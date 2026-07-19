@@ -1,0 +1,15 @@
+#!/bin/sh
+
+# pre-push receives lines in this format:
+# <local-ref> <local-sha> <remote-ref> <remote-sha>
+while read -r local_ref local_sha remote_ref remote_sha; do
+  if [ "$remote_ref" = "refs/heads/main" ]; then
+    cat >&2 <<'EOF'
+错误：禁止直接推送到 main 分支。
+请推送到其他分支，并通过 Pull Request / Merge Request 合并。
+EOF
+    exit 1
+  fi
+done
+
+exit 0
