@@ -4,7 +4,7 @@
 
 ## 分区职责
 
-`docs/` 存放需要提交、共享和评审的项目文档，包括架构、ADR、接口、数据、开发和运维说明。当前包含 `adr/` 决策记录。
+`docs/` 存放需要提交、共享和评审的项目文档，包括架构、ADR、接口、数据、开发和运维说明。当前包含 `adr/` 决策记录和 `ui/` 长期 UI 规范。
 
 ## 文档类型与位置
 
@@ -34,5 +34,7 @@
 ## 当前索引
 
 - Monorepo 工具选型：`adr/0001-monorepo-tooling.md`
+- UI Design Tokens 决策：`adr/0002-ui-design-tokens.md`
+- UI 设计规范：`ui/design-system.md`
 
 新增、替代或删除文档时同步维护本索引或相应主题索引。

@@ -4,7 +4,11 @@
 
 ## 分区职责
 
-`packages/` 只存放具有真实跨模块消费者、稳定边界和明确所有权的共享代码、契约、客户端或工程配置。当前 package 清单为空。
+`packages/` 只存放具有已确认跨模块消费者、稳定边界和明确所有权的共享代码、契约、客户端或工程配置。
+
+## 当前 package
+
+- `ui-tokens/`：框架无关 UI Design Tokens，以及 Tailwind CSS v4 和 shadcn CSS integration；Web、Admin 是已确认但尚未实施的未来消费者。
 
 ## 新增模块准入
 

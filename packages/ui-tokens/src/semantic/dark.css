@@ -1,0 +1,105 @@
+[data-theme="dark"],
+.dark {
+  --tmp-color-bg-canvas: var(--tmp-ref-color-neutral-950);
+  --tmp-color-bg-surface: var(--tmp-ref-color-neutral-900);
+  --tmp-color-bg-elevated: var(--tmp-ref-color-neutral-950);
+  --tmp-color-bg-muted: var(--tmp-ref-color-neutral-800);
+  --tmp-color-bg-inverse: var(--tmp-ref-color-neutral-50);
+
+  --tmp-color-text-primary: var(--tmp-ref-color-neutral-50);
+  --tmp-color-text-secondary: var(--tmp-ref-color-neutral-400);
+  --tmp-color-text-muted: var(--tmp-ref-color-neutral-500);
+  --tmp-color-text-disabled: var(--tmp-ref-color-neutral-600);
+  --tmp-color-text-inverse: var(--tmp-ref-color-neutral-950);
+  --tmp-color-text-link: var(--tmp-ref-color-blue-400);
+
+  --tmp-color-border-subtle: var(--tmp-ref-color-neutral-900);
+  --tmp-color-border-default: var(--tmp-ref-color-neutral-800);
+  --tmp-color-border-strong: var(--tmp-ref-color-neutral-600);
+  --tmp-color-focus-ring: var(--tmp-ref-color-neutral-500);
+  --tmp-color-focus-ring-offset: var(--tmp-ref-color-neutral-950);
+
+  --tmp-color-action-primary: var(--tmp-ref-color-neutral-50);
+  --tmp-color-action-primary-hover: var(--tmp-ref-color-neutral-200);
+  --tmp-color-action-primary-foreground: var(--tmp-ref-color-neutral-950);
+  --tmp-color-action-secondary: var(--tmp-ref-color-neutral-800);
+  --tmp-color-action-secondary-hover: var(--tmp-ref-color-neutral-700);
+  --tmp-color-action-secondary-foreground: var(--tmp-ref-color-neutral-50);
+  --tmp-color-action-destructive: var(--tmp-ref-color-red-400);
+  --tmp-color-action-destructive-hover: var(--tmp-ref-color-red-200);
+  --tmp-color-action-destructive-foreground: var(--tmp-ref-color-neutral-950);
+
+  --tmp-color-status-info-bg: color-mix(in oklch, var(--tmp-ref-color-blue-500) 15%, transparent);
+  --tmp-color-status-info-text: var(--tmp-ref-color-blue-400);
+  --tmp-color-status-info-border: color-mix(in oklch, var(--tmp-ref-color-blue-500) 30%, transparent);
+  --tmp-color-status-info-icon: var(--tmp-ref-color-blue-400);
+  --tmp-color-status-success-bg: color-mix(in oklch, var(--tmp-ref-color-green-600) 15%, transparent);
+  --tmp-color-status-success-text: var(--tmp-ref-color-green-400);
+  --tmp-color-status-success-border: color-mix(in oklch, var(--tmp-ref-color-green-600) 30%, transparent);
+  --tmp-color-status-success-icon: var(--tmp-ref-color-green-400);
+  --tmp-color-status-warning-bg: color-mix(in oklch, var(--tmp-ref-color-amber-500) 15%, transparent);
+  --tmp-color-status-warning-text: var(--tmp-ref-color-amber-400);
+  --tmp-color-status-warning-border: color-mix(in oklch, var(--tmp-ref-color-amber-500) 30%, transparent);
+  --tmp-color-status-warning-icon: var(--tmp-ref-color-amber-400);
+  --tmp-color-status-danger-bg: color-mix(in oklch, var(--tmp-ref-color-red-500) 15%, transparent);
+  --tmp-color-status-danger-text: var(--tmp-ref-color-red-400);
+  --tmp-color-status-danger-border: color-mix(in oklch, var(--tmp-ref-color-red-500) 30%, transparent);
+  --tmp-color-status-danger-icon: var(--tmp-ref-color-red-400);
+
+  --tmp-color-data-1: var(--tmp-ref-color-blue-400);
+  --tmp-color-data-2: var(--tmp-ref-color-cyan-500);
+  --tmp-color-data-3: var(--tmp-ref-color-orange-500);
+  --tmp-color-data-4: var(--tmp-ref-color-rose-500);
+  --tmp-color-data-5: var(--tmp-ref-color-teal-600);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --tmp-color-bg-canvas: var(--tmp-ref-color-neutral-950);
+    --tmp-color-bg-surface: var(--tmp-ref-color-neutral-900);
+    --tmp-color-bg-elevated: var(--tmp-ref-color-neutral-950);
+    --tmp-color-bg-muted: var(--tmp-ref-color-neutral-800);
+    --tmp-color-bg-inverse: var(--tmp-ref-color-neutral-50);
+    --tmp-color-text-primary: var(--tmp-ref-color-neutral-50);
+    --tmp-color-text-secondary: var(--tmp-ref-color-neutral-400);
+    --tmp-color-text-muted: var(--tmp-ref-color-neutral-500);
+    --tmp-color-text-disabled: var(--tmp-ref-color-neutral-600);
+    --tmp-color-text-inverse: var(--tmp-ref-color-neutral-950);
+    --tmp-color-text-link: var(--tmp-ref-color-blue-400);
+    --tmp-color-border-subtle: var(--tmp-ref-color-neutral-900);
+    --tmp-color-border-default: var(--tmp-ref-color-neutral-800);
+    --tmp-color-border-strong: var(--tmp-ref-color-neutral-600);
+    --tmp-color-focus-ring: var(--tmp-ref-color-neutral-500);
+    --tmp-color-focus-ring-offset: var(--tmp-ref-color-neutral-950);
+    --tmp-color-action-primary: var(--tmp-ref-color-neutral-50);
+    --tmp-color-action-primary-hover: var(--tmp-ref-color-neutral-200);
+    --tmp-color-action-primary-foreground: var(--tmp-ref-color-neutral-950);
+    --tmp-color-action-secondary: var(--tmp-ref-color-neutral-800);
+    --tmp-color-action-secondary-hover: var(--tmp-ref-color-neutral-700);
+    --tmp-color-action-secondary-foreground: var(--tmp-ref-color-neutral-50);
+    --tmp-color-action-destructive: var(--tmp-ref-color-red-400);
+    --tmp-color-action-destructive-hover: var(--tmp-ref-color-red-200);
+    --tmp-color-action-destructive-foreground: var(--tmp-ref-color-neutral-950);
+    --tmp-color-status-info-bg: color-mix(in oklch, var(--tmp-ref-color-blue-500) 15%, transparent);
+    --tmp-color-status-info-text: var(--tmp-ref-color-blue-400);
+    --tmp-color-status-info-border: color-mix(in oklch, var(--tmp-ref-color-blue-500) 30%, transparent);
+    --tmp-color-status-info-icon: var(--tmp-ref-color-blue-400);
+    --tmp-color-status-success-bg: color-mix(in oklch, var(--tmp-ref-color-green-600) 15%, transparent);
+    --tmp-color-status-success-text: var(--tmp-ref-color-green-400);
+    --tmp-color-status-success-border: color-mix(in oklch, var(--tmp-ref-color-green-600) 30%, transparent);
+    --tmp-color-status-success-icon: var(--tmp-ref-color-green-400);
+    --tmp-color-status-warning-bg: color-mix(in oklch, var(--tmp-ref-color-amber-500) 15%, transparent);
+    --tmp-color-status-warning-text: var(--tmp-ref-color-amber-400);
+    --tmp-color-status-warning-border: color-mix(in oklch, var(--tmp-ref-color-amber-500) 30%, transparent);
+    --tmp-color-status-warning-icon: var(--tmp-ref-color-amber-400);
+    --tmp-color-status-danger-bg: color-mix(in oklch, var(--tmp-ref-color-red-500) 15%, transparent);
+    --tmp-color-status-danger-text: var(--tmp-ref-color-red-400);
+    --tmp-color-status-danger-border: color-mix(in oklch, var(--tmp-ref-color-red-500) 30%, transparent);
+    --tmp-color-status-danger-icon: var(--tmp-ref-color-red-400);
+    --tmp-color-data-1: var(--tmp-ref-color-blue-400);
+    --tmp-color-data-2: var(--tmp-ref-color-cyan-500);
+    --tmp-color-data-3: var(--tmp-ref-color-orange-500);
+    --tmp-color-data-4: var(--tmp-ref-color-rose-500);
+    --tmp-color-data-5: var(--tmp-ref-color-teal-600);
+  }
+}

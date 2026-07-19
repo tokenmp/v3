@@ -1,0 +1,78 @@
+:root {
+  /* Typography roles */
+  --tmp-font-sans: var(--tmp-ref-font-family-sans);
+  --tmp-font-mono: var(--tmp-ref-font-family-mono);
+  --tmp-text-caption-size: var(--tmp-ref-font-size-xs);
+  --tmp-text-caption-line-height: var(--tmp-ref-line-height-normal);
+  --tmp-text-body-sm-size: var(--tmp-ref-font-size-sm);
+  --tmp-text-body-sm-line-height: var(--tmp-ref-line-height-normal);
+  --tmp-text-body-md-size: var(--tmp-ref-font-size-md);
+  --tmp-text-body-md-line-height: var(--tmp-ref-line-height-normal);
+  --tmp-text-heading-sm-size: var(--tmp-ref-font-size-lg);
+  --tmp-text-heading-sm-line-height: var(--tmp-ref-line-height-snug);
+  --tmp-text-heading-md-size: var(--tmp-ref-font-size-2xl);
+  --tmp-text-heading-md-line-height: var(--tmp-ref-line-height-tight);
+  --tmp-text-heading-lg-size: var(--tmp-ref-font-size-4xl);
+  --tmp-text-heading-lg-line-height: var(--tmp-ref-line-height-tight);
+
+  /* Shape and elevation */
+  --tmp-radius-sm: var(--tmp-ref-radius-sm);
+  --tmp-radius-md: var(--tmp-ref-radius-md);
+  --tmp-radius-lg: var(--tmp-ref-radius-lg);
+  --tmp-radius-xl: var(--tmp-ref-radius-xl);
+  --tmp-radius-full: var(--tmp-ref-radius-full);
+  --tmp-shadow-xs: var(--tmp-ref-shadow-xs);
+  --tmp-shadow-sm: var(--tmp-ref-shadow-sm);
+  --tmp-shadow-md: var(--tmp-ref-shadow-md);
+  --tmp-shadow-lg: var(--tmp-ref-shadow-lg);
+  --tmp-shadow-card: var(--tmp-ref-shadow-card);
+  --tmp-shadow-button: var(--tmp-ref-shadow-button);
+  --tmp-shadow-raised: var(--tmp-ref-shadow-sm);
+  --tmp-shadow-overlay: var(--tmp-ref-shadow-lg);
+  --tmp-shadow-modal: var(--tmp-ref-shadow-lg);
+
+  /* Stable control and layout contracts */
+  --tmp-control-height-sm: 2rem;
+  --tmp-control-height-md: 2.5rem;
+  --tmp-control-height-lg: 3rem;
+  --tmp-control-padding-inline: 0.625rem;
+  --tmp-input-padding-inline: 0.75rem;
+  --tmp-page-gutter: var(--tmp-ref-space-4);
+  --tmp-page-content-max-width: 90rem;
+  --tmp-sidebar-width: 16rem;
+  --tmp-sidebar-width-collapsed: 3.5rem;
+
+  /* Motion and layers */
+  --tmp-duration-fast: var(--tmp-ref-duration-fast);
+  --tmp-duration-normal: var(--tmp-ref-duration-normal);
+  --tmp-duration-slow: var(--tmp-ref-duration-slow);
+  --tmp-easing-standard: var(--tmp-ref-easing-standard);
+  --tmp-easing-enter: var(--tmp-ref-easing-enter);
+  --tmp-easing-exit: var(--tmp-ref-easing-exit);
+  --tmp-layer-sticky: var(--tmp-ref-layer-sticky);
+  --tmp-layer-dropdown: var(--tmp-ref-layer-dropdown);
+  --tmp-layer-popover: var(--tmp-ref-layer-popover);
+  --tmp-layer-drawer: var(--tmp-ref-layer-drawer);
+  --tmp-layer-modal: var(--tmp-ref-layer-modal);
+  --tmp-layer-toast: var(--tmp-ref-layer-toast);
+}
+
+@media (min-width: 48rem) {
+  :root {
+    --tmp-page-gutter: var(--tmp-ref-space-6);
+  }
+}
+
+@media (min-width: 80rem) {
+  :root {
+    --tmp-page-gutter: var(--tmp-ref-space-8);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --tmp-duration-fast: var(--tmp-ref-duration-instant);
+    --tmp-duration-normal: var(--tmp-ref-duration-instant);
+    --tmp-duration-slow: var(--tmp-ref-duration-instant);
+  }
+}
