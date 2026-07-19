@@ -77,7 +77,7 @@ docs/        # 架构、ADR、接口、数据与运维文档
 tools/       # 仓库级脚本和工程工具
 ```
 
-仓库级 workspace、工具链及顶层逻辑分区已经创建。`packages/ui-tokens` 是当前唯一具体模块；apps、services、infra 和 tools 当前没有具体模块。后续每个模块必须在实施前由用户确认，并通过独立变更引入。
+仓库级 workspace、工具链及顶层逻辑分区已经创建。`packages/ui-tokens` 是首个 Node.js workspace 模块；`services/auth` 是首个 Go 服务（Auth Foundation）。apps、infra 和 tools 当前没有具体模块。后续每个模块必须在实施前由用户确认，并通过独立变更引入。
 
 ## 5. 可部署单元规则
 
@@ -285,7 +285,7 @@ TokenMP v3 是多语言 Monorepo：
 - Executor 保持 Go。
 - 其他服务或应用的语言与框架根据现有代码及后续决策确定。
 - Node.js workspace 工具不得接管 Go 模块边界。
-- Go workspace 是否使用 `go.work`、模块如何拆分，属于实施前待确认项。
+- Go workspace 使用 `go.work`；首个 Go module `services/auth` 已创建，模块路径 `github.com/tokenmp/v3/services/auth`，Go 1.26.5。后续 Go 服务通过独立变更新增 `go.work` 条目与模块级 `AGENTS.md`。
 - 跨语言共享优先使用 OpenAPI、JSON Schema、Protobuf 等语言中立契约及代码生成，不复制手写类型作为唯一事实来源。
 
 ## 10. Workspace 与构建工具选型
@@ -297,17 +297,18 @@ TokenMP v3 是多语言 Monorepo：
 - 任务编排：Turborepo 2.10.5。
 - Node.js：26.4.0，通过 `mise.toml` 固定。
 - TypeScript：6.0.3。
-- 当前模块数量：1（`packages/ui-tokens`）；其他顶层分区及其 `AGENTS.md` 仍属于仓库骨架，不代表具体应用、服务、infra 或 tool 已实施。
-- Go workspace：尚未创建；引入首个 Go module 时再确认并建立。
+- Go：1.26.5，通过 `mise.toml` 固定。
+- Go workspace：`go.work` 已创建，`use ./services/auth`。
+- 当前模块数量：2（`packages/ui-tokens`、`services/auth`）；其他顶层分区及其 `AGENTS.md` 仍属于仓库骨架，不代表具体应用、infra 或 tool 已实施。
+- `services/auth/` 是首个 Go 服务，当前为 Auth Foundation（仅骨架与 health 端点，不实现注册/登录/JWT）。
 
-详细理由见 `docs/adr/0001-monorepo-tooling.md`。
+详细理由见 `docs/adr/0001-monorepo-tooling.md` 与 `docs/adr/0004-auth-service-foundation.md`。
 
 以下内容仍未决定，Agent 不得自行默认：
 
-- Go module / `go.work` 的最终组织方式。
-- 版本策略：统一版本或独立版本。
+- 各 Go 服务的版本策略：统一版本或独立版本。
 - 发布工具和远端缓存方案。
-- 各应用与服务的运行时框架。
+- 各应用与服务的运行时框架（首个 Go 服务的运行时框架已确认为 Chi + GORM，其他服务仍逐个确认）。
 - 契约格式和代码生成工具。
 
 Agent 提议未决选型时必须提供：
@@ -382,12 +383,12 @@ Monorepo 迁移应渐进执行，而不是一次性重写：
 
 ## 16. 新增模块前必须确认的事项
 
-pnpm workspace、Turborepo 和基础 TypeScript 工具链已落地。新增或迁移具体模块前，仍需按任务确认：
+pnpm workspace、Turborepo 和基础 TypeScript 工具链已落地。Go workspace 已创建（`use ./services/auth`）。新增或迁移具体模块前，仍需按任务确认：
 
 - 本次实际纳入仓库的应用、服务或 package 清单。
 - 模块目录、职责、消费者和依赖方向。
 - 运行时框架及公开契约。
-- 如果涉及 Go，确认 module / `go.work` 组织方式。
+- 如果涉及 Go，在 `go.work` 新增 `use` 条目并补充模块级 `AGENTS.md`。
 - 契约格式与代码生成策略。
 - 模块测试、CI、缓存和发布要求。
 - Docker build context、镜像和部署边界。

@@ -95,3 +95,97 @@ jobs:
 
       - name: Gitleaks scan
         run: gitleaks git --redact --verbose --exit-code 1 .
+
+  go-auth:
+    name: go auth / format / vet / test / build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        # Pinned to Postgres 17 alpine per ADR 0004.
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: tokenmp
+          POSTGRES_PASSWORD: tokenmp
+          POSTGRES_DB: tokenmp_auth
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U tokenmp -d tokenmp_auth"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      AUTH_DATABASE_URL: postgres://tokenmp:tokenmp@localhost:5432/tokenmp_auth?sslmode=disable
+    steps:
+      - name: Checkout
+        # actions/checkout v5
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+
+      - name: Setup Go
+        # actions/setup-go v6
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
+        with:
+          go-version: "1.26.5"
+          cache-dependency-path: |
+            services/auth/go.sum
+
+      - name: Install golang-migrate CLI
+        env:
+          MIGRATE_VERSION: "4.18.3"
+        run: |
+          set -euo pipefail
+          tmpdir="${RUNNER_TEMP:?}/migrate"
+          mkdir -p "$tmpdir"
+          # Verify the requested version resolves in the module graph before
+          # trusting it. `go list -m -versions` exits non-zero if absent.
+          go list -m -versions github.com/golang-migrate/migrate/v4@v${MIGRATE_VERSION} >/dev/null
+          # The default migrate build only ships the `stub` database driver.
+          # Build with the `postgres` tag so the CLI can talk to PostgreSQL.
+          go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@v${MIGRATE_VERSION}
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: gofmt
+        working-directory: services/auth
+        run: |
+          out="$(gofmt -l .)"
+          if [ -n "$out" ]; then
+            echo "gofmt found unformatted files:" >&2
+            echo "$out" >&2
+            exit 1
+          fi
+
+      - name: go vet
+        working-directory: services/auth
+        run: go vet ./... && go vet -tags=integration ./...
+
+      - name: go test -race (unit)
+        working-directory: services/auth
+        run: go test -race ./...
+
+      - name: go build
+        working-directory: services/auth
+        run: |
+          go build ./...
+          go build -o /tmp/auth-bin ./cmd/auth
+          go build -o /tmp/healthcheck-bin ./cmd/healthcheck
+
+      # Build the auth Docker image on the GitHub Runner to validate the
+      # Dockerfile end-to-end as part of CI. Build only: the image is not
+      # run, not pushed, not published to any registry, and not tagged into
+      # a long-lived cache. This step requires no local Docker on developer
+      # machines — the Ubuntu runner provides Docker out of the box.
+      - name: docker build (build only, no run/push)
+        run: docker build -f services/auth/Dockerfile -t tokenmp-v3-auth:${{ github.sha }} .
+
+      - name: Migration cycle (up/down/up)
+        working-directory: services/auth
+        run: |
+          set -euo pipefail
+          migrate -path migrations -database "$AUTH_DATABASE_URL" up
+          migrate -path migrations -database "$AUTH_DATABASE_URL" down -all
+          migrate -path migrations -database "$AUTH_DATABASE_URL" up
+
+      - name: Integration tests
+        working-directory: services/auth
+        run: go test -tags=integration -race ./test/integration/...
