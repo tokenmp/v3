@@ -1,0 +1,61 @@
+# Docker build context ignore for TokenMP v3.
+#
+# Excludes local state, secrets, VCS, editor, Node.js and build outputs so
+# the Go service image build context stays minimal and never copies secrets.
+# go.mod, go.sum, go.work and the auth service source/migrations are NOT
+# excluded — they are required for the build.
+
+# VCS and editor
+.git/
+.gitignore
+.gitattributes
+.githooks/
+**/.git/
+**/.vscode/
+**/.idea/
+**/*.swp
+**/*.swo
+**/*~
+
+# Agent local / private context (never copied into images)
+.agents/local.md
+.agents/**/local.md
+.agents/**/*.local.md
+.agents/plans/**
+!.agents/plans/README.md
+
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+**/secrets/
+**/*.pem
+**/*.key
+
+# Node.js workspace outputs (not needed by Go builds)
+node_modules/
+**/node_modules/
+.pnpm-store/
+.turbo/
+**/.turbo/
+dist/
+**/dist/
+coverage/
+**/coverage/
+*.tsbuildinfo
+
+# Go build outputs and caches
+**/*.test
+**/*.out
+**/vendor/
+
+# Documentation and CI not needed at build time (kept out to shrink context)
+.github/
+docs/
+**/README.md
+**/AGENTS.md
+*.md
+
+# OS noise
+.DS_Store
+**/.DS_Store

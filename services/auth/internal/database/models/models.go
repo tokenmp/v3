@@ -1,0 +1,74 @@
+// Package models defines the GORM entities for the auth service.
+//
+// These types map to tables created by versioned SQL migrations under
+// services/auth/migrations. AutoMigrate is never called on these models;
+// they exist only for application-layer queries and to document the schema
+// contract. The migrations are the source of truth for column types, defaults
+// and constraints.
+package models
+
+import "time"
+
+// Role is the user role enumeration. Allowed values are "user" and "admin";
+// the default is "user". The DB CHECK constraint enforces the allowed set.
+type Role string
+
+const (
+	RoleUser  Role = "user"
+	RoleAdmin Role = "admin"
+)
+
+// Status is the user account status. The DB CHECK constraint enforces the
+// allowed set.
+type Status string
+
+const (
+	StatusActive   Status = "active"
+	StatusDisabled Status = "disabled"
+)
+
+// User mirrors the users table. The DB column types and constraints are the
+// source of truth; this struct is for application-layer access only.
+//
+// Email is VARCHAR(255); a CHECK requires email <> ” AND email =
+// LOWER(BTRIM(email)) so the stored value is always normalized; uniqueness is
+// enforced on LOWER(BTRIM(email)) via an expression index. Citext is
+// intentionally not used. password_hash is TEXT (matches the legacy
+// production column) and is non-empty via CHECK.
+type User struct {
+	ID           string    `gorm:"primaryKey;type:uuid;column:id"`
+	Email        string    `gorm:"type:varchar(255);column:email"`
+	PasswordHash string    `gorm:"type:text;column:password_hash"` // bcrypt hash
+	Role         Role      `gorm:"type:varchar(16);column:role"`
+	Status       Status    `gorm:"type:varchar(16);column:status"`
+	TokenVersion int       `gorm:"type:integer;column:token_version"`
+	CreatedAt    time.Time `gorm:"column:created_at"`
+	UpdatedAt    time.Time `gorm:"column:updated_at"`
+}
+
+// TableName fixes the table name for GORM.
+func (User) TableName() string { return "users" }
+
+// AuthSession mirrors the auth_sessions table, which stores refresh token
+// rotation state for future login/JWT work. auth_sessions is a new,
+// Auth-owned schema; its column types are Auth's own type design, not a
+// legacy mirror. On rotation the OLD row's ReplacedBySessionID is set to the
+// NEW session's id and the old row is revoked with RevokeReason="token_rotated";
+// new rows never carry ReplacedBySessionID.
+type AuthSession struct {
+	ID                  string     `gorm:"primaryKey;type:uuid;column:id"`
+	UserID              string     `gorm:"type:uuid;column:user_id"`
+	TokenFamilyID       string     `gorm:"type:uuid;column:token_family_id"`
+	RefreshTokenHash    []byte     `gorm:"type:bytea;column:refresh_token_hash"`
+	ReplacedBySessionID *string    `gorm:"type:uuid;column:replaced_by_session_id"`
+	ExpiresAt           time.Time  `gorm:"column:expires_at"`
+	RevokedAt           *time.Time `gorm:"column:revoked_at"`
+	RevokeReason        *string    `gorm:"type:varchar(64);column:revoke_reason"`
+	IP                  *string    `gorm:"type:inet;column:ip"`
+	UserAgent           *string    `gorm:"type:text;column:user_agent"`
+	CreatedAt           time.Time  `gorm:"column:created_at"`
+	UpdatedAt           time.Time  `gorm:"column:updated_at"`
+}
+
+// TableName fixes the table name for GORM.
+func (AuthSession) TableName() string { return "auth_sessions" }

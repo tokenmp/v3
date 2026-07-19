@@ -4,7 +4,9 @@
 
 ## 分区职责
 
-`services/` 用于可独立开发、测试、构建和部署的后端服务。当前服务清单为空。
+`services/` 用于可独立开发、测试、构建和部署的后端服务。当前服务清单：
+
+- `auth/`：TokenMP v3 认证服务，Go 1.26.5、Chi、GORM、PostgreSQL（库 `tokenmp_auth`）。当前为 Auth Foundation（仅骨架与 health 端点），不实现注册/登录/JWT。模块文档：`auth/AGENTS.md`。
 
 ## 新增模块准入
 
@@ -26,7 +28,7 @@
 
 ## 开发与验证
 
-具体语言、框架和命令由每个服务定义。Node.js 服务应接入根 pnpm/Turborepo 任务；Go 服务保持独立 module 边界，并在引入时确认 `go.work` 策略。
+具体语言、框架和命令由每个服务定义。Node.js 服务应接入根 pnpm/Turborepo 任务；Go 服务保持独立 module 边界。仓库已引入 `go.work`（`use ./services/auth`），首个 Go module 为 `github.com/tokenmp/v3/services/auth`；后续 Go 服务通过独立变更新增 `go.work` 条目与模块级 `AGENTS.md`。
 
 ## DO NOT
 

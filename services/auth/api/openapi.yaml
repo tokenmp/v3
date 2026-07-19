@@ -1,0 +1,134 @@
+openapi: 3.0.3
+info:
+  title: TokenMP v3 Auth Service
+  version: 0.1.0
+  description: |
+    Foundation contract for the TokenMP v3 auth service. This OpenAPI document
+    only declares endpoints that are implemented in this PR: the health and
+    readiness probes. Authentication, registration, login and token rotation
+    are intentionally out of scope for this foundation and are not described
+    here. Consumers are added only when a concrete consumer exists; no
+    speculative endpoints are declared.
+servers:
+  - url: http://127.0.0.1:8080
+    description: Local development
+paths:
+  /healthz:
+    get:
+      summary: Liveness probe
+      description: Reports whether the process and HTTP server are alive. Does not depend on external resources.
+      operationId: getHealthz
+      responses:
+        '200':
+          description: Service is alive.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+        '405':
+          description: Method not allowed.
+    head:
+      summary: Liveness probe (HEAD)
+      description: |
+        Same status and headers as GET /healthz but with an empty body, per
+        HTTP semantics for HEAD. Used by lightweight probes that only need
+        the status code.
+      operationId: headHealthz
+      responses:
+        '200':
+          description: Service is alive. No body is returned for HEAD.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+        '405':
+          description: Method not allowed.
+  /readyz:
+    get:
+      summary: Readiness probe
+      description: |
+        Reports whether the service is ready to serve traffic, including a
+        database connectivity check. A failure returns 503 and never leaks
+        the underlying error message.
+      operationId: getReadyz
+      responses:
+        '200':
+          description: Service is ready.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+        '503':
+          description: Service is not ready. The body intentionally omits the underlying cause.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+        '405':
+          description: Method not allowed.
+    head:
+      summary: Readiness probe (HEAD)
+      description: |
+        Same status and headers as GET /readyz but with an empty body, per
+        HTTP semantics for HEAD. Returns 200 when ready and 503 when not
+        ready; the 503 response carries no body and never leaks the
+        underlying cause.
+      operationId: headReadyz
+      responses:
+        '200':
+          description: Service is ready. No body is returned for HEAD.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+        '503':
+          description: Service is not ready. No body is returned for HEAD.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+        '405':
+          description: Method not allowed.
+components:
+  headers:
+    CacheControlNoStore:
+      description: Health/readiness responses are never cached by intermediaries.
+      schema:
+        type: string
+        enum: ['no-store']
+        example: no-store
+    ContentTypeJSON:
+      description: JSON responses are UTF-8 encoded.
+      schema:
+        type: string
+        enum: ['application/json; charset=utf-8']
+        example: application/json; charset=utf-8
+  schemas:
+    HealthResponse:
+      type: object
+      required: [status, service, timestamp]
+      properties:
+        status:
+          type: string
+          enum: [ok, unready]
+          description: Liveness or readiness outcome.
+        service:
+          type: string
+          enum: [auth]
+          description: Emitting service identifier.
+        timestamp:
+          type: string
+          format: date-time
+          description: RFC 3339 UTC timestamp of the response.
