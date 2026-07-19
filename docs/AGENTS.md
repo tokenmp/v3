@@ -35,6 +35,7 @@
 
 - Monorepo 工具选型：`adr/0001-monorepo-tooling.md`
 - UI Design Tokens 决策：`adr/0002-ui-design-tokens.md`
+- CI 基线决策：`adr/0003-ci-baseline.md`
 - UI 设计规范：`ui/design-system.md`
 
 新增、替代或删除文档时同步维护本索引或相应主题索引。
