@@ -1,0 +1,13 @@
+# Agent local/private context
+.agents/local.md
+.agents/**/local.md
+.agents/**/*.local.md
+
+# Agent task plans are local; keep the shared convention
+.agents/plans/**
+!.agents/plans/README.md
+
+# Editor temporary files
+*.swp
+*.swo
+*~
