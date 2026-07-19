@@ -14,6 +14,17 @@
 - Git 开发流程：`.agents/gitflow.md`
 - 操作约束：`.agents/operations.md`
 
+## Monorepo 分区
+
+- Apps：`apps/AGENTS.md`
+- Services：`services/AGENTS.md`
+- Packages：`packages/AGENTS.md`
+- Infra：`infra/AGENTS.md`
+- Tools：`tools/AGENTS.md`
+- Docs：`docs/AGENTS.md`
+
+新增、移动或删除模块时，必须同步维护根索引、分区 `AGENTS.md` 和模块 `AGENTS.md`。
+
 ## 本地私有上下文
 
 - 可选本地入口：`.agents/local.md`（存在时读取，不提交到 Git）

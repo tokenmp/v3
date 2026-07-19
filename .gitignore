@@ -7,6 +7,24 @@
 .agents/plans/**
 !.agents/plans/README.md
 
+# Dependencies and task caches
+node_modules/
+.pnpm-store/
+.turbo/
+**/.turbo/
+
+# Build and test outputs
+dist/
+**/dist/
+coverage/
+**/coverage/
+*.tsbuildinfo
+
+# Local environment files
+.env
+.env.*
+!.env.example
+
 # Editor temporary files
 *.swp
 *.swo
