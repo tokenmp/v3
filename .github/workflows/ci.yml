@@ -1,0 +1,97 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: lint / typecheck / test / build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        # actions/checkout v5
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+
+      # pnpm/action-setup must run before actions/setup-node so the cache
+      # input can resolve the pnpm version. Node 26.4.0 does not ship
+      # Corepack, so the pinned pnpm 11.15.0 is installed by this action
+      # directly from package.json's packageManager field.
+      - name: Setup pnpm
+        # pnpm/action-setup v4.4.0
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320
+        with:
+          version: 11.15.0
+
+      - name: Setup Node.js
+        # actions/setup-node v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: 26.4.0
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
+
+  secrets-scan:
+    name: gitleaks
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        # actions/checkout v5
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          fetch-depth: 0
+
+      # Download the open-source Gitleaks CLI at a fixed version directly on
+      # the runner. The gitleaks-action wrapper is intentionally NOT used:
+      # for organization repositories it may require a GITLEAKS_LICENSE
+      # secret, which would break this baseline's no-extra-secret commitment.
+      # No repository secret and no GITHUB_TOKEN is referenced, so fork pull
+      # requests are scanned without any extra secret.
+      - name: Install and verify Gitleaks CLI
+        env:
+          GITLEAKS_VERSION: "8.28.0"
+        run: |
+          set -euo pipefail
+          tmpdir="${RUNNER_TEMP:?}/gitleaks"
+          mkdir -p "$tmpdir"
+          cd "$tmpdir"
+          base="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
+          checksum_file="gitleaks_${GITLEAKS_VERSION}_checksums.txt"
+          tarball="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl --fail --location --retry 3 --retry-delay 5 \
+            --output "$checksum_file" "${base}/${checksum_file}"
+          curl --fail --location --retry 3 --retry-delay 5 \
+            --output "$tarball" "${base}/${tarball}"
+          # Verify the tarball against the official checksums file. Only the
+          # linux_x64 entry is present locally; --ignore-missing skips the rest.
+          sha256sum -c --ignore-missing "$checksum_file"
+          tar -xzf "$tarball" -C "$tmpdir"
+          chmod +x "$tmpdir/gitleaks"
+          echo "$tmpdir" >> "$GITHUB_PATH"
+
+      - name: Gitleaks scan
+        run: gitleaks git --redact --verbose --exit-code 1 .
