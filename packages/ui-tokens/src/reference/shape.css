@@ -1,0 +1,11 @@
+:root {
+  --tmp-ref-radius-none: 0;
+  --tmp-ref-radius-sm: 0.375rem;
+  --tmp-ref-radius-md: 0.5rem;
+  --tmp-ref-radius-lg: 0.625rem;
+  --tmp-ref-radius-xl: 0.875rem;
+  --tmp-ref-radius-full: 9999px;
+
+  --tmp-ref-border-width-default: 1px;
+  --tmp-ref-border-width-strong: 2px;
+}

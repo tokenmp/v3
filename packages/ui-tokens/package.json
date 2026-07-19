@@ -1,0 +1,25 @@
+{
+  "name": "@tokenmp/ui-tokens",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "sideEffects": [
+    "**/*.css"
+  ],
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "exports": {
+    ".": "./dist/index.css",
+    "./tailwind": "./dist/integrations/tailwind.css",
+    "./shadcn": "./dist/integrations/shadcn.css"
+  },
+  "scripts": {
+    "build": "node ./scripts/build.mjs",
+    "clean": "node ./scripts/clean.mjs",
+    "lint": "node ./scripts/validate.mjs --lint",
+    "test": "node ./scripts/build.mjs && node --test ./tests/*.test.mjs",
+    "typecheck": "node ./scripts/validate.mjs --contract"
+  }
+}

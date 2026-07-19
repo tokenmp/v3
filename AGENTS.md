@@ -23,6 +23,10 @@
 - Tools：`tools/AGENTS.md`
 - Docs：`docs/AGENTS.md`
 
+## 已实施模块
+
+- UI Design Tokens：`packages/ui-tokens/AGENTS.md`
+
 新增、移动或删除模块时，必须同步维护根索引、分区 `AGENTS.md` 和模块 `AGENTS.md`。
 
 ## 本地私有上下文

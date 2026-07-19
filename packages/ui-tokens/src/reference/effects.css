@@ -1,0 +1,25 @@
+:root {
+  --tmp-ref-shadow-none: none;
+  --tmp-ref-shadow-xs: 0 1px 2px 0 oklch(0 0 0 / 0.03);
+  --tmp-ref-shadow-sm: 0 1px 2px 0 oklch(0 0 0 / 0.05);
+  --tmp-ref-shadow-md: 0 2px 4px 0 oklch(0 0 0 / 0.06);
+  --tmp-ref-shadow-lg: 0 4px 8px 0 oklch(0 0 0 / 0.08);
+  --tmp-ref-shadow-card: 0 1px 2px 0 oklch(0 0 0 / 0.04);
+  --tmp-ref-shadow-button: 0 1px 1px 0 oklch(0 0 0 / 0.03);
+
+  --tmp-ref-duration-instant: 0ms;
+  --tmp-ref-duration-fast: 150ms;
+  --tmp-ref-duration-normal: 200ms;
+  --tmp-ref-duration-slow: 300ms;
+  --tmp-ref-easing-standard: cubic-bezier(0.33, 1, 0.68, 1);
+  --tmp-ref-easing-enter: cubic-bezier(0.33, 1, 0.68, 1);
+  --tmp-ref-easing-exit: cubic-bezier(0.32, 0, 0.67, 0);
+
+  --tmp-ref-layer-base: 0;
+  --tmp-ref-layer-sticky: 20;
+  --tmp-ref-layer-dropdown: 50;
+  --tmp-ref-layer-popover: 50;
+  --tmp-ref-layer-drawer: 50;
+  --tmp-ref-layer-modal: 50;
+  --tmp-ref-layer-toast: 9999;
+}

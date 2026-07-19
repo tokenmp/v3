@@ -1,0 +1,28 @@
+:root {
+  --tmp-ref-font-family-sans: "PingFang SC", -apple-system, "Segoe UI", Roboto, sans-serif;
+  --tmp-ref-font-family-mono: ui-monospace, SFMono-Regular, monospace;
+
+  --tmp-ref-font-size-2xs: 0.625rem;
+  --tmp-ref-font-size-xs: 0.75rem;
+  --tmp-ref-font-size-sm: 0.875rem;
+  --tmp-ref-font-size-md: 1rem;
+  --tmp-ref-font-size-lg: 1.125rem;
+  --tmp-ref-font-size-xl: 1.25rem;
+  --tmp-ref-font-size-2xl: 1.5rem;
+  --tmp-ref-font-size-3xl: 1.875rem;
+  --tmp-ref-font-size-4xl: 2.25rem;
+
+  --tmp-ref-line-height-tight: 1.2;
+  --tmp-ref-line-height-snug: 1.35;
+  --tmp-ref-line-height-normal: 1.5;
+  --tmp-ref-line-height-relaxed: 1.65;
+
+  --tmp-ref-font-weight-regular: 400;
+  --tmp-ref-font-weight-medium: 500;
+  --tmp-ref-font-weight-semibold: 600;
+  --tmp-ref-font-weight-bold: 700;
+
+  --tmp-ref-letter-spacing-tight: -0.02em;
+  --tmp-ref-letter-spacing-normal: 0;
+  --tmp-ref-letter-spacing-wide: 0.04em;
+}

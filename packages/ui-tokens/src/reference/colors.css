@@ -1,0 +1,48 @@
+:root {
+  /* Migrated from the previous TokenMP UI baseline. */
+  --tmp-ref-color-neutral-0: oklch(1 0 0);
+  --tmp-ref-color-neutral-50: oklch(0.985 0 0);
+  --tmp-ref-color-neutral-100: oklch(0.97 0 0);
+  --tmp-ref-color-neutral-200: oklch(0.922 0 0);
+  --tmp-ref-color-neutral-300: oklch(0.87 0 0);
+  --tmp-ref-color-neutral-400: oklch(0.708 0 0);
+  --tmp-ref-color-neutral-500: oklch(0.556 0 0);
+  --tmp-ref-color-neutral-600: oklch(0.439 0 0);
+  --tmp-ref-color-neutral-700: oklch(0.371 0 0);
+  --tmp-ref-color-neutral-800: oklch(0.269 0 0);
+  --tmp-ref-color-neutral-900: oklch(0.205 0 0);
+  --tmp-ref-color-neutral-950: oklch(0.145 0 0);
+  --tmp-ref-color-neutral-1000: oklch(0 0 0);
+
+  --tmp-ref-color-blue-100: oklch(0.97 0.014 250);
+  --tmp-ref-color-blue-200: oklch(0.94 0.029 250);
+  --tmp-ref-color-blue-300: oklch(0.91 0.047 245);
+  --tmp-ref-color-blue-400: oklch(0.82 0.1 250);
+  --tmp-ref-color-blue-500: oklch(0.73 0.158 248);
+  --tmp-ref-color-blue-600: oklch(0.576 0.251 258);
+  --tmp-ref-color-blue-700: oklch(0.515 0.24 258);
+
+  --tmp-ref-color-green-100: oklch(0.976 0.029 145);
+  --tmp-ref-color-green-200: oklch(0.969 0.037 147);
+  --tmp-ref-color-green-400: oklch(0.85 0.16 145);
+  --tmp-ref-color-green-600: oklch(0.802 0.214 145);
+  --tmp-ref-color-green-700: oklch(0.646 0.175 147);
+
+  --tmp-ref-color-red-100: oklch(0.965 0.022 13);
+  --tmp-ref-color-red-200: oklch(0.954 0.03 14);
+  --tmp-ref-color-red-400: oklch(0.8 0.12 14);
+  --tmp-ref-color-red-500: oklch(0.7 0.18 14);
+  --tmp-ref-color-red-700: oklch(0.626 0.252 23);
+
+  --tmp-ref-color-amber-100: oklch(0.975 0.033 86);
+  --tmp-ref-color-amber-200: oklch(0.968 0.05 90);
+  --tmp-ref-color-amber-400: oklch(0.9 0.12 86);
+  --tmp-ref-color-amber-500: oklch(0.85 0.15 86);
+  --tmp-ref-color-amber-700: oklch(0.819 0.197 76);
+
+  /* Additional data-series colors; they do not replace semantic status colors. */
+  --tmp-ref-color-cyan-500: oklch(0.69 0.13 210);
+  --tmp-ref-color-teal-600: oklch(0.56 0.11 185);
+  --tmp-ref-color-orange-500: oklch(0.7 0.17 50);
+  --tmp-ref-color-rose-500: oklch(0.62 0.19 15);
+}

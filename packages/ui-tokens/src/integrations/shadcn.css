@@ -1,0 +1,39 @@
+/* shadcn/ui compatibility aliases. Values remain owned by TokenMP semantic tokens. */
+:root {
+  --background: var(--tmp-color-bg-canvas);
+  --foreground: var(--tmp-color-text-primary);
+  --card: var(--tmp-color-bg-surface);
+  --card-foreground: var(--tmp-color-text-primary);
+  --popover: var(--tmp-color-bg-elevated);
+  --popover-foreground: var(--tmp-color-text-primary);
+  --primary: var(--tmp-color-action-primary);
+  --primary-foreground: var(--tmp-color-action-primary-foreground);
+  --secondary: var(--tmp-color-action-secondary);
+  --secondary-foreground: var(--tmp-color-action-secondary-foreground);
+  --muted: var(--tmp-color-bg-muted);
+  --muted-foreground: var(--tmp-color-text-secondary);
+  --accent: var(--tmp-color-action-secondary);
+  --accent-foreground: var(--tmp-color-action-secondary-foreground);
+  --destructive: var(--tmp-color-action-destructive);
+  --destructive-foreground: var(--tmp-color-action-destructive-foreground);
+  --border: var(--tmp-color-border-default);
+  --input: var(--tmp-color-border-default);
+  --ring: var(--tmp-color-focus-ring);
+  --ring-offset-background: var(--tmp-color-focus-ring-offset);
+  --radius: var(--tmp-radius-lg);
+
+  --sidebar: var(--tmp-color-bg-surface);
+  --sidebar-foreground: var(--tmp-color-text-primary);
+  --sidebar-primary: var(--tmp-color-action-primary);
+  --sidebar-primary-foreground: var(--tmp-color-action-primary-foreground);
+  --sidebar-accent: var(--tmp-color-action-secondary);
+  --sidebar-accent-foreground: var(--tmp-color-action-secondary-foreground);
+  --sidebar-border: var(--tmp-color-border-default);
+  --sidebar-ring: var(--tmp-color-focus-ring);
+
+  --chart-1: var(--tmp-color-data-1);
+  --chart-2: var(--tmp-color-data-2);
+  --chart-3: var(--tmp-color-data-3);
+  --chart-4: var(--tmp-color-data-4);
+  --chart-5: var(--tmp-color-data-5);
+}

@@ -77,7 +77,7 @@ docs/        # 架构、ADR、接口、数据与运维文档
 tools/       # 仓库级脚本和工程工具
 ```
 
-仓库级 workspace、工具链及顶层逻辑分区已经创建。各分区当前没有具体 app、service、package、infra 或 tool 模块；每个模块必须在实施前由用户确认，并通过独立变更引入。
+仓库级 workspace、工具链及顶层逻辑分区已经创建。`packages/ui-tokens` 是当前唯一具体模块；apps、services、infra 和 tools 当前没有具体模块。后续每个模块必须在实施前由用户确认，并通过独立变更引入。
 
 ## 5. 可部署单元规则
 
@@ -297,7 +297,7 @@ TokenMP v3 是多语言 Monorepo：
 - 任务编排：Turborepo 2.10.5。
 - Node.js：26.4.0，通过 `mise.toml` 固定。
 - TypeScript：6.0.3。
-- 当前模块数量：0；顶层分区及其 `AGENTS.md` 属于仓库骨架，不代表具体应用、服务或 package 已实施。
+- 当前模块数量：1（`packages/ui-tokens`）；其他顶层分区及其 `AGENTS.md` 仍属于仓库骨架，不代表具体应用、服务、infra 或 tool 已实施。
 - Go workspace：尚未创建；引入首个 Go module 时再确认并建立。
 
 详细理由见 `docs/adr/0001-monorepo-tooling.md`。

@@ -1,0 +1,67 @@
+/* Tailwind CSS v4 mapping. Import after `tailwindcss` and the core token entry. */
+@theme inline {
+  --color-background: var(--tmp-color-bg-canvas);
+  --color-foreground: var(--tmp-color-text-primary);
+  --color-card: var(--tmp-color-bg-surface);
+  --color-card-foreground: var(--tmp-color-text-primary);
+  --color-popover: var(--tmp-color-bg-elevated);
+  --color-popover-foreground: var(--tmp-color-text-primary);
+  --color-primary: var(--tmp-color-action-primary);
+  --color-primary-foreground: var(--tmp-color-action-primary-foreground);
+  --color-secondary: var(--tmp-color-action-secondary);
+  --color-secondary-foreground: var(--tmp-color-action-secondary-foreground);
+  --color-muted: var(--tmp-color-bg-muted);
+  --color-muted-foreground: var(--tmp-color-text-secondary);
+  --color-accent: var(--tmp-color-action-secondary);
+  --color-accent-foreground: var(--tmp-color-action-secondary-foreground);
+  --color-destructive: var(--tmp-color-action-destructive);
+  --color-destructive-foreground: var(--tmp-color-action-destructive-foreground);
+  --color-border: var(--tmp-color-border-default);
+  --color-input: var(--tmp-color-border-default);
+  --color-ring: var(--tmp-color-focus-ring);
+  --color-ring-offset-background: var(--tmp-color-focus-ring-offset);
+  --color-success: var(--tmp-color-status-success-text);
+  --color-warning: var(--tmp-color-status-warning-text);
+  --color-info: var(--tmp-color-status-info-text);
+
+  --color-sidebar: var(--tmp-color-bg-surface);
+  --color-sidebar-foreground: var(--tmp-color-text-primary);
+  --color-sidebar-primary: var(--tmp-color-action-primary);
+  --color-sidebar-primary-foreground: var(--tmp-color-action-primary-foreground);
+  --color-sidebar-accent: var(--tmp-color-action-secondary);
+  --color-sidebar-accent-foreground: var(--tmp-color-action-secondary-foreground);
+  --color-sidebar-border: var(--tmp-color-border-default);
+  --color-sidebar-ring: var(--tmp-color-focus-ring);
+
+  --font-sans: var(--tmp-font-sans);
+  --font-mono: var(--tmp-font-mono);
+  --radius-sm: var(--tmp-radius-sm);
+  --radius-md: var(--tmp-radius-md);
+  --radius-lg: var(--tmp-radius-lg);
+  --radius-xl: var(--tmp-radius-xl);
+  --shadow-xs: var(--tmp-shadow-xs);
+  --shadow-sm: var(--tmp-shadow-sm);
+  --shadow-md: var(--tmp-shadow-md);
+  --shadow-lg: var(--tmp-shadow-lg);
+  --ease-standard: var(--tmp-easing-standard);
+  --animate-accordion-down: accordion-down var(--tmp-duration-normal) var(--tmp-easing-standard);
+  --animate-accordion-up: accordion-up var(--tmp-duration-normal) var(--tmp-easing-standard);
+
+  @keyframes accordion-down {
+    from {
+      height: 0;
+    }
+    to {
+      height: var(--radix-accordion-content-height);
+    }
+  }
+
+  @keyframes accordion-up {
+    from {
+      height: var(--radix-accordion-content-height);
+    }
+    to {
+      height: 0;
+    }
+  }
+}
