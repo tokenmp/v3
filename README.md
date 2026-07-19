@@ -71,7 +71,7 @@ Read `AGENTS.md`, then read each nested `AGENTS.md` from the repository root to 
 ## Implemented modules
 
 - [`@tokenmp/ui-tokens`](packages/ui-tokens/README.md): framework-neutral Design Tokens with Tailwind CSS v4 and shadcn integration exports. No frontend app or component package is included yet.
-- [`services/auth`](services/auth/README.md): TokenMP v3 Auth Foundation — the first Go service (Go 1.26.5, Chi, GORM, PostgreSQL). Ships the service skeleton, health endpoints, versioned SQL migrations, Dockerfile, tests and CI. Registration, login and JWT are intentionally not implemented in this change.
+- [`services/auth`](services/auth/README.md): TokenMP v3 Auth Service — the first Go service (Go 1.26.5, Chi, GORM, PostgreSQL). Implements the auth identity flows: registration, login, Ed25519 (EdDSA) access-token issuance, opaque refresh-token rotation with reuse detection, logout, logout-all, /me, and Argon2id password hashing with bcrypt legacy upgrade. Health endpoints, versioned SQL migrations, Dockerfile, tests and CI are unchanged from the foundation.
 
 ## Architecture decisions
 
@@ -79,4 +79,5 @@ Read `AGENTS.md`, then read each nested `AGENTS.md` from the repository root to 
 - [ADR 0002: UI Design Tokens](docs/adr/0002-ui-design-tokens.md)
 - [ADR 0003: CI Baseline](docs/adr/0003-ci-baseline.md)
 - [ADR 0004: Auth Service Foundation](docs/adr/0004-auth-service-foundation.md)
+- [ADR 0005: Auth Identity Flows](docs/adr/0005-auth-identity-flows.md)
 - [UI Design System](docs/ui/design-system.md)

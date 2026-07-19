@@ -36,10 +36,10 @@ const (
 	serviceName   = "auth"
 )
 
-// writeJSON writes the JSON payload for GET requests. For HEAD requests it
+// writeHealthJSON writes the JSON payload for GET requests. For HEAD requests it
 // writes only the headers and status code, with no body. Cache-Control:
 // no-store is always set so intermediaries never cache health probes.
-func writeJSON(w http.ResponseWriter, r *http.Request, status int, payload any) {
+func writeHealthJSON(w http.ResponseWriter, r *http.Request, status int, payload any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
@@ -61,7 +61,7 @@ func Healthz(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
-	writeJSON(w, r, http.StatusOK, HealthResponse{
+	writeHealthJSON(w, r, http.StatusOK, HealthResponse{
 		Status:    statusOK,
 		Service:   serviceName,
 		Timestamp: nowRFC3339(),
@@ -85,7 +85,7 @@ func Readyz(pinger Pinger) http.HandlerFunc {
 			status = statusUnready
 			httpStatus = http.StatusServiceUnavailable
 		}
-		writeJSON(w, r, httpStatus, HealthResponse{
+		writeHealthJSON(w, r, httpStatus, HealthResponse{
 			Status:    status,
 			Service:   serviceName,
 			Timestamp: nowRFC3339(),

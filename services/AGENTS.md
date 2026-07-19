@@ -6,7 +6,7 @@
 
 `services/` 用于可独立开发、测试、构建和部署的后端服务。当前服务清单：
 
-- `auth/`：TokenMP v3 认证服务，Go 1.26.5、Chi、GORM、PostgreSQL（库 `tokenmp_auth`）。当前为 Auth Foundation（仅骨架与 health 端点），不实现注册/登录/JWT。模块文档：`auth/AGENTS.md`。
+- `auth/`：TokenMP v3 认证服务，Go 1.26.5、Chi、GORM、PostgreSQL（库 `tokenmp_auth`）。已实现 Auth Identity Flows：注册/登录、Ed25519/EdDSA Access Token 签发、opaque Refresh Token 轮换与 reuse 检测、logout/logout-all、/me、Argon2id 密码哈希与 bcrypt 兼容升级；速率限制未实现，为部署阻塞项（见 `auth/AGENTS.md` 与 ADR 0005）。模块文档：`auth/AGENTS.md`。
 
 ## 新增模块准入
 

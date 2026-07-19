@@ -34,6 +34,18 @@ type Config struct {
 	DBMaxOpenConns    int
 	DBMaxIdleConns    int
 	DBConnMaxLifetime time.Duration
+
+	// JWT / refresh token configuration. Key file paths are read here but
+	// the PEM is parsed and validated by the jwt package at startup; paths are
+	// never echoed in errors. An empty path is allowed at the config layer so
+	// the service can be assembled for tests with an injected in-memory key
+	// pair; main.go fails fast if a path is missing in a real deployment.
+	JWTPrivateKeyFile string
+	JWTPublicKeyFile  string
+	JWTIssuer         string
+	JWTAudience       string
+	AccessTokenTTL    time.Duration
+	RefreshTokenTTL   time.Duration
 }
 
 const (
@@ -48,6 +60,14 @@ const (
 	// requiredDatabaseName is the only accepted database path. The auth
 	// service must never connect to any other database.
 	requiredDatabaseName = "tokenmp_auth"
+
+	// JWT / refresh token defaults. Access tokens are short-lived (15m);
+	// refresh tokens live 30d. The issuer/audience defaults are the stable
+	// TokenMP identifiers used by this service.
+	defaultJWTIssuer       = "tokenmp-auth"
+	defaultJWTAudience     = "tokenmp-web"
+	defaultAccessTokenTTL  = 15 * time.Minute
+	defaultRefreshTokenTTL = 30 * 24 * time.Hour
 )
 
 // Sentinel validation errors. None of them embed the URL or credentials.
@@ -82,6 +102,14 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	accessTTL, err := getduration("AUTH_JWT_ACCESS_TOKEN_TTL", defaultAccessTokenTTL)
+	if err != nil {
+		return Config{}, err
+	}
+	refreshTTL, err := getduration("AUTH_JWT_REFRESH_TOKEN_TTL", defaultRefreshTokenTTL)
+	if err != nil {
+		return Config{}, err
+	}
 
 	cfg := Config{
 		HTTPAddr:          getenv("AUTH_HTTP_ADDR", defaultHTTPAddr),
@@ -92,6 +120,13 @@ func Load() (Config, error) {
 		DBMaxOpenConns:    maxOpen,
 		DBMaxIdleConns:    maxIdle,
 		DBConnMaxLifetime: connMaxLifetime,
+
+		JWTPrivateKeyFile: strings.TrimSpace(os.Getenv("AUTH_JWT_PRIVATE_KEY_FILE")),
+		JWTPublicKeyFile:  strings.TrimSpace(os.Getenv("AUTH_JWT_PUBLIC_KEY_FILE")),
+		JWTIssuer:         getenv("AUTH_JWT_ISSUER", defaultJWTIssuer),
+		JWTAudience:       getenv("AUTH_JWT_AUDIENCE", defaultJWTAudience),
+		AccessTokenTTL:    accessTTL,
+		RefreshTokenTTL:   refreshTTL,
 	}
 
 	if err := validateLogLevel(cfg.LogLevel); err != nil {
@@ -111,6 +146,23 @@ func Load() (Config, error) {
 	}
 	if cfg.DBConnMaxLifetime < 0 {
 		return Config{}, fmt.Errorf("AUTH_DB_CONN_MAX_LIFETIME must be >= 0, got %s", cfg.DBConnMaxLifetime)
+	}
+	if cfg.AccessTokenTTL <= 0 {
+		return Config{}, fmt.Errorf("AUTH_JWT_ACCESS_TOKEN_TTL must be > 0, got %s", cfg.AccessTokenTTL)
+	}
+	if cfg.RefreshTokenTTL <= 0 {
+		return Config{}, fmt.Errorf("AUTH_JWT_REFRESH_TOKEN_TTL must be > 0, got %s", cfg.RefreshTokenTTL)
+	}
+	// Refresh tokens must outlive access tokens; otherwise rotation would
+	// mint refresh tokens that expire before the access token they pair with.
+	if cfg.RefreshTokenTTL <= cfg.AccessTokenTTL {
+		return Config{}, fmt.Errorf("AUTH_JWT_REFRESH_TOKEN_TTL (%s) must be greater than AUTH_JWT_ACCESS_TOKEN_TTL (%s)", cfg.RefreshTokenTTL, cfg.AccessTokenTTL)
+	}
+	if cfg.JWTIssuer == "" {
+		return Config{}, fmt.Errorf("AUTH_JWT_ISSUER must not be empty")
+	}
+	if cfg.JWTAudience == "" {
+		return Config{}, fmt.Errorf("AUTH_JWT_AUDIENCE must not be empty")
 	}
 	return cfg, nil
 }

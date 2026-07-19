@@ -1,11 +1,11 @@
 # TokenMP v3 Auth Service
 
-The first Go service in the TokenMP v3 Monorepo. This PR is the **Auth
-Foundation**: it stands up the service skeleton — Go module, HTTP server,
-configuration, PostgreSQL connection, versioned SQL migrations, health and
-readiness endpoints, graceful shutdown, Dockerfile, tests and CI — but does
-**not** implement registration, login or JWT issuance. Those belong to a
-follow-up change.
+The first Go service in the TokenMP v3 Monorepo. It owns authentication and
+JWT for TokenMP v3 and accesses only the `tokenmp_auth` database. This module
+implements the **Auth Identity Flows** on top of the foundation: registration,
+login, Ed25519 (EdDSA) access-token issuance, opaque refresh-token rotation
+with reuse detection, logout, logout-all, `/me`, and Argon2id password hashing
+with bcrypt legacy upgrade.
 
 ## Module status
 
@@ -15,59 +15,130 @@ follow-up change.
 - Runtime framework: Chi v5 for HTTP routing
 - ORM: GORM with the PostgreSQL driver. **AutoMigrate is forbidden.** Schema
   is owned by versioned SQL migrations under `migrations/`, applied
-  out-of-band by `golang-migrate` CLI.
+  out-of-band by golang-migrate CLI.
 - Logging: stdlib `log/slog`
 - Configuration: stdlib `os`/`strconv`/`time` — no third-party config library
 - Database: PostgreSQL, dedicated database named `tokenmp_auth`
+- Access tokens: Ed25519 / EdDSA (`github.com/golang-jwt/jwt/v5`)
+- Password hashing: Argon2id (`github.com/alexedwards/argon2id`) + bcrypt
+  legacy compatibility (`golang.org/x/crypto/bcrypt`)
 
-## Scope of this foundation
+## Scope of this module
 
 Implemented:
 
-- `cmd/auth` entrypoint: loads config, opens DB, starts HTTP server, performs
-  graceful shutdown on SIGINT/SIGTERM
-- `cmd/healthcheck`: standalone binary used as the Docker `HEALTHCHECK` so the
-  runtime image does not depend on `curl`/`wget`
-- `internal/config`: env-driven, fail-fast config with safe defaults
+- `cmd/auth` entrypoint: loads config, loads the Ed25519 JWT key pair from
+  disk, opens DB, builds the auth service and HTTP server, performs graceful
+  shutdown on SIGINT/SIGTERM
+- `cmd/healthcheck`: standalone binary used as the Docker `HEALTHCHECK`
+- `internal/config`: env-driven, fail-fast config with JWT tunables
 - `internal/database`: GORM Postgres open/close + Pinger for readiness
 - `internal/database/models`: GORM entities mirroring the SQL schema
   (application-layer only; never migrated)
-- `internal/handler`: `/healthz` and `/readyz` JSON handlers
-- `internal/server`: Chi router with RequestID/RealIP/Recoverer middleware,
-  configured `http.Server` timeouts
+- `internal/security/jwt`: Ed25519 issue/verify + key loading (never echoes
+  key contents or paths)
+- `internal/security/password`: Argon2id hashing, bcrypt compatibility,
+  password policy validation (12..128 runes, no NUL/control chars, raw UTF-8,
+  no trim/NFKC)
+- `internal/security/refresh`: 32-byte base64url refresh token generation +
+  SHA-256 hashing
+- `internal/repository`: GORM user/session repos + `TxRunner`; classified
+  errors (`ErrDuplicateEmail` / `ErrNotFound` / `ErrConstraint` /
+  `ErrInternal`) that never wrap the raw driver error
+- `internal/auth`: the service — `Register`, `Login`, `Refresh`, `Logout`,
+  `LogoutAll`, `Me`, `ChangePassword`
+- `internal/handler`: HTTP handlers + `RequireUser` middleware + uniform
+  `{error:{code,message}}` responses
+- `internal/server`: Chi router wiring (`/healthz`, `/readyz`, and the
+  `/api/v1/auth/*` routes)
 - `migrations/000001_create_users` and `migrations/000002_create_auth_sessions`
-  (up/down)
-- `api/openapi.yaml` contract for `/healthz` and `/readyz`
+  (up/down) — **unchanged**; no new migration is added
+- `api/openapi.yaml` contract for health + auth routes
 - Docker: multi-stage `services/auth/Dockerfile`; final stage is `alpine:3.22`,
   non-root (`tokenmp` UID/GID 10001), with `ca-certificates` and `tini` only.
-- Unit tests (config + handler/server) and integration tests gated by the
+  The runtime image does **not** contain JWT keys — deployments must mount
+  them at runtime.
+- Unit tests (security + config + auth service with fake repos + handler /
+  middleware contracts + server) and integration tests gated by the
   `integration` build tag
-- GitHub Actions Go CI job (format/vet/test/build + migration cycle + integration)
+- GitHub Actions Go CI job (format/vet/test/build + migration cycle +
+  integration)
 
-Not implemented (intentionally deferred):
+Not implemented (intentionally deferred / deployment blockers):
 
-- Registration, login, refresh-token rotation, JWT issuance and Argon2id
-- The `preferred_billing` and `fallback_enabled` fields are not part of Auth
+- **Rate limiting** is not implemented. A per-instance in-memory limiter is
+  inconsistent across replicas and the RealIP trust boundary is undefined.
+  Rate limiting must be provided by a future gateway or Redis-backed shared
+  policy before production deployment. See ADR 0005.
+- Browser cookie-mode token delivery (separate future design; tokens are
+  returned in the JSON body today).
+- The `preferred_billing` and `fallback_enabled` fields are not part of Auth.
+
+## Auth identity flows
+
+| Method | Path | Auth | Behaviour |
+|---|---|---|---|
+| POST | `/api/v1/auth/register` | none | 201 `{id,email,role,status,created_at}`; **no auto-login**; duplicate 409 `email_taken`; weak password / invalid email 400 |
+| POST | `/api/v1/auth/login` | none | 200 `{access_token,refresh_token,token_type:"Bearer",expires_in}`; not-found / wrong-password / disabled → uniform 401 `invalid_credentials` (dummy Argon2id burns time on the not-found path) |
+| POST | `/api/v1/auth/refresh` | none | 200 token response; rotates refresh token (same family); reuse of a revoked token revokes the whole family (`token_reuse`) and returns 401 indistinguishable from invalid; expired / disabled → 401 |
+| POST | `/api/v1/auth/logout` | none | 204 idempotent; invalid / revoked tokens also return 204 |
+| POST | `/api/v1/auth/logout-all` | Bearer | 204; revokes all active sessions (`logout_all`) and bumps `token_version` |
+| GET | `/api/v1/auth/me` | Bearer | 200 public user; middleware loads the user every request and compares status + token_version |
+| PUT | `/api/v1/auth/password` | Bearer | 204; Argon2id update + `token_version` bump + revoke all sessions (`password_changed`); caller must re-login |
+
+Access tokens are Ed25519 (EdDSA) JWTs with claims `iss/aud/sub/jti/iat/nbf/exp`
++ `role` + `token_version` (default TTL 15m). Consumers only need the public
+key to verify. **If the private key is compromised an attacker can forge
+tokens until the key is rotated** — key management is a deployment concern
+(see Docker / deployment below).
+
+Refresh tokens are 32-byte `crypto/rand` base64url strings; the DB stores only
+the SHA-256 hash as `BYTEA` (default TTL 30d). Rotation uses a transaction with
+`SELECT ... FOR UPDATE`; the OLD row's `replaced_by_session_id` points at the
+NEW session and the OLD row is revoked with `token_rotated`. New rows never
+carry `replaced_by_session_id`. Reuse of a revoked token revokes the entire
+family with `token_reuse` and the revocation **commits** before the 401 is
+returned.
+
+Password policy: raw UTF-8 (no trim, no NFKC), 12..128 Unicode code points,
+no NUL or C0/C1 control characters. New hashes use Argon2id (memory 64 MiB,
+iterations 3, parallelism 2, salt 16, key 32, PHC format). Legacy bcrypt
+(`$2a`/`$2b`/`$2y`) hashes verify on login and are upgraded to Argon2id in the
+same transaction (no `token_version` bump). `email` is normalized with
+`LOWER(BTRIM)` before storage (the DB CHECK is the backstop).
 
 ## Security notes
 
-- `AUTH_DATABASE_URL` is the single required secret-bearing env var. It is
-  strictly validated: only `postgres`/`postgresql` URLs are accepted, and
-  they must carry a host, a non-empty user and a path of exactly
-  `/tokenmp_auth`. Any validation error reports only the failing rule — it
-  never echoes the URL, the credentials, the host or the path. Defaults
+- `AUTH_DATABASE_URL` is strictly validated: only `postgres`/`postgresql` URLs
+  are accepted, and they must carry a host, a non-empty user and a path of
+  exactly `/tokenmp_auth`. Any validation error reports only the failing rule
+  — it never echoes the URL, the credentials, the host or the path. Defaults
   never include production credentials.
+- JWT keys are loaded from files (`AUTH_JWT_PRIVATE_KEY_FILE` /
+  `AUTH_JWT_PUBLIC_KEY_FILE`). PEM content is **not** accepted via environment
+  variables to avoid multi-line secrets and log leakage. The service fails
+  fast at startup if the files are missing or do not parse as Ed25519 PEM;
+  errors never echo the key contents or the file paths. Tests generate an
+  in-memory key pair and never read these files.
 - Numeric and duration tunables (`AUTH_DB_MAX_*`, `AUTH_DB_CONN_MAX_LIFETIME`,
-  `AUTH_SHUTDOWN_TIMEOUT`) fail fast on non-parseable or negative input; they
-  never silently fall back to a default.
-- Logs never print the connection string. `database.Open` returns stable
-  classified errors (open failed / acquire *sql.DB failed / initial ping
-  failed) that never wrap the driver's raw error, so the DSN cannot reach
-  logs. `readyz` returns 503 on failure without leaking the underlying error
-  text; HEAD responses write no body at all.
-- `password_hash` stores bcrypt hashes today. The planned progressive upgrade
-  to Argon2id is documented in `docs/adr/0004-auth-service-foundation.md` and
-  will verify existing bcrypt hashes on next login, then re-hash with Argon2id.
+  `AUTH_SHUTDOWN_TIMEOUT`, `AUTH_JWT_ACCESS_TOKEN_TTL`,
+  `AUTH_JWT_REFRESH_TOKEN_TTL`) fail fast on non-parseable or negative input;
+  they never silently fall back to a default. Refresh TTL must be greater than
+  access TTL or the service fails fast.
+- Logs never print the connection string or JWT key material. `database.Open`
+  returns stable classified errors that never wrap the driver's raw error.
+  Repository errors are stable sentinels (`ErrDuplicateEmail` /
+  `ErrNotFound` / `ErrConstraint` / `ErrInternal`) so the DSN, raw SQL and
+  constraint names cannot reach logs or HTTP responses. `readyz` returns 503
+  on failure without leaking the underlying error text; HEAD responses write
+  no body at all.
+- Public errors use the uniform body `{error:{code,message}}` and never leak
+  password hashes, tokens, or raw database errors. Login returns the same
+  `invalid_credentials` for unknown user / wrong password / disabled account
+  and burns a dummy Argon2id hash to flatten the timing side channel.
+- `password_hash` stores Argon2id (PHC) for new rows; legacy bcrypt hashes are
+  accepted for verification and upgraded on the next successful login (see
+  ADR 0004 / 0005).
 
 ## Environment variables
 
@@ -77,6 +148,12 @@ See `.env.example` for the full list and safe defaults. All variables use the
 | Variable | Required | Default | Notes |
 |---|---|---|---|
 | `AUTH_DATABASE_URL` | yes | — | Single Postgres URL; never logged |
+| `AUTH_JWT_PRIVATE_KEY_FILE` | yes | — | Ed25519 PEM (PKCS8) file path; never echoed |
+| `AUTH_JWT_PUBLIC_KEY_FILE` | yes | — | Ed25519 PEM (PKIX) file path; never echoed |
+| `AUTH_JWT_ISSUER` | no | `tokenmp-auth` | JWT `iss` claim |
+| `AUTH_JWT_AUDIENCE` | no | `tokenmp-web` | JWT `aud` claim |
+| `AUTH_JWT_ACCESS_TOKEN_TTL` | no | `15m` | Access token lifetime |
+| `AUTH_JWT_REFRESH_TOKEN_TTL` | no | `720h` (30d) | Refresh token lifetime; must be > access TTL |
 | `AUTH_HTTP_ADDR` | no | `:8080` | HTTP listen address |
 | `AUTH_LOG_LEVEL` | no | `info` | `debug\|info\|warn\|error` |
 | `AUTH_LOG_FORMAT` | no | `json` | `json\|text` |
@@ -88,8 +165,9 @@ See `.env.example` for the full list and safe defaults. All variables use the
 
 ## Schema
 
-Migrations are the source of truth. Highlights and hard compatibility
-constraints enforced by the schema:
+Migrations are the source of truth and are **unchanged** in this change — the
+existing schema already carries every column and constraint the flows need.
+Highlights and hard compatibility constraints enforced by the schema:
 
 - The legacy production `users` table is confirmed to use
   `UUID` / `VARCHAR` / `TEXT` / `TIMESTAMPTZ` types. These migrations
@@ -107,10 +185,13 @@ constraints enforced by the schema:
 - `users.status` is `VARCHAR(16)` with `CHECK (status IN ('active','disabled'))`,
   default `'active'`.
 - `users.token_version` is `INTEGER`, default `1`, `CHECK (token_version >= 1)`.
+  Bumped by password change and logout-all to invalidate outstanding access
+  tokens.
 - `users.password_hash` is `TEXT` (matches the legacy production column;
-  stores bcrypt) with `CHECK (password_hash <> '')`.
-- `auth_sessions.refresh_token_hash` is `BYTEA` with a unique index and
-  `CHECK (length(refresh_token_hash) > 0)`.
+  stores Argon2id PHC, with legacy bcrypt accepted for verification) with
+  `CHECK (password_hash <> '')`.
+- `auth_sessions.refresh_token_hash` is `BYTEA` (SHA-256) with a unique index
+  and `CHECK (length(refresh_token_hash) > 0)`.
 - `auth_sessions.token_family_id` is `UUID`, default `gen_random_uuid()`.
 - `auth_sessions.ip` is `INET` (native Postgres inet; `auth_sessions` is a new
   Auth-owned table, not a legacy mirror).
@@ -120,12 +201,11 @@ constraints enforced by the schema:
   `token_rotated`, `token_reuse`, `user_disabled`) and a consistency CHECK
   requiring `revoked_at` and `revoke_reason` to be both NULL or both set.
 - `auth_sessions` carries `replaced_by_session_id` as a self-referential
-  FK (`ON DELETE SET NULL`) preserved for future rotation semantics. The
-  column name reads "this row was replaced BY session <id>": on rotation
-  the OLD row is updated to set `replaced_by_session_id` to the NEW
-  session's id and is revoked with `revoke_reason='token_rotated'`; new
-  rows never carry this value. Also includes `expires_at`, timestamps,
-  the `CHECK (expires_at > created_at)` and supporting indexes.
+  FK (`ON DELETE SET NULL`). On rotation the OLD row's
+  `replaced_by_session_id` is set to the NEW session's id and the OLD row is
+  revoked with `revoke_reason='token_rotated'`; new rows never carry this
+  value. Also includes `expires_at`, timestamps, the
+  `CHECK (expires_at > created_at)` and supporting indexes.
 - `pgcrypto` is created by `000001` but is **not** dropped by the down
   migration (other schemas may depend on it).
 - No seed data ships with migrations.
@@ -161,11 +241,14 @@ go build ./...
 `go test -race ./...` (without the `integration` tag) is the local test
 command. The `integration`-tagged suite is **not** run locally; it is executed
 by CI only, where it runs the migration cycle (up → down → up), validates
-schema defaults, CHECK constraints, the email normalization invariant,
-`auth_sessions` FKs and unique indexes, the revoke_reason allow-list and
-revoked consistency, the INET ip / TEXT user_agent columns, the
-`replaced_by_session_id` self-FK, and confirms `/readyz` returns 200 against
-a live database via the real `Pinger` driven through `httptest.NewServer`.
+schema defaults / CHECK constraints / the email normalization invariant /
+`auth_sessions` FKs and unique indexes / the revoke_reason allow-list and
+revoked consistency / the INET ip / TEXT user_agent columns / the
+`replaced_by_session_id` self-FK, and drives the **full auth identity flow**
+end-to-end (register → login → /me → refresh rotation → reuse family revocation
+→ bcrypt legacy upgrade → password-change invalidation → logout-all →
+concurrent refresh serialization → disabled-login rejection → no-leak) plus
+`/readyz` against a live database via `httptest.NewServer`.
 
 ### Connecting to a shared dev/preview PostgreSQL
 
@@ -217,6 +300,11 @@ falls back to Go's native host arch). The image is named
 `/healthz` — it does not depend on `curl` or `wget`. Image digests are not
 hard-coded; pinning is left to the deploy pipeline.
 
+**The runtime image does NOT contain JWT keys.** Deployments MUST mount the
+Ed25519 key files at runtime at the paths configured by
+`AUTH_JWT_PRIVATE_KEY_FILE` / `AUTH_JWT_PUBLIC_KEY_FILE`; the service fails
+fast if they are missing or invalid. Never bake a private key into an image.
+
 ### CI image build
 
 The Dockerfile is validated end-to-end by the `go-auth` CI job, which runs
@@ -232,4 +320,5 @@ machines to validate the Dockerfile.
 - `AGENTS.md` (module-level)
 - `../../AGENTS.md` (repository root)
 - `../../docs/adr/0004-auth-service-foundation.md`
+- `../../docs/adr/0005-auth-identity-flows.md`
 - `api/openapi.yaml`

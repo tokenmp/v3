@@ -1,5 +1,5 @@
 // Package server wires the auth service HTTP server: Chi router, middleware,
-// health routes and graceful shutdown.
+// health routes, auth identity flow routes and graceful shutdown.
 package server
 
 import (
@@ -11,7 +11,9 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/tokenmp/v3/services/auth/internal/auth"
 	"github.com/tokenmp/v3/services/auth/internal/handler"
+	"github.com/tokenmp/v3/services/auth/internal/security/jwt"
 )
 
 // Pinger is the readiness contract injected into /readyz.
@@ -22,17 +24,41 @@ type Server struct {
 	httpSrv *http.Server
 }
 
-// New builds a Chi router and the configured http.Server.
-func New(addr string, pinger Pinger) *Server {
+// New builds a Chi router and the configured http.Server. The router exposes
+// the health endpoints plus the auth identity flow routes under
+// /api/v1/auth/*. jwtVerifier and userStore are wired for the authenticated
+// routes (me / password / logout-all); authService backs all routes.
+func New(addr string, pinger Pinger, jwtVerifier *jwt.Verifier, authService *auth.Service, userStore handler.UserStore) *Server {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
 
+	// Health endpoints (liveness / readiness).
 	r.Get("/healthz", handler.Healthz)
 	r.Head("/healthz", handler.Healthz)
 	r.Get("/readyz", handler.Readyz(pinger))
 	r.Head("/readyz", handler.Readyz(pinger))
+
+	// Auth identity flow routes.
+	authH := handler.NewAuthHandler(authService)
+	r.Route("/api/v1/auth", func(r chi.Router) {
+		// Public endpoints (no Bearer required).
+		r.Post("/register", authH.Register)
+		r.Post("/login", authH.Login)
+		r.Post("/refresh", authH.Refresh)
+		r.Post("/logout", authH.Logout)
+
+		// Authenticated endpoints (Bearer required).
+		if jwtVerifier != nil && userStore != nil {
+			r.Group(func(r chi.Router) {
+				r.Use(handler.RequireUser(jwtVerifier, userStore))
+				r.Get("/me", authH.Me)
+				r.Put("/password", authH.ChangePassword)
+				r.Post("/logout-all", authH.LogoutAll)
+			})
+		}
+	})
 
 	srv := &http.Server{
 		Addr:              addr,
