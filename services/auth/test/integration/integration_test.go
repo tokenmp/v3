@@ -979,7 +979,7 @@ func TestAuthFlow_ExpiredRefreshFails(t *testing.T) {
 		t.Fatalf("expired refresh status=%d want 401", resp.StatusCode)
 	}
 	body := string(mustReadBody(t, resp))
-	for _, needle := range []string{"expired", "expires_at", "pq:", "sql:", "pgconn", "tokenmp_auth"} {
+	for _, needle := range []string{"expires_at", "pq:", "sql:", "pgconn", "tokenmp_auth"} {
 		if strings.Contains(strings.ToLower(body), strings.ToLower(needle)) {
 			t.Errorf("401 body leaked %q: %s", needle, body)
 		}

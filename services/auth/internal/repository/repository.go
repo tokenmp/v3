@@ -60,18 +60,27 @@ func classify(err error) error {
 		switch pgErr.Code {
 		case "23505": // unique_violation
 			// Distinguish the email unique index from a generic unique violation.
-			if pgErr.ConstraintName == "users_email" || pgErr.ConstraintName == "users_email_key" {
+			// The migration creates: CREATE UNIQUE INDEX users_email_unique_idx ON users (LOWER(BTRIM(email)))
+			// PostgreSQL may also report the auto-generated constraint name users_email_key.
+			switch pgErr.ConstraintName {
+			case "users_email_unique_idx", "users_email_key":
 				return ErrDuplicateEmail
-			}
-			if pgErr.ConstraintName == "auth_sessions_refresh_token_hash" || pgErr.ConstraintName == "auth_sessions_refresh_token_hash_key" {
+			case "auth_sessions_refresh_token_hash_key":
 				return ErrConstraint // refresh token hash collision
+			default:
+				return ErrConstraint
 			}
-			return ErrConstraint
 		case "23503": // foreign_key_violation
 			return ErrConstraint
 		case "23514": // check_violation
 			return ErrConstraint
 		}
+	}
+	// GORM's ErrDuplicatedKey is only returned when TranslateError is enabled
+	// and the dialector implements ErrorTranslator. The postgres driver does
+	// not implement ErrorTranslator, so this branch is defensive only.
+	if errors.Is(err, gorm.ErrDuplicatedKey) {
+		return ErrConstraint
 	}
 	return ErrInternal
 }
