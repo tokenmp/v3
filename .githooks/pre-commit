@@ -1,0 +1,13 @@
+#!/bin/sh
+
+branch=$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)
+
+if [ "$branch" = "main" ]; then
+  cat >&2 <<'EOF'
+错误：禁止直接在 main 分支提交。
+请创建或切换到其他分支后再提交。
+EOF
+  exit 1
+fi
+
+exit 0
