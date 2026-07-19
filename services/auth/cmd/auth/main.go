@@ -1,8 +1,10 @@
 // Command auth is the TokenMP v3 auth service entrypoint.
 //
-// It loads configuration from AUTH_* environment variables, opens the
-// PostgreSQL connection, starts the HTTP server, and performs graceful
-// shutdown on SIGINT/SIGTERM.
+// It loads configuration from AUTH_* environment variables, loads the Ed25519
+// JWT key pair from disk, opens the PostgreSQL connection, builds the auth
+// identity service and HTTP server, and performs graceful shutdown on
+// SIGINT/SIGTERM. Key paths and PEM contents are never echoed in logs or
+// errors.
 package main
 
 import (
@@ -13,9 +15,14 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
+	"github.com/tokenmp/v3/services/auth/internal/auth"
 	"github.com/tokenmp/v3/services/auth/internal/config"
 	"github.com/tokenmp/v3/services/auth/internal/database"
+	"github.com/tokenmp/v3/services/auth/internal/handler"
+	"github.com/tokenmp/v3/services/auth/internal/repository"
+	"github.com/tokenmp/v3/services/auth/internal/security/jwt"
 	"github.com/tokenmp/v3/services/auth/internal/server"
 )
 
@@ -36,6 +43,26 @@ func run() error {
 	}
 	logger := newLogger(cfg.LogLevel, cfg.LogFormat)
 	slog.SetDefault(logger)
+
+	// Load the Ed25519 JWT key pair. The file paths and PEM contents are
+	// never echoed in errors or logs (the jwt package returns stable
+	// classified sentinels). Fail fast at startup.
+	logger.Info("loading jwt key pair")
+	kp, err := jwt.LoadKeyPair(cfg.JWTPrivateKeyFile, cfg.JWTPublicKeyFile)
+	if err != nil {
+		logger.Error("jwt key pair load failed", "error", err)
+		return err
+	}
+	issuer, err := jwt.NewIssuer(kp, cfg.JWTIssuer, cfg.JWTAudience, cfg.AccessTokenTTL)
+	if err != nil {
+		logger.Error("jwt issuer build failed", "error", err)
+		return err
+	}
+	verifier, err := jwt.NewVerifier(kp, cfg.JWTIssuer, cfg.JWTAudience)
+	if err != nil {
+		logger.Error("jwt verifier build failed", "error", err)
+		return err
+	}
 
 	rootCtx, rootCancel := context.WithCancel(context.Background())
 	defer rootCancel()
@@ -62,8 +89,16 @@ func run() error {
 		}
 	}()
 
+	userRepo := repository.NewUserRepository(db)
+	sessionRepo := repository.NewSessionRepository(db)
+	txRunner := repository.NewTxRunner(db)
+
+	clock := realClock{}
+	authService := auth.NewService(userRepo, sessionRepo, txRunner, issuer, clock, cfg.AccessTokenTTL, cfg.RefreshTokenTTL)
+	userStore := handler.NewUserRepoAdapter(userRepo)
+
 	pinger := database.PingerFromDB(db)
-	srv := server.New(cfg.HTTPAddr, pinger)
+	srv := server.New(cfg.HTTPAddr, pinger, verifier, authService, userStore)
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -95,6 +130,11 @@ func run() error {
 	logger.Info("shutdown complete")
 	return nil
 }
+
+// realClock implements auth.Clock using time.Now.
+type realClock struct{}
+
+func (realClock) Now() time.Time { return time.Now().UTC() }
 
 func newLogger(level, format string) *slog.Logger {
 	var lvl slog.Level

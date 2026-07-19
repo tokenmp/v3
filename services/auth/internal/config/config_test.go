@@ -63,6 +63,24 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.DBConnMaxLifetime != 30*time.Minute {
 		t.Errorf("DBConnMaxLifetime = %s, want 30m", cfg.DBConnMaxLifetime)
 	}
+	if cfg.JWTIssuer != "tokenmp-auth" {
+		t.Errorf("JWTIssuer = %q, want tokenmp-auth", cfg.JWTIssuer)
+	}
+	if cfg.JWTAudience != "tokenmp-web" {
+		t.Errorf("JWTAudience = %q, want tokenmp-web", cfg.JWTAudience)
+	}
+	if cfg.AccessTokenTTL != 15*time.Minute {
+		t.Errorf("AccessTokenTTL = %s, want 15m", cfg.AccessTokenTTL)
+	}
+	if cfg.RefreshTokenTTL != 30*24*time.Hour {
+		t.Errorf("RefreshTokenTTL = %s, want 720h", cfg.RefreshTokenTTL)
+	}
+	if cfg.JWTPrivateKeyFile != "" {
+		t.Errorf("JWTPrivateKeyFile = %q, want empty", cfg.JWTPrivateKeyFile)
+	}
+	if cfg.JWTPublicKeyFile != "" {
+		t.Errorf("JWTPublicKeyFile = %q, want empty", cfg.JWTPublicKeyFile)
+	}
 }
 
 func TestLoad_Overrides(t *testing.T) {
@@ -144,6 +162,77 @@ func TestLoad_InvalidDurationsAndInts(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestLoad_JWTTTLValidation covers JWT TTL constraints: access TTL must be > 0,
+// refresh TTL must be > 0, and refresh TTL must be greater than access TTL.
+func TestLoad_JWTTTLValidation(t *testing.T) {
+	t.Setenv("AUTH_DATABASE_URL", validURL)
+	unsetAuthEnvsExcept(t, "AUTH_DATABASE_URL")
+
+	t.Run("zero access TTL", func(t *testing.T) {
+		t.Setenv("AUTH_JWT_ACCESS_TOKEN_TTL", "0s")
+		if _, err := Load(); err == nil {
+			t.Fatal("expected error for zero access TTL")
+		}
+	})
+
+	t.Setenv("AUTH_JWT_ACCESS_TOKEN_TTL", "") // reset
+
+	t.Run("negative access TTL", func(t *testing.T) {
+		t.Setenv("AUTH_JWT_ACCESS_TOKEN_TTL", "-5m")
+		if _, err := Load(); err == nil {
+			t.Fatal("expected error for negative access TTL")
+		}
+	})
+
+	t.Setenv("AUTH_JWT_ACCESS_TOKEN_TTL", "") // reset
+
+	t.Run("zero refresh TTL", func(t *testing.T) {
+		t.Setenv("AUTH_JWT_REFRESH_TOKEN_TTL", "0s")
+		if _, err := Load(); err == nil {
+			t.Fatal("expected error for zero refresh TTL")
+		}
+	})
+
+	t.Setenv("AUTH_JWT_REFRESH_TOKEN_TTL", "") // reset
+
+	t.Run("refresh less than access", func(t *testing.T) {
+		t.Setenv("AUTH_JWT_ACCESS_TOKEN_TTL", "1h")
+		t.Setenv("AUTH_JWT_REFRESH_TOKEN_TTL", "30m")
+		if _, err := Load(); err == nil {
+			t.Fatal("expected error for refresh TTL <= access TTL")
+		}
+	})
+
+	t.Setenv("AUTH_JWT_ACCESS_TOKEN_TTL", "")
+	t.Setenv("AUTH_JWT_REFRESH_TOKEN_TTL", "")
+
+	t.Run("refresh equal to access", func(t *testing.T) {
+		t.Setenv("AUTH_JWT_ACCESS_TOKEN_TTL", "15m")
+		t.Setenv("AUTH_JWT_REFRESH_TOKEN_TTL", "15m")
+		if _, err := Load(); err == nil {
+			t.Fatal("expected error for refresh TTL == access TTL")
+		}
+	})
+
+	t.Setenv("AUTH_JWT_ACCESS_TOKEN_TTL", "")
+	t.Setenv("AUTH_JWT_REFRESH_TOKEN_TTL", "")
+
+	t.Run("refresh greater than access ok", func(t *testing.T) {
+		t.Setenv("AUTH_JWT_ACCESS_TOKEN_TTL", "15m")
+		t.Setenv("AUTH_JWT_REFRESH_TOKEN_TTL", "1h")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if cfg.AccessTokenTTL != 15*time.Minute {
+			t.Errorf("AccessTokenTTL = %s, want 15m", cfg.AccessTokenTTL)
+		}
+		if cfg.RefreshTokenTTL != time.Hour {
+			t.Errorf("RefreshTokenTTL = %s, want 1h", cfg.RefreshTokenTTL)
+		}
+	})
 }
 
 func TestLoad_NegativeValuesRejected(t *testing.T) {
@@ -256,6 +345,14 @@ func unsetAuthEnvsExcept(t *testing.T, keep ...string) {
 		"AUTH_DB_MAX_OPEN_CONNS",
 		"AUTH_DB_MAX_IDLE_CONNS",
 		"AUTH_DB_CONN_MAX_LIFETIME",
+		// JWT environment variables — cleared so tests don't leak from the
+		// host environment and don't accidentally pick up local .env values.
+		"AUTH_JWT_PRIVATE_KEY_FILE",
+		"AUTH_JWT_PUBLIC_KEY_FILE",
+		"AUTH_JWT_ISSUER",
+		"AUTH_JWT_AUDIENCE",
+		"AUTH_JWT_ACCESS_TOKEN_TTL",
+		"AUTH_JWT_REFRESH_TOKEN_TTL",
 	}
 	for _, k := range all {
 		if _, ok := keepSet[k]; ok {

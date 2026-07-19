@@ -26,7 +26,7 @@
 ## 已实施模块
 
 - UI Design Tokens：`packages/ui-tokens/AGENTS.md`
-- Auth Service：`services/auth/AGENTS.md`（Go 1.26.5，首个 Go module，`go.work` 已创建）
+- Auth Service：`services/auth/AGENTS.md`（Go 1.26.5，首个 Go module，`go.work` 已创建）。已实现 Auth Identity Flows：注册、登录、Ed25519/EdDSA Access Token、opaque Refresh Token 轮换与 reuse 检测、logout/logout-all、/me、Argon2id 密码哈希与 bcrypt 兼容升级。
 
 新增、移动或删除模块时，必须同步维护根索引、分区 `AGENTS.md` 和模块 `AGENTS.md`。
 

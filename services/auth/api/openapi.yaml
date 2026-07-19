@@ -1,14 +1,17 @@
 openapi: 3.0.3
 info:
   title: TokenMP v3 Auth Service
-  version: 0.1.0
+  version: 0.2.0
   description: |
-    Foundation contract for the TokenMP v3 auth service. This OpenAPI document
-    only declares endpoints that are implemented in this PR: the health and
-    readiness probes. Authentication, registration, login and token rotation
-    are intentionally out of scope for this foundation and are not described
-    here. Consumers are added only when a concrete consumer exists; no
-    speculative endpoints are declared.
+    TokenMP v3 auth service contract. This OpenAPI document declares the
+    implemented endpoints: the health/readiness probes and the auth identity
+    flow routes (register, login, refresh, logout, logout-all, me, password).
+    Authentication uses Ed25519 (EdDSA) access tokens; refresh tokens are
+    opaque 32-byte base64url strings whose SHA-256 hash is stored. See
+    docs/adr/0005-auth-identity-flows.md for the full security model,
+    including the documented limitation that an in-memory rate limiter is NOT
+    implemented and rate limiting must be provided by a future gateway/Redis
+    shared policy before production deployment.
 servers:
   - url: http://127.0.0.1:8080
     description: Local development
@@ -101,10 +104,228 @@ paths:
               $ref: '#/components/headers/CacheControlNoStore'
         '405':
           description: Method not allowed.
+  /api/v1/auth/register:
+    post:
+      summary: Register a new user
+      description: |
+        Creates a new user with a normalized (LOWER BTRIM) email and an
+        Argon2id password hash. Does NOT auto-login: no session or access
+        token is issued. On duplicate email returns 409 email_taken. The
+        response shape is the public user view (no password_hash, no
+        token_version).
+      operationId: register
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: User created.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicUser'
+        '400':
+          description: Invalid email or password does not meet the policy.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Email already registered.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/auth/login:
+    post:
+      summary: Log in
+      description: |
+        Authenticates by email + password and mints a new refresh session plus
+        an Ed25519 access token. On any failure (unknown user, wrong password,
+        disabled account) the same 401 invalid_credentials is returned; a
+        dummy Argon2id hash is computed on the not-found path to flatten the
+        timing side channel. On a successful bcrypt login the password is
+        re-hashed with Argon2id in the same transaction (no token_version
+        bump). Tokens are returned in the JSON body (not cookies); browser
+        clients must store them securely.
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Tokens issued.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '400':
+          description: Invalid request body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Invalid email or password, or account disabled.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/auth/refresh:
+    post:
+      summary: Rotate a refresh token
+      description: |
+        Rotates a refresh token: the presented token is hashed and looked up
+        with SELECT FOR UPDATE. If valid, a new session is created in the
+        same token family and the old session is revoked with
+        revoke_reason='token_rotated' and pointed at the new session. If the
+        presented token is already revoked, this is treated as reuse: all
+        active sessions in the family are revoked with revoke_reason=
+        'token_reuse' (the revocation commits even though a 401 is returned),
+        and the response is the same 401 shape as an invalid refresh token so
+        reuse is not signalled to an attacker. Expired refresh tokens and
+        disabled accounts return 401.
+      operationId: refresh
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+      responses:
+        '200':
+          description: New tokens issued.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '401':
+          description: Refresh token is invalid, expired, or reused.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/auth/logout:
+    post:
+      summary: Log out (revoke a single refresh token)
+      description: |
+        Revokes the single session identified by the refresh token. Idempotent:
+        an invalid or already-revoked token also returns 204 so the endpoint
+        cannot be used to probe whether a token exists.
+      operationId: logout
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+      responses:
+        '204':
+          description: Logout completed (or was already a no-op).
+  /api/v1/auth/logout-all:
+    post:
+      summary: Log out everywhere
+      description: |
+        Requires a Bearer access token. Revokes all active sessions for the
+        user with revoke_reason='logout_all' and bumps users.token_version so
+        all outstanding access tokens are immediately invalid.
+      operationId: logoutAll
+      security:
+        - bearerAuth: []
+      responses:
+        '204':
+          description: All sessions revoked; access tokens invalidated.
+        '401':
+          description: Missing or invalid access token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/auth/me:
+    get:
+      summary: Current user
+      description: |
+        Requires a Bearer access token. Returns the public user view. The
+        middleware loads the user on every request and compares status and
+        token_version so a disabled account or a bumped token_version
+        invalidates the access token immediately.
+      operationId: me
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: The authenticated user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicUser'
+        '401':
+          description: Missing, invalid, expired or revoked access token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/auth/password:
+    put:
+      summary: Change password
+      description: |
+        Requires a Bearer access token. Verifies the current password,
+        validates and Argon2id-hashes the new password, updates the hash,
+        bumps users.token_version, and revokes all active sessions with
+        revoke_reason='password_changed' (including the current one). Returns
+        204; the caller must re-login.
+      operationId: changePassword
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangePasswordRequest'
+      responses:
+        '204':
+          description: Password changed; all sessions revoked.
+        '400':
+          description: New password does not meet the policy.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Missing/invalid access token or wrong current password.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        Ed25519 (EdDSA) access token in the Authorization header as
+        `Bearer <token>`. Consumers need only the public key to verify.
   headers:
     CacheControlNoStore:
-      description: Health/readiness responses are never cached by intermediaries.
+      description: Responses are never cached by intermediaries.
       schema:
         type: string
         enum: ['no-store']
@@ -132,3 +353,112 @@ components:
           type: string
           format: date-time
           description: RFC 3339 UTC timestamp of the response.
+    PublicUser:
+      type: object
+      required: [id, email, role, status, created_at]
+      description: |
+        Public user view. Never includes password_hash or token_version.
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        role:
+          type: string
+          enum: [user, admin]
+        status:
+          type: string
+          enum: [active, disabled]
+        created_at:
+          type: string
+          format: date-time
+    RegisterRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 255
+          description: Normalized with LOWER(BTRIM) before storage.
+        password:
+          type: string
+          format: password
+          minLength: 12
+          maxLength: 128
+          description: |
+            Raw UTF-8; not trimmed and not NFKC-normalized. 12..128 Unicode
+            code points; no NUL or control characters.
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+    RefreshRequest:
+      type: object
+      required: [refresh_token]
+      properties:
+        refresh_token:
+          type: string
+          description: Opaque 32-byte base64url refresh token.
+    ChangePasswordRequest:
+      type: object
+      required: [current_password, new_password]
+      properties:
+        current_password:
+          type: string
+          format: password
+        new_password:
+          type: string
+          format: password
+          minLength: 12
+          maxLength: 128
+    TokenResponse:
+      type: object
+      required: [access_token, refresh_token, token_type, expires_in]
+      properties:
+        access_token:
+          type: string
+          description: Ed25519 (EdDSA) JWT access token.
+        refresh_token:
+          type: string
+          description: Opaque 32-byte base64url refresh token.
+        token_type:
+          type: string
+          enum: [Bearer]
+        expires_in:
+          type: integer
+          description: Access token lifetime in seconds.
+    Error:
+      type: object
+      required: [error]
+      description: |
+        Uniform error body. code is a stable machine-readable identifier;
+        message is a human-readable string that never leaks raw database,
+        password or token material.
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum:
+                - invalid_credentials
+                - email_taken
+                - invalid_token
+                - invalid_refresh_token
+                - password_too_weak
+                - invalid_email
+                - bad_request
+                - unauthorized
+                - internal_error
+            message:
+              type: string

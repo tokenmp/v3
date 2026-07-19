@@ -37,6 +37,7 @@
 - UI Design Tokens 决策：`adr/0002-ui-design-tokens.md`
 - CI 基线决策：`adr/0003-ci-baseline.md`
 - Auth Service Foundation 决策：`adr/0004-auth-service-foundation.md`
+- Auth Identity Flows 决策：`adr/0005-auth-identity-flows.md`
 - UI 设计规范：`ui/design-system.md`
 
 新增、替代或删除文档时同步维护本索引或相应主题索引。
