@@ -1,6 +1,6 @@
 # TokenMP v3
 
-TokenMP v3 is being developed as an incremental, multi-language Monorepo. Repository tooling and the shared UI Design Token package are implemented; application and service modules remain intentionally absent.
+TokenMP v3 is an incremental, multi-language Monorepo. Repository tooling, two shared packages, and two Go service modules are implemented; application, infrastructure, and tool modules remain intentionally absent.
 
 ## Toolchain
 
@@ -8,7 +8,7 @@ TokenMP v3 is being developed as an incremental, multi-language Monorepo. Reposi
 - pnpm 11.15.0
 - Turborepo 2.10.5
 - TypeScript 6.0.3
-- Go 1.26.5 (for Go services; workspace at `go.work`, first module `github.com/tokenmp/v3/services/auth`)
+- Go 1.26.5 (for Go services; workspace at `go.work`, modules `github.com/tokenmp/v3/services/auth` and `github.com/tokenmp/v3/services/executor`)
 
 Install the pinned local toolchain with mise, then install dependencies:
 
@@ -23,21 +23,16 @@ The workspace contains top-level logical partitions with scoped `AGENTS.md` guid
 
 ```text
 apps/       # application modules; currently empty
-services/   # backend service modules; currently contains auth
+services/   # backend service modules; currently contains auth and executor
 packages/   # shared packages; currently contains ui-tokens and contracts
 infra/      # infrastructure modules; currently empty
 tools/      # repository tools; currently empty
 docs/       # shared project documentation and ADRs
 ```
 
-`packages/ui-tokens/` is the first Node.js workspace module. `packages/contracts/` is the language-neutral API contract package (`@tokenmp/contracts`); it is the single source of truth for all service OpenAPI contracts, starting with Auth. `services/auth/` is
-the first Go service module and the first concrete service; it implements
-the full auth identity flows (registration, login, Ed25519/EdDSA access-token
-issuance, opaque refresh-token rotation with reuse detection, logout, logout-all, /me, Argon2id password hashing with bcrypt legacy upgrade). Other partition
-directories remain repository structure rather than implemented modules. No
-additional app, service, package, infrastructure module, or tool is created
-until its scope, boundaries, dependencies, and module-level `AGENTS.md` are
-handled in a dedicated change.
+The repository has four implemented modules: `packages/ui-tokens`, `packages/contracts`, `services/auth`, and `services/executor`. `packages/contracts/` is the language-neutral API contract package (`@tokenmp/contracts`) and the single source of truth for service OpenAPI contracts; it contains Auth and Executor contracts. The Executor contract describes its intended public interface, but Executor public business routes have not been implemented.
+
+`services/auth/` implements the full auth identity flows (registration, login, Ed25519/EdDSA access-token issuance, opaque refresh-token rotation with reuse detection, logout, logout-all, `/me`, and Argon2id password hashing with bcrypt legacy upgrade). `services/executor/` is a Mock-first Go Foundation module that implements the `/healthz` endpoint, validated runtime configuration, graceful shutdown, Mock/InMemory ports, and the quota-reservation terminal state machine. Executor generation configuration/scripts are pre-provisioned and experimental in contracts; `services/executor` has not generated, committed, or registered generated models/server, and `check:generated:executor` is not a current gate. Other partition directories remain repository structure rather than implemented modules. No additional app, service, package, infrastructure module, or tool is created until its scope, boundaries, dependencies, and module-level `AGENTS.md` are handled in a dedicated change.
 
 ## Commands
 
@@ -50,9 +45,7 @@ pnpm build
 
 These commands validate the root Node.js task graph and the two workspace
 packages (UI Tokens and Contracts).
-The auth service is a Go module and is **not** part of the pnpm/Turborepo task
-graph; it is validated with `go` directly (see `services/auth/README.md`) and
-by the dedicated Go CI job.
+The Auth and Executor services are independent Go modules and are **not** part of the pnpm/Turborepo task graph. Validate them with `go` directly from their module directories (see their respective READMEs). CI currently has a dedicated Go job for Auth; Executor has no CI job yet.
 
 ## Continuous Integration
 
@@ -73,8 +66,9 @@ Read `AGENTS.md`, then read each nested `AGENTS.md` from the repository root to 
 ## Implemented modules
 
 - [`@tokenmp/ui-tokens`](packages/ui-tokens/README.md): framework-neutral Design Tokens with Tailwind CSS v4 and shadcn integration exports. No frontend app or component package is included yet.
-- [`@tokenmp/contracts`](packages/contracts/README.md): language-neutral API contract package. Single source of truth for all service OpenAPI contracts; currently contains Auth Service v1. Services conform to contracts at design/build time; the package has zero runtime dependencies.
-- [`services/auth`](services/auth/README.md): TokenMP v3 Auth Service — the first Go service (Go 1.26.5, Chi, GORM, PostgreSQL). Implements the auth identity flows: registration, login, Ed25519 (EdDSA) access-token issuance, opaque refresh-token rotation with reuse detection, logout, logout-all, /me, and Argon2id password hashing with bcrypt legacy upgrade. Health endpoints, versioned SQL migrations, Dockerfile, tests and CI are unchanged from the foundation.
+- [`@tokenmp/contracts`](packages/contracts/README.md): language-neutral API contract package. Single source of truth for all service OpenAPI contracts; contains Auth Service v1 and the Executor contract. Services conform to contracts at design/build time; the package has zero runtime dependencies. Executor public business routes described by its contract are not implemented. Executor generation configuration/scripts are pre-provisioned and experimental in contracts; `services/executor` has not generated, committed, or registered generated models/server, and `check:generated:executor` is not a current gate.
+- [`services/auth`](services/auth/README.md): TokenMP v3 Auth Service — Go 1.26.5, Chi, GORM, PostgreSQL. Implements the auth identity flows: registration, login, Ed25519 (EdDSA) access-token issuance, opaque refresh-token rotation with reuse detection, logout, logout-all, `/me`, and Argon2id password hashing with bcrypt legacy upgrade.
+- [`services/executor`](services/executor/README.md): TokenMP v3 Executor Foundation — Go 1.26.5. Implements `/healthz`, runtime configuration, graceful shutdown, Mock/InMemory ports, and quota-reservation terminal transitions. It has no database, SDK, Docker image, CI job, or public model business routes yet. Executor generation configuration/scripts are pre-provisioned and experimental in contracts; `services/executor` has not generated, committed, or registered generated models/server, and `check:generated:executor` is not a current gate.
 
 ## Architecture decisions
 

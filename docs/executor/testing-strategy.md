@@ -1,9 +1,11 @@
 # Executor Testing Strategy
 
-- 状态：测试设计基线，尚未实施
+- 状态：测试设计基线；Foundation 测试已实施，后续阶段测试尚未实施
 - 适用范围：TokenMP v3 `services/executor`
 - 架构来源：`architecture.md`
 - API 契约：`packages/contracts/openapi/executor/v1.yaml`
+
+Foundation 已实施的测试范围：运行时配置校验、`GET` / `HEAD /healthz`、优雅关闭、以及 config、identity、quota、request log 和 runtime 端口的 Mock/InMemory contract 测试；其中 quota 覆盖 reservation 从 `reserved` 到 `finalized` 或 `released` 的唯一终态、同终态幂等和相反终态冲突。本文其余 SDK、adapter、公开模型路由、流处理、集成、fuzz、性能、Docker 与 CI 测试仍是后续设计。
 
 ## 1. 测试目标
 
@@ -768,7 +770,7 @@ go test -race -count=1 ./test/integration/...
 
 | 阶段 | 最低门槛 |
 |---|---|
-| Foundation | config + health + graceful shutdown unit tests |
+| Foundation | **已实施**：运行时 config、health、graceful shutdown，以及 Mock/InMemory ports 和 quota terminal contract/unit tests |
 | Codegen | freshness + route conformance |
 | Config model | C01–C27 + compiler fuzz smoke |
 | Routing | selector + candidate scope + deterministic ordering |

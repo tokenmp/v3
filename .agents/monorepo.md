@@ -58,7 +58,7 @@ Monorepo 是代码组织和工程治理方式，不表示所有服务必须：
 - `auth`：负责认证和 JWT，只访问认证数据库。
 - `api`：负责 API Key、业务配置、模型与上游配置、业务及请求日志相关能力。
 - `quota`：负责配额检查、预留、结算、释放及流水。
-- `executor`：核心转发执行服务，保持 Go 实现。开发初期通过 Mock/InMemory Repository 验证执行架构，不连接数据库；后续允许通过独立设计引入由 Executor 自己拥有的配置或运行时数据库及 Repository 实现。Executor 不得直接访问 Auth、API、Quota 或其他服务拥有的数据库；跨服务能力仍通过明确、可版本化的契约调用。
+- `executor`：核心转发执行服务，保持 Go 实现。Foundation 阶段采用 Mock-first，通过 Mock/InMemory ports 验证执行架构，不直接访问数据库；后续如有持久化需求，必须经独立设计，并且只能由 Executor 自己拥有和访问其配置或运行时数据库及 Repository 实现。Executor 不得直接访问 Auth、API、Quota 或其他服务拥有的数据库；与其他服务的交互必须通过明确、可配置、版本化的内部契约。
 - Web、Admin 或 Gateway 属于独立应用/可部署单元，不得把核心执行逻辑复制进前端或网关。
 - 服务间通过明确、可版本化的契约通信，不得跨服务直接读取对方私有数据库或导入对方内部实现。
 
@@ -77,7 +77,7 @@ docs/        # 架构、ADR、接口、数据与运维文档
 tools/       # 仓库级脚本和工程工具
 ```
 
-仓库级 workspace、工具链及顶层逻辑分区已经创建。`packages/ui-tokens` 是首个 Node.js workspace 模块；`packages/contracts` 是语言中立 API 契约 package；`services/auth` 是首个 Go 服务（已实现 Auth Identity Flows）。apps、infra 和 tools 当前没有具体模块。后续每个模块必须在实施前由用户确认，并通过独立变更引入。
+仓库级 workspace、工具链及顶层逻辑分区已经创建。已实施模块为 `packages/ui-tokens`、`packages/contracts`、`services/auth` 与 `services/executor`：contracts 包含 Auth 和 Executor 的语言中立 API 契约；Auth 已实现 Identity Flows；Executor 处于 Mock-first Foundation 阶段，已实现 health、配置、优雅关闭、Mock/InMemory ports 与 quota reservation 终态状态机，但公开模型业务路由尚未实现。contracts 侧 Executor 生成配置/脚本已预置且为 experimental；`services/executor` 尚未生成、提交或注册 generated models/server，`check:generated:executor` 尚非现行门禁。apps、infra 和 tools 当前没有具体模块。后续每个模块必须在实施前由用户确认，并通过独立变更引入。
 
 ## 5. 可部署单元规则
 
@@ -273,7 +273,7 @@ infra/tools   -> workspace metadata
 - 一个 service 导入另一个 service 的私有源码。
 - 循环依赖。
 - 前端直接依赖后端内部数据库模型。
-- Executor 直接连接 Auth、API、Quota、Business、Logs 或其他服务拥有的数据库；未来若引入 Executor 自有数据库，必须先明确 schema、migration、凭据和部署所有权。
+- Executor 直接连接 Auth、API、Quota、Business、Logs 或其他服务拥有的数据库；Foundation 不连接数据库。未来若引入 Executor 自有数据库，必须先明确其 schema、migration、凭据和部署所有权。
 - 通过共享数据库表替代正式服务接口。
 
 服务间调用应通过内部 HTTP、消息或后续明确选定的协议，并保留鉴权、超时、重试、幂等和错误语义。
@@ -285,7 +285,7 @@ TokenMP v3 是多语言 Monorepo：
 - Executor 保持 Go。
 - 其他服务或应用的语言与框架根据现有代码及后续决策确定。
 - Node.js workspace 工具不得接管 Go 模块边界。
-- Go workspace 使用 `go.work`；首个 Go module `services/auth` 已创建，模块路径 `github.com/tokenmp/v3/services/auth`，Go 1.26.5。后续 Go 服务通过独立变更新增 `go.work` 条目与模块级 `AGENTS.md`。
+- Go workspace 使用 `go.work`；已包含 `services/auth` 和 `services/executor` 两个 Go module，模块路径分别为 `github.com/tokenmp/v3/services/auth` 与 `github.com/tokenmp/v3/services/executor`，均使用 Go 1.26.5。后续 Go 服务通过独立变更新增 `go.work` 条目与模块级 `AGENTS.md`。
 - 跨语言共享优先使用 OpenAPI、JSON Schema、Protobuf 等语言中立契约及代码生成，不复制手写类型作为唯一事实来源。
 
 ## 10. Workspace 与构建工具选型
@@ -298,9 +298,10 @@ TokenMP v3 是多语言 Monorepo：
 - Node.js：26.4.0，通过 `mise.toml` 固定。
 - TypeScript：6.0.3。
 - Go：1.26.5，通过 `mise.toml` 固定。
-- Go workspace：`go.work` 已创建，`use ./services/auth`。
-- 当前模块数量：3（`packages/ui-tokens`、`packages/contracts`、`services/auth`）；其他顶层分区及其 `AGENTS.md` 仍属于仓库骨架，不代表具体应用、infra 或 tool 已实施。
-- `services/auth/` 是首个 Go 服务，已实现 Auth Identity Flows（注册/登录/JWT/Refresh Token 轮换等，见 ADR 0005）。
+- Go workspace：`go.work` 已创建，包含 `use ./services/auth` 与 `use ./services/executor`。
+- 当前模块数量：4（`packages/ui-tokens`、`packages/contracts`、`services/auth`、`services/executor`）；其他顶层分区及其 `AGENTS.md` 仍属于仓库骨架，不代表具体应用、infra 或 tool 已实施。
+- `services/auth/` 已实现 Auth Identity Flows（注册/登录/JWT/Refresh Token 轮换等，见 ADR 0005）。
+- `services/executor/` 是 Mock-first Foundation：已实现 health、配置、优雅关闭、Mock/InMemory ports 与 quota reservation 终态状态机；无数据库、SDK、Docker、CI 或公开模型业务路由。contracts 侧 Executor 生成配置/脚本已预置且为 experimental；`services/executor` 尚未生成、提交或注册 generated models/server，`check:generated:executor` 尚非现行门禁。
 
 详细理由见 `docs/adr/0001-monorepo-tooling.md` 与 `docs/adr/0004-auth-service-foundation.md`。
 
@@ -383,7 +384,7 @@ Monorepo 迁移应渐进执行，而不是一次性重写：
 
 ## 16. 新增模块前必须确认的事项
 
-pnpm workspace、Turborepo 和基础 TypeScript 工具链已落地。Go workspace 已创建（`use ./services/auth`）。新增或迁移具体模块前，仍需按任务确认：
+pnpm workspace、Turborepo 和基础 TypeScript 工具链已落地。Go workspace 已创建（`use ./services/auth`、`./services/executor`）。新增或迁移具体模块前，仍需按任务确认：
 
 - 本次实际纳入仓库的应用、服务或 package 清单。
 - 模块目录、职责、消费者和依赖方向。

@@ -25,9 +25,10 @@
 | `@tokenmp/contracts/openapi/auth/v1.yaml` | YAML 读取能力 | Auth Service v1 OpenAPI 3.0.3 契约；无副作用 | stable | `openapi/auth/v1.yaml` |
 | `@tokenmp/contracts/openapi/executor/v1.yaml` | YAML 读取能力 | Executor Service v1 OpenAPI 3.0.3 契约；无副作用 | stable | `openapi/executor/v1.yaml` |
 | `generate:auth:go` 脚本 | Go 1.26.5+，oapi-codegen v2.8.0（自动下载） | 生成 Auth `models.gen.go` 与 `server.gen.go` | stable | 两份 `go/auth-v1-*.yaml` + `openapi/auth/v1.yaml` |
-| `generate:executor:go` 脚本 | Go 1.26.5+，oapi-codegen v2.8.0（自动下载）；Executor 模块实施后使用 | 生成 Executor `models.gen.go` 与 `server.gen.go` | experimental | 两份 `go/executor-v1-*.yaml` + `openapi/executor/v1.yaml` |
-| `check:generated` 脚本 | Go 1.26.5+ | 临时目录重生成并 byte compare；exit 0=新鲜，exit 1=过期 | stable | 同上 |
-| `check:generated:executor` 脚本 | Go 1.26.5+；要求 `services/executor` 及生成物已实施 | 临时目录重生成并 byte compare；Executor 模块尚未创建时预期失败 | experimental | 同上 |
+| `generate:executor:go` 脚本 | Go 1.26.5+，oapi-codegen v2.8.0（自动下载） | experimental：可生成候选 Executor `models.gen.go` 与 `server.gen.go`；`services/executor` 已实施 Foundation，但尚无生成、提交或注册的产物 | experimental | 两份 `go/executor-v1-*.yaml` + `openapi/executor/v1.yaml` |
+| `check:generated` 脚本 | Go 1.26.5+ | 临时目录重生成并 byte compare；exit 0=新鲜，exit 1=过期 | stable | Auth 生成物 |
+| `check:generated:executor` 脚本 | Go 1.26.5+ | experimental：候选产物存在时可临时重生成并 byte compare；Executor 尚无提交产物，非现行门禁 | experimental | Executor 生成配置与脚本 |
+
 
 ## 依赖关系与消费者
 
@@ -35,12 +36,13 @@
 |---|---|---|---|---|---|
 | 依赖 | Node.js | 构建和契约验证 | 开发工具 | `scripts/*.mjs` | package 全部检查 |
 | 依赖 | `yaml` npm 包 | 验证脚本真正解析 YAML | devDependency | `scripts/validate.mjs` | `lint` + `typecheck` |
-| 依赖 | Go 1.26.5+ | oapi-codegen 代码生成 | 开发工具（`go run @version`） | `go/generate.sh` | `check:generated` + `go test` |
+| 依赖 | Go 1.26.5+ | oapi-codegen 代码生成 | 开发工具（`go run @version`） | Auth：`go/generate.sh`；Executor：experimental `go/generate-executor.sh` | Auth：`check:generated` + `go test`；Executor 尚非门禁 |
 | 被依赖 | `services/auth` | Auth 实现遵循此契约 | 设计/构建时契约依赖 + 生成代码 | `openapi/auth/v1.yaml` → `{models,server}.gen.go` | Auth conformance test + 生成物新鲜度测试 + 集成测试 |
+| 被依赖 | `services/executor` | Executor Foundation 以契约作为后续公开路由的设计/构建时事实来源 | OpenAPI 文件引用；无 Go runtime import、无 generated models/server | `openapi/executor/v1.yaml` | 公开路由实施时验证契约与路由 |
 
 未来消费者（Web/Admin/Gateway）将通过此 package 发现 API，但尚未实施，不列入依赖表。Auth conformance test（`services/auth/internal/server/contract_test.go`）是当前唯一已实施的直接消费者/验证方：它在无数据库环境下加载此契约，用 kin-openapi 解析并 Validate，从 Chi 实际路由提取所有 HTTP method+path，与契约双向严格比较。
 
-依赖方向：Auth 实现与测试必须符合 contracts 的协议，属于设计/构建时契约依赖，不是 Go runtime import；contracts 不依赖 Auth。消费者只依赖 contracts，不依赖 Auth 源码。
+依赖方向：Auth 实现与测试、以及 Executor Foundation 后续公开路由都必须符合 contracts 的协议，属于设计/构建时契约依赖，不是 Go runtime import；contracts 不依赖服务。消费者只依赖 contracts，不依赖服务源码。
 
 ## Go 代码生成
 
@@ -53,14 +55,16 @@
 
 ### 生成物
 
-- 输出：`services/auth/internal/contract/authv1/models.gen.go`（仅 models）和 `server.gen.go`（Chi handler、StrictServerInterface、strict response types），均含 `DO NOT EDIT` 头。server 配置以官方 `skip-prune: true` 复用同 package models，不重复生成。
-- 提交进仓库；`dist/.turbo` 不提交
+- Auth 输出：`services/auth/internal/contract/authv1/models.gen.go`（仅 models）和 `server.gen.go`（Chi handler、StrictServerInterface、strict response types），均含 `DO NOT EDIT` 头。server 配置以官方 `skip-prune: true` 复用同 package models，不重复生成，并提交进仓库。
+- Executor：contracts 侧 `go/executor-v1-{models,server}.yaml` 与 `go/generate-executor.sh` 已预置且为 experimental；`services/executor` 尚未生成、提交或注册 generated models/server。
+- `dist/.turbo` 不提交。
 
 ### 新鲜度保障
 
 - `go/check-generated.sh`：临时目录重生成 + byte compare，不修改工作区，可从任意 cwd 工作
 - `services/auth/internal/contract/authv1/freshness_test.go`：轻量级 Go test，逐一验证两个 `.gen.go` 文件包含 oapi-codegen 源头标记和 DO NOT EDIT 标记，不运行生成器，快速且离线
-- 完整新鲜度检查（重生成 + 字节对比）由 `go/check-generated.sh` 及 CI `go-auth` job 早期步骤执行，不依赖普通 `go test`
+- Auth 完整新鲜度检查（重生成 + 字节对比）由 `go/check-generated.sh` 及 CI `go-auth` job 早期步骤执行，不依赖普通 `go test`。
+- `go/check-generated-executor.sh` 是为候选 Executor 生成物预置的 experimental 脚本；在 `services/executor` 生成、提交并注册 generated models/server 前，`check:generated:executor` 尚非现行门禁。
 
 ## 开发与验证
 
@@ -72,18 +76,17 @@ pnpm --filter @tokenmp/contracts build
 
 # Go 代码生成
 pnpm --filter @tokenmp/contracts generate:auth:go
-# Executor 模块及最终生成模式落地后使用：
-pnpm --filter @tokenmp/contracts generate:executor:go
+pnpm --filter @tokenmp/contracts generate:executor:go # experimental；Foundation 已实施，但尚无应提交的 Executor 生成物
 
 # 生成物新鲜度检查
 pnpm --filter @tokenmp/contracts check:generated
-# Executor 模块及生成物落地后使用：
-pnpm --filter @tokenmp/contracts check:generated:executor
+pnpm --filter @tokenmp/contracts check:generated:executor # experimental；尚非现行门禁
+
 ```
 
 - 最小验证：`lint`（YAML 基本结构 + 禁止内部术语）、`typecheck`（跨文件 operationId 唯一性 + $ref 解析）、`test`（Node test runner 契约测试）、`build`（复制到 dist）。
 - 契约测试：`tests/openapi-auth-v1.test.mjs`。
-- 生成测试：`services/auth/internal/contract/authv1/freshness_test.go`。
+- 生成测试：`services/auth/internal/contract/authv1/freshness_test.go`。Executor 尚未生成、提交或注册 generated models/server；其生成配置/脚本为 experimental，`check:generated:executor` 尚非现行门禁。
 - 集成测试：首次消费者接入时补充端到端验证。
 
 ## 模块边界
@@ -104,6 +107,7 @@ pnpm --filter @tokenmp/contracts check:generated:executor
 - **DO NOT** 在契约中描述速率限制为已实现——速率限制是部署阻塞项，尚未实施。
 - **DO NOT** 保留服务源码中的第二份 OpenAPI 副本——`packages/contracts/openapi/auth/v1.yaml` 是唯一权威副本。
 - **DO NOT** 手动编辑 `services/auth/internal/contract/authv1/{models,server}.gen.go`——通过 `generate.sh` 重生成。
+- **DO NOT** 将 experimental Executor 生成配置/脚本误述为现行服务生成流程或质量门禁——`services/executor` 尚未生成、提交或注册 generated models/server，`check:generated:executor` 尚非现行门禁。
 - **DO NOT** 将 oapi-codegen CLI 作为 Go module 依赖——使用 `go run @version` 避免污染依赖图。
 
 ## 已知陷阱与历史教训
@@ -124,7 +128,7 @@ pnpm --filter @tokenmp/contracts check:generated:executor
 - DO：每次修改契约后运行 `generate:auth:go`；CI 早期执行 `check:generated`；Go test `freshness_test.go` 也在本地检测。
 - DO NOT：手动编辑 `.gen.go` 文件；跳过新鲜度检查。
 - 验证：`check-generated.sh` + `freshness_test.go` + CI step。
-- 适用范围：所有使用 oapi-codegen 生成的服务。
+- 适用范围：当前为 Auth；Executor 仅在其 generated models/server 被生成、提交并注册后适用。
 
 ## 文档维护触发器
 
