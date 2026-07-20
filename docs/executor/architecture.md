@@ -1,6 +1,6 @@
 # Executor Architecture Design
 
-- 状态：设计基线已确认；Foundation 已实施，后续执行能力仍按本文设计逐阶段落地
+- 状态：设计基线已确认；Foundation、Config compiler/snapshot 与 routing 已实施，后续执行能力仍按本文设计逐阶段落地
 - 适用范围：TokenMP v3 `services/executor`
 - 契约来源：`packages/contracts/openapi/executor/v1.yaml`
 - 关联测试方案：`testing-strategy.md`
@@ -19,7 +19,7 @@ Executor 是 TokenMP 的模型请求执行面，负责：
 8. 按配置决定同 Credential 重试、切 Credential、切 Route、切 Provider或切模型。
 9. 管理业务超时、流提交边界、取消、配额和请求日志。
 
-Foundation 不连接数据库，已通过端口接口及 Mock/InMemory 实现提供身份、配置、配额、日志和运行时状态。generated models/strict server、adapter skeleton 与 route/HTTP conformance 已实施；公开模型业务路由的 runtime 注册、业务执行、SDK、流处理及持久化仍未实施；未来持久化实现不得改变核心执行流程。
+Foundation 不连接数据库，已通过端口接口及 Mock/InMemory 实现提供身份、配置、配额、日志和运行时状态。generated models/strict server、adapter skeleton 与 route/HTTP conformance 已实施；公开模型业务路由的 runtime 注册、业务执行、attempt budget、SDK、流处理及持久化仍未实施；未来持久化实现不得改变核心执行流程。
 
 ## 2. 设计原则
 
@@ -147,7 +147,7 @@ Client
 
 ## 4. 目标目录
 
-`services/executor/` 已作为 Foundation 模块存在。下列目录是完整设计目标；除 Foundation 已落地的 `cmd/executor`、`internal/app`、`internal/config`、端口实现、health transport、`internal/contract/executorv1` 和 `internal/transport/executorv1api` 外，Config model 阶段已落地 `internal/adapter`（原始配置类型与枚举）、`internal/snapshot`（原始 `ConfigSnapshot` 与不可变 `Store`/`NewCompiledSnapshot`/`CompiledSnapshot` 发布原语）与 `fixtures/configs/{default,xfyun,anthropic}.json`；其余目录仅在对应阶段创建。
+`services/executor/` 已作为 Foundation 模块存在。下列目录是完整设计目标；除 Foundation 已落地的 `cmd/executor`、`internal/app`、`internal/config`、端口实现、health transport、`internal/contract/executorv1` 和 `internal/transport/executorv1api` 外，Config model 阶段已落地 `internal/adapter`（原始配置类型与枚举）、`internal/snapshot`（原始 `ConfigSnapshot` 与不可变 `Store`/`NewCompiledSnapshot`/`CompiledSnapshot` 发布原语）、`internal/routing`（strict selector、revision-pinned Resolver/Plan）与 `fixtures/configs/{default,xfyun,anthropic}.json`；其余目录仅在对应阶段创建。
 
 ```text
 services/executor/
@@ -270,7 +270,7 @@ schema validation
 
 当前实施状态：完整的模块内 compiler 已落地：`snapshot.Compile` 把 `ConfigSnapshot` 转为 `adapter.ConfigInput` 并调用 `adapter.Compile`，实施 C01–C27 相关的 identity/reference、provider/adapter/protocol compatibility、HTTPS 无 userinfo BaseURL、有限 DSL、capability/thinking、retry/timeout、priority/conflict、fallback、immutability 与 determinism 校验；它按 code defaults → global → adapter → provider → route 合并策略，并按 priority/route ID 确定性排序，输出 `CompiledConfig`。代码默认值为 request `2m`、TTFT `45s`、stream idle `30s`、stream max lifetime `10m`、retry backoff `200ms`、max total attempts `3`、max same-target attempts `2`、max total retry duration `90s`。随后 `NewCompiledSnapshot` 深拷贝冻结，专用 `Store` 以 `atomic.Pointer` 原子发布 Store-owned copy；每个 `Current()` 返回独立视图，因此 later publish 不改变已开始请求所持 revision，且 invalid 或 stale publication 保留 last known good。三份脱敏 fixture 均严格解码、secret 扫描、通过 compiler 并实际发布。它尚未连接 config repository/reload loop 或请求 pipeline。
 
-同一请求和其全部 attempt 固定使用同一 revision，保证行为可复现。
+同一请求和其全部 attempt 必须固定使用同一 revision，保证行为可复现。routing Resolver 已从 `CompiledSnapshot` 深拷贝并固定 revision/generation；其 Plan 与任何未来 request pipeline 的实际 attempt 之间尚未接线。
 
 ## 8. Adapter 配置模型
 
@@ -376,6 +376,14 @@ degraded=true
 原始上游正文不得直接返回客户端。
 
 ## 9. 重试与候选范围
+
+### 9.1 已实施 routing 边界
+
+`internal/routing` 已实施为不访问网络、数据库或 Provider 的纯 Go 能力。它严格解析 `model[:group][@provider]`：空段、重复/颠倒分隔符、空白/控制字符和超长输入被拒绝；`auto` 可为 `auto` 或 `auto@provider`，但不能带 group。实际候选由冻结的 compiled snapshot 决定，数据模型已支持 route group、provider selector、route-local non-secret credential、configured auto model list 和 model fallback。
+
+旧 adapter 级 `Auth.CredentialRef` 仍可被 compiler 接受；若 route 未声明 credentials，它被合成为 route-local credential，其 ID 为 `legacy-route-sha256-` 加 route ID 的**全长** SHA-256 hex。Resolver 的 Candidate/Plan 只带 credential ID/reference，绝不带 secret material。
+
+Resolver/Plan 固定 source snapshot 的 revision/generation 并在该私有 universe 内产生 deterministic candidates。每个 candidate 在 model、provider、route、credential 四个独立 quarantine 维度检查；未找到 state 可用，active state 排除 candidate，除 context cancellation/deadline 外的读取失败 fail closed。`Plan.Next` 为 retry actions 给出已冻结、selector-scoped candidate scope（并排除 visited target）；它**不是** RetryDecider，尚不匹配 retry rules、不管理 attempt budget，且不发起任何上游调用。
 
 ```go
 type RetryAction string
@@ -525,7 +533,7 @@ Request/Attempt/Event 日志至少记录：
 | 1 | `feat/executor-foundation` | **已实施**：模块骨架、health、运行时配置、优雅关闭、Mock/InMemory ports、最小 quota terminal 状态机 |
 | 2 | `refactor/executor-codegen` | **已实施**：generated models/strict server、adapter skeleton、生成物新鲜度门禁与 route/HTTP conformance；运行时尚未注册业务路由，业务执行与流处理未实现 |
 | 3 | `feat/executor-config-model` | **已实施（模块内，未接 runtime）**：`snapshot.Compile` → `adapter.Compile`、C01–C27 相关有限 DSL 安全校验、继承/normalization、deterministic ordering、immutable generation-aware Store 与三份脱敏 fixture 的严格解码/真实编译/发布测试；默认值已与本设计基线对齐。 |
-| 4 | `feat/executor-routing` | selector、candidate dimensions |
+| 4 | `feat/executor-routing` | **已实施（纯 Go，未接 runtime/pipeline）**：strict `model[:group][@provider]` selector（`auto` 禁止 group）、route group/provider selector/route-local non-secret credential/auto+model fallback、legacy `CredentialRef` 全长 SHA-256 合成、revision-pinned immutable Resolver/Plan、deterministic candidates 与 model/provider/route/credential 四维 fail-closed quarantine；`Plan.Next` 仅定义 candidate scope，不是 RetryDecider。 |
 | 5 | `feat/executor-adapter-engine` | thinking/request/response 规则 |
 | 6 | `feat/executor-sdk-openai` | OpenAI SDK 非流式、SDK retry=0、Context cancel、quota cleanup |
 | 7 | `feat/executor-retry-policy` | retry decision、attempt budget、quarantine |

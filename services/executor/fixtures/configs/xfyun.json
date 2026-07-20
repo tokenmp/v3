@@ -41,6 +41,7 @@
   "Providers": {
     "xfyun-default": {
       "ID": "xfyun-default",
+      "Selector": "xfyun",
       "Name": "XFYun Default",
       "BaseURL": "https://spark-api.xfyun.example/v1",
       "SDKKind": "generic_http",
@@ -60,7 +61,8 @@
       "Enabled": true,
       "Protocol": "openai_chat",
       "Retry": {},
-      "Timeout": {}
+      "Timeout": {},
+      "Credentials": []
     }
   ],
   "Adapters": {

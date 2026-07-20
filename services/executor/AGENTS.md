@@ -4,8 +4,8 @@
 
 ## 模块职责
 
-- 负责：TokenMP 模型请求执行面的 Foundation：health、优雅关闭、Mock/InMemory ports 与 quota reservation 终态状态机。已实施 generated transport 层及路由契约一致性测试，但运行时 `main` 仍未注册任何公开业务路由。已实施 Config compiler：`snapshot.Compile` → `adapter.Compile` 校验与 normalization 原始 snapshot，检查 identities/references、provider/adapter/protocol compatibility、HTTPS BaseURL、capability/thinking、timeouts/retries、fallback cycle，以及有限 DSL 的路径、action、header/query allowlist 与规则 priority；产出 deterministic `CompiledConfig`。三份脱敏 fixture 均在严格解码、secret 扫描后实际编译并发布；C01–C27 相关安全、默认值、immutability 与确定性测试均已实施。compiler 默认值为 request `2m`、TTFT `45s`、idle `30s`、lifetime `10m`、backoff `200ms`、total attempts `3`、same-target attempts `2`、total retry duration `90s`。
-- 不负责：runtime config source/reload loop、运行时公开模型 API 路由注册、数据库、SDK、Docker、独立 Executor CI job、Provider 调用或生产部署。compiled config 可由 immutable generation-aware snapshot store 发布，但尚未被 request pipeline 消费。contracts 侧 Executor 生成配置/脚本已落地；已生成并提交 generated models/strict server（`services/executor/internal/contract/executorv1/{models,server}.gen.go`），由 `check:generated:executor` 新鲜度检查覆盖（该检查是现有 `go-auth` CI job 中必经的门禁步骤；无独立 Executor CI job）。
+- 负责：TokenMP 模型请求执行面的 Foundation：health、优雅关闭、Mock/InMemory ports 与 quota reservation 终态状态机。已实施 generated transport 层及路由契约一致性测试，但运行时 `main` 仍未注册任何公开业务路由。已实施 Config compiler：`snapshot.Compile` → `adapter.Compile` 校验与 normalization 原始 snapshot，检查 identities/references、provider/adapter/protocol compatibility、HTTPS BaseURL、capability/thinking、timeouts/retries、fallback cycle，以及有限 DSL 的路径、action、header/query allowlist 与规则 priority；产出 deterministic `CompiledConfig`。三份脱敏 fixture 均在严格解码、secret 扫描后实际编译并发布；C01–C27 相关安全、默认值、immutability 与确定性测试均已实施。已实施纯 Go routing：strict `model[:group][@provider]` selector（`auto` 不得带 group）、route group/provider selector/route-local non-secret credential/auto+model fallback；legacy adapter `CredentialRef` 合成 `legacy-route-sha256-<full SHA-256(route ID)>` ID。Resolver/Plan 固定 revision/generation，产出 deterministic candidates，并以 model/provider/route/credential 四维 quarantine read fail-closed；`Plan.Next` 仅提供候选 action scope，不是 RetryDecider。compiler 默认值为 request `2m`、TTFT `45s`、idle `30s`、lifetime `10m`、backoff `200ms`、total attempts `3`、same-target attempts `2`、total retry duration `90s`。
+- 不负责：runtime config source/reload loop、运行时公开模型 API 路由注册、attempt budget、execution pipeline、数据库、SDK、Docker、独立 Executor CI job、Provider 调用或生产部署。compiled config 与 routing Resolver/Plan 均尚未被 request pipeline 消费。contracts 侧 Executor 生成配置/脚本已落地；已生成并提交 generated models/strict server（`services/executor/internal/contract/executorv1/{models,server}.gen.go`），由 `check:generated:executor` 新鲜度检查覆盖（该检查是现有 `go-auth` CI job 中必经的门禁步骤；无独立 Executor CI job）。
 - 所有者：TokenMP。
 
 ## 必读文档
@@ -28,6 +28,7 @@
 | Executor route conformance test | Go test 运行环境 | `internal/server/contract_test.go` 以 kin-openapi 加载契约，遍历 generated `Handler` 的 Chi 路由，与 OpenAPI method+path 双向严格比较（7 条路由） | experimental | `packages/contracts/openapi/executor/v1.yaml` |
 | config compiler | non-empty revision；models/providers/adapters/routes 集合可为空 | `snapshot.Compile` → `adapter.Compile` 返回 normalized、deterministic `CompiledConfig` 或分类 validation error；空集合编译为无业务 route 的 config；C01–C27 相关有限 DSL、配置图、默认值、继承、priority、immutability 与 determinism 均由 compiler tests 覆盖 | experimental | `internal/snapshot/compiler.go`、`internal/adapter/compiler.go`、`*_test.go` |
 | immutable generation-aware snapshot publication | non-empty matching revision, non-nil compiled config, non-zero monotonic generation | deep-copy freeze + atomic Store-owned publication; `Current` returns an independent same-generation view, so later publish cannot mutate an in-flight request's revision; invalid or stale publication preserves last known good | experimental | `internal/snapshot/store.go`、`internal/snapshot/store_test.go` |
+| routing selector / Resolver / Plan | frozen compiled snapshot plus strict `model[:group][@provider]` selector | deterministic, revision/generation-pinned non-secret candidates; `auto` forbids group; model/provider/route/credential quarantine read failure fails closed; `Plan.Next` exposes scope only, not retry decisions | experimental | `internal/routing/{selector,resolver}.go` and tests |
 | three config fixtures | `fixtures/configs/{default,xfyun,anthropic}.json` | strict decode、secret scan、fixture-specific assertions、`Compile` 与 Store publish；每份均产生 store-ready compiled config | experimental | `internal/snapshot/{fixture,compiler}_test.go`、`fixtures/configs/*.json` |
 
 ## 依赖关系与消费者
@@ -38,7 +39,7 @@
 | 依赖 | `github.com/getkin/kin-openapi` | 路由契约一致性测试在 test 时解析并 Validate OpenAPI | test-only Go 依赖 | `internal/server/contract_test.go` | 修改契约或 generated Handler 后运行 `go test ./internal/server/...` |
 | 依赖 | `github.com/go-chi/chi/v5`、`github.com/oapi-codegen/runtime` | generated server 与 adapter 的运行时依赖 | Go runtime import | `go.mod` | `go build ./...` |
 
-Foundation 尚无已验证的直接消费者。generated transport 与 adapter 仅被路由一致性测试消费，未被运行时 `main` 注册。compiler 和 snapshot store 是模块内纯 Go 库，无 runtime consumer；三份 fixture 仅被 compiler/snapshot tests 消费。
+Foundation 尚无已验证的直接消费者。routing Resolver/Plan 是仅由测试消费的模块内纯 Go 能力，未接入 runtime routing 或 request pipeline。generated transport 与 adapter 仅被路由一致性测试消费，未被运行时 `main` 注册。compiler 和 snapshot store 是模块内纯 Go 库，无 runtime consumer；三份 fixture 仅被 compiler/snapshot tests 消费。
 
 ## 开发与验证
 
@@ -73,7 +74,8 @@ go build ./...
 - **DO NOT** 在运行时启用 SSE 流式响应 — strict server 生成的 SSE 能力仅为 generated capability，当前不被任何运行时代码调用；流式实现待后续流式阶段。
 - **DO NOT** 引入 Docker 或独立 Executor CI job/运行时路由 — generated models/strict server 已生成、提交并供 adapter 与测试使用；现有 `go-auth` job 仅复用其 Go toolchain 执行 generated freshness、generated transport/route conformance race tests，以及 `go test -race -count=1 ./internal/adapter/... ./internal/snapshot/...` compiler/snapshot race 门禁。该门禁不运行数据库、SDK、runtime config source 或 request pipeline；Docker、运行时业务路由与集成验证仍待后续独立阶段（见 `docs/executor/architecture.md` 阶段 14）。
 - **DO NOT** 将有限 DSL 扩展为脚本执行平台，或让其写 Host、Authorization、代理/转发、Content-Length、SDK 控制头、密钥引用、URL scheme/host/base path；禁止任意脚本、SQL、网络、文件访问或自由模板。compiler 仅接受有限 action、受限 path 及 allowlisted header/query。
-- **DO NOT** 把 compiler/store 已落地误写为 runtime reload 或业务执行：它们尚无 runtime config source、reload loop、Provider 调用或 request-pipeline consumer。
+- **DO NOT** 把 compiler/store/routing 已落地误写为 runtime reload 或业务执行：它们尚无 runtime config source、reload loop、Provider 调用、attempt budget 或 request-pipeline consumer。
+- **DO NOT** 把 `Plan.Next` 当作 RetryDecider，或在 resolver 外扩大 selector/revision-pinned candidate universe：它只对已冻结候选定义 action scope；retry rule matching、attempt budget 与执行均未实施。
 - **DO NOT** 修改 compiler 默认值或 policy 继承顺序而不更新 C01–C27 tests 与文档：当前实值为 request `2m`、TTFT `45s`、idle `30s`、lifetime `10m`、backoff `200ms`、total attempts `3`、same-target attempts `2`、total retry duration `90s`。
 - **DO NOT** 手动编辑 `internal/contract/executorv1/{models,server}.gen.go` — 通过 `packages/contracts/go/generate-executor.sh` 重生成。
 - **DO NOT** 对同一 reservation 执行相反终态 — 会造成重复结算或错误释放；正确做法：同终态幂等重放，相反终态返回稳定冲突。

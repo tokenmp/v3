@@ -47,6 +47,7 @@
   "Providers": {
     "openai-default": {
       "ID": "openai-default",
+      "Selector": "openai",
       "Name": "OpenAI Default",
       "BaseURL": "https://api.openai.example/v1",
       "SDKKind": "openai",
@@ -66,7 +67,8 @@
       "Enabled": true,
       "Protocol": "openai_chat",
       "Retry": {},
-      "Timeout": {}
+      "Timeout": {},
+      "Credentials": []
     }
   ],
   "Adapters": {

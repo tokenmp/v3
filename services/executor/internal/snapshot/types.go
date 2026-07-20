@@ -23,16 +23,18 @@ type ConfigSnapshot struct {
 
 // GlobalPolicy provides the lowest-precedence retry and timeout settings.
 type GlobalPolicy struct {
-	Retry   adapter.RetryPolicy
-	Timeout adapter.TimeoutPolicy
+	Retry        adapter.RetryPolicy
+	Timeout      adapter.TimeoutPolicy
+	AutoModelIDs []string
 }
 
 // ModelConfig declares the public model identity and its normalized features.
 type ModelConfig struct {
-	ID           string
-	DisplayName  string
-	Capabilities []adapter.Capability
-	Thinking     ModelThinkingConfig
+	ID               string
+	DisplayName      string
+	Capabilities     []adapter.Capability
+	Thinking         ModelThinkingConfig
+	FallbackModelIDs []string
 }
 
 // ModelThinkingConfig describes model-level thinking limits before an adapter
@@ -50,6 +52,7 @@ type ModelThinkingConfig struct {
 type ProviderConfig struct {
 	ID       string
 	Name     string
+	Selector string
 	BaseURL  string
 	SDKKind  adapter.SDKKind
 	Protocol adapter.Protocol
@@ -70,4 +73,16 @@ type RouteConfig struct {
 	Retry            adapter.RetryPolicy
 	Timeout          adapter.TimeoutPolicy
 	FallbackRouteIDs []string
+	RouteGroup       string
+	Credentials      []CredentialConfig
+}
+
+// CredentialConfig identifies one non-secret credential candidate for a route.
+// CredentialRef is resolved outside the snapshot and must never contain the
+// credential material itself.
+type CredentialConfig struct {
+	ID            string
+	CredentialRef string
+	Priority      int
+	Enabled       bool
 }

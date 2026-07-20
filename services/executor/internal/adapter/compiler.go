@@ -1,6 +1,8 @@
 package adapter
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -45,11 +47,15 @@ type ConfigInput struct {
 type GlobalInput struct {
 	Retry   RetryPolicy
 	Timeout TimeoutPolicy
+	// AutoModelIDs is an ordered list of configured models eligible for the
+	// reserved "auto" model selection.
+	AutoModelIDs []string
 }
 type ModelInput struct {
-	ID           string
-	Capabilities []Capability
-	Thinking     ThinkingInput
+	ID               string
+	Capabilities     []Capability
+	Thinking         ThinkingInput
+	FallbackModelIDs []string
 }
 type ThinkingInput struct {
 	Supported                      bool
@@ -57,11 +63,11 @@ type ThinkingInput struct {
 	MinBudgetToken, MaxBudgetToken int
 }
 type ProviderInput struct {
-	ID, Name, BaseURL string
-	SDKKind           SDKKind
-	Protocol          Protocol
-	Retry             RetryPolicy
-	Timeout           TimeoutPolicy
+	ID, Name, BaseURL, Selector string
+	SDKKind                     SDKKind
+	Protocol                    Protocol
+	Retry                       RetryPolicy
+	Timeout                     TimeoutPolicy
 }
 type RouteInput struct {
 	ID, ModelID, ProviderID, AdapterID, UpstreamModel string
@@ -71,28 +77,37 @@ type RouteInput struct {
 	Retry                                             RetryPolicy
 	Timeout                                           TimeoutPolicy
 	FallbackRouteIDs                                  []string
+	RouteGroup                                        string
+	Credentials                                       []CredentialInput
+}
+type CredentialInput struct {
+	ID, CredentialRef string
+	Priority          int
+	Enabled           bool
 }
 
 // CompiledConfig is a normalized immutable-in-practice configuration value.
 // Use CloneCompiledConfig before retaining a caller-visible value.
 type CompiledConfig struct {
-	Revision  string
-	Models    map[string]CompiledModel
-	Providers map[string]CompiledProvider
-	Adapters  map[string]CompiledAdapter
-	Routes    []CompiledRoute
+	Revision     string
+	AutoModelIDs []string
+	Models       map[string]CompiledModel
+	Providers    map[string]CompiledProvider
+	Adapters     map[string]CompiledAdapter
+	Routes       []CompiledRoute
 }
 type CompiledModel struct {
-	ID           string
-	Capabilities []Capability
-	Thinking     ThinkingInput
+	ID               string
+	Capabilities     []Capability
+	Thinking         ThinkingInput
+	FallbackModelIDs []string
 }
 type CompiledProvider struct {
-	ID, Name, BaseURL string
-	SDKKind           SDKKind
-	Protocol          Protocol
-	Retry             CompiledRetry
-	Timeout           CompiledTimeout
+	ID, Name, BaseURL, Selector string
+	SDKKind                     SDKKind
+	Protocol                    Protocol
+	Retry                       CompiledRetry
+	Timeout                     CompiledTimeout
 }
 type CompiledRoute struct {
 	ID, ModelID, ProviderID, AdapterID, UpstreamModel string
@@ -102,6 +117,13 @@ type CompiledRoute struct {
 	Retry                                             CompiledRetry
 	Timeout                                           CompiledTimeout
 	FallbackRouteIDs                                  []string
+	RouteGroup                                        string
+	Credentials                                       []CompiledCredential
+}
+type CompiledCredential struct {
+	ID, CredentialRef string
+	Priority          int
+	Enabled           bool
 }
 type CompiledAdapter struct {
 	ID, Name      string
@@ -137,7 +159,7 @@ func Compile(in ConfigInput) (CompiledConfig, error) {
 	if err != nil {
 		return CompiledConfig{}, fmt.Errorf("global timeout: %w", err)
 	}
-	out := CompiledConfig{Revision: in.Revision, Models: make(map[string]CompiledModel, len(in.Models)), Providers: make(map[string]CompiledProvider, len(in.Providers)), Adapters: make(map[string]CompiledAdapter, len(in.Adapters))}
+	out := CompiledConfig{Revision: in.Revision, AutoModelIDs: append([]string(nil), in.Global.AutoModelIDs...), Models: make(map[string]CompiledModel, len(in.Models)), Providers: make(map[string]CompiledProvider, len(in.Providers)), Adapters: make(map[string]CompiledAdapter, len(in.Adapters))}
 	modelIDs := map[string]bool{}
 	for key, m := range in.Models {
 		if modelIDs[m.ID] {
@@ -147,15 +169,22 @@ func Compile(in ConfigInput) (CompiledConfig, error) {
 		if key == "" || m.ID == "" || key != m.ID {
 			return CompiledConfig{}, fmt.Errorf("model key/id mismatch %q/%q", key, m.ID)
 		}
+		if m.ID == "auto" {
+			return CompiledConfig{}, fmt.Errorf("model ID %q is reserved", m.ID)
+		}
 		if err := capabilities(m.Capabilities); err != nil {
 			return CompiledConfig{}, fmt.Errorf("model %q: %w", key, err)
 		}
 		if err := thinkingInput(m.Thinking); err != nil {
 			return CompiledConfig{}, fmt.Errorf("model %q: %w", key, err)
 		}
-		out.Models[key] = CompiledModel{ID: m.ID, Capabilities: append([]Capability(nil), m.Capabilities...), Thinking: m.Thinking}
+		out.Models[key] = CompiledModel{ID: m.ID, Capabilities: append([]Capability(nil), m.Capabilities...), Thinking: m.Thinking, FallbackModelIDs: append([]string(nil), m.FallbackModelIDs...)}
+	}
+	if err := validateModelReferences(out.Models, in.Global.AutoModelIDs); err != nil {
+		return CompiledConfig{}, err
 	}
 	providerNames := map[string]bool{}
+	providerSelectors := map[string]bool{}
 	for key, p := range in.Providers {
 		if providerNames[p.Name] {
 			return CompiledConfig{}, fmt.Errorf("duplicate provider name %q", p.Name)
@@ -164,6 +193,14 @@ func Compile(in ConfigInput) (CompiledConfig, error) {
 		if key == "" || p.ID == "" || key != p.ID || strings.TrimSpace(p.Name) == "" || !p.SDKKind.Valid() || !p.Protocol.Valid() {
 			return CompiledConfig{}, fmt.Errorf("invalid provider %q", key)
 		}
+		selector := p.Selector
+		if selector == "" {
+			selector = p.ID
+		}
+		if !safeSegment(selector) || providerSelectors[selector] {
+			return CompiledConfig{}, fmt.Errorf("invalid or duplicate provider selector %q", selector)
+		}
+		providerSelectors[selector] = true
 		baseURL, err := url.Parse(p.BaseURL)
 		if err != nil || baseURL.Scheme != "https" || baseURL.Host == "" || baseURL.User != nil {
 			return CompiledConfig{}, fmt.Errorf("provider %q has invalid base URL", key)
@@ -176,7 +213,7 @@ func Compile(in ConfigInput) (CompiledConfig, error) {
 		if err != nil {
 			return CompiledConfig{}, fmt.Errorf("provider %q timeout: %w", key, err)
 		}
-		out.Providers[key] = CompiledProvider{ID: p.ID, Name: p.Name, BaseURL: p.BaseURL, SDKKind: p.SDKKind, Protocol: p.Protocol, Retry: r, Timeout: t}
+		out.Providers[key] = CompiledProvider{ID: p.ID, Name: p.Name, BaseURL: p.BaseURL, Selector: selector, SDKKind: p.SDKKind, Protocol: p.Protocol, Retry: r, Timeout: t}
 	}
 	adapterNames := map[string]bool{}
 	for key, raw := range in.Adapters {
@@ -256,18 +293,162 @@ func Compile(in ConfigInput) (CompiledConfig, error) {
 		if err != nil {
 			return CompiledConfig{}, fmt.Errorf("route %q timeout: %w", route.ID, err)
 		}
-		out.Routes = append(out.Routes, CompiledRoute{ID: route.ID, ModelID: route.ModelID, ProviderID: route.ProviderID, AdapterID: route.AdapterID, UpstreamModel: route.UpstreamModel, Priority: route.Priority, Enabled: route.Enabled, Protocol: route.Protocol, Retry: r, Timeout: t, FallbackRouteIDs: append([]string(nil), route.FallbackRouteIDs...)})
+		credentials, err := compileCredentials(route, a.Auth)
+		if err != nil {
+			return CompiledConfig{}, fmt.Errorf("route %q: %w", route.ID, err)
+		}
+		out.Routes = append(out.Routes, CompiledRoute{ID: route.ID, ModelID: route.ModelID, ProviderID: route.ProviderID, AdapterID: route.AdapterID, UpstreamModel: route.UpstreamModel, Priority: route.Priority, Enabled: route.Enabled, Protocol: route.Protocol, Retry: r, Timeout: t, FallbackRouteIDs: append([]string(nil), route.FallbackRouteIDs...), RouteGroup: route.RouteGroup, Credentials: credentials})
+	}
+	if err := validateRouteCredentials(out.Routes); err != nil {
+		return CompiledConfig{}, err
 	}
 	if err := validateFallbacks(out.Routes); err != nil {
 		return CompiledConfig{}, err
 	}
 	sort.SliceStable(out.Routes, func(i, j int) bool {
-		if out.Routes[i].Priority == out.Routes[j].Priority {
-			return out.Routes[i].ID < out.Routes[j].ID
+		if out.Routes[i].Priority != out.Routes[j].Priority {
+			return out.Routes[i].Priority < out.Routes[j].Priority
 		}
-		return out.Routes[i].Priority < out.Routes[j].Priority
+		if out.Routes[i].RouteGroup != out.Routes[j].RouteGroup {
+			return out.Routes[i].RouteGroup < out.Routes[j].RouteGroup
+		}
+		return out.Routes[i].ID < out.Routes[j].ID
 	})
 	return out, nil
+}
+
+const legacyCredentialIDPrefix = "legacy-route-sha256-"
+
+func compileCredentials(route RouteInput, auth AuthRule) ([]CompiledCredential, error) {
+	if auth.Kind == AuthNone {
+		if len(route.Credentials) != 0 || auth.CredentialRef != "" {
+			return nil, fmt.Errorf("auth none must not configure credentials")
+		}
+		return nil, nil
+	}
+	if len(route.Credentials) != 0 && auth.CredentialRef != "" {
+		return nil, fmt.Errorf("explicit credentials conflict with legacy adapter credential")
+	}
+	credentials := route.Credentials
+	legacy := len(credentials) == 0 && auth.CredentialRef != ""
+	if legacy {
+		credentials = []CredentialInput{{ID: legacyCredentialID(route.ID), CredentialRef: auth.CredentialRef, Enabled: true}}
+	}
+	if len(credentials) == 0 {
+		return nil, fmt.Errorf("authenticated route requires an enabled credential")
+	}
+	seenRefs := map[string]bool{}
+	out := make([]CompiledCredential, 0, len(credentials))
+	enabled := false
+	for _, credential := range credentials {
+		if !safeSegment(credential.ID) {
+			return nil, fmt.Errorf("credential %q: invalid credential ID", credential.ID)
+		}
+		if !legacy && strings.HasPrefix(credential.ID, legacyCredentialIDPrefix) {
+			return nil, fmt.Errorf("credential %q: legacy credential ID namespace is reserved", credential.ID)
+		}
+		if !safeCredentialRef(credential.CredentialRef) {
+			return nil, fmt.Errorf("credential %q: invalid credential reference", credential.ID)
+		}
+		if seenRefs[credential.CredentialRef] {
+			return nil, fmt.Errorf("credential %q: duplicate credential reference", credential.ID)
+		}
+		seenRefs[credential.CredentialRef] = true
+		enabled = enabled || credential.Enabled
+		out = append(out, CompiledCredential{ID: credential.ID, CredentialRef: credential.CredentialRef, Priority: credential.Priority, Enabled: credential.Enabled})
+	}
+	if !enabled {
+		return nil, fmt.Errorf("authenticated route requires an enabled credential")
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Priority != out[j].Priority {
+			return out[i].Priority < out[j].Priority
+		}
+		return out[i].ID < out[j].ID
+	})
+	return out, nil
+}
+
+func validateModelReferences(models map[string]CompiledModel, auto []string) error {
+	seenAuto := map[string]bool{}
+	for _, id := range auto {
+		if id == "auto" || seenAuto[id] {
+			return fmt.Errorf("invalid or duplicate auto model ID %q", id)
+		}
+		if _, ok := models[id]; !ok {
+			return fmt.Errorf("unknown auto model %q", id)
+		}
+		seenAuto[id] = true
+	}
+	state := map[string]uint8{}
+	for id, model := range models {
+		seen := map[string]bool{}
+		for _, fallback := range model.FallbackModelIDs {
+			if fallback == "auto" || seen[fallback] {
+				return fmt.Errorf("model %q has invalid or duplicate fallback model %q", id, fallback)
+			}
+			if _, ok := models[fallback]; !ok {
+				return fmt.Errorf("model %q references unknown fallback model %q", id, fallback)
+			}
+			seen[fallback] = true
+		}
+	}
+	var visit func(string) error
+	visit = func(id string) error {
+		if state[id] == 1 {
+			return fmt.Errorf("fallback model cycle at %q", id)
+		}
+		if state[id] == 2 {
+			return nil
+		}
+		state[id] = 1
+		for _, fallback := range models[id].FallbackModelIDs {
+			if err := visit(fallback); err != nil {
+				return err
+			}
+		}
+		state[id] = 2
+		return nil
+	}
+	for id := range models {
+		if err := visit(id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func legacyCredentialID(routeID string) string {
+	sum := sha256.Sum256([]byte(routeID))
+	return legacyCredentialIDPrefix + hex.EncodeToString(sum[:])
+}
+
+func safeSegment(v string) bool {
+	if v == "" || v == "." || v == ".." {
+		return false
+	}
+	for _, r := range v {
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' || r == '.') {
+			return false
+		}
+	}
+	return true
+}
+func safeCredentialRef(v string) bool {
+	u, err := url.ParseRequestURI(v)
+	if err != nil || u.Scheme == "" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || strings.ContainsAny(v, "\r\n") {
+		return false
+	}
+	segments := strings.Split(strings.Trim(u.EscapedPath(), "/"), "/")
+	if len(segments) == 0 || segments[0] == "" {
+		return false
+	}
+	for _, segment := range segments {
+		if !safeSegment(segment) {
+			return false
+		}
+	}
+	return true
 }
 
 func retriesDisabled(raw RetryPolicy) bool {
@@ -693,6 +874,22 @@ func compatible(m CompiledModel, a CompiledAdapter) error {
 	}
 	return nil
 }
+func validateRouteCredentials(routes []CompiledRoute) error {
+	ids := map[string]bool{}
+	for _, route := range routes {
+		if route.RouteGroup != "" && !safeSegment(route.RouteGroup) {
+			return fmt.Errorf("route %q has invalid route group %q", route.ID, route.RouteGroup)
+		}
+		for _, credential := range route.Credentials {
+			if ids[credential.ID] {
+				return fmt.Errorf("duplicate credential ID %q", credential.ID)
+			}
+			ids[credential.ID] = true
+		}
+	}
+	return nil
+}
+
 func validateFallbacks(routes []CompiledRoute) error {
 	byID := make(map[string]CompiledRoute, len(routes))
 	for _, r := range routes {
@@ -730,8 +927,8 @@ func validateFallbacks(routes []CompiledRoute) error {
 			if !ok {
 				return fmt.Errorf("route %q references unknown fallback %q", r.ID, next)
 			}
-			if nr.ModelID != r.ModelID {
-				return fmt.Errorf("route %q fallback %q targets another model", r.ID, next)
+			if nr.ModelID != r.ModelID || nr.RouteGroup != r.RouteGroup {
+				return fmt.Errorf("route %q fallback %q targets another model or route group", r.ID, next)
 			}
 			if state[next] == 1 {
 				return fmt.Errorf("fallback cycle at route %q", next)
@@ -782,9 +979,11 @@ func rank(e ThinkingEffort) int {
 // CloneCompiledConfig deep-copies every mutable member of c for Store use.
 func CloneCompiledConfig(c CompiledConfig) CompiledConfig {
 	out := c
+	out.AutoModelIDs = append([]string(nil), c.AutoModelIDs...)
 	out.Models = make(map[string]CompiledModel, len(c.Models))
 	for k, v := range c.Models {
 		v.Capabilities = append([]Capability(nil), v.Capabilities...)
+		v.FallbackModelIDs = append([]string(nil), v.FallbackModelIDs...)
 		out.Models[k] = v
 	}
 	out.Providers = make(map[string]CompiledProvider, len(c.Providers))
@@ -804,6 +1003,7 @@ func CloneCompiledConfig(c CompiledConfig) CompiledConfig {
 	out.Routes = append([]CompiledRoute(nil), c.Routes...)
 	for i := range out.Routes {
 		out.Routes[i].FallbackRouteIDs = append([]string(nil), out.Routes[i].FallbackRouteIDs...)
+		out.Routes[i].Credentials = append([]CompiledCredential(nil), out.Routes[i].Credentials...)
 		out.Routes[i].Retry.Rules = cloneRetryRules(out.Routes[i].Retry.Rules)
 	}
 	return out

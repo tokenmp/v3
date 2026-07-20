@@ -377,8 +377,17 @@ func TestFixturesCompileKeyFields(t *testing.T) {
 			if _, ok := compiled.Models[route.ModelID]; !ok {
 				t.Errorf("route model %q is absent from compiled models", route.ModelID)
 			}
-			if _, ok := compiled.Providers[route.ProviderID]; !ok {
+			provider, ok := compiled.Providers[route.ProviderID]
+			if !ok {
 				t.Errorf("route provider %q is absent from compiled providers", route.ProviderID)
+			} else if provider.Selector == "" {
+				t.Errorf("route provider %q has empty selector", route.ProviderID)
+			}
+			if len(raw.Routes[0].Credentials) != 0 && len(route.Credentials) != len(raw.Routes[0].Credentials) {
+				t.Errorf("explicit route credentials were not preserved: %#v", route.Credentials)
+			}
+			if len(raw.Routes[0].Credentials) == 0 && (len(route.Credentials) != 1 || route.Credentials[0].CredentialRef != raw.Adapters[route.AdapterID].Auth.CredentialRef) {
+				t.Errorf("legacy adapter credential was not bridged: %#v", route.Credentials)
 			}
 			if _, ok := compiled.Adapters[route.AdapterID]; !ok {
 				t.Errorf("route adapter %q is absent from compiled adapters", route.AdapterID)
