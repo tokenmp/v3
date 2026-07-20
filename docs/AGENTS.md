@@ -39,8 +39,8 @@
 - Auth Service Foundation 决策：`adr/0004-auth-service-foundation.md`
 - Auth Identity Flows 决策：`adr/0005-auth-identity-flows.md`
 - API Contracts Package 决策：`adr/0006-api-contracts-package.md`
-- Executor 架构设计基线（设计已确认；Foundation、Config compiler/immutable snapshot 与 routing selector/resolver/Plan/quarantine 已实施；执行 adapter engine、attempt budget、SDK 与 stream 等后续能力未实施）：`executor/architecture.md`
-- Executor 测试策略（Foundation、Config compiler/snapshot、routing selector/resolver/Plan/quarantine 与 `FuzzCompile`/`FuzzParseSelector` smoke 已实施；其他 fuzz target、持续 fuzz 及后续阶段测试未实施）：`executor/testing-strategy.md`
+- Executor 架构设计基线（设计已确认；Foundation、Config compiler/immutable snapshot、routing 与纯 Go Adapter Engine 已实施；credential resolver/secret injector、SDK/provider、RetryDecider/attempt budget、pipeline/runtime 业务路由与 stream 等仍未实施）：`executor/architecture.md`
+- Executor 测试策略（Foundation、Config compiler/snapshot、routing 与 Adapter Engine 的 strict JSON/DSL/thinking/response mapping、atomic/mutation/race/fuzz 覆盖已实施；持续 fuzz、SDK/pipeline 等后续阶段测试未实施）：`executor/testing-strategy.md`
 - UI 设计规范：`ui/design-system.md`
 
 新增、替代或删除文档时同步维护本索引或相应主题索引。

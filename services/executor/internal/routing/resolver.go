@@ -51,10 +51,9 @@ type QuarantineReader interface {
 	GetQuarantine(context.Context, QuarantineTarget) (Quarantine, error)
 }
 
-// Credential is a non-secret credential reference.
+// Credential identifies a credential without exposing its reference.
 type Credential struct {
 	ID       string
-	Ref      string
 	Priority int
 }
 
@@ -84,6 +83,12 @@ func (c Candidate) target() QuarantineTarget {
 	return QuarantineTarget{ModelID: c.ModelID, ProviderID: c.Provider.ID, RouteID: c.RouteID, CredentialID: c.Credential.ID}
 }
 
+// candidateState retains the private retry universe. It deliberately contains
+// only a safe Candidate: credential resolution belongs to a future port.
+type candidateState struct {
+	candidate Candidate
+}
+
 // Plan is a revision-pinned, deterministically ordered candidate list. Its
 // retry metadata is private so callers cannot broaden the selected snapshot.
 type Plan struct {
@@ -95,33 +100,33 @@ type Plan struct {
 	autoModelIDs       []string
 	fallbackModels     map[string][]string
 	fallbackRoutes     map[string][]string
-	fallbackCandidates []Candidate
+	fallbackCandidates []candidateState
 }
 
 // Next returns the next allowed candidate for action. current identifies the
 // attempted target; visited excludes prior targets for advancing actions.
 // RetrySameCredential intentionally permits current even when it is visited.
 func (p Plan) Next(action adapter.RetryAction, current QuarantineTarget, visited map[QuarantineTarget]struct{}) (Candidate, bool) {
-	findCurrent := func() (Candidate, bool) {
-		for _, candidate := range p.fallbackCandidates {
-			if candidate.target() == current {
-				return candidate, true
+	findCurrent := func() (candidateState, bool) {
+		for _, state := range p.fallbackCandidates {
+			if state.candidate.target() == current {
+				return state, true
 			}
 		}
-		return Candidate{}, false
+		return candidateState{}, false
 	}
 	currentCandidate, found := findCurrent()
 	if !found {
 		return Candidate{}, false
 	}
-	usable := func(candidate Candidate) bool {
-		_, seen := visited[candidate.target()]
+	usable := func(state candidateState) bool {
+		_, seen := visited[state.candidate.target()]
 		return !seen
 	}
 	first := func(match func(Candidate) bool) (Candidate, bool) {
-		for _, candidate := range p.fallbackCandidates {
-			if match(candidate) && usable(candidate) {
-				return candidate, true
+		for _, state := range p.fallbackCandidates {
+			if match(state.candidate) && usable(state) {
+				return state.candidate, true
 			}
 		}
 		return Candidate{}, false
@@ -129,31 +134,31 @@ func (p Plan) Next(action adapter.RetryAction, current QuarantineTarget, visited
 
 	switch action {
 	case adapter.RetrySameCredential:
-		return currentCandidate, true
+		return currentCandidate.candidate, true
 	case adapter.RetryNextCredential:
 		return first(func(candidate Candidate) bool {
-			return candidate.ModelID == currentCandidate.ModelID && candidate.Provider.ID == currentCandidate.Provider.ID && candidate.RouteID == currentCandidate.RouteID && candidate.Credential.ID != currentCandidate.Credential.ID
+			return candidate.ModelID == currentCandidate.candidate.ModelID && candidate.Provider.ID == currentCandidate.candidate.Provider.ID && candidate.RouteID == currentCandidate.candidate.RouteID && candidate.Credential.ID != currentCandidate.candidate.Credential.ID
 		})
 	case adapter.RetryNextRoute:
-		for _, routeID := range p.fallbackRoutes[currentCandidate.RouteID] {
+		for _, routeID := range p.fallbackRoutes[currentCandidate.candidate.RouteID] {
 			if candidate, ok := first(func(candidate Candidate) bool {
-				return candidate.ModelID == currentCandidate.ModelID && candidate.Group == currentCandidate.Group && candidate.RouteID == routeID
+				return candidate.ModelID == currentCandidate.candidate.ModelID && candidate.Group == currentCandidate.candidate.Group && candidate.RouteID == routeID
 			}); ok {
 				return candidate, true
 			}
 		}
 		return first(func(candidate Candidate) bool {
-			return candidate.ModelID == currentCandidate.ModelID && candidate.Group == currentCandidate.Group && candidate.RouteID != currentCandidate.RouteID
+			return candidate.ModelID == currentCandidate.candidate.ModelID && candidate.Group == currentCandidate.candidate.Group && candidate.RouteID != currentCandidate.candidate.RouteID
 		})
 	case adapter.RetryNextProvider:
 		return first(func(candidate Candidate) bool {
-			return candidate.ModelID == currentCandidate.ModelID && candidate.Group == currentCandidate.Group && candidate.Provider.ID != currentCandidate.Provider.ID
+			return candidate.ModelID == currentCandidate.candidate.ModelID && candidate.Group == currentCandidate.candidate.Group && candidate.Provider.ID != currentCandidate.candidate.Provider.ID
 		})
 	case adapter.RetryNextModel:
-		modelIDs := p.fallbackModels[currentCandidate.ModelID]
+		modelIDs := p.fallbackModels[currentCandidate.candidate.ModelID]
 		if p.auto {
 			for index, modelID := range p.autoModelIDs {
-				if modelID == currentCandidate.ModelID {
+				if modelID == currentCandidate.candidate.ModelID {
 					modelIDs = p.autoModelIDs[index+1:]
 					break
 				}
@@ -161,7 +166,7 @@ func (p Plan) Next(action adapter.RetryAction, current QuarantineTarget, visited
 		}
 		for _, modelID := range modelIDs {
 			if candidate, ok := first(func(candidate Candidate) bool {
-				return candidate.ModelID == modelID && candidate.Group == currentCandidate.Group
+				return candidate.ModelID == modelID && candidate.Group == currentCandidate.candidate.Group
 			}); ok {
 				return candidate, true
 			}
@@ -238,8 +243,10 @@ func (r *Resolver) Resolve(ctx context.Context, selector Selector) (Plan, error)
 			if !credential.Enabled {
 				continue
 			}
-			candidate := Candidate{ModelID: route.ModelID, Provider: Provider{ID: provider.ID, Selector: provider.Selector}, RouteID: route.ID, Group: route.RouteGroup, Credential: Credential{ID: credential.ID, Ref: credential.CredentialRef, Priority: credential.Priority}, AdapterID: route.AdapterID, Upstream: route.UpstreamModel, Protocol: route.Protocol, Priority: route.Priority, Revision: r.revision, Generation: r.generation}
-			excluded, err := r.quarantined(ctx, candidate)
+			state := candidateState{
+				candidate: Candidate{ModelID: route.ModelID, Provider: Provider{ID: provider.ID, Selector: provider.Selector}, RouteID: route.ID, Group: route.RouteGroup, Credential: Credential{ID: credential.ID, Priority: credential.Priority}, AdapterID: route.AdapterID, Upstream: route.UpstreamModel, Protocol: route.Protocol, Priority: route.Priority, Revision: r.revision, Generation: r.generation},
+			}
+			excluded, err := r.quarantined(ctx, state.candidate)
 			if err != nil {
 				return Plan{}, err
 			}
@@ -249,9 +256,9 @@ func (r *Resolver) Resolve(ctx context.Context, selector Selector) (Plan, error)
 			if !candidateModels[route.ModelID] {
 				continue
 			}
-			plan.fallbackCandidates = append(plan.fallbackCandidates, candidate)
+			plan.fallbackCandidates = append(plan.fallbackCandidates, state)
 			if (selector.Auto && autoEligible) || (!selector.Auto && (selector.Model == "" || route.ModelID == selector.Model)) {
-				plan.Candidates = append(plan.Candidates, candidate)
+				plan.Candidates = append(plan.Candidates, state.candidate)
 			}
 		}
 	}
@@ -260,7 +267,7 @@ func (r *Resolver) Resolve(ctx context.Context, selector Selector) (Plan, error)
 			return autoRank[plan.Candidates[i].ModelID] < autoRank[plan.Candidates[j].ModelID]
 		})
 		sort.SliceStable(plan.fallbackCandidates, func(i, j int) bool {
-			return autoRank[plan.fallbackCandidates[i].ModelID] < autoRank[plan.fallbackCandidates[j].ModelID]
+			return autoRank[plan.fallbackCandidates[i].candidate.ModelID] < autoRank[plan.fallbackCandidates[j].candidate.ModelID]
 		})
 	}
 	if len(plan.Candidates) == 0 {

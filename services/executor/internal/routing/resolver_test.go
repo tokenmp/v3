@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -105,6 +107,29 @@ func routeIDs(plan Plan) []string {
 	return result
 }
 
+func TestPlanAndCandidateFormattingExcludeVaultLocator(t *testing.T) {
+	credentialType := reflect.TypeFor[Credential]()
+	if credentialType.NumField() != 2 || credentialType.Field(0).Name != "ID" || credentialType.Field(1).Name != "Priority" {
+		t.Fatalf("public Credential fields = %v, want only ID and Priority", credentialType)
+	}
+
+	plan, err := resolver(t, testSnapshot(t, "credential-shape", 1), nil).Resolve(context.Background(), Selector{Model: "a"})
+	if err != nil {
+		t.Fatalf("Resolve() error = %v", err)
+	}
+	if strings.Contains(fmt.Sprintf("%+v", plan), "vault://") {
+		t.Fatalf("Plan formatting exposed a vault locator: %+v", plan)
+	}
+	for _, candidate := range plan.Candidates {
+		if candidate.Credential.ID == "" {
+			t.Fatal("authenticated candidate omitted credential ID")
+		}
+		if strings.Contains(fmt.Sprintf("%+v", candidate), "vault://") {
+			t.Fatalf("Candidate formatting exposed a vault locator: %+v", candidate)
+		}
+	}
+}
+
 func TestResolveSelectorsOrderAndSafeCandidates(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -131,11 +156,8 @@ func TestResolveSelectorsOrderAndSafeCandidates(t *testing.T) {
 					t.Errorf("routeIDs()[%d] = %q, want %q", i, got[i], test.want[i])
 				}
 				candidate := plan.Candidates[i]
-				if candidate.Revision != "rev-1" || candidate.Generation != 7 || candidate.Provider.Selector == "" || candidate.Credential.Ref == "" {
+				if candidate.Revision != "rev-1" || candidate.Generation != 7 || candidate.Provider.Selector == "" || candidate.Credential.ID == "" {
 					t.Errorf("candidate pin/safe fields = %+v", candidate)
-				}
-				if candidate.Credential.Ref == "vault-secret" {
-					t.Error("candidate exposed a secret")
 				}
 			}
 		})
@@ -146,17 +168,17 @@ func TestResolveAuthNoneCandidateAndQuarantineScopes(t *testing.T) {
 	t.Run("resolves an explicit no credential candidate", func(t *testing.T) {
 		plan, err := resolver(t, authNoneSnapshot(t), nil).Resolve(context.Background(), Selector{Model: "model"})
 		if err != nil || len(plan.Candidates) != 1 {
-			t.Fatalf("Resolve(AuthNone) = (%+v, %v), want one candidate", plan, err)
+			t.Fatalf("Resolve(AuthNone) candidate count = %d, error = %v; want one candidate", len(plan.Candidates), err)
 		}
 		candidate := plan.Candidates[0]
 		if candidate.Credential != (Credential{}) {
 			t.Fatalf("AuthNone credential = %+v, want explicit empty credential", candidate.Credential)
 		}
 		if same, ok := plan.Next(adapter.RetrySameCredential, candidate.target(), map[QuarantineTarget]struct{}{candidate.target(): {}}); !ok || same != candidate {
-			t.Fatalf("Next(same credential) = (%+v, %t), want current AuthNone candidate", same, ok)
+			t.Fatalf("Next(same credential) returned current candidate = %t, want true", ok && same == candidate)
 		}
-		if next, ok := plan.Next(adapter.RetryNextCredential, candidate.target(), nil); ok {
-			t.Fatalf("Next(next credential) = %+v, want no AuthNone credential", next)
+		if _, ok := plan.Next(adapter.RetryNextCredential, candidate.target(), nil); ok {
+			t.Fatal("Next(next credential) returned a candidate for AuthNone")
 		}
 	})
 
@@ -194,7 +216,7 @@ func TestResolveQuarantineEachDimensionAndFailures(t *testing.T) {
 		{CredentialID: "b-1"}: {Until: now}, // expired is usable
 	}}
 	if plan, err := resolver(t, testSnapshot(t, "rev", 1), reader).Resolve(context.Background(), Selector{Model: "b"}); err != nil || len(plan.Candidates) != 1 {
-		t.Fatalf("expired quarantine Resolve() = (%+v, %v)", plan, err)
+		t.Fatalf("expired quarantine Resolve() candidate count = %d, error = %v; want one candidate", len(plan.Candidates), err)
 	}
 	if _, err := resolver(t, testSnapshot(t, "rev", 1), reader).Resolve(context.Background(), Selector{Model: "a"}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("active dimension Resolve() error = %v, want ErrNotFound", err)
@@ -229,8 +251,8 @@ func TestNewResolverRejectsInvalidSnapshotAndPinsValue(t *testing.T) {
 	result := resolver(t, first, nil)
 	first.Value().Routes[0].Credentials[0].CredentialRef = "vault-secret"
 	plan, err := result.Resolve(context.Background(), Selector{Model: "a"})
-	if err != nil || plan.Revision != "first" || plan.Candidates[0].Credential.Ref == "vault-secret" {
-		t.Fatalf("pinned result = (%+v, %v)", plan, err)
+	if err != nil || plan.Revision != "first" || len(plan.Candidates) == 0 || plan.Candidates[0].Credential.ID != "p-1" {
+		t.Fatalf("pinned result revision = %q, candidate count = %d, error = %v", plan.Revision, len(plan.Candidates), err)
 	}
 }
 

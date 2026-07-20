@@ -1,14 +1,18 @@
 package adapter
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
+	"math"
 	"net/url"
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 const (
@@ -30,6 +34,16 @@ const (
 	HardMaxRetryBackoff          = time.Minute
 	maxJSONPointerLength         = 1024
 	maxJSONPointerDepth          = 32
+	maxRequestRules              = 256
+	maxResponseRules             = 256
+	maxResponseMatchers          = 64
+	maxResponseTokenBytes        = 128
+	maxResponseMessageContains   = 256
+	maxResponseMessageBytes      = 512
+	maxDSLLiteralBytes           = 64 << 10
+	maxEnumEntries               = 256
+	maxDSLJSONDepth              = 64
+	maxDSLJSONNodes              = 10000
 	maxFallbackNodes             = 10000
 )
 
@@ -560,13 +574,25 @@ func validateAdapter(a AdapterConfig) error {
 	if !a.Auth.Kind.Valid() {
 		return fmt.Errorf("invalid auth kind")
 	}
-	if a.Auth.Kind == AuthBearerHeader || a.Auth.Kind == AuthAPIKeyHeader {
-		if a.Auth.Header == "" {
-			return fmt.Errorf("header auth requires header")
+	switch a.Auth.Kind {
+	case AuthNone:
+		if a.Auth.Header != "" || a.Auth.Query != "" || a.Auth.Prefix != "" || a.Auth.CredentialRef != "" {
+			return fmt.Errorf("auth none has inapplicable fields")
 		}
-	}
-	if a.Auth.Kind == AuthAPIKeyQuery && a.Auth.Query == "" {
-		return fmt.Errorf("query auth requires query")
+	case AuthBearerHeader, AuthAPIKeyHeader:
+		if !rfcToken(a.Auth.Header) || compilerForbiddenName(a.Auth.Header) || authDeniedHeader(a.Auth.Header) {
+			return fmt.Errorf("invalid auth header")
+		}
+		if a.Auth.Query != "" || hasCTL(a.Auth.Prefix) {
+			return fmt.Errorf("auth has inapplicable or unsafe fields")
+		}
+	case AuthAPIKeyQuery:
+		if !safeSegment(a.Auth.Query) || compilerForbiddenName(a.Auth.Query) {
+			return fmt.Errorf("invalid auth query")
+		}
+		if a.Auth.Header != "" || a.Auth.Prefix != "" {
+			return fmt.Errorf("auth has inapplicable fields")
+		}
 	}
 	if err := capabilities(a.Capability.Require); err != nil {
 		return err
@@ -632,83 +658,152 @@ func thinkingPolicy(t ThinkingPolicy) error {
 			return fmt.Errorf("budget outside bounds")
 		}
 	}
+	// Runtime resolves a request effort through EffortMapping, then looks up
+	// its budget by that effective effort. A positive minimum cannot silently
+	// default to zero, so every effective effort must be explicitly mapped.
+	// With a zero minimum, an omitted mapping intentionally means budget zero.
+	if t.MinBudgetToken > 0 {
+		for _, effective := range t.EffortMapping {
+			if _, ok := t.BudgetMapping[effective]; !ok {
+				return fmt.Errorf("missing budget mapping for effective effort")
+			}
+		}
+	}
 	return nil
 }
 func requestPolicy(p RequestPolicy) error {
-	headers := headerSet(p.AllowedHeaders)
-	query := exactSet(p.AllowedQuery)
-	ids, writes := map[string]bool{}, map[string]string{}
+	if len(p.Rules) > maxRequestRules {
+		return fmt.Errorf("request rule limit exceeded")
+	}
+	headers, err := validatedHeaders(p.AllowedHeaders)
+	if err != nil {
+		return err
+	}
+	query, err := validatedQuery(p.AllowedQuery)
+	if err != nil {
+		return err
+	}
+	ids := map[string]bool{}
+	var reads, writes []string
 	for _, r := range p.Rules {
-		if r.ID == "" || ids[r.ID] || !r.Action.Valid() {
+		if !safeSegment(r.ID) || ids[r.ID] || !r.Action.Valid() {
 			return fmt.Errorf("invalid or duplicate request rule %q", r.ID)
 		}
 		if r.ValueRef != "" {
 			return fmt.Errorf("request rule %q uses unsupported value reference", r.ID)
 		}
 		ids[r.ID] = true
-		write := func(path string) error {
-			if err := validateJSONPointer(path); err != nil {
+		write := func(path string, allowAppend bool) error {
+			if err := validateWritablePath(path); err != nil {
 				return err
 			}
-			if protectedPath(path) {
-				return fmt.Errorf("protected request path %q", path)
+			if !allowAppend && pointerTerminal(path) == "-" {
+				return fmt.Errorf("invalid JSON pointer target")
 			}
-			if old, ok := writes[path]; ok {
-				return fmt.Errorf("request rules %q and %q write %q", old, r.ID, path)
+			for _, prior := range writes {
+				if pointerOverlaps(path, prior) {
+					return fmt.Errorf("request rule write conflict")
+				}
 			}
-			writes[path] = r.ID
+			for _, prior := range reads {
+				if pointerOverlaps(path, prior) {
+					return fmt.Errorf("request rule read/write conflict")
+				}
+			}
+			writes = append(writes, path)
+			return nil
+		}
+		read := func(path string) error {
+			if err := validateWritablePath(path); err != nil {
+				return err
+			}
+			if pointerTerminal(path) == "-" {
+				return fmt.Errorf("invalid JSON pointer source")
+			}
+			for _, prior := range writes {
+				if pointerOverlaps(path, prior) {
+					return fmt.Errorf("request rule read/write conflict")
+				}
+			}
+			reads = append(reads, path)
 			return nil
 		}
 		switch r.Action {
 		case RequestSetHeader:
-			name := strings.TrimSpace(r.Name)
-			if deniedHeader(name) || !headers[canonicalHeader(name)] {
-				return fmt.Errorf("header %q is not allowlisted", r.Name)
+			if r.Path != "" || r.From != "" || r.To != "" || len(r.EnumMap) != 0 || r.Min != nil || r.Max != nil {
+				return fmt.Errorf("header action has inapplicable fields")
+			}
+			if !rfcToken(r.Name) || compilerForbiddenName(r.Name) || deniedHeader(r.Name) || !headers[canonicalHeader(r.Name)] {
+				return fmt.Errorf("invalid or unallowlisted header")
+			}
+			if err := validateJSONStringLiteral(r.Value); err != nil {
+				return fmt.Errorf("invalid header value")
 			}
 		case RequestSetQuery:
-			if !query[r.Name] {
-				return fmt.Errorf("query %q is not allowlisted", r.Name)
+			if r.Path != "" || r.From != "" || r.To != "" || len(r.EnumMap) != 0 || r.Min != nil || r.Max != nil {
+				return fmt.Errorf("query action has inapplicable fields")
+			}
+			if !safeSegment(r.Name) || compilerForbiddenName(r.Name) || !query[r.Name] {
+				return fmt.Errorf("invalid or unallowlisted query")
+			}
+			if err := validateJSONStringLiteral(r.Value); err != nil {
+				return fmt.Errorf("invalid query value")
 			}
 		case RequestSet:
-			if !json.Valid(r.Value) {
-				return fmt.Errorf("set value is not JSON")
+			if r.From != "" || r.To != "" || r.Name != "" || len(r.EnumMap) != 0 || r.Min != nil || r.Max != nil {
+				return fmt.Errorf("set action has inapplicable fields")
 			}
-			if err := write(r.Path); err != nil {
+			if err := validateJSONLiteral(r.Value); err != nil {
+				return fmt.Errorf("invalid set value")
+			}
+			if err := write(r.Path, true); err != nil {
 				return err
 			}
 		case RequestCopy:
-			if err := validateWritablePath(r.From); err != nil {
-				return fmt.Errorf("copy source: %w", err)
+			if r.Path != "" || r.Name != "" || len(r.Value) != 0 || len(r.EnumMap) != 0 || r.Min != nil || r.Max != nil {
+				return fmt.Errorf("copy action has inapplicable fields")
 			}
-			if err := write(r.To); err != nil {
+			if err := read(r.From); err != nil {
+				return err
+			}
+			if err := write(r.To, true); err != nil {
 				return err
 			}
 		case RequestRename:
-			if err := validateWritablePath(r.From); err != nil {
-				return fmt.Errorf("rename source: %w", err)
+			if r.Path != "" || r.Name != "" || len(r.Value) != 0 || len(r.EnumMap) != 0 || r.Min != nil || r.Max != nil {
+				return fmt.Errorf("rename action has inapplicable fields")
 			}
-			if err := write(r.From); err != nil {
+			if err := validateWritablePath(r.From); err != nil {
 				return err
 			}
-			if err := write(r.To); err != nil {
+			if pointerTerminal(r.From) == "-" {
+				return fmt.Errorf("invalid JSON pointer source")
+			}
+			if err := write(r.From, false); err != nil {
+				return err
+			}
+			if err := write(r.To, true); err != nil {
 				return err
 			}
 		case RequestRemove:
-			if err := write(r.Path); err != nil {
+			if r.From != "" || r.To != "" || r.Name != "" || len(r.Value) != 0 || len(r.EnumMap) != 0 || r.Min != nil || r.Max != nil {
+				return fmt.Errorf("remove action has inapplicable fields")
+			}
+			if err := write(r.Path, false); err != nil {
 				return err
 			}
 		case RequestMapEnum:
-			if len(r.EnumMap) == 0 {
-				return fmt.Errorf("empty enum map")
+			if r.From != "" || r.To != "" || r.Name != "" || len(r.Value) != 0 || r.Min != nil || r.Max != nil || len(r.EnumMap) == 0 || len(r.EnumMap) > maxEnumEntries {
+				return fmt.Errorf("invalid enum map")
 			}
-			if err := write(r.Path); err != nil {
+			if err := write(r.Path, false); err != nil {
 				return err
 			}
 		case RequestClampNumber:
-			if r.Min == nil || r.Max == nil || *r.Min > *r.Max {
+			if r.From != "" || r.To != "" || r.Name != "" || len(r.Value) != 0 || len(r.EnumMap) != 0 || r.Min == nil || r.Max == nil || math.IsNaN(*r.Min) || math.IsNaN(*r.Max) || math.IsInf(*r.Min, 0) || math.IsInf(*r.Max, 0) || *r.Min > *r.Max {
 				return fmt.Errorf("invalid clamp")
 			}
-			if err := write(r.Path); err != nil {
+			if err := write(r.Path, false); err != nil {
 				return err
 			}
 		}
@@ -716,7 +811,7 @@ func requestPolicy(p RequestPolicy) error {
 	return nil
 }
 func validateJSONPointer(p string) error {
-	if len(p) == 0 || len(p) > maxJSONPointerLength || p[0] != '/' {
+	if len(p) == 0 || p == "/" || len(p) > maxJSONPointerLength || p[0] != '/' {
 		return fmt.Errorf("invalid JSON pointer")
 	}
 	parts := strings.Split(p[1:], "/")
@@ -724,13 +819,38 @@ func validateJSONPointer(p string) error {
 		return fmt.Errorf("JSON pointer too deep")
 	}
 	for _, part := range parts {
-		for i := 0; i < len(part); i++ {
-			if part[i] == '~' && (i+1 == len(part) || (part[i+1] != '0' && part[i+1] != '1')) {
-				return fmt.Errorf("invalid JSON pointer escape")
-			}
+		decoded, err := unescapeCompilerPointerToken(part)
+		if err != nil {
+			return err
+		}
+		if compilerForbiddenName(decoded) {
+			return fmt.Errorf("unsafe JSON pointer token")
 		}
 	}
 	return nil
+}
+func unescapeCompilerPointerToken(token string) (string, error) {
+	var out strings.Builder
+	out.Grow(len(token))
+	for i := 0; i < len(token); i++ {
+		if token[i] != '~' {
+			out.WriteByte(token[i])
+			continue
+		}
+		if i+1 == len(token) || (token[i+1] != '0' && token[i+1] != '1') {
+			return "", fmt.Errorf("invalid JSON pointer escape")
+		}
+		if token[i+1] == '0' {
+			out.WriteByte('~')
+		} else {
+			out.WriteByte('/')
+		}
+		i++
+	}
+	return out.String(), nil
+}
+func compilerForbiddenName(v string) bool {
+	return v == "__proto__" || v == "prototype" || v == "constructor"
 }
 func validateWritablePath(p string) error {
 	if err := validateJSONPointer(p); err != nil {
@@ -749,24 +869,144 @@ func protectedPath(p string) bool {
 	}
 	return false
 }
-func canonicalHeader(v string) string { return strings.ToLower(strings.TrimSpace(v)) }
-func headerSet(xs []string) map[string]bool {
-	out := map[string]bool{}
-	for _, x := range xs {
-		if x != "" {
-			out[canonicalHeader(x)] = true
-		}
-	}
-	return out
+func pointerTerminal(p string) string {
+	parts := strings.Split(p[1:], "/")
+	return parts[len(parts)-1]
 }
-func exactSet(xs []string) map[string]bool {
-	out := map[string]bool{}
-	for _, x := range xs {
-		if x != "" {
-			out[x] = true
+func pointerOverlaps(a, b string) bool {
+	return a == b || strings.HasPrefix(a, b+"/") || strings.HasPrefix(b, a+"/")
+}
+func canonicalHeader(v string) string { return strings.ToLower(v) }
+func rfcToken(v string) bool {
+	if v == "" {
+		return false
+	}
+	for _, r := range v {
+		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || strings.ContainsRune("!#$%&'*+-.^_`|~", r)) {
+			return false
 		}
 	}
-	return out
+	return true
+}
+func hasCTL(v string) bool {
+	for _, r := range v {
+		if r <= 0x1f || r == 0x7f {
+			return true
+		}
+	}
+	return false
+}
+func validatedHeaders(xs []string) (map[string]bool, error) {
+	out := map[string]bool{}
+	for _, x := range xs {
+		if !rfcToken(x) || compilerForbiddenName(x) || out[canonicalHeader(x)] {
+			return nil, fmt.Errorf("invalid allowed header")
+		}
+		out[canonicalHeader(x)] = true
+	}
+	return out, nil
+}
+func validatedQuery(xs []string) (map[string]bool, error) {
+	out := map[string]bool{}
+	for _, x := range xs {
+		if !safeSegment(x) || compilerForbiddenName(x) || out[x] {
+			return nil, fmt.Errorf("invalid allowed query")
+		}
+		out[x] = true
+	}
+	return out, nil
+}
+func authDeniedHeader(v string) bool {
+	n := canonicalHeader(v)
+	return n == "host" || n == "content-length" || strings.HasPrefix(n, "proxy-") || strings.HasPrefix(n, "forwarded") || n == "forwarded" || strings.HasPrefix(n, "x-forwarded-") || strings.HasPrefix(n, "x-sdk-")
+}
+func validateJSONLiteral(raw json.RawMessage) error {
+	if len(raw) == 0 || len(raw) > maxDSLLiteralBytes {
+		return fmt.Errorf("invalid JSON literal")
+	}
+	if !utf8.Valid(raw) {
+		return fmt.Errorf("invalid JSON literal")
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	nodes := 0
+	if err := scanJSONValue(dec, 0, &nodes); err != nil {
+		return err
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return fmt.Errorf("invalid JSON literal")
+	}
+	return nil
+}
+func validateJSONStringLiteral(raw json.RawMessage) error {
+	if err := validateJSONLiteral(raw); err != nil {
+		return err
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err != nil || hasCTL(s) {
+		return fmt.Errorf("invalid JSON string")
+	}
+	return nil
+}
+func scanJSONValue(dec *json.Decoder, depth int, nodes *int) error {
+	if depth > maxDSLJSONDepth {
+		return fmt.Errorf("JSON depth limit exceeded")
+	}
+	*nodes++
+	if *nodes > maxDSLJSONNodes {
+		return fmt.Errorf("JSON node limit exceeded")
+	}
+	tok, err := dec.Token()
+	if err != nil {
+		return err
+	}
+	switch d := tok.(type) {
+	case json.Delim:
+		switch d {
+		case '{':
+			seen := map[string]bool{}
+			for dec.More() {
+				key, err := dec.Token()
+				if err != nil {
+					return err
+				}
+				name, ok := key.(string)
+				if !ok || compilerForbiddenName(name) {
+					return fmt.Errorf("unsafe JSON object key")
+				}
+				if seen[name] {
+					return fmt.Errorf("duplicate JSON object key")
+				}
+				seen[name] = true
+				if err := scanJSONValue(dec, depth+1, nodes); err != nil {
+					return err
+				}
+			}
+			end, err := dec.Token()
+			if err != nil || end != json.Delim('}') {
+				return fmt.Errorf("invalid JSON object")
+			}
+		case '[':
+			for dec.More() {
+				if err := scanJSONValue(dec, depth+1, nodes); err != nil {
+					return err
+				}
+			}
+			end, err := dec.Token()
+			if err != nil || end != json.Delim(']') {
+				return fmt.Errorf("invalid JSON array")
+			}
+		default:
+			return fmt.Errorf("invalid JSON literal")
+		}
+	}
+	if number, ok := tok.(json.Number); ok {
+		value, err := number.Float64()
+		if err != nil || math.IsNaN(value) || math.IsInf(value, 0) {
+			return fmt.Errorf("invalid JSON number")
+		}
+	}
+	return nil
 }
 func deniedHeader(v string) bool {
 	n := canonicalHeader(v)
@@ -786,10 +1026,19 @@ func deniedHeader(v string) bool {
 }
 
 func responseRules(rs []ResponseRule) error {
+	if len(rs) > maxResponseRules {
+		return fmt.Errorf("response rule limit exceeded")
+	}
 	ids, conflicts := map[string]bool{}, map[string]bool{}
 	for _, r := range rs {
+		if err := validateResponseMatch(r.Match); err != nil {
+			return fmt.Errorf("invalid response matcher")
+		}
+		if err := validateResponseOutput(r.Output); err != nil {
+			return fmt.Errorf("invalid response output")
+		}
 		key := fmt.Sprintf("%d/%d/%s", r.Priority, responseSpecificity(r.Match), responseScope(r.Match))
-		if r.ID == "" || ids[r.ID] || conflicts[key] || r.Output.HTTPStatus < 100 || r.Output.HTTPStatus > 599 {
+		if !safeSegment(r.ID) || ids[r.ID] || conflicts[key] {
 			return fmt.Errorf("invalid/conflicting response rule %q", r.ID)
 		}
 		ids[r.ID] = true
@@ -797,11 +1046,67 @@ func responseRules(rs []ResponseRule) error {
 	}
 	return nil
 }
+
+func validateResponseMatch(m ResponseMatch) error {
+	if responseSpecificity(m) == 0 {
+		return fmt.Errorf("empty response matcher")
+	}
+	if err := validateResponseStatuses(m.HTTPStatuses); err != nil {
+		return err
+	}
+	for _, values := range [][]string{m.ErrorCodes, m.ErrorTypes, m.FinishReasons, m.StreamEventTypes} {
+		if err := validateResponseMatcherStrings(values, maxResponseTokenBytes); err != nil {
+			return err
+		}
+	}
+	return validateResponseMatcherStrings(m.MessageContains, maxResponseMessageContains)
+}
+
+func validateResponseStatuses(statuses []int) error {
+	if len(statuses) > maxResponseMatchers {
+		return fmt.Errorf("response matcher limit exceeded")
+	}
+	seen := make(map[int]bool, len(statuses))
+	for _, status := range statuses {
+		if status < 400 || status > 599 || seen[status] {
+			return fmt.Errorf("invalid response HTTP status matcher")
+		}
+		seen[status] = true
+	}
+	return nil
+}
+
+func validateResponseMatcherStrings(values []string, maxBytes int) error {
+	if len(values) > maxResponseMatchers {
+		return fmt.Errorf("response matcher limit exceeded")
+	}
+	seen := make(map[string]bool, len(values))
+	for _, value := range values {
+		if value == "" || len(value) > maxBytes || !utf8.ValidString(value) || hasCTL(value) || seen[value] {
+			return fmt.Errorf("invalid response string matcher")
+		}
+		seen[value] = true
+	}
+	return nil
+}
+
+func validateResponseOutput(output ResponseOutput) error {
+	if output.HTTPStatus < 400 || output.HTTPStatus > 599 ||
+		!responseToken(output.ErrorCode) || !responseToken(output.ErrorType) ||
+		output.Message == "" || len(output.Message) > maxResponseMessageBytes || !utf8.ValidString(output.Message) || hasCTL(output.Message) {
+		return fmt.Errorf("invalid response output")
+	}
+	return nil
+}
+
+func responseToken(value string) bool {
+	return len(value) <= maxResponseTokenBytes && rfcToken(value)
+}
 func validateRetryRules(rs []RetryRule) error {
 	ids, conflicts := map[string]bool{}, map[string]bool{}
 	for _, r := range rs {
 		key := fmt.Sprintf("%d/%d/%s", r.Priority, retrySpecificity(r), retryScope(r))
-		if r.ID == "" || ids[r.ID] || conflicts[key] || !r.Action.Valid() {
+		if !safeSegment(r.ID) || ids[r.ID] || conflicts[key] || !r.Action.Valid() {
 			return fmt.Errorf("invalid/conflicting retry rule %q", r.ID)
 		}
 		ids[r.ID] = true

@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"math"
 	"reflect"
 	"strings"
 	"testing"
@@ -94,9 +95,9 @@ func TestCompileThinkingAndFiniteRequestDSL(t *testing.T) {
 	mustFail(t, in, "missing mapping")
 	in = baseInput()
 	a = in.Adapters["a"]
-	a.Request = RequestPolicy{AllowedHeaders: []string{"X-Safe"}, Rules: []RequestRule{{ID: "h", Action: RequestSetHeader, Path: "/x", Name: "X-Unsafe"}}}
+	a.Request = RequestPolicy{AllowedHeaders: []string{"X-Safe"}, Rules: []RequestRule{{ID: "h", Action: RequestSetHeader, Name: "X-Unsafe", Value: []byte(`"x"`)}}}
 	in.Adapters["a"] = a
-	mustFail(t, in, "not allowlisted")
+	mustFail(t, in, "unallowlisted")
 	in = baseInput()
 	a = in.Adapters["a"]
 	a.Request = RequestPolicy{Rules: []RequestRule{{ID: "p", Action: RequestSet, Path: "/bad~2escape", Value: []byte(`true`)}}}
@@ -107,7 +108,7 @@ func TestCompileThinkingAndFiniteRequestDSL(t *testing.T) {
 func TestCompileSortsConflictsAndClones(t *testing.T) {
 	in := baseInput()
 	a := in.Adapters["a"]
-	a.Response.Rules = []ResponseRule{{ID: "late", Priority: 20, Output: ResponseOutput{HTTPStatus: 500}}, {ID: "early", Priority: 10, Output: ResponseOutput{HTTPStatus: 429}}}
+	a.Response.Rules = []ResponseRule{{ID: "late", Priority: 20, Match: ResponseMatch{HTTPStatuses: []int{500}}, Output: ResponseOutput{HTTPStatus: 500, ErrorCode: "UPSTREAM_ERROR", ErrorType: "upstream_error", Message: "upstream error"}}, {ID: "early", Priority: 10, Match: ResponseMatch{HTTPStatuses: []int{429}}, Output: ResponseOutput{HTTPStatus: 429, ErrorCode: "RATE_LIMITED", ErrorType: "rate_limited", Message: "rate limited"}}}
 	a.Retry.Rules = []RetryRule{{ID: "late", Priority: 20, Action: RetryNextRoute}, {ID: "early", Priority: 10, Action: RetryNextCredential}}
 	in.Adapters["a"] = a
 	got := mustCompile(t, in)
@@ -198,7 +199,11 @@ func TestCompileC03ToC12IdentityRulesAndDSLGuards(t *testing.T) {
 		for _, action := range []RequestAction{RequestRemove, RequestSet} {
 			in := baseInput()
 			a := in.Adapters["a"]
-			a.Request.Rules = []RequestRule{{ID: "x", Action: action, Path: "/model/child", Value: []byte(`"x"`)}}
+			rule := RequestRule{ID: "x", Action: action, Path: "/model/child"}
+			if action == RequestSet {
+				rule.Value = []byte(`"x"`)
+			}
+			a.Request.Rules = []RequestRule{rule}
 			in.Adapters["a"] = a
 			mustFail(t, in, "protected")
 		}
@@ -232,9 +237,9 @@ func TestCompileC03ToC12IdentityRulesAndDSLGuards(t *testing.T) {
 			in := baseInput()
 			a := in.Adapters["a"]
 			a.Request.AllowedHeaders = []string{name}
-			a.Request.Rules = []RequestRule{{ID: "x", Action: RequestSetHeader, Name: name}}
+			a.Request.Rules = []RequestRule{{ID: "x", Action: RequestSetHeader, Name: name, Value: []byte(`"x"`)}}
 			in.Adapters["a"] = a
-			mustFail(t, in, "allowlisted")
+			mustFail(t, in, "unallowlisted header")
 		}
 	})
 	t.Run("query remains case sensitive", func(t *testing.T) {
@@ -243,7 +248,7 @@ func TestCompileC03ToC12IdentityRulesAndDSLGuards(t *testing.T) {
 		a.Request.AllowedQuery = []string{"APIKey"}
 		a.Request.Rules = []RequestRule{{ID: "x", Action: RequestSetQuery, Name: "apikey"}}
 		in.Adapters["a"] = a
-		mustFail(t, in, "allowlisted")
+		mustFail(t, in, "unallowlisted query")
 	})
 	t.Run("RFC6901 and bounded pointers", func(t *testing.T) {
 		in := baseInput()
@@ -331,12 +336,12 @@ func TestCompileC23ToC27FallbackDeterminismAndNoAliases(t *testing.T) {
 	t.Run("response deterministic sort and true collision", func(t *testing.T) {
 		in := baseInput()
 		a := in.Adapters["a"]
-		a.Response.Rules = []ResponseRule{{ID: "b", Priority: 1, Match: ResponseMatch{HTTPStatuses: []int{500}}, Output: ResponseOutput{HTTPStatus: 500}}, {ID: "a", Priority: 1, Match: ResponseMatch{ErrorCodes: []string{"x"}}, Output: ResponseOutput{HTTPStatus: 500}}}
+		a.Response.Rules = []ResponseRule{{ID: "b", Priority: 1, Match: ResponseMatch{HTTPStatuses: []int{500}}, Output: ResponseOutput{HTTPStatus: 500, ErrorCode: "UPSTREAM_ERROR", ErrorType: "upstream_error", Message: "upstream error"}}, {ID: "a", Priority: 1, Match: ResponseMatch{ErrorCodes: []string{"x"}}, Output: ResponseOutput{HTTPStatus: 500, ErrorCode: "UPSTREAM_ERROR", ErrorType: "upstream_error", Message: "upstream error"}}}
 		in.Adapters["a"] = a
 		if got := mustCompile(t, in).Adapters["a"].ResponseRules; got[0].ID != "a" {
 			t.Fatalf("sort=%#v", got)
 		}
-		a.Response.Rules = append(a.Response.Rules, ResponseRule{ID: "c", Priority: 1, Match: ResponseMatch{ErrorCodes: []string{"x"}}, Output: ResponseOutput{HTTPStatus: 500}})
+		a.Response.Rules = append(a.Response.Rules, ResponseRule{ID: "c", Priority: 1, Match: ResponseMatch{ErrorCodes: []string{"x"}}, Output: ResponseOutput{HTTPStatus: 500, ErrorCode: "UPSTREAM_ERROR", ErrorType: "upstream_error", Message: "upstream error"}})
 		in.Adapters["a"] = a
 		mustFail(t, in, "conflicting")
 	})
@@ -351,7 +356,6 @@ func TestCompileC23ToC27FallbackDeterminismAndNoAliases(t *testing.T) {
 }
 
 func TestCompileC24NestedAliasesAreFullyDetached(t *testing.T) {
-	min, max := 0.1, 0.9
 	in := baseInput()
 	model := in.Models["m"]
 	model.Capabilities = []Capability{CapabilityChat, CapabilityTools}
@@ -362,8 +366,8 @@ func TestCompileC24NestedAliasesAreFullyDetached(t *testing.T) {
 	a := in.Adapters["a"]
 	a.Capability = CapabilityPolicy{Require: []Capability{CapabilityChat}, Deny: []Capability{CapabilityImages}}
 	a.Thinking = ThinkingPolicy{EffortMapping: map[ThinkingEffort]ThinkingEffort{ThinkingLow: ThinkingMinimal}, BudgetMapping: map[ThinkingEffort]int{ThinkingLow: 7}}
-	a.Request = RequestPolicy{AllowedHeaders: []string{"X-Safe"}, AllowedQuery: []string{"mode"}, Rules: []RequestRule{{ID: "set", Action: RequestSet, Path: "/temperature", Value: []byte("1"), EnumMap: map[string]string{"warm": "hot"}, Min: &min, Max: &max}}}
-	a.Response.Rules = []ResponseRule{{ID: "response", Priority: 1, Match: ResponseMatch{HTTPStatuses: []int{503}, ErrorCodes: []string{"busy"}, ErrorTypes: []string{"temporary"}, MessageContains: []string{"retry"}, FinishReasons: []string{"length"}, StreamEventTypes: []string{"error"}}, Output: ResponseOutput{HTTPStatus: 503}}}
+	a.Request = RequestPolicy{AllowedHeaders: []string{"X-Safe"}, AllowedQuery: []string{"mode"}, Rules: []RequestRule{{ID: "set", Action: RequestSet, Path: "/temperature", Value: []byte("1")}}}
+	a.Response.Rules = []ResponseRule{{ID: "response", Priority: 1, Match: ResponseMatch{HTTPStatuses: []int{503}, ErrorCodes: []string{"busy"}, ErrorTypes: []string{"temporary"}, MessageContains: []string{"retry"}, FinishReasons: []string{"length"}, StreamEventTypes: []string{"error"}}, Output: ResponseOutput{HTTPStatus: 503, ErrorCode: "UPSTREAM_ERROR", ErrorType: "upstream_error", Message: "upstream error"}}}
 	a.Retry.Rules = []RetryRule{{ID: "adapter", Priority: 1, HTTPStatuses: []int{429}, ErrorCodes: []string{"rate"}, ErrorTypes: []string{"limited"}, Action: RetryNextCredential}}
 	in.Adapters["a"] = a
 	in.Routes[0].FallbackRouteIDs = []string{"r2"}
@@ -379,9 +383,6 @@ func TestCompileC24NestedAliasesAreFullyDetached(t *testing.T) {
 	a.Request.AllowedHeaders[0] = "X-Mutated"
 	a.Request.AllowedQuery[0] = "mutated"
 	a.Request.Rules[0].Value[0] = '9'
-	a.Request.Rules[0].EnumMap["warm"] = "cold"
-	*a.Request.Rules[0].Min = 0.2
-	*a.Request.Rules[0].Max = 0.8
 	a.Response.Rules[0].Match.HTTPStatuses[0] = 418
 	a.Response.Rules[0].Match.ErrorCodes[0] = "mutated"
 	a.Response.Rules[0].Match.ErrorTypes[0] = "mutated"
@@ -396,14 +397,14 @@ func TestCompileC24NestedAliasesAreFullyDetached(t *testing.T) {
 	in.Routes[1].Retry.Rules[0].HTTPStatuses[0] = 418
 
 	got := compiled.Adapters["a"]
-	if compiled.Models["m"].Capabilities[0] != CapabilityChat || compiled.Providers["p"].Retry.Rules[0].HTTPStatuses[0] != 503 || got.Capability.Require[0] != CapabilityChat || got.Thinking.EffortMapping[ThinkingLow] != ThinkingMinimal || got.Thinking.BudgetMapping[ThinkingLow] != 7 || got.Request.AllowedHeaders[0] != "X-Safe" || got.Request.AllowedQuery[0] != "mode" || string(got.Request.Rules[0].Value) != "1" || got.Request.Rules[0].EnumMap["warm"] != "hot" || *got.Request.Rules[0].Min != 0.1 || *got.Request.Rules[0].Max != 0.9 || got.ResponseRules[0].Match.HTTPStatuses[0] != 503 || got.ResponseRules[0].Match.ErrorCodes[0] != "busy" || got.ResponseRules[0].Match.ErrorTypes[0] != "temporary" || got.ResponseRules[0].Match.MessageContains[0] != "retry" || got.ResponseRules[0].Match.FinishReasons[0] != "length" || got.ResponseRules[0].Match.StreamEventTypes[0] != "error" || got.Retry.Rules[0].HTTPStatuses[0] != 429 || compiled.Routes[0].FallbackRouteIDs[0] != "r2" || compiled.Routes[1].Retry.Rules[0].HTTPStatuses[0] != 500 {
+	if compiled.Models["m"].Capabilities[0] != CapabilityChat || compiled.Providers["p"].Retry.Rules[0].HTTPStatuses[0] != 503 || got.Capability.Require[0] != CapabilityChat || got.Thinking.EffortMapping[ThinkingLow] != ThinkingMinimal || got.Thinking.BudgetMapping[ThinkingLow] != 7 || got.Request.AllowedHeaders[0] != "X-Safe" || got.Request.AllowedQuery[0] != "mode" || string(got.Request.Rules[0].Value) != "1" || got.ResponseRules[0].Match.HTTPStatuses[0] != 503 || got.ResponseRules[0].Match.ErrorCodes[0] != "busy" || got.ResponseRules[0].Match.ErrorTypes[0] != "temporary" || got.ResponseRules[0].Match.MessageContains[0] != "retry" || got.ResponseRules[0].Match.FinishReasons[0] != "length" || got.ResponseRules[0].Match.StreamEventTypes[0] != "error" || got.Retry.Rules[0].HTTPStatuses[0] != 429 || compiled.Routes[0].FallbackRouteIDs[0] != "r2" || compiled.Routes[1].Retry.Rules[0].HTTPStatuses[0] != 500 {
 		t.Fatalf("raw mutation leaked into compiled config: %#v", compiled)
 	}
 
 	clone := CloneCompiledConfig(compiled)
-	clone.Adapters["a"].Request.Rules[0].EnumMap["warm"] = "clone-mutation"
+	clone.Adapters["a"].Request.Rules[0].Value[0] = '9'
 	clone.Routes[0].FallbackRouteIDs[0] = "clone-mutation"
-	if compiled.Adapters["a"].Request.Rules[0].EnumMap["warm"] != "hot" || compiled.Routes[0].FallbackRouteIDs[0] != "r2" {
+	if string(compiled.Adapters["a"].Request.Rules[0].Value) != "1" || compiled.Routes[0].FallbackRouteIDs[0] != "r2" {
 		t.Fatal("CloneCompiledConfig retained a nested alias")
 	}
 }
@@ -625,4 +626,301 @@ func TestCompileRejectsExplicitLegacyCredentialNamespace(t *testing.T) {
 	in.Adapters["a"] = a
 	in.Routes[0].Credentials = []CredentialInput{{ID: legacyCredentialIDPrefix + strings.Repeat("0", sha256.Size*2), CredentialRef: "vault://provider/explicit", Enabled: true}}
 	mustFail(t, in, "legacy credential ID namespace is reserved")
+}
+
+// DSL01–DSL12 pin the compiler boundary for the finite request DSL.
+func TestDSL01ToDSL12SecurityMatrix(t *testing.T) {
+	compileRule := func(t *testing.T, r RequestRule, headers, query []string) error {
+		t.Helper()
+		in := baseInput()
+		a := in.Adapters["a"]
+		a.Request = RequestPolicy{AllowedHeaders: headers, AllowedQuery: query, Rules: []RequestRule{r}}
+		in.Adapters["a"] = a
+		_, err := Compile(in)
+		return err
+	}
+	mustReject := func(t *testing.T, r RequestRule) {
+		t.Helper()
+		if err := compileRule(t, r, nil, nil); err == nil {
+			t.Fatal("Compile succeeded")
+		}
+	}
+	t.Run("DSL01 root pointer rejected", func(t *testing.T) {
+		for _, r := range []RequestRule{{ID: "set", Action: RequestSet, Path: "/", Value: []byte("null")}, {ID: "copy", Action: RequestCopy, From: "/", To: "/x"}, {ID: "rename", Action: RequestRename, From: "/x", To: "/"}} {
+			mustReject(t, r)
+		}
+	})
+	t.Run("DSL02 overlapping reads and writes rejected", func(t *testing.T) {
+		in := baseInput()
+		a := in.Adapters["a"]
+		a.Request.Rules = []RequestRule{{ID: "copy", Action: RequestCopy, From: "/a", To: "/b"}, {ID: "set", Action: RequestSet, Path: "/a/x", Value: []byte("1")}}
+		in.Adapters["a"] = a
+		mustFail(t, in, "read/write conflict")
+	})
+	t.Run("DSL03 rule and enum bounds", func(t *testing.T) {
+		in := baseInput()
+		a := in.Adapters["a"]
+		a.Request.Rules = make([]RequestRule, maxRequestRules+1)
+		for i := range a.Request.Rules {
+			a.Request.Rules[i] = RequestRule{ID: string(rune('a'+i%26)) + string(rune(i/26+'a')), Action: RequestRemove, Path: "/x"}
+		}
+		in.Adapters["a"] = a
+		mustFail(t, in, "limit")
+		m := make(map[string]string, maxEnumEntries+1)
+		for i := 0; i <= maxEnumEntries; i++ {
+			m[string(rune(i))] = "x"
+		}
+		mustReject(t, RequestRule{ID: "map", Action: RequestMapEnum, Path: "/x", EnumMap: m})
+	})
+	t.Run("DSL04 literal size bounded", func(t *testing.T) {
+		mustReject(t, RequestRule{ID: "set", Action: RequestSet, Path: "/x", Value: []byte(`"` + strings.Repeat("x", maxDSLLiteralBytes) + `"`)})
+	})
+	t.Run("DSL05 strict JSON rejects duplicate and prototype keys", func(t *testing.T) {
+		mustReject(t, RequestRule{ID: "set", Action: RequestSet, Path: "/x", Value: []byte(`{"a":{"b":1,"b":2}}`)})
+		mustReject(t, RequestRule{ID: "set", Action: RequestSet, Path: "/x", Value: []byte(`{"a":{"__proto__":1}}`)})
+		for _, path := range []string{"/__proto__", "/prototype", "/constructor"} {
+			mustReject(t, RequestRule{ID: "set", Action: RequestSet, Path: path, Value: []byte(`1`)})
+		}
+	})
+	t.Run("DSL06 JSON UTF-8 and numbers match runtime", func(t *testing.T) {
+		for _, literal := range [][]byte{[]byte{'"', 0xff, '"'}, []byte(`1e999`)} {
+			mustReject(t, RequestRule{ID: "set", Action: RequestSet, Path: "/x", Value: literal})
+		}
+		// Float64 accepts this integer (though it cannot preserve its exact
+		// precision); the runtime preserves its json.Number lexeme for set.
+		if err := compileRule(t, RequestRule{ID: "set", Action: RequestSet, Path: "/x", Value: []byte(`9007199254740993`)}, nil, nil); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("DSL07 literal errors do not echo literal", func(t *testing.T) {
+		const secretLiteral = `"do-not-echo-literal" trailing`
+		err := compileRule(t, RequestRule{ID: "set", Action: RequestSet, Path: "/x", Value: []byte(secretLiteral)}, nil, nil)
+		if err == nil {
+			t.Fatal("Compile succeeded")
+		}
+		if strings.Contains(err.Error(), secretLiteral) || strings.Contains(err.Error(), "do-not-echo-literal") {
+			t.Fatalf("error exposed literal: %q", err)
+		}
+	})
+	t.Run("DSL08 JSON depth and nodes bounded", func(t *testing.T) {
+		deep := strings.Repeat("[", maxDSLJSONDepth+1) + "0" + strings.Repeat("]", maxDSLJSONDepth+1)
+		mustReject(t, RequestRule{ID: "set", Action: RequestSet, Path: "/x", Value: []byte(deep)})
+		many := "[" + strings.TrimSuffix(strings.Repeat("0,", maxDSLJSONNodes+1), ",") + "]"
+		mustReject(t, RequestRule{ID: "set", Action: RequestSet, Path: "/x", Value: []byte(many)})
+	})
+	t.Run("DSL09 header query require safe names and JSON strings", func(t *testing.T) {
+		if err := compileRule(t, RequestRule{ID: "h", Action: RequestSetHeader, Name: "X-Safe", Value: []byte(`"ok"`)}, []string{"X-Safe"}, nil); err != nil {
+			t.Fatal(err)
+		}
+		for _, r := range []RequestRule{{ID: "h", Action: RequestSetHeader, Name: "bad space", Value: []byte(`"ok"`)}, {ID: "h", Action: RequestSetHeader, Name: "X-Safe", Value: []byte(`1`)}, {ID: "q", Action: RequestSetQuery, Name: "bad space", Value: []byte(`"ok"`)}, {ID: "q", Action: RequestSetQuery, Name: "prototype", Value: []byte(`"ok"`)}} {
+			mustReject(t, r)
+		}
+		if err := compileRule(t, RequestRule{ID: "h", Action: RequestSetHeader, Name: "__proto__", Value: []byte(`"ok"`)}, []string{"__proto__"}, nil); err == nil {
+			t.Fatal("prototype header compiled")
+		}
+	})
+	t.Run("DSL10 auth names and prefix safe", func(t *testing.T) {
+		in := baseInput()
+		a := in.Adapters["a"]
+		a.Auth = AuthRule{Kind: AuthBearerHeader, Header: "Host"}
+		in.Adapters["a"] = a
+		mustFail(t, in, "invalid auth header")
+		in = baseInput()
+		a = in.Adapters["a"]
+		a.Auth = AuthRule{Kind: AuthBearerHeader, Header: "Authorization", Prefix: "Bearer\r\n"}
+		in.Adapters["a"] = a
+		mustFail(t, in, "unsafe")
+		in = baseInput()
+		a = in.Adapters["a"]
+		a.Auth = AuthRule{Kind: AuthBearerHeader, Header: "__proto__"}
+		in.Adapters["a"] = a
+		mustFail(t, in, "invalid auth header")
+	})
+	t.Run("DSL11 clamp finite", func(t *testing.T) {
+		nan := math.NaN()
+		mustReject(t, RequestRule{ID: "c", Action: RequestClampNumber, Path: "/x", Min: &nan, Max: floatp(1)})
+	})
+	t.Run("DSL12 append only target set copy rename", func(t *testing.T) {
+		for _, r := range []RequestRule{{ID: "remove", Action: RequestRemove, Path: "/x/-"}, {ID: "map", Action: RequestMapEnum, Path: "/x/-", EnumMap: map[string]string{"a": "b"}}, {ID: "clamp", Action: RequestClampNumber, Path: "/x/-", Min: floatp(0), Max: floatp(1)}, {ID: "copy", Action: RequestCopy, From: "/x/-", To: "/y"}} {
+			mustReject(t, r)
+		}
+		if err := compileRule(t, RequestRule{ID: "set", Action: RequestSet, Path: "/x/-", Value: []byte("1")}, nil, nil); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
+func TestCompileResponseRulesRejectUnsafeMatchersAndOutputs(t *testing.T) {
+	valid := func() ResponseRule {
+		return ResponseRule{
+			ID:     "response",
+			Match:  ResponseMatch{HTTPStatuses: []int{503}},
+			Output: ResponseOutput{HTTPStatus: 502, ErrorCode: "UPSTREAM_ERROR", ErrorType: "upstream_error", Message: "upstream error"},
+		}
+	}
+	compile := func(t *testing.T, rule ResponseRule) error {
+		t.Helper()
+		in := baseInput()
+		a := in.Adapters["a"]
+		a.Response.Rules = []ResponseRule{rule}
+		in.Adapters["a"] = a
+		_, err := Compile(in)
+		return err
+	}
+	mustReject := func(t *testing.T, rule ResponseRule) {
+		t.Helper()
+		if err := compile(t, rule); err == nil {
+			t.Fatal("Compile succeeded")
+		}
+	}
+	if err := compile(t, valid()); err != nil {
+		t.Fatalf("valid response rule rejected: %v", err)
+	}
+	t.Run("empty match fails closed", func(t *testing.T) {
+		rule := valid()
+		rule.Match = ResponseMatch{}
+		mustReject(t, rule)
+	})
+	t.Run("status ranges and duplicates rejected", func(t *testing.T) {
+		for _, statuses := range [][]int{{399}, {600}, {503, 503}} {
+			rule := valid()
+			rule.Match.HTTPStatuses = statuses
+			mustReject(t, rule)
+		}
+		for _, status := range []int{399, 600} {
+			rule := valid()
+			rule.Output.HTTPStatus = status
+			mustReject(t, rule)
+		}
+	})
+	t.Run("string matchers are bounded safe and unique", func(t *testing.T) {
+		for _, set := range []func(*ResponseMatch){
+			func(m *ResponseMatch) { m.ErrorCodes = []string{""} },
+			func(m *ResponseMatch) { m.ErrorTypes = []string{"bad\rvalue"} },
+			func(m *ResponseMatch) { m.FinishReasons = []string{string([]byte{0xff})} },
+			func(m *ResponseMatch) { m.FinishReasons = []string{strings.Repeat("x", maxResponseTokenBytes+1)} },
+			func(m *ResponseMatch) { m.StreamEventTypes = []string{"event", "event"} },
+			func(m *ResponseMatch) { m.MessageContains = []string{""} },
+			func(m *ResponseMatch) {
+				m.MessageContains = []string{strings.Repeat("x", maxResponseMessageContains+1)}
+			},
+		} {
+			rule := valid()
+			rule.Match.HTTPStatuses = nil
+			set(&rule.Match)
+			mustReject(t, rule)
+		}
+	})
+	t.Run("every matcher slice and rule count are bounded", func(t *testing.T) {
+		for _, fill := range []func(*ResponseMatch){
+			func(m *ResponseMatch) {
+				m.HTTPStatuses = make([]int, maxResponseMatchers+1)
+				for i := range m.HTTPStatuses {
+					m.HTTPStatuses[i] = 400 + i
+				}
+			},
+			func(m *ResponseMatch) { m.ErrorCodes = responseTestStrings(maxResponseMatchers + 1) },
+			func(m *ResponseMatch) { m.ErrorTypes = responseTestStrings(maxResponseMatchers + 1) },
+			func(m *ResponseMatch) { m.MessageContains = responseTestStrings(maxResponseMatchers + 1) },
+			func(m *ResponseMatch) { m.FinishReasons = responseTestStrings(maxResponseMatchers + 1) },
+			func(m *ResponseMatch) { m.StreamEventTypes = responseTestStrings(maxResponseMatchers + 1) },
+		} {
+			rule := valid()
+			rule.Match.HTTPStatuses = nil
+			fill(&rule.Match)
+			mustReject(t, rule)
+		}
+
+		in := baseInput()
+		a := in.Adapters["a"]
+		a.Response.Rules = make([]ResponseRule, maxResponseRules+1)
+		for i := range a.Response.Rules {
+			a.Response.Rules[i] = valid()
+			a.Response.Rules[i].ID = fmt.Sprintf("response-%d", i)
+		}
+		in.Adapters["a"] = a
+		mustFail(t, in, "response rule limit")
+	})
+	t.Run("outputs use safe tokens and fixed single-line text", func(t *testing.T) {
+		for _, mutate := range []func(*ResponseOutput){
+			func(o *ResponseOutput) { o.ErrorCode = "" },
+			func(o *ResponseOutput) { o.Message = "" },
+			func(o *ResponseOutput) { o.ErrorType = "unsafe type" },
+			func(o *ResponseOutput) { o.ErrorCode = strings.Repeat("x", maxResponseTokenBytes+1) },
+			func(o *ResponseOutput) { o.Message = "upstream secret\nvalue" },
+			func(o *ResponseOutput) { o.Message = strings.Repeat("x", maxResponseMessageBytes+1) },
+			func(o *ResponseOutput) { o.Message = string([]byte{0xff}) },
+		} {
+			rule := valid()
+			mutate(&rule.Output)
+			mustReject(t, rule)
+		}
+	})
+	t.Run("errors do not echo sensitive matcher or message", func(t *testing.T) {
+		const secret = "do-not-echo-response-secret"
+		for _, mutate := range []func(*ResponseRule){
+			func(rule *ResponseRule) {
+				rule.Match.HTTPStatuses = nil
+				rule.Match.MessageContains = []string{secret, secret}
+			},
+			func(rule *ResponseRule) { rule.Output.Message = secret + "\n" },
+		} {
+			rule := valid()
+			mutate(&rule)
+			err := compile(t, rule)
+			if err == nil {
+				t.Fatal("Compile succeeded")
+			}
+			if strings.Contains(err.Error(), secret) {
+				t.Fatalf("compiler error exposed sensitive response configuration: %q", err)
+			}
+		}
+	})
+}
+
+func responseTestStrings(count int) []string {
+	values := make([]string, count)
+	for i := range values {
+		values[i] = fmt.Sprintf("value-%d", i)
+	}
+	return values
+}
+
+func TestThinkingBudgetMappingsFollowEffectiveEffort(t *testing.T) {
+	policy := func(min int) ThinkingPolicy {
+		return ThinkingPolicy{
+			Supported:      true,
+			DefaultEffort:  ThinkingLow,
+			MinBudgetToken: min,
+			MaxBudgetToken: 10,
+			EffortMapping:  fullEffortMap(ThinkingHigh),
+			BudgetMapping:  map[ThinkingEffort]int{},
+		}
+	}
+	if err := thinkingPolicy(policy(1)); err == nil || !strings.Contains(err.Error(), "missing budget mapping") {
+		t.Fatalf("positive minimum accepted missing effective budget mapping: %v", err)
+	}
+	// Runtime treats an omitted BudgetMapping[effectiveEffort] as zero. This
+	// is valid only where the configured lower bound itself permits zero.
+	if err := thinkingPolicy(policy(0)); err != nil {
+		t.Fatalf("zero minimum must permit omitted effective budget mapping as zero: %v", err)
+	}
+	p := policy(1)
+	p.BudgetMapping[ThinkingHigh] = 1
+	if err := thinkingPolicy(p); err != nil {
+		t.Fatalf("mapped effective budget within bounds rejected: %v", err)
+	}
+}
+
+func TestRequestAllowlistsRejectPrototypeFamilyNames(t *testing.T) {
+	for _, request := range []RequestPolicy{
+		{AllowedHeaders: []string{"constructor"}},
+		{AllowedQuery: []string{"prototype"}},
+	} {
+		in := baseInput()
+		a := in.Adapters["a"]
+		a.Request = request
+		in.Adapters["a"] = a
+		mustFail(t, in, "invalid allowed")
+	}
 }
