@@ -25,9 +25,9 @@
 | `@tokenmp/contracts/openapi/auth/v1.yaml` | YAML 读取能力 | Auth Service v1 OpenAPI 3.0.3 契约；无副作用 | stable | `openapi/auth/v1.yaml` |
 | `@tokenmp/contracts/openapi/executor/v1.yaml` | YAML 读取能力 | Executor Service v1 OpenAPI 3.0.3 契约；无副作用 | stable | `openapi/executor/v1.yaml` |
 | `generate:auth:go` 脚本 | Go 1.26.5+，oapi-codegen v2.8.0（自动下载） | 生成 Auth `models.gen.go` 与 `server.gen.go` | stable | 两份 `go/auth-v1-*.yaml` + `openapi/auth/v1.yaml` |
-| `generate:executor:go` 脚本 | Go 1.26.5+，oapi-codegen v2.8.0（自动下载） | 生成 Executor `models.gen.go` 与 `server.gen.go` | stable | 两份 `go/executor-v1-*.yaml` + `openapi/executor/v1.yaml` |
+| `generate:executor:go` 脚本 | Go 1.26.5+，oapi-codegen v2.8.0（自动下载）；Executor 模块实施后使用 | 生成 Executor `models.gen.go` 与 `server.gen.go` | experimental | 两份 `go/executor-v1-*.yaml` + `openapi/executor/v1.yaml` |
 | `check:generated` 脚本 | Go 1.26.5+ | 临时目录重生成并 byte compare；exit 0=新鲜，exit 1=过期 | stable | 同上 |
-| `check:generated:executor` 脚本 | Go 1.26.5+ | 临时目录重生成并 byte compare；exit 0=新鲜，exit 1=过期 | stable | 同上 |
+| `check:generated:executor` 脚本 | Go 1.26.5+；要求 `services/executor` 及生成物已实施 | 临时目录重生成并 byte compare；Executor 模块尚未创建时预期失败 | experimental | 同上 |
 
 ## 依赖关系与消费者
 
@@ -72,10 +72,12 @@ pnpm --filter @tokenmp/contracts build
 
 # Go 代码生成
 pnpm --filter @tokenmp/contracts generate:auth:go
+# Executor 模块及最终生成模式落地后使用：
 pnpm --filter @tokenmp/contracts generate:executor:go
 
 # 生成物新鲜度检查
 pnpm --filter @tokenmp/contracts check:generated
+# Executor 模块及生成物落地后使用：
 pnpm --filter @tokenmp/contracts check:generated:executor
 ```
 
