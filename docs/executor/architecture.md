@@ -1,6 +1,6 @@
 # Executor Architecture Design
 
-- 状态：设计基线已确认；Foundation、Config compiler/snapshot 与 routing 已实施，后续执行能力仍按本文设计逐阶段落地
+- 状态：设计基线已确认；Foundation、Config compiler/snapshot、routing 与 Phase 5 pure-Go Adapter Engine 已实施，后续执行能力仍按本文设计逐阶段落地
 - 适用范围：TokenMP v3 `services/executor`
 - 契约来源：`packages/contracts/openapi/executor/v1.yaml`
 - 关联测试方案：`testing-strategy.md`
@@ -19,7 +19,7 @@ Executor 是 TokenMP 的模型请求执行面，负责：
 8. 按配置决定同 Credential 重试、切 Credential、切 Route、切 Provider或切模型。
 9. 管理业务超时、流提交边界、取消、配额和请求日志。
 
-Foundation 不连接数据库，已通过端口接口及 Mock/InMemory 实现提供身份、配置、配额、日志和运行时状态。generated models/strict server、adapter skeleton 与 route/HTTP conformance 已实施；公开模型业务路由的 runtime 注册、业务执行、attempt budget、SDK、流处理及持久化仍未实施；未来持久化实现不得改变核心执行流程。
+Foundation 不连接数据库，已通过端口接口及 Mock/InMemory 实现提供身份、配置、配额、日志和运行时状态。generated models/strict server、adapter skeleton、route/HTTP conformance 与纯 Go Adapter Engine 已实施；公开模型业务路由的 runtime 注册、credential resolver/secret injector、业务执行、RetryDecider/attempt budget、SDK/provider、流处理及持久化仍未实施；未来持久化实现不得改变核心执行流程。
 
 ## 2. 设计原则
 
@@ -300,10 +300,10 @@ type AdapterConfig struct {
 - `rename(from, to)`
 - `map_enum(path, map)`
 - `clamp_number(path, min, max)`
-- `set_header(name, value_ref)`
+- `set_header(name, literal)`
 - `set_query(name, literal)`
 
-Header 和 query 使用白名单。规则不得覆盖 `Host`、`Authorization`、代理/转发头、Content-Length、SDK 控制头或密钥引用；URL scheme、host 和基础 path 不属于 DSL。禁止任意脚本、SQL、网络、文件访问和自由模板执行。
+Header 和 query 使用白名单，且 value 必须是 JSON string literal；`ValueRef` 在 compiler 和 Engine 均继续拒绝，直到未来独立 resolver integration。规则不得覆盖 `Host`、`Authorization`、代理/转发头、Content-Length、SDK 控制头或密钥引用；URL scheme、host 和基础 path 不属于 DSL。禁止任意脚本、SQL、网络、文件访问和自由模板执行。
 
 ### 8.2 Thinking 示例
 
@@ -338,6 +338,8 @@ degraded=true
 ```
 
 ### 8.3 响应映射
+
+模块内 `adapter.Engine.MapResponse` 已实施，输入只接受已分类的上游 metadata，绝不接受或返回任意上游正文。它按 compiler 已固定的规则顺序（priority、specificity、ID）返回首个命中；每个已填充 matcher 维度必须匹配（AND），同一维度的列表值互为替代（OR），没有任何 matcher 的规则 fail closed、不匹配。未命中时固定 default：4xx→400 `UPSTREAM_INVALID_REQUEST`、5xx→502 `UPSTREAM_ERROR`、status 0→504 `UPSTREAM_TIMEOUT`、未分类 2xx/3xx→502 `UPSTREAM_PROTOCOL_ERROR`。它尚未接入 request/execution pipeline。
 
 响应规则可匹配：
 
@@ -381,7 +383,7 @@ degraded=true
 
 `internal/routing` 已实施为不访问网络、数据库或 Provider 的纯 Go 能力。它严格解析 `model[:group][@provider]`：空段、重复/颠倒分隔符、空白/控制字符和超长输入被拒绝；`auto` 可为 `auto` 或 `auto@provider`，但不能带 group。实际候选由冻结的 compiled snapshot 决定，数据模型已支持 route group、provider selector、route-local non-secret credential、configured auto model list 和 model fallback。
 
-旧 adapter 级 `Auth.CredentialRef` 仍可被 compiler 接受；若 route 未声明 credentials，它被合成为 route-local credential，其 ID 为 `legacy-route-sha256-` 加 route ID 的**全长** SHA-256 hex。Resolver 的 Candidate/Plan 只带 credential ID/reference，绝不带 secret material。
+旧 adapter 级 `Auth.CredentialRef` 仍可被 compiler 接受；若 route 未声明 credentials，它被合成为 route-local credential，其 ID 为 `legacy-route-sha256-` 加 route ID 的**全长** SHA-256 hex。公开 Resolver Candidate/Plan 只带安全 credential ID/priority，绝不带 credential reference 或 secret material；credential resolution/secret injection 尚未实现。
 
 Resolver/Plan 固定 source snapshot 的 revision/generation 并在该私有 universe 内产生 deterministic candidates。每个 candidate 在 model、provider、route、credential 四个独立 quarantine 维度检查；未找到 state 可用，active state 排除 candidate，除 context cancellation/deadline 外的读取失败 fail closed。`Plan.Next` 为 retry actions 给出已冻结、selector-scoped candidate scope（并排除 visited target）；它**不是** RetryDecider，尚不匹配 retry rules、不管理 attempt budget，且不发起任何上游调用。
 
@@ -533,8 +535,8 @@ Request/Attempt/Event 日志至少记录：
 | 1 | `feat/executor-foundation` | **已实施**：模块骨架、health、运行时配置、优雅关闭、Mock/InMemory ports、最小 quota terminal 状态机 |
 | 2 | `refactor/executor-codegen` | **已实施**：generated models/strict server、adapter skeleton、生成物新鲜度门禁与 route/HTTP conformance；运行时尚未注册业务路由，业务执行与流处理未实现 |
 | 3 | `feat/executor-config-model` | **已实施（模块内，未接 runtime）**：`snapshot.Compile` → `adapter.Compile`、C01–C27 相关有限 DSL 安全校验、继承/normalization、deterministic ordering、immutable generation-aware Store 与三份脱敏 fixture 的严格解码/真实编译/发布测试；默认值已与本设计基线对齐。 |
-| 4 | `feat/executor-routing` | **已实施（纯 Go，未接 runtime/pipeline）**：strict `model[:group][@provider]` selector（`auto` 禁止 group）、route group/provider selector/route-local non-secret credential/auto+model fallback、legacy `CredentialRef` 全长 SHA-256 合成、revision-pinned immutable Resolver/Plan、deterministic candidates 与 model/provider/route/credential 四维 fail-closed quarantine；`Plan.Next` 仅定义 candidate scope，不是 RetryDecider。 |
-| 5 | `feat/executor-adapter-engine` | thinking/request/response 规则 |
+| 4 | `feat/executor-routing` | **已实施（纯 Go，未接 runtime/pipeline）**：strict `model[:group][@provider]` selector（`auto` 禁止 group）、route group/provider selector/route-local non-secret credential/auto+model fallback、legacy `CredentialRef` 全长 SHA-256 合成、revision-pinned immutable Resolver/Plan、deterministic candidates 与 model/provider/route/credential 四维 fail-closed quarantine；公开 Candidate/Plan 仅含安全 credential ID/priority，不含 credential ref 或 secret；`Plan.Next` 仅定义 candidate scope，不是 RetryDecider。 |
+| 5 | `feat/executor-adapter-engine` | **已实施（模块内，未接 pipeline）**：stateless pure-Go/no-I/O Engine 严格解码 JSON object、执行全部有限 DSL actions、literal-only header/query、继续拒绝 `ValueRef`、按 selected model bounds 映射 thinking，并安全 map response（维度间 AND、维度内 OR、compiler established order、fixed default）；atomic/mutation/race/fuzz 覆盖已实施。 |
 | 6 | `feat/executor-sdk-openai` | OpenAI SDK 非流式、SDK retry=0、Context cancel、quota cleanup |
 | 7 | `feat/executor-retry-policy` | retry decision、attempt budget、quarantine |
 | 8 | `feat/executor-streaming` | StreamBridge、TTFT/idle/lifetime |

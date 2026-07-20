@@ -131,8 +131,8 @@ func TestResolverIntegrationCompileFixtureAndSelectors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolve legacy fixture: %v", err)
 	}
-	if len(legacyPlan.Candidates) != 1 || legacyPlan.Candidates[0].Credential.ID == "" || legacyPlan.Candidates[0].Credential.Ref != "vault://openai-default/credential/default" {
-		t.Fatalf("legacy fixture candidate = %+v, want synthesized non-secret legacy credential", legacyPlan.Candidates)
+	if len(legacyPlan.Candidates) != 1 || legacyPlan.Candidates[0].Credential.ID == "" {
+		t.Fatalf("legacy fixture candidate count = %d, credential ID present = %t; want one synthesized legacy credential ID", len(legacyPlan.Candidates), len(legacyPlan.Candidates) == 1 && legacyPlan.Candidates[0].Credential.ID != "")
 	}
 
 	config := routingIntegrationConfig(t)

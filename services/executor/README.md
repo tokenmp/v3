@@ -1,6 +1,6 @@
 # Executor
 
-Executor 是 TokenMP v3 的 Mock-first Foundation 模型请求执行服务。已提供 HTTP health、配置加载、优雅关闭、Mock/InMemory ports、配额 reservation 终态状态机，以及模块内 Config compiler、immutable generation-aware snapshot Store 和 revision-pinned routing Resolver/Plan；尚未实现公开模型业务路由的运行时注册、attempt budget、执行 pipeline、数据库、SDK、Docker 或独立 Executor CI job。已实施并提交 Executor v1 generated transport（`internal/contract/executorv1/{models,server}.gen.go`）与 `internal/transport/executorv1api` adapter skeleton，并新增路由契约一致性测试（`internal/server/contract_test.go`）；但运行时 `main` 仍未注册任何公开业务路由，仍只经 `internal/transport/healthz` 服务 `/healthz`。`check:generated:executor` 是现有 `go-auth` CI job 中必经的新鲜度门禁；同一 job 还运行 generated contract、strict adapter skeleton 与 route/HTTP conformance 的 race tests，但仍无独立 Executor CI job、运行时业务路由或执行 pipeline 测试。
+Executor 是 TokenMP v3 的 Mock-first Foundation 模型请求执行服务。已提供 HTTP health、配置加载、优雅关闭、Mock/InMemory ports、配额 reservation 终态状态机，以及模块内 Config compiler、immutable generation-aware snapshot Store、revision-pinned routing Resolver/Plan 和 stateless pure-Go Adapter Engine；尚未实现公开模型业务路由的运行时注册、credential resolver/secret injector、RetryDecider/attempt budget、执行 pipeline、数据库、SDK/provider、Docker 或独立 Executor CI job。已实施并提交 Executor v1 generated transport（`internal/contract/executorv1/{models,server}.gen.go`）与 `internal/transport/executorv1api` adapter skeleton，并新增路由契约一致性测试（`internal/server/contract_test.go`）；但运行时 `main` 仍未注册任何公开业务路由，仍只经 `internal/transport/healthz` 服务 `/healthz`。`check:generated:executor` 是现有 `go-auth` CI job 中必经的新鲜度门禁；同一 job 还运行 generated contract、strict adapter skeleton 与 route/HTTP conformance 的 race tests，但仍无独立 Executor CI job、运行时业务路由或执行 pipeline 测试。
 
 ## 已实施能力
 
@@ -15,8 +15,9 @@ Executor 是 TokenMP v3 的 Mock-first Foundation 模型请求执行服务。已
 - `internal/snapshot.Compile` 将原始 `ConfigSnapshot` 转换为 `internal/adapter.Compile` 的输入；compiler 校验 C01–C27 所覆盖的 identity/reference、provider/adapter/protocol compatibility、HTTPS Base URL、有限 DSL、thinking/capability、timeout/retry、priority/conflict、fallback 与确定性/无别名约束，并按继承优先级 normalization。
 - `NewCompiledSnapshot` 和 `Store` 深拷贝冻结并按单调 generation 原子发布；`Current` 返回独立的不可变视图，拒绝无效或陈旧发布且保留 last known good。
 - `internal/routing` 是纯 Go 的 revision-pinned Resolver/Plan：解析严格的 `model[:group][@provider]` selector；特殊 `auto` 只允许裸用或 `@provider`，不允许 route group。Resolver 在其冻结的 compiled snapshot 中产生确定性 candidate，支持 route group/provider selector、route-local credential、`auto` 列表及 model fallback。
-- route-local credential 只保存非 secret reference；旧 adapter `Auth.CredentialRef` 会合成为稳定的 `legacy-route-sha256-<full SHA-256(route ID)>` credential ID。候选不包含 credential material。
+- route-local credential 的 compiled config 可保存非 secret reference；旧 adapter `Auth.CredentialRef` 会合成为稳定的 `legacy-route-sha256-<full SHA-256(route ID)>` credential ID。公开 Candidate/Plan 只含安全 credential ID/priority，不包含 credential ref、secret 或 credential material。
 - Resolver 对 model、provider、route、credential 四个独立 quarantine 维度读取失败时 fail closed；active quarantine 过滤候选。`Plan.Next` 只在已冻结、selector-scoped universe 内为 retry action 返回候选范围，**不是** RetryDecider，也不执行重试或 attempt budget。
+- `internal/adapter.Engine` 是零状态、纯 Go、无 I/O 的运行时：`Apply` 对严格 JSON object 执行全部有限 DSL actions（set/copy/remove/rename/map_enum/clamp_number/set_header/set_query），以 selected model bounds 约束 thinking；header/query 只从 JSON string literal 注入，`ValueRef` 继续拒绝。失败返回零 `AppliedRequest`，不泄露部分 mutation。`MapResponse` 按 compiler 固定的顺序匹配：填充维度之间为 AND、同一维度内为 OR；无匹配使用固定安全 default。response mapping 已在模块内实现，尚未接入 pipeline。
 - 三份脱敏 fixture（`fixtures/configs/{default,xfyun,anthropic}.json`）在严格解码、secret 扫描和 fixture-specific assertions 后实际编译并发布。Compiler 默认值：request `2m`、TTFT `45s`、stream idle `30s`、stream lifetime `10m`、retry backoff `200ms`、total attempts `3`、same-target attempts `2`、total retry duration `90s`。
 
 ## 运行时配置
@@ -53,11 +54,11 @@ pnpm --filter @tokenmp/contracts check:generated:executor
 go test ./internal/server/...
 ```
 
-测试不需要数据库，也不需要 Docker。`go test ./...` 包含 compiler、Store、fixture 和 C01–C27 覆盖。没有独立 Executor CI job；现有 `go-auth` job 在 generated freshness、generated transport/route conformance race tests 之外，还从本目录运行 `go test -race -count=1 ./internal/adapter/... ./internal/snapshot/...`。该 compiler/snapshot 门禁不运行数据库、SDK、runtime config source 或 request pipeline。
+测试不需要数据库，也不需要 Docker。`go test ./...` 包含 compiler、Store、fixture、Adapter Engine 与 C01–C27 覆盖。Engine 测试覆盖 strict JSON、全部有限 DSL actions、literal-only header/query、继续拒绝 `ValueRef`、model-bounded thinking、safe response mapping、atomicity/mutation isolation、race 与 fuzz。没有独立 Executor CI job；现有 `go-auth` job 在 generated freshness、generated transport/route conformance race tests 之外，还从本目录运行 `go test -race -count=1 ./internal/adapter/... ./internal/snapshot/...`。该纯 Go 门禁不运行数据库、SDK、runtime config source 或 request pipeline。
 
 ## 契约与边界
 
 - `packages/contracts/openapi/executor/v1.yaml` 是 Executor HTTP 契约的唯一事实来源。运行时 `main` 只注册 `/healthz`（经 `internal/transport/healthz`）；generated `Handler`/`StrictHandler` 与 `executorv1api.Adapter` 仅被路由一致性测试驱动，未接入运行时 server。契约中的公开模型业务路由尚未在运行时实现，strict SSE 为 generated capability，当前不被任何运行时代码调用。generated models/strict server 随变更提交，位于 `internal/contract/executorv1/` 并供 adapter 与测试使用；现有 `go-auth` job 运行 generated freshness、generated transport/route conformance race tests，以及 `go test -race -count=1 ./internal/adapter/... ./internal/snapshot/...` 的 compiler/snapshot race 门禁。该门禁不运行数据库、SDK、runtime config source 或 request pipeline；仍无独立 Executor CI job、运行时业务路由或执行 pipeline 测试。Docker、运行时路由与集成验证仍待后续独立阶段（见 `docs/executor/architecture.md` 阶段 14）。
-- Config compiler、Store、routing Resolver/Plan 尚未由 runtime config source、reload loop 或 request pipeline 消费；它们是模块内已实施的纯 Go 能力。
+- Config compiler、Store、routing Resolver/Plan 与 Adapter Engine 尚未由 runtime config source、reload loop 或 request pipeline 消费；它们是模块内已实施的纯 Go 能力。Engine 不解析 credential ref，不解析或注入 secret；该职责留给未来 credential resolver/secret injector。
 - Foundation 不拥有数据库、schema 或 migration，并使用 Mock/InMemory ports。未来 Executor 如需持久化，可拥有自己的数据库及其 schema 和 migration；不得访问其他服务的数据库、schema、migration 或私有源码。
 - 服务间集成必须使用明确、可版本化的契约，不能以源码 import 或共享数据库替代。
