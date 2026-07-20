@@ -1,17 +1,24 @@
 openapi: 3.0.3
 info:
-  title: TokenMP v3 Auth Service
+  title: TokenMP v3 Auth API
   version: 0.2.0
   description: |
-    TokenMP v3 auth service contract. This OpenAPI document declares the
-    implemented endpoints: the health/readiness probes and the auth identity
-    flow routes (register, login, refresh, logout, logout-all, me, password).
-    Authentication uses Ed25519 (EdDSA) access tokens; refresh tokens are
-    opaque 32-byte base64url strings whose SHA-256 hash is stored. See
-    docs/adr/0005-auth-identity-flows.md for the full security model,
-    including the documented limitation that an in-memory rate limiter is NOT
-    implemented and rate limiting must be provided by a future gateway/Redis
-    shared policy before production deployment.
+    TokenMP v3 Auth API contract — the single source of truth for consumers
+    of the Auth Service HTTP interface. This document describes the
+    implemented endpoints, request/response shapes, authentication mechanism,
+    idempotency guarantees and error semantics.
+
+    Authentication uses Ed25519 (EdDSA) JWT access tokens. Refresh tokens are
+    opaque base64url strings that rotate on each use; reuse of a revoked
+    refresh token revokes the entire token family.
+
+    **Rate limiting is NOT implemented.** Consumers and operators must not
+    assume the service is rate-limited. Rate limiting must be provided by a
+    future gateway or shared policy before production deployment.
+
+    This document is the complete and authoritative HTTP contract for
+    consumers. No service implementation context is required to discover
+    or interpret the API.
 servers:
   - url: http://127.0.0.1:8080
     description: Local development
@@ -35,6 +42,9 @@ paths:
                 $ref: '#/components/schemas/HealthResponse'
         '405':
           description: Method not allowed.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
     head:
       summary: Liveness probe (HEAD)
       description: |
@@ -48,15 +58,20 @@ paths:
           headers:
             Cache-Control:
               $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
         '405':
           description: Method not allowed.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
   /readyz:
     get:
       summary: Readiness probe
       description: |
         Reports whether the service is ready to serve traffic, including a
-        database connectivity check. A failure returns 503 and never leaks
-        the underlying error message.
+        connectivity check to its backing store. A failure returns 503 and
+        never leaks the underlying error message.
       operationId: getReadyz
       responses:
         '200':
@@ -83,6 +98,9 @@ paths:
                 $ref: '#/components/schemas/HealthResponse'
         '405':
           description: Method not allowed.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
     head:
       summary: Readiness probe (HEAD)
       description: |
@@ -97,22 +115,28 @@ paths:
           headers:
             Cache-Control:
               $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
         '503':
           description: Service is not ready. No body is returned for HEAD.
           headers:
             Cache-Control:
               $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
         '405':
           description: Method not allowed.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
   /api/v1/auth/register:
     post:
       summary: Register a new user
       description: |
-        Creates a new user with a normalized (LOWER BTRIM) email and an
-        Argon2id password hash. Does NOT auto-login: no session or access
-        token is issued. On duplicate email returns 409 email_taken. The
-        response shape is the public user view (no password_hash, no
-        token_version).
+        Creates a new user with a normalized email. Does NOT auto-login: no
+        session or access token is issued. On duplicate email returns 409
+        `email_taken`. The response shape is the public user view (no
+        password or internal metadata).
       operationId: register
       requestBody:
         required: true
@@ -134,12 +158,33 @@ paths:
                 $ref: '#/components/schemas/PublicUser'
         '400':
           description: Invalid email or password does not meet the policy.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
         '409':
           description: Email already registered.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
           content:
             application/json:
               schema:
@@ -148,14 +193,11 @@ paths:
     post:
       summary: Log in
       description: |
-        Authenticates by email + password and mints a new refresh session plus
-        an Ed25519 access token. On any failure (unknown user, wrong password,
-        disabled account) the same 401 invalid_credentials is returned; a
-        dummy Argon2id hash is computed on the not-found path to flatten the
-        timing side channel. On a successful bcrypt login the password is
-        re-hashed with Argon2id in the same transaction (no token_version
-        bump). Tokens are returned in the JSON body (not cookies); browser
-        clients must store them securely.
+        Authenticates by email + password and returns a new access token and
+        refresh token. On any failure (unknown user, wrong password, disabled
+        account) the same 401 `invalid_credentials` is returned. Tokens are
+        returned in the JSON body (not cookies); browser clients must store
+        them securely.
       operationId: login
       requestBody:
         required: true
@@ -177,12 +219,33 @@ paths:
                 $ref: '#/components/schemas/TokenResponse'
         '400':
           description: Invalid request body.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
         '401':
           description: Invalid email or password, or account disabled.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
           content:
             application/json:
               schema:
@@ -191,16 +254,12 @@ paths:
     post:
       summary: Rotate a refresh token
       description: |
-        Rotates a refresh token: the presented token is hashed and looked up
-        with SELECT FOR UPDATE. If valid, a new session is created in the
-        same token family and the old session is revoked with
-        revoke_reason='token_rotated' and pointed at the new session. If the
-        presented token is already revoked, this is treated as reuse: all
-        active sessions in the family are revoked with revoke_reason=
-        'token_reuse' (the revocation commits even though a 401 is returned),
+        Rotates a refresh token: if valid, a new token pair is issued and the
+        old token is revoked. If the presented token is already revoked, this
+        is treated as reuse: all active tokens in the family are revoked
         and the response is the same 401 shape as an invalid refresh token so
-        reuse is not signalled to an attacker. Expired refresh tokens and
-        disabled accounts return 401.
+        reuse is not signalled to an attacker.
+        Expired refresh tokens and disabled accounts also return 401.
       operationId: refresh
       requestBody:
         required: true
@@ -211,12 +270,33 @@ paths:
       responses:
         '200':
           description: New tokens issued.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/TokenResponse'
         '401':
           description: Refresh token is invalid, expired, or reused.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
           content:
             application/json:
               schema:
@@ -226,33 +306,60 @@ paths:
       summary: Log out (revoke a single refresh token)
       description: |
         Revokes the single session identified by the refresh token. Idempotent:
-        an invalid or already-revoked token also returns 204 so the endpoint
-        cannot be used to probe whether a token exists.
+        an invalid, malformed, absent or already-revoked token also returns 204
+        so the endpoint cannot be used to probe whether a token exists. A
+        missing or malformed request body is not an error; the body is optional
+        and any decode failure is treated the same as an empty/invalid token.
       operationId: logout
       requestBody:
-        required: true
+        required: false
+        description: |
+          Optional. When present, must be a JSON object with a `refresh_token`
+          field. Malformed, absent, or invalid token bodies are all treated
+          idempotently as 204 and are never used to probe token existence.
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/RefreshRequest'
+              $ref: '#/components/schemas/LogoutRequest'
       responses:
         '204':
           description: Logout completed (or was already a no-op).
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
   /api/v1/auth/logout-all:
     post:
       summary: Log out everywhere
       description: |
         Requires a Bearer access token. Revokes all active sessions for the
-        user with revoke_reason='logout_all' and bumps users.token_version so
-        all outstanding access tokens are immediately invalid.
+        user and invalidates all outstanding access tokens immediately.
       operationId: logoutAll
       security:
         - bearerAuth: []
       responses:
         '204':
           description: All sessions revoked; access tokens invalidated.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
         '401':
           description: Missing or invalid access token.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
           content:
             application/json:
               schema:
@@ -261,22 +368,41 @@ paths:
     get:
       summary: Current user
       description: |
-        Requires a Bearer access token. Returns the public user view. The
-        middleware loads the user on every request and compares status and
-        token_version so a disabled account or a bumped token_version
-        invalidates the access token immediately.
+        Requires a Bearer access token. Returns the public user view. A
+        disabled account or an invalidated access token is rejected with 401.
       operationId: me
       security:
         - bearerAuth: []
       responses:
         '200':
           description: The authenticated user.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/PublicUser'
         '401':
           description: Missing, invalid, expired or revoked access token.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
           content:
             application/json:
               schema:
@@ -286,10 +412,9 @@ paths:
       summary: Change password
       description: |
         Requires a Bearer access token. Verifies the current password,
-        validates and Argon2id-hashes the new password, updates the hash,
-        bumps users.token_version, and revokes all active sessions with
-        revoke_reason='password_changed' (including the current one). Returns
-        204; the caller must re-login.
+        validates the new password, updates it, and revokes all active
+        sessions (including the current one). Returns 204; the caller must
+        re-login.
       operationId: changePassword
       security:
         - bearerAuth: []
@@ -302,14 +427,38 @@ paths:
       responses:
         '204':
           description: Password changed; all sessions revoked.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
         '400':
           description: New password does not meet the policy.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
         '401':
           description: Missing/invalid access token or wrong current password.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
           content:
             application/json:
               schema:
@@ -357,7 +506,7 @@ components:
       type: object
       required: [id, email, role, status, created_at]
       description: |
-        Public user view. Never includes password_hash or token_version.
+        Public user view. Never includes password or internal metadata.
       properties:
         id:
           type: string
@@ -377,12 +526,13 @@ components:
     RegisterRequest:
       type: object
       required: [email, password]
+      additionalProperties: false
       properties:
         email:
           type: string
           format: email
           maxLength: 255
-          description: Normalized with LOWER(BTRIM) before storage.
+          description: Normalized to lowercase and trimmed before processing.
         password:
           type: string
           format: password
@@ -394,6 +544,7 @@ components:
     LoginRequest:
       type: object
       required: [email, password]
+      additionalProperties: false
       properties:
         email:
           type: string
@@ -404,13 +555,22 @@ components:
     RefreshRequest:
       type: object
       required: [refresh_token]
+      additionalProperties: false
       properties:
         refresh_token:
           type: string
-          description: Opaque 32-byte base64url refresh token.
+          description: Opaque base64url refresh token.
+    LogoutRequest:
+      type: object
+      required: [refresh_token]
+      properties:
+        refresh_token:
+          type: string
+          description: Opaque base64url refresh token.
     ChangePasswordRequest:
       type: object
       required: [current_password, new_password]
+      additionalProperties: false
       properties:
         current_password:
           type: string
@@ -429,7 +589,7 @@ components:
           description: Ed25519 (EdDSA) JWT access token.
         refresh_token:
           type: string
-          description: Opaque 32-byte base64url refresh token.
+          description: Opaque base64url refresh token.
         token_type:
           type: string
           enum: [Bearer]
@@ -440,9 +600,9 @@ components:
       type: object
       required: [error]
       description: |
-        Uniform error body. code is a stable machine-readable identifier;
-        message is a human-readable string that never leaks raw database,
-        password or token material.
+        Uniform error body. `code` is a stable machine-readable identifier;
+        `message` is a human-readable string that never leaks internal
+        implementation details, credentials or token material.
       properties:
         error:
           type: object

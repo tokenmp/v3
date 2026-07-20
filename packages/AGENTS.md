@@ -9,6 +9,7 @@
 ## 当前 package
 
 - `ui-tokens/`：框架无关 UI Design Tokens，以及 Tailwind CSS v4 和 shadcn CSS integration；Web、Admin 是已确认但尚未实施的未来消费者。
+- `contracts/`：语言中立跨程序 API 协议唯一事实来源（`@tokenmp/contracts`）；当前包含 Auth Service v1 OpenAPI 契约；oapi-codegen v2.8.0 从 Auth 契约生成 Go models 与 server 代码。Auth 实现与测试必须符合此 package 的协议，属于设计/构建时契约依赖，不是 Go runtime import；Auth conformance test（`services/auth/internal/server/contract_test.go`）是当前唯一已实施的直接消费者/验证方；未来消费者（Web/Admin/Gateway）将通过此 package 发现 API，不得读取服务源码。
 
 ## 新增模块准入
 

@@ -12,7 +12,7 @@
 
 - 模块说明：`README.md`
 - 架构决策：`../../docs/adr/0004-auth-service-foundation.md`、`../../docs/adr/0005-auth-identity-flows.md`
-- 接口契约：`api/openapi.yaml`
+- 接口契约：`../../packages/contracts/openapi/auth/v1.yaml`（唯一权威副本；消费者不得读取 Auth 源码发现 API）
 - Migration 文件：`migrations/000001_create_users.{up,down}.sql`、`migrations/000002_create_auth_sessions.{up,down}.sql`
 - Go workspace：`../../go.work`
 - 仓库 Docker 规范：`../../.agents/docker.md`
@@ -21,11 +21,11 @@
 
 | 能力/导出 | 输入与前置条件 | 返回/错误/副作用 | 稳定性 | 契约来源 |
 |---|---|---|---|---|
-| `GET /healthz` | 进程存活 | 200 `{status:"ok",service:"auth",timestamp}`；不依赖外部资源 | stable | `api/openapi.yaml`、`internal/handler/health.go` |
+| `GET /healthz` | 进程存活 | 200 `{status:"ok",service:"auth",timestamp}`；不依赖外部资源 | stable | `packages/contracts/openapi/auth/v1.yaml` |
 | `HEAD /healthz` | 同上 | 200；空 body | stable | 同上 |
 | `GET /readyz` | 已注入 `Pinger` | 200 ok 或 503 `{status:"unready",...}`；**不泄露底层错误** | stable | 同上 |
 | `HEAD /readyz` | 同上 | 200 或 503；空 body | stable | 同上 |
-| `POST /api/v1/auth/register` | email+password JSON | 201 `{id,email,role,status,created_at}`；**不自动登录**；重复 409 `email_taken`；弱密码/非法 email 400 | stable | `api/openapi.yaml`、`internal/handler/auth.go` |
+| `POST /api/v1/auth/register` | email+password JSON | 201 `{id,email,role,status,created_at}`；**不自动登录**；重复 409 `email_taken`；弱密码/非法 email 400 | stable | `packages/contracts/openapi/auth/v1.yaml` |
 | `POST /api/v1/auth/login` | email+password JSON | 200 `{access_token,refresh_token,token_type:"Bearer",expires_in}`；不存在/错密码/disabled 统一 401 `invalid_credentials`（预生成 dummy Argon2id hash 执行 CompareDummy 防时序差，disabled 先完成 Compare 再返回） | stable | 同上 |
 | `POST /api/v1/auth/refresh` | `{refresh_token}` JSON | 200 token response；命中已撤销旧 token 视为 reuse：事务内撤销整 family 为 `token_reuse` 并 COMMIT，返回固定 401（与 invalid_refresh 同形，不暴露 reuse 信号）；过期/disabled 同样 401 | stable | 同上 |
 | `POST /api/v1/auth/logout` | `{refresh_token}` JSON | 204 幂等：无效/已撤销 token 也 204，避免探测 | stable | 同上 |
@@ -45,6 +45,9 @@ Refresh 为 32-byte `crypto/rand` base64url；DB 只存 SHA-256 BYTEA；默认 3
 
 | 方向 | 模块/资源 | 使用功能 | 依赖方式 | 契约/入口 | 变更后验证 |
 |---|---|---|---|---|---|
+| 依赖 | `@tokenmp/contracts` | Auth API 契约唯一事实来源 + Go 代码生成 | 设计/构建时契约依赖 + 生成代码 | `packages/contracts/openapi/auth/v1.yaml` → `internal/contract/authv1/{models,server}.gen.go` | contracts lint/test + Auth conformance test + 生成物源头标记测试 + `check-generated.sh` |
+| 依赖 | `github.com/google/uuid` | UUID 类型（生成代码运行时依赖，由 oapi-codegen type-mapping 配置） | Go module import | `uuid.UUID`、`uuid.Parse` | `go build ./...`、`go test -race` |
+| 依赖 | `github.com/getkin/kin-openapi` | OpenAPI 契约解析与验证（仅测试依赖） | Go module import（test） | kin-openapi 公开 API | `go test -race ./internal/server/` |
 | 依赖 | PostgreSQL（库名 `tokenmp_auth`） | 用户/session 持久化 | GORM PG driver / SQL | `AUTH_DATABASE_URL`、`migrations/*.sql` | migration 周期 + 集成测试 |
 | 依赖 | `github.com/go-chi/chi/v5` | HTTP 路由与中间件 | Go module import | chi v5 公开 API | `go build ./...` |
 | 依赖 | `gorm.io/gorm` + `gorm.io/driver/postgres` | ORM 与连接池；事务 + `clause.Locking` SELECT FOR UPDATE | Go module import | GORM 公开 API | `go vet`、`go test -race` |
@@ -54,7 +57,9 @@ Refresh 为 32-byte `crypto/rand` base64url；DB 只存 SHA-256 BYTEA；默认 3
 | 依赖 | `github.com/jackc/pgx/v5`（`stdlib`） | 集成测试原生 SQL 校验 | build tag `integration` | pgx `database/sql` driver | `go test -tags=integration` |
 | 依赖 | `golang-migrate` CLI | 应用 migration | 外部 CLI，非运行时依赖 | `migrate -path migrations` | CI migration 周期 |
 
-当前**没有已实施的直接消费者**（Web/Admin/Gateway/其他服务均未实施）。不得把未来消费者写成已集成。
+当前没有已实施的**外部应用消费者**（Web/Admin/Gateway/其他服务均未实施），但 Auth conformance test（`internal/server/contract_test.go`）是 `@tokenmp/contracts` 的实际直接消费者/验证方：它在无数据库环境下加载仓库唯一契约 `packages/contracts/openapi/auth/v1.yaml`，用 kin-openapi 解析并 Validate，从 Chi 实际路由提取所有 HTTP method+path，与契约双向严格比较。不得把未来消费者写成已集成。
+
+API 路由由 oapi-codegen 生成的 Chi strict handler 注册（`internal/contract/authv1/server.gen.go`，引用 `models.gen.go`），实现层为 `internal/transport/authv1api/adapter.go`（满足 `StrictServerInterface`，含编译时断言）。预解码 Chi middleware（`bodyPreDecodeMiddleware`）在生成器解码前强制 1KiB 限制、DisallowUnknownFields、单 JSON value 校验、Logout 幂等规范化。旧 `internal/handler` 包已删除，所有测试与 helper 已迁入 `internal/transport/authv1api`。
 
 ## 开发与验证
 
@@ -68,6 +73,9 @@ Refresh 为 32-byte `crypto/rand` base64url；DB 只存 SHA-256 BYTEA；默认 3
 
 ```bash
 cd services/auth
+
+# 生成物新鲜度检查（修改 OpenAPI 后必须重生成）
+../../packages/contracts/go/check-generated.sh
 
 # 格式
 gofmt -w .
@@ -118,6 +126,8 @@ go test -tags=integration -race ./test/integration/...
 
 ## DO NOT
 
+- **DO NOT** 将 API 契约放回 `services/auth/api/` 或保留第二份 OpenAPI 副本——唯一权威副本在 `packages/contracts/openapi/auth/v1.yaml`（见 ADR 0006）。
+- **DO NOT** 期望消费者读取 Auth 源码、GORM 模型、migration 或数据库结构来发现 API——消费者只依赖 `@tokenmp/contracts`。
 - **DO NOT** 在本机安装或启动 PostgreSQL，也不得运行 `docker run postgres`、
   `brew install postgresql` 或任何等价动作 —— 真实 migration 与集成测试只由
   GitHub Actions 的 `postgres:17-alpine` service container 运行。本机默认只跑
@@ -145,6 +155,8 @@ go test -tags=integration -race ./test/integration/...
 - **DO NOT** 把 reuse 撤销随 error rollback——事务内撤销 family active sessions 为 `token_reuse` 后必须 COMMIT 再返回 401（service 层让 fn 返回 nil，commit 后再决定结果错误）。
 - **DO NOT** 在 `users` 表加入 `preferred_billing`/`fallback_enabled` 等业务字段——
   不属于 Auth 数据所有权。
+- **DO NOT** 手动编辑 `internal/contract/authv1/{models,server}.gen.go`——通过 `packages/contracts/go/generate.sh` 重生成。
+- **DO NOT** 保留两套活跃 API handler 路由——旧 `internal/handler` 包已删除，活跃路由由生成代码注册，所有测试与 helper 已迁入 `internal/transport/authv1api`。
 
 ## 已知陷阱与历史教训
 
@@ -172,7 +184,7 @@ go test -tags=integration -race ./test/integration/...
 - 根因：直接返回 `err.Error()` 把底层连接错误透出。
 - DO：只返回固定 `{status:"unready",service:"auth",timestamp}`；底层错误进日志且不含连接串。
 - DO NOT：把 `pinger.Ping` 的 `err` 写入 HTTP 响应。
-- 验证：`internal/handler/health_test.go` 的 `TestReadyz_Unready503NoLeak` 断言响应不含 `secret`/`password`。
+- 验证：`internal/transport/authv1api` 的 health 端点测试断言响应不含 `secret`/`password`。
 - 适用范围：所有 readiness 健康端点。
 
 ### GORM AutoMigrate 与版本化 migration 冲突
@@ -186,7 +198,7 @@ go test -tags=integration -race ./test/integration/...
 
 ## 文档维护触发器
 
-出现以下变化时同步更新本文件、README、`api/openapi.yaml` 与 ADR 0004 / 0005：
+出现以下变化时同步更新本文件、README、`packages/contracts/openapi/auth/v1.yaml` 与 ADR 0004 / 0005 / 0006：
 
 - 新增/移除对外端点或修改返回结构。
 - 引入/移除速率限制、Redis 共享策略、浏览器 cookie 模式或密钥轮换流程。

@@ -130,6 +130,12 @@ jobs:
           cache-dependency-path: |
             services/auth/go.sum
 
+      - name: Generated code freshness check
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
+          bash packages/contracts/go/check-generated.sh
+
       - name: Install golang-migrate CLI
         env:
           MIGRATE_VERSION: "4.18.3"

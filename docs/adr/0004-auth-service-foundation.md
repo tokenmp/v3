@@ -156,13 +156,14 @@ The migration files are the source of truth. The corrected decisions are:
 
 ### Tests and CI
 
-- Unit tests: `internal/config` (env validation, strict `AUTH_DATABASE_URL`
-  parsing that never echoes the URL/credentials in errors, fail-fast on
-  invalid numeric/duration values), `internal/database` (classified errors
-  whose public `Error()` never renders the driver/DSN text), `internal/handler`
-  (`/healthz` and `/readyz` GET + HEAD with an injected fake Pinger; HEAD
-  writes no body; 503 does not leak error text), `internal/server` (Chi routes,
-  middleware, shutdown).
+- Historical foundation tests originally exercised `internal/handler`. The
+  active implementation is now the generated contract boundary
+  `internal/contract/authv1` plus `internal/transport/authv1api`; its
+  transport tests cover `/healthz` and `/readyz` GET + HEAD with an injected
+  fake Pinger, including empty HEAD bodies, `Cache-Control: no-store`, JSON
+  `Content-Type`, and non-leaking 503 responses. `internal/server` is retained
+  as a compatibility facade; its unit tests cover routing and shutdown, and
+  integration tests use that facade.
 - Integration tests gated by the `integration` build tag require a real
   PostgreSQL instance and the `migrate` CLI on PATH. **They are not run on
   developer machines**; they run only in the GitHub Actions `go-auth` job
@@ -215,11 +216,13 @@ The migration files are the source of truth. The corrected decisions are:
 
 ### Contract
 
-- `api/openapi.yaml` declares only `/healthz` and `/readyz` with a uniform
-  `HealthResponse`, including explicit HEAD operations that carry the same
-  status and `Cache-Control: no-store` header but no body, plus the
-  `Cache-Control` header on the GET responses. No speculative endpoints. No
-  consumers exist yet; none are described as integrated.
+- The API contract has been extracted to `packages/contracts/openapi/auth/v1.yaml`
+  (see ADR 0006). `api/openapi.yaml` is no longer present in the service
+  directory; the contract in `packages/contracts` is the single source of truth.
+- The active HTTP boundary is generated from that contract into
+  `internal/contract/authv1/{models,server}.gen.go` and implemented by
+  `internal/transport/authv1api`. `internal/server` is a compatibility facade
+  used by integration tests; production wiring uses `authv1api` directly.
 
 ## Consequences
 

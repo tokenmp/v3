@@ -1,0 +1,25 @@
+{
+  "name": "@tokenmp/contracts",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "exports": {
+    "./openapi/auth/v1.yaml": "./dist/openapi/auth/v1.yaml"
+  },
+  "scripts": {
+    "build": "node ./scripts/build.mjs",
+    "clean": "node ./scripts/clean.mjs",
+    "generate:auth:go": "bash go/generate.sh",
+    "check:generated": "bash go/check-generated.sh",
+    "lint": "node ./scripts/validate.mjs --lint",
+    "test": "node ./scripts/build.mjs && node --test ./tests/*.test.mjs",
+    "typecheck": "node ./scripts/validate.mjs --contract"
+  },
+  "devDependencies": {
+    "yaml": "2.9.0"
+  }
+}

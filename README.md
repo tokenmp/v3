@@ -23,16 +23,17 @@ The workspace contains top-level logical partitions with scoped `AGENTS.md` guid
 
 ```text
 apps/       # application modules; currently empty
-services/   # backend service modules; currently contains auth (foundation)
-packages/   # shared packages; currently contains ui-tokens
+services/   # backend service modules; currently contains auth
+packages/   # shared packages; currently contains ui-tokens and contracts
 infra/      # infrastructure modules; currently empty
 tools/      # repository tools; currently empty
 docs/       # shared project documentation and ADRs
 ```
 
-`packages/ui-tokens/` is the first Node.js workspace module. `services/auth/` is
-the first Go service module and the first concrete service; it ships the Auth
-Foundation skeleton only (no registration/login/JWT). Other partition
+`packages/ui-tokens/` is the first Node.js workspace module. `packages/contracts/` is the language-neutral API contract package (`@tokenmp/contracts`); it is the single source of truth for all service OpenAPI contracts, starting with Auth. `services/auth/` is
+the first Go service module and the first concrete service; it implements
+the full auth identity flows (registration, login, Ed25519/EdDSA access-token
+issuance, opaque refresh-token rotation with reuse detection, logout, logout-all, /me, Argon2id password hashing with bcrypt legacy upgrade). Other partition
 directories remain repository structure rather than implemented modules. No
 additional app, service, package, infrastructure module, or tool is created
 until its scope, boundaries, dependencies, and module-level `AGENTS.md` are
@@ -47,7 +48,8 @@ pnpm test
 pnpm build
 ```
 
-These commands validate the root Node.js task graph and the UI Token package.
+These commands validate the root Node.js task graph and the two workspace
+packages (UI Tokens and Contracts).
 The auth service is a Go module and is **not** part of the pnpm/Turborepo task
 graph; it is validated with `go` directly (see `services/auth/README.md`) and
 by the dedicated Go CI job.
@@ -71,6 +73,7 @@ Read `AGENTS.md`, then read each nested `AGENTS.md` from the repository root to 
 ## Implemented modules
 
 - [`@tokenmp/ui-tokens`](packages/ui-tokens/README.md): framework-neutral Design Tokens with Tailwind CSS v4 and shadcn integration exports. No frontend app or component package is included yet.
+- [`@tokenmp/contracts`](packages/contracts/README.md): language-neutral API contract package. Single source of truth for all service OpenAPI contracts; currently contains Auth Service v1. Services conform to contracts at design/build time; the package has zero runtime dependencies.
 - [`services/auth`](services/auth/README.md): TokenMP v3 Auth Service — the first Go service (Go 1.26.5, Chi, GORM, PostgreSQL). Implements the auth identity flows: registration, login, Ed25519 (EdDSA) access-token issuance, opaque refresh-token rotation with reuse detection, logout, logout-all, /me, and Argon2id password hashing with bcrypt legacy upgrade. Health endpoints, versioned SQL migrations, Dockerfile, tests and CI are unchanged from the foundation.
 
 ## Architecture decisions
@@ -80,4 +83,5 @@ Read `AGENTS.md`, then read each nested `AGENTS.md` from the repository root to 
 - [ADR 0003: CI Baseline](docs/adr/0003-ci-baseline.md)
 - [ADR 0004: Auth Service Foundation](docs/adr/0004-auth-service-foundation.md)
 - [ADR 0005: Auth Identity Flows](docs/adr/0005-auth-identity-flows.md)
+- [ADR 0006: API Contracts Package](docs/adr/0006-api-contracts-package.md)
 - [UI Design System](docs/ui/design-system.md)

@@ -1,0 +1,18 @@
+# oapi-codegen v2.8.0 configuration for Auth v1 HTTP models.
+# Used by: packages/contracts/go/generate.sh
+# Output: services/auth/internal/contract/authv1/models.gen.go
+package: authv1
+generate:
+  models: true
+output-options:
+  type-mapping:
+    string:
+      formats:
+        email:
+          type: string
+        uuid:
+          type: uuid.UUID
+          import: github.com/google/uuid
+additional-imports:
+  - alias: uuid
+    package: github.com/google/uuid

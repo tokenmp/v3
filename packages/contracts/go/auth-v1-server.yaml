@@ -1,0 +1,10 @@
+# oapi-codegen v2.8.0 configuration for Auth v1 Chi and strict server code.
+# Used by: packages/contracts/go/generate.sh
+# Output: services/auth/internal/contract/authv1/server.gen.go
+# skip-prune preserves references to models generated into the same package.
+package: authv1
+generate:
+  chi-server: true
+  strict-server: true
+output-options:
+  skip-prune: true
