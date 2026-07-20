@@ -1,11 +1,11 @@
 # Executor Testing Strategy
 
-- 状态：测试设计基线；Foundation 测试已实施，后续阶段测试尚未实施
+- 状态：测试设计基线；Foundation、Config compiler/snapshot 与 routing 测试已实施，后续执行阶段测试尚未实施
 - 适用范围：TokenMP v3 `services/executor`
 - 架构来源：`architecture.md`
 - API 契约：`packages/contracts/openapi/executor/v1.yaml`
 
-Foundation 已实施的测试范围：运行时配置校验、`GET` / `HEAD /healthz`、优雅关闭、config、identity、quota、request log 和 runtime 端口的 Mock/InMemory contract 测试，以及 generated transport 的生成物标记检查（`freshness_test.go`）与路由契约一致性测试（`internal/server/contract_test.go`）；其中 quota 覆盖 reservation 从 `reserved` 到 `finalized` 或 `released` 的唯一终态、同终态幂等和相反终态冲突。Config compiler/snapshot 阶段已实施 `snapshot.Compile` → `adapter.Compile`、`internal/adapter/compiler_test.go`、`internal/snapshot/compiler_test.go`、`store_test.go`（无快照、发布深拷贝、旧 revision 稳定、被拒发布保留 last known good、并发读者/发布者）和 fixture tests。三份 fixture 以 `DisallowUnknownFields` 严格解码、secret 扫描、枚举/duration/round-trip/HTTPS BaseURL 检查后实际编译和发布；测试还覆盖 xfyun `503→429`、thinking 至多 `medium`，以及 Anthropic `529→429`。C01–C27 相关 compiler/snapshot 安全、默认值、immutability 与 determinism 测试均已实施，详见第 4 节；`FuzzCompile` 已作为 compiler fuzz smoke 实施。本文其余 SDK、业务 adapter、公开模型运行时路由、流处理、集成、其他 fuzz target、持续 fuzz、性能、Docker 与 CI 测试仍是后续设计。
+Foundation 已实施的测试范围：运行时配置校验、`GET` / `HEAD /healthz`、优雅关闭、config、identity、quota、request log 和 runtime 端口的 Mock/InMemory contract 测试，以及 generated transport 的生成物标记检查（`freshness_test.go`）与路由契约一致性测试（`internal/server/contract_test.go`）；其中 quota 覆盖 reservation 从 `reserved` 到 `finalized` 或 `released` 的唯一终态、同终态幂等和相反终态冲突。Config compiler/snapshot 阶段已实施 `snapshot.Compile` → `adapter.Compile`、`internal/adapter/compiler_test.go`、`internal/snapshot/compiler_test.go`、`store_test.go`（无快照、发布深拷贝、旧 revision 稳定、被拒发布保留 last known good、并发读者/发布者）和 fixture tests。三份 fixture 以 `DisallowUnknownFields` 严格解码、secret 扫描、枚举/duration/round-trip/HTTPS BaseURL 检查后实际编译和发布；测试还覆盖 xfyun `503→429`、thinking 至多 `medium`，以及 Anthropic `529→429`。C01–C27 相关 compiler/snapshot 安全、默认值、immutability 与 determinism 测试均已实施，详见第 4 节；`FuzzCompile` 和 `FuzzParseSelector` 已作为 fuzz smoke 实施。routing tests 覆盖 strict selector、revision-pinned deterministic Resolver/Plan、legacy credential synthesis、candidate scopes、四维 fail-closed quarantine、immutable private fallback universe 与并发 resolve。本文其余 SDK、业务 adapter、公开模型运行时路由、attempt budget、流处理、集成、其他 fuzz target、持续 fuzz、性能、Docker 与 CI 测试仍是后续设计。
 
 ## 1. 测试目标
 
@@ -250,9 +250,9 @@ Compiler 默认值已由测试断言：request `2m`、TTFT `45s`、stream idle `
 
 ## 5. Model Selector 与 Routing 测试
 
-### 5.1 Selector
+### 5.1 Selector（已实施）
 
-有效：
+`internal/routing/selector_test.go` 覆盖下列 grammar、无输入回显的稳定 invalid sentinel、canonical round-trip 和 `FuzzParseSelector` smoke。有效：
 
 ```text
 gpt-4o
@@ -276,7 +276,9 @@ model@provider:group
 超过长度上限
 ```
 
-### 5.2 Candidate Scope
+### 5.2 Candidate Scope（已实施，纯 Go）
+
+`internal/routing/{resolver,resolver_integration}_test.go` 使用 compiled snapshots 和脱敏 fixture 覆盖 deterministic candidate order、route group/provider selector、route-local credentials、legacy `CredentialRef` synthesis、auto/model fallback、revision/generation pinning、private frozen retry universe、并发 resolve，以及以下 scope。该层不执行 retry decision、attempt budget 或 pipeline。
 
 构造至少：
 
@@ -385,7 +387,7 @@ model B
 - 完全冲突在编译阶段拒绝；
 - selected rule id 出现在 explain trace。
 
-## 9. Retry 与 Attempt Budget 测试
+## 9. Retry 与 Attempt Budget 测试（后续；`Plan.Next` scope 不等于 RetryDecider）
 
 | 编号 | 场景 | 期望 |
 |---|---|---|
@@ -650,12 +652,11 @@ go test -race ./...
 
 ### 16.1 Fuzz targets
 
-已实施的唯一 fuzz target 是 `internal/adapter/compiler_test.go` 中的 `FuzzCompile`：它以变化的 Provider Base URL 和有限 DSL JSON pointer 调用 `Compile`，作为 compiler fuzz smoke。除常规 `go test` 对其 seed 的执行外，尚未配置短时或持续 fuzz 运行。
+已实施的已实施 fuzz target 为 `internal/adapter/compiler_test.go` 中的 `FuzzCompile`（变化 Provider Base URL 和有限 DSL JSON pointer）及 `internal/routing/selector_test.go` 中的 `FuzzParseSelector`（grammar/canonical round-trip）。除常规 `go test` 对 seed 的执行外，尚未配置短时或持续 fuzz 运行。
 
 以下 target 仍是后续设计，尚未实现：
 
 ```text
-FuzzParseModelSelector
 FuzzCompileAdapterConfig
 FuzzApplyRequestRules
 FuzzParseOpenAIChatSSE
@@ -757,7 +758,7 @@ pnpm --filter @tokenmp/contracts check:generated:executor
 cd services/executor && go test ./internal/server/...
 ```
 
-现有 `go-auth` CI job 已运行 `check:generated:executor`、generated transport/route conformance race tests，以及从 `services/executor` 执行的 `go test -race -count=1 ./internal/adapter/... ./internal/snapshot/...`。后者是 Config compiler/immutable snapshot Store 的最小 race 门禁，仅覆盖纯 Go compiler/snapshot packages；不运行数据库、SDK、runtime config source 或 request pipeline，也不构成独立 Executor CI job。Docker/集成验证仍待后续独立阶段（见阶段 14）。
+现有 `go-auth` CI job 已运行 `check:generated:executor`、generated transport/route conformance race tests，以及从 `services/executor` 执行的 `go test -race -count=1 ./internal/adapter/... ./internal/snapshot/...`。后者是 Config compiler/immutable snapshot Store 的最小 race 门禁，仅覆盖纯 Go compiler/snapshot packages；routing tests 尚未接入该 CI command。不运行数据库、SDK、runtime config source 或 request pipeline，也不构成独立 Executor CI job。Docker/集成验证仍待后续独立阶段（见阶段 14）。
 
 ### `executor-integration`
 
@@ -781,8 +782,8 @@ go test -race -count=1 ./test/integration/...
 |---|---|
 | Foundation | **已实施**：运行时 config、health、graceful shutdown，以及 Mock/InMemory ports 和 quota terminal contract/unit tests |
 | Codegen | **已实施**：freshness + route/HTTP conformance（不表示 runtime 路由注册或业务执行） |
-| Config compiler/snapshot | **已实施（模块内 + 最小 CI race 门禁）**：compiler、immutable generation-aware Store、三份 fixture 的严格解码/真实编译/发布测试、C01–C27 覆盖和 `FuzzCompile` smoke；现有 `go-auth` job 运行 `go test -race -count=1 ./internal/adapter/... ./internal/snapshot/...`，不运行 DB/SDK/runtime；默认值已与架构基线对齐 |
-| Routing | selector + candidate scope + deterministic ordering |
+| Config compiler/snapshot | **已实施（模块内 + 最小 CI race 门禁）**：compiler、immutable generation-aware Store、三份 fixture 的严格解码/真实编译/发布测试、C01–C27 覆盖和 `FuzzCompile` smoke；现有 `go-auth` job 运行 `go test -race -count=1 ./internal/adapter/... ./internal/snapshot/...`，不运行 DB/SDK/runtime；routing 尚未接入该 CI command；默认值已与架构基线对齐 |
+| Routing | **已实施（纯 Go）**：strict selector、candidate scope、deterministic ordering、revision/generation pinning、legacy credential synthesis、四维 fail-closed quarantine 与 private Plan universe；不表示 RetryDecider、attempt budget 或 runtime pipeline |
 | Adapter engine | thinking + DSL + response mapping |
 | OpenAI SDK | request/response + retry=0 + context cancel |
 | Retry | R01–R20 适用项 + property budget invariant |

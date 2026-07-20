@@ -1,6 +1,8 @@
 package adapter
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"reflect"
 	"strings"
@@ -475,4 +477,152 @@ func FuzzCompile(f *testing.F) {
 		in.Adapters["a"] = a
 		_, _ = Compile(in)
 	})
+}
+
+func TestCompileRoutingCandidates(t *testing.T) {
+	t.Run("normalizes selectors credentials and candidate order", func(t *testing.T) {
+		in := baseInput()
+		in.Global.AutoModelIDs = []string{"m", "z"}
+		in.Models["m"] = ModelInput{ID: "m", Capabilities: []Capability{CapabilityChat}, FallbackModelIDs: []string{"z"}}
+		in.Models["z"] = ModelInput{ID: "z", Capabilities: []Capability{CapabilityChat}}
+		in.Providers["p"] = ProviderInput{ID: "p", Name: "provider", BaseURL: "https://provider.example/v1", SDKKind: SDKKindOpenAI, Protocol: ProtocolOpenAIChat}
+		in.Routes[0].RouteGroup = "primary"
+		in.Routes[0].Credentials = []CredentialInput{{ID: "secondary", CredentialRef: "vault://provider/secondary", Priority: 2, Enabled: true}, {ID: "primary", CredentialRef: "vault://provider/primary", Priority: 1, Enabled: true}}
+		in.Adapters["a"] = AdapterConfig{ID: "a", Name: "adapter", Version: 1, SDKKind: SDKKindOpenAI, Protocol: ProtocolOpenAIChat, Auth: AuthRule{Kind: AuthBearerHeader, Header: "Authorization"}}
+		got := mustCompile(t, in)
+		if !reflect.DeepEqual(got.AutoModelIDs, []string{"m", "z"}) || got.Providers["p"].Selector != "p" || !reflect.DeepEqual(got.Models["m"].FallbackModelIDs, []string{"z"}) || got.Routes[0].Credentials[0].ID != "primary" {
+			t.Fatalf("routing candidates = %#v", got)
+		}
+		clone := CloneCompiledConfig(got)
+		clone.AutoModelIDs[0] = "mutated"
+		clone.Models["m"].FallbackModelIDs[0] = "mutated"
+		clone.Routes[0].Credentials[0].ID = "mutated"
+		if got.AutoModelIDs[0] != "m" || got.Models["m"].FallbackModelIDs[0] != "z" || got.Routes[0].Credentials[0].ID != "primary" {
+			t.Fatal("clone retained routing candidate aliases")
+		}
+	})
+
+	for _, tc := range []struct {
+		name, want string
+		mutate     func(*ConfigInput)
+	}{
+		{"duplicate selector", "selector", func(in *ConfigInput) {
+			in.Providers["q"] = ProviderInput{ID: "q", Name: "other", Selector: "p", BaseURL: "https://other.example/v1", SDKKind: SDKKindOpenAI, Protocol: ProtocolOpenAIChat}
+		}},
+		{"unsafe selector", "selector", func(in *ConfigInput) { p := in.Providers["p"]; p.Selector = "../p"; in.Providers["p"] = p }},
+		{"auto actual model", "reserved", func(in *ConfigInput) {
+			in.Models = map[string]ModelInput{"auto": {ID: "auto", Capabilities: []Capability{CapabilityChat}}}
+			in.Routes[0].ModelID = "auto"
+		}},
+		{"unknown auto", "unknown auto", func(in *ConfigInput) { in.Global.AutoModelIDs = []string{"missing"} }},
+		{"duplicate auto", "duplicate auto", func(in *ConfigInput) { in.Global.AutoModelIDs = []string{"m", "m"} }},
+		{"fallback model cycle", "fallback model cycle", func(in *ConfigInput) {
+			in.Models["z"] = ModelInput{ID: "z", Capabilities: []Capability{CapabilityChat}, FallbackModelIDs: []string{"m"}}
+			m := in.Models["m"]
+			m.FallbackModelIDs = []string{"z"}
+			in.Models["m"] = m
+		}},
+		{"legacy explicit conflict", "conflict", func(in *ConfigInput) {
+			a := in.Adapters["a"]
+			a.Auth = AuthRule{Kind: AuthBearerHeader, Header: "Authorization", CredentialRef: "vault://provider/legacy"}
+			in.Adapters["a"] = a
+			in.Routes[0].Credentials = []CredentialInput{{ID: "explicit", CredentialRef: "vault://provider/explicit", Enabled: true}}
+		}},
+		{"auth credential required", "enabled credential", func(in *ConfigInput) {
+			a := in.Adapters["a"]
+			a.Auth = AuthRule{Kind: AuthBearerHeader, Header: "Authorization"}
+			in.Adapters["a"] = a
+		}},
+		{"auth none rejects credentials", "auth none", func(in *ConfigInput) {
+			in.Routes[0].Credentials = []CredentialInput{{ID: "c", CredentialRef: "vault://provider/c", Enabled: true}}
+		}},
+		{"credential ids global", "duplicate credential ID", func(in *ConfigInput) {
+			in.Routes = append(in.Routes, RouteInput{ID: "r2", ModelID: "m", ProviderID: "p", AdapterID: "a", UpstreamModel: "two", Protocol: ProtocolOpenAIChat, Credentials: []CredentialInput{{ID: "c", CredentialRef: "vault://provider/c", Enabled: true}}})
+			a := in.Adapters["a"]
+			a.Auth = AuthRule{Kind: AuthBearerHeader, Header: "Authorization"}
+			in.Adapters["a"] = a
+			in.Routes[0].Credentials = []CredentialInput{{ID: "c", CredentialRef: "vault://provider/first", Enabled: true}}
+		}},
+		{"fallback group mismatch", "route group", func(in *ConfigInput) {
+			in.Routes[0].RouteGroup = "one"
+			in.Routes = append(in.Routes, RouteInput{ID: "r2", ModelID: "m", ProviderID: "p", AdapterID: "a", UpstreamModel: "two", Protocol: ProtocolOpenAIChat, RouteGroup: "two"})
+			in.Routes[0].FallbackRouteIDs = []string{"r2"}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) { in := baseInput(); tc.mutate(&in); mustFail(t, in, tc.want) })
+	}
+}
+
+func TestCompileCredentialErrorsDoNotExposeReferences(t *testing.T) {
+	const secretMarker = "secret-marker-must-not-escape"
+	for _, tc := range []struct {
+		name        string
+		credentials []CredentialInput
+		credential  string
+		want        string
+	}{
+		{
+			name:        "invalid reference",
+			credentials: []CredentialInput{{ID: "primary", CredentialRef: "vault://provider/" + secretMarker + "?query=forbidden", Enabled: true}},
+			credential:  "primary",
+			want:        "invalid credential reference",
+		},
+		{
+			name: "duplicate reference",
+			credentials: []CredentialInput{
+				{ID: "primary", CredentialRef: "vault://provider/" + secretMarker, Enabled: true},
+				{ID: "secondary", CredentialRef: "vault://provider/" + secretMarker, Enabled: true},
+			},
+			credential: "secondary",
+			want:       "duplicate credential reference",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			in := baseInput()
+			a := in.Adapters["a"]
+			a.Auth = AuthRule{Kind: AuthBearerHeader, Header: "Authorization"}
+			in.Adapters["a"] = a
+			in.Routes[0].Credentials = tc.credentials
+
+			_, err := Compile(in)
+			if err == nil {
+				t.Fatal("Compile succeeded")
+			}
+			message := err.Error()
+			for _, want := range []string{`route "r"`, `credential "` + tc.credential + `"`, tc.want} {
+				if !strings.Contains(message, want) {
+					t.Errorf("error = %q, want %q", message, want)
+				}
+			}
+			if strings.Contains(message, secretMarker) {
+				t.Errorf("error exposed credential reference marker: %q", message)
+			}
+		})
+	}
+}
+
+func TestCompileSynthesizesStableLegacyCredential(t *testing.T) {
+	in := baseInput()
+	a := in.Adapters["a"]
+	a.Auth = AuthRule{Kind: AuthBearerHeader, Header: "Authorization", CredentialRef: "vault://provider/default"}
+	in.Adapters["a"] = a
+	got := mustCompile(t, in)
+
+	sum := sha256.Sum256([]byte("r"))
+	wantID := legacyCredentialIDPrefix + hex.EncodeToString(sum[:])
+	if len(wantID) != len(legacyCredentialIDPrefix)+sha256.Size*2 || got.Routes[0].Credentials[0] != (CompiledCredential{ID: wantID, CredentialRef: "vault://provider/default", Enabled: true}) {
+		t.Fatalf("legacy credential = %#v, want full SHA-256 ID %q", got.Routes[0].Credentials, wantID)
+	}
+	if legacyCredentialID("r") != wantID || legacyCredentialID("r") != legacyCredentialID("r") {
+		t.Fatalf("legacy credential ID is not stable: %q", legacyCredentialID("r"))
+	}
+}
+
+func TestCompileRejectsExplicitLegacyCredentialNamespace(t *testing.T) {
+	in := baseInput()
+	a := in.Adapters["a"]
+	a.Auth = AuthRule{Kind: AuthBearerHeader, Header: "Authorization"}
+	in.Adapters["a"] = a
+	in.Routes[0].Credentials = []CredentialInput{{ID: legacyCredentialIDPrefix + strings.Repeat("0", sha256.Size*2), CredentialRef: "vault://provider/explicit", Enabled: true}}
+	mustFail(t, in, "legacy credential ID namespace is reserved")
 }

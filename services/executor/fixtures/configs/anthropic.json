@@ -41,6 +41,7 @@
   "Providers": {
     "anthropic-default": {
       "ID": "anthropic-default",
+      "Selector": "anthropic",
       "Name": "Anthropic Default",
       "BaseURL": "https://api.anthropic.example",
       "SDKKind": "anthropic",
@@ -60,7 +61,8 @@
       "Enabled": true,
       "Protocol": "anthropic_messages",
       "Retry": {},
-      "Timeout": {}
+      "Timeout": {},
+      "Credentials": []
     }
   ],
   "Adapters": {
