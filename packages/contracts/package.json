@@ -8,13 +8,16 @@
     "README.md"
   ],
   "exports": {
-    "./openapi/auth/v1.yaml": "./dist/openapi/auth/v1.yaml"
+    "./openapi/auth/v1.yaml": "./dist/openapi/auth/v1.yaml",
+    "./openapi/executor/v1.yaml": "./dist/openapi/executor/v1.yaml"
   },
   "scripts": {
     "build": "node ./scripts/build.mjs",
     "clean": "node ./scripts/clean.mjs",
     "generate:auth:go": "bash go/generate.sh",
+    "generate:executor:go": "bash go/generate-executor.sh",
     "check:generated": "bash go/check-generated.sh",
+    "check:generated:executor": "bash go/check-generated-executor.sh",
     "lint": "node ./scripts/validate.mjs --lint",
     "test": "node ./scripts/build.mjs && node --test ./tests/*.test.mjs",
     "typecheck": "node ./scripts/validate.mjs --contract"
