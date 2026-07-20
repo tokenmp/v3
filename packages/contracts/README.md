@@ -43,9 +43,9 @@ pnpm --filter @tokenmp/contracts typecheck           # 跨文件 operationId 唯
 pnpm --filter @tokenmp/contracts test                # Node test runner 契约测试
 pnpm --filter @tokenmp/contracts build               # 复制契约到 dist/
 pnpm --filter @tokenmp/contracts generate:auth:go    # 生成 Auth Go server 代码
-pnpm --filter @tokenmp/contracts generate:executor:go # 生成 Executor Go server 代码
+pnpm --filter @tokenmp/contracts generate:executor:go # experimental：生成候选 Executor Go code
 pnpm --filter @tokenmp/contracts check:generated     # 验证 Auth 生成物新鲜度
-pnpm --filter @tokenmp/contracts check:generated:executor # 验证 Executor 生成物新鲜度
+pnpm --filter @tokenmp/contracts check:generated:executor # experimental：尚非现行门禁
 ```
 
 ## Go 生成治理
@@ -56,6 +56,8 @@ Auth Go 边界由固定的 oapi-codegen v2.8.0 和两份明确配置确定性生
 - `go/auth-v1-server.yaml` → `internal/contract/authv1/server.gen.go`（Chi + strict server；官方 `skip-prune: true` 引用同 package models，不重复生成）
 
 两个文件均提交、带源契约和 `DO NOT EDIT` 头；`check:generated` 在临时目录重生成并逐一字节比较，且拒绝旧 `generated.go`。GitHub 将 `*.gen.go` 标记为 generated，默认折叠；评审先看 OpenAPI、adapter、测试与 freshness 结果。
+
+Executor 生成配置/脚本也已预置，但仅为 experimental：`services/executor` 尚未生成、提交或注册 generated models/server，`check:generated:executor` 尚非现行门禁。
 
 为保持 diff 可审阅，生成器升级、API 行为变更和 OpenAPI 全文格式化必须分开提交；`operationId` 与 schema 名是稳定生成标识，禁止无意义重命名或重排。
 
@@ -72,7 +74,7 @@ Auth Go 边界由固定的 oapi-codegen v2.8.0 和两份明确配置确定性生
 
 - **运行时**：零第三方依赖。`dist/` 中的 YAML 契约可被任何语言直接消费。
 - **开发期**：`yaml` npm 包（devDependency）用于验证脚本真正解析 YAML，不随 `dist/` 发布。
-- **Go 代码生成**：oapi-codegen v2.8.0（通过 `go run @version` 下载，不作为 module 依赖）；通过 `output-options.type-mapping` 配置将 `format: email` → `string`、`format: uuid` → `uuid.UUID`（`github.com/google/uuid`），避免 `oapi-codegen/runtime` 依赖。`additional-imports` 提供 `uuid` 别名导入。
+- **Go 代码生成**：Auth 使用 oapi-codegen v2.8.0（通过 `go run @version` 下载，不作为 module 依赖）；通过 `output-options.type-mapping` 配置将 `format: email` → `string`、`format: uuid` → `uuid.UUID`（`github.com/google/uuid`），避免 `oapi-codegen/runtime` 依赖。`additional-imports` 提供 `uuid` 别名导入。Executor 生成配置/脚本已预置且为 experimental；`services/executor` 尚未生成、提交或注册 generated models/server，`check:generated:executor` 尚非现行门禁。
 
 ## 架构决策
 
