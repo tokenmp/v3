@@ -1,0 +1,168 @@
+{
+  "Revision": "2026-07-21-xfyun",
+  "CreatedAt": "2026-07-21T00:00:00Z",
+  "Global": {
+    "Retry": {
+      "MaxTotalAttempts": 4,
+      "MaxSameTargetAttempts": 2,
+      "MaxTotalDuration": "60s",
+      "Backoff": "800ms",
+      "Rules": [
+        {
+          "ID": "global-retry-429",
+          "Priority": 10,
+          "HTTPStatuses": [429],
+          "Action": "next_credential"
+        }
+      ]
+    },
+    "Timeout": {
+      "RequestTimeout": "90s",
+      "TTFTTimeout": "25s",
+      "StreamIdleTimeout": "20s",
+      "StreamMaxLifetime": "240s",
+      "RetryBackoff": "800ms"
+    }
+  },
+  "Models": {
+    "chat-xfyun": {
+      "ID": "chat-xfyun",
+      "DisplayName": "XFYun Chat",
+      "Capabilities": ["chat", "streaming", "tools"],
+      "Thinking": {
+        "Supported": true,
+        "DefaultEffort": "low",
+        "MaxEffort": "high",
+        "MinBudgetToken": 0,
+        "MaxBudgetToken": 4000
+      }
+    }
+  },
+  "Providers": {
+    "xfyun-default": {
+      "ID": "xfyun-default",
+      "Name": "XFYun Default",
+      "BaseURL": "https://spark-api.xfyun.example/v1",
+      "SDKKind": "generic_http",
+      "Protocol": "openai_chat",
+      "Retry": {},
+      "Timeout": {}
+    }
+  },
+  "Routes": [
+    {
+      "ID": "route-chat-xfyun",
+      "ModelID": "chat-xfyun",
+      "ProviderID": "xfyun-default",
+      "AdapterID": "adapter-xfyun-default",
+      "UpstreamModel": "spark-default",
+      "Priority": 100,
+      "Enabled": true,
+      "Protocol": "openai_chat",
+      "Retry": {},
+      "Timeout": {}
+    }
+  ],
+  "Adapters": {
+    "adapter-xfyun-default": {
+      "ID": "adapter-xfyun-default",
+      "Name": "XFYun Default Adapter",
+      "Version": 1,
+      "SDKKind": "generic_http",
+      "Protocol": "openai_chat",
+      "Auth": {
+        "Kind": "api_key_header",
+        "Header": "Authorization",
+        "Prefix": "Bearer",
+        "CredentialRef": "vault://xfyun-default/credential/default"
+      },
+      "Capability": {
+        "Require": ["chat", "streaming"],
+        "Deny": []
+      },
+      "Thinking": {
+        "Supported": true,
+        "DefaultEffort": "low",
+        "EffortMapping": {
+          "none": "none",
+          "minimal": "minimal",
+          "low": "low",
+          "medium": "medium",
+          "high": "high",
+          "xhigh": "high",
+          "max": "high"
+        },
+        "BudgetMapping": {
+          "low": 1000,
+          "medium": 2000,
+          "high": 4000
+        },
+        "MinBudgetToken": 0,
+        "MaxBudgetToken": 4000
+      },
+      "Request": {
+        "AllowedHeaders": ["Content-Type", "Accept"],
+        "AllowedQuery": [],
+        "Rules": []
+      },
+      "Response": {
+        "Rules": [
+          {
+            "ID": "resp-503-to-429",
+            "Priority": 10,
+            "Match": {
+              "HTTPStatuses": [503],
+              "ErrorCodes": ["service_unavailable", "traffic_overflow"]
+            },
+            "Output": {
+              "HTTPStatus": 429,
+              "ErrorCode": "rate_limited",
+              "ErrorType": "rate_limited",
+              "Message": "upstream temporarily unavailable; retryable as rate limited"
+            }
+          },
+          {
+            "ID": "resp-429",
+            "Priority": 20,
+            "Match": {
+              "HTTPStatuses": [429]
+            },
+            "Output": {
+              "HTTPStatus": 429,
+              "ErrorCode": "rate_limited",
+              "ErrorType": "rate_limited",
+              "Message": "upstream rate limited"
+            }
+          }
+        ]
+      },
+      "Retry": {
+        "MaxTotalAttempts": 4,
+        "MaxSameTargetAttempts": 2,
+        "MaxTotalDuration": "60s",
+        "Backoff": "800ms",
+        "Rules": [
+          {
+            "ID": "retry-503-as-429",
+            "Priority": 10,
+            "HTTPStatuses": [503],
+            "Action": "next_credential"
+          },
+          {
+            "ID": "retry-429",
+            "Priority": 20,
+            "HTTPStatuses": [429],
+            "Action": "next_credential"
+          }
+        ]
+      },
+      "Timeout": {
+        "RequestTimeout": "90s",
+        "TTFTTimeout": "25s",
+        "StreamIdleTimeout": "20s",
+        "StreamMaxLifetime": "240s",
+        "RetryBackoff": "800ms"
+      }
+    }
+  }
+}

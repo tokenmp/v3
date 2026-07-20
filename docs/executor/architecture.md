@@ -147,7 +147,7 @@ Client
 
 ## 4. 目标目录
 
-`services/executor/` 已作为 Foundation 模块存在。下列目录是完整设计目标；除 Foundation 已落地的 `cmd/executor`、`internal/app`、`internal/config`、端口实现、health transport、`internal/contract/executorv1` 和 `internal/transport/executorv1api` 外，其余目录仅在对应阶段创建。
+`services/executor/` 已作为 Foundation 模块存在。下列目录是完整设计目标；除 Foundation 已落地的 `cmd/executor`、`internal/app`、`internal/config`、端口实现、health transport、`internal/contract/executorv1` 和 `internal/transport/executorv1api` 外，Config model 阶段已落地 `internal/adapter`（原始配置类型与枚举）、`internal/snapshot`（原始 `ConfigSnapshot` 与不可变 `Store`/`NewCompiledSnapshot`/`CompiledSnapshot` 发布原语）与 `fixtures/configs/{default,xfyun,anthropic}.json`；其余目录仅在对应阶段创建。
 
 ```text
 services/executor/
@@ -267,6 +267,8 @@ schema validation
 → immutable CompiledSnapshot
 → atomic publish
 ```
+
+当前实施状态：完整的模块内 compiler 已落地：`snapshot.Compile` 把 `ConfigSnapshot` 转为 `adapter.ConfigInput` 并调用 `adapter.Compile`，实施 C01–C27 相关的 identity/reference、provider/adapter/protocol compatibility、HTTPS 无 userinfo BaseURL、有限 DSL、capability/thinking、retry/timeout、priority/conflict、fallback、immutability 与 determinism 校验；它按 code defaults → global → adapter → provider → route 合并策略，并按 priority/route ID 确定性排序，输出 `CompiledConfig`。代码默认值为 request `2m`、TTFT `45s`、stream idle `30s`、stream max lifetime `10m`、retry backoff `200ms`、max total attempts `3`、max same-target attempts `2`、max total retry duration `90s`。随后 `NewCompiledSnapshot` 深拷贝冻结，专用 `Store` 以 `atomic.Pointer` 原子发布 Store-owned copy；每个 `Current()` 返回独立视图，因此 later publish 不改变已开始请求所持 revision，且 invalid 或 stale publication 保留 last known good。三份脱敏 fixture 均严格解码、secret 扫描、通过 compiler 并实际发布。它尚未连接 config repository/reload loop 或请求 pipeline。
 
 同一请求和其全部 attempt 固定使用同一 revision，保证行为可复现。
 
@@ -451,7 +453,9 @@ stream idle timeout max 5m
 stream lifetime max     60m
 ```
 
-字段缺失使用默认值，显式 `0` 不表示无限。配置编译必须拒绝负数、超过硬上限和不合理的相互关系；不静默 clamp。
+字段缺失使用默认值，显式 `0` 不表示无限。配置编译拒绝非正 duration、超过硬上限和不合理的相互关系；不静默 clamp。
+
+> 实现对齐状态：compiler 已与本节默认值对齐：request `2m`、TTFT `45s`、idle `30s`、lifetime `10m`、backoff `200ms`、max total attempts `3`、max same-target attempts `2`、max total retry duration `90s`。它仍没有 runtime config source、reload loop 或 request-pipeline consumer。
 
 ## 11. 流式状态机
 
@@ -520,7 +524,7 @@ Request/Attempt/Event 日志至少记录：
 |---|---|---|
 | 1 | `feat/executor-foundation` | **已实施**：模块骨架、health、运行时配置、优雅关闭、Mock/InMemory ports、最小 quota terminal 状态机 |
 | 2 | `refactor/executor-codegen` | **已实施**：generated models/strict server、adapter skeleton、生成物新鲜度门禁与 route/HTTP conformance；运行时尚未注册业务路由，业务执行与流处理未实现 |
-| 3 | `feat/executor-config-model` | ConfigSnapshot、校验、编译、fixtures |
+| 3 | `feat/executor-config-model` | **已实施（模块内，未接 runtime）**：`snapshot.Compile` → `adapter.Compile`、C01–C27 相关有限 DSL 安全校验、继承/normalization、deterministic ordering、immutable generation-aware Store 与三份脱敏 fixture 的严格解码/真实编译/发布测试；默认值已与本设计基线对齐。 |
 | 4 | `feat/executor-routing` | selector、candidate dimensions |
 | 5 | `feat/executor-adapter-engine` | thinking/request/response 规则 |
 | 6 | `feat/executor-sdk-openai` | OpenAI SDK 非流式、SDK retry=0、Context cancel、quota cleanup |

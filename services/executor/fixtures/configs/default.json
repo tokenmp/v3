@@ -1,0 +1,160 @@
+{
+  "Revision": "2026-07-21-default",
+  "CreatedAt": "2026-07-21T00:00:00Z",
+  "Global": {
+    "Retry": {
+      "MaxTotalAttempts": 3,
+      "MaxSameTargetAttempts": 2,
+      "MaxTotalDuration": "45s",
+      "Backoff": "500ms",
+      "Rules": [
+        {
+          "ID": "global-retry-429",
+          "Priority": 10,
+          "HTTPStatuses": [429],
+          "Action": "next_credential"
+        },
+        {
+          "ID": "global-retry-5xx",
+          "Priority": 20,
+          "HTTPStatuses": [500, 502, 503, 504],
+          "Action": "next_route"
+        }
+      ]
+    },
+    "Timeout": {
+      "RequestTimeout": "120s",
+      "TTFTTimeout": "20s",
+      "StreamIdleTimeout": "30s",
+      "StreamMaxLifetime": "300s",
+      "RetryBackoff": "500ms"
+    }
+  },
+  "Models": {
+    "chat-default": {
+      "ID": "chat-default",
+      "DisplayName": "Default Chat",
+      "Capabilities": ["chat", "streaming", "tools"],
+      "Thinking": {
+        "Supported": true,
+        "DefaultEffort": "medium",
+        "MaxEffort": "high",
+        "MinBudgetToken": 0,
+        "MaxBudgetToken": 8000
+      }
+    }
+  },
+  "Providers": {
+    "openai-default": {
+      "ID": "openai-default",
+      "Name": "OpenAI Default",
+      "BaseURL": "https://api.openai.example/v1",
+      "SDKKind": "openai",
+      "Protocol": "openai_chat",
+      "Retry": {},
+      "Timeout": {}
+    }
+  },
+  "Routes": [
+    {
+      "ID": "route-chat-default",
+      "ModelID": "chat-default",
+      "ProviderID": "openai-default",
+      "AdapterID": "adapter-openai-default",
+      "UpstreamModel": "gpt-default",
+      "Priority": 100,
+      "Enabled": true,
+      "Protocol": "openai_chat",
+      "Retry": {},
+      "Timeout": {}
+    }
+  ],
+  "Adapters": {
+    "adapter-openai-default": {
+      "ID": "adapter-openai-default",
+      "Name": "OpenAI Default Adapter",
+      "Version": 1,
+      "SDKKind": "openai",
+      "Protocol": "openai_chat",
+      "Auth": {
+        "Kind": "bearer_header",
+        "Header": "Authorization",
+        "Prefix": "Bearer",
+        "CredentialRef": "vault://openai-default/credential/default"
+      },
+      "Capability": {
+        "Require": ["chat", "streaming"],
+        "Deny": []
+      },
+      "Thinking": {
+        "Supported": true,
+        "DefaultEffort": "medium",
+        "EffortMapping": {
+          "none": "none",
+          "minimal": "minimal",
+          "low": "low",
+          "medium": "medium",
+          "high": "high",
+          "xhigh": "high",
+          "max": "high"
+        },
+        "BudgetMapping": {
+          "low": 2000,
+          "medium": 4000,
+          "high": 8000
+        },
+        "MinBudgetToken": 0,
+        "MaxBudgetToken": 8000
+      },
+      "Request": {
+        "AllowedHeaders": ["Content-Type", "Accept"],
+        "AllowedQuery": [],
+        "Rules": []
+      },
+      "Response": {
+        "Rules": [
+          {
+            "ID": "resp-429",
+            "Priority": 10,
+            "Match": {
+              "HTTPStatuses": [429]
+            },
+            "Output": {
+              "HTTPStatus": 429,
+              "ErrorCode": "rate_limited",
+              "ErrorType": "rate_limited",
+              "Message": "upstream rate limited"
+            }
+          }
+        ]
+      },
+      "Retry": {
+        "MaxTotalAttempts": 3,
+        "MaxSameTargetAttempts": 2,
+        "MaxTotalDuration": "45s",
+        "Backoff": "500ms",
+        "Rules": [
+          {
+            "ID": "retry-429",
+            "Priority": 10,
+            "HTTPStatuses": [429],
+            "Action": "next_credential"
+          },
+          {
+            "ID": "retry-5xx",
+            "Priority": 20,
+            "HTTPStatuses": [500, 502, 503, 504],
+            "Action": "next_route"
+          }
+        ]
+      },
+      "Timeout": {
+        "RequestTimeout": "120s",
+        "TTFTTimeout": "20s",
+        "StreamIdleTimeout": "30s",
+        "StreamMaxLifetime": "300s",
+        "RetryBackoff": "500ms"
+      }
+    }
+  }
+}

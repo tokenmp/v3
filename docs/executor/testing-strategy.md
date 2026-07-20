@@ -5,7 +5,7 @@
 - 架构来源：`architecture.md`
 - API 契约：`packages/contracts/openapi/executor/v1.yaml`
 
-Foundation 已实施的测试范围：运行时配置校验、`GET` / `HEAD /healthz`、优雅关闭、config、identity、quota、request log 和 runtime 端口的 Mock/InMemory contract 测试，以及 generated transport 的生成物标记检查（`freshness_test.go`）与路由契约一致性测试（`internal/server/contract_test.go`）；其中 quota 覆盖 reservation 从 `reserved` 到 `finalized` 或 `released` 的唯一终态、同终态幂等和相反终态冲突。本文其余 SDK、业务 adapter、公开模型运行时路由、流处理、集成、fuzz、性能、Docker 与 CI 测试仍是后续设计。
+Foundation 已实施的测试范围：运行时配置校验、`GET` / `HEAD /healthz`、优雅关闭、config、identity、quota、request log 和 runtime 端口的 Mock/InMemory contract 测试，以及 generated transport 的生成物标记检查（`freshness_test.go`）与路由契约一致性测试（`internal/server/contract_test.go`）；其中 quota 覆盖 reservation 从 `reserved` 到 `finalized` 或 `released` 的唯一终态、同终态幂等和相反终态冲突。Config compiler/snapshot 阶段已实施 `snapshot.Compile` → `adapter.Compile`、`internal/adapter/compiler_test.go`、`internal/snapshot/compiler_test.go`、`store_test.go`（无快照、发布深拷贝、旧 revision 稳定、被拒发布保留 last known good、并发读者/发布者）和 fixture tests。三份 fixture 以 `DisallowUnknownFields` 严格解码、secret 扫描、枚举/duration/round-trip/HTTPS BaseURL 检查后实际编译和发布；测试还覆盖 xfyun `503→429`、thinking 至多 `medium`，以及 Anthropic `529→429`。C01–C27 相关 compiler/snapshot 安全、默认值、immutability 与 determinism 测试均已实施，详见第 4 节；`FuzzCompile` 已作为 compiler fuzz smoke 实施。本文其余 SDK、业务 adapter、公开模型运行时路由、流处理、集成、其他 fuzz target、持续 fuzz、性能、Docker 与 CI 测试仍是后续设计。
 
 ## 1. 测试目标
 
@@ -221,35 +221,32 @@ type UpstreamScenario struct {
 
 ## 4. Config Compiler 测试矩阵
 
-| 编号 | 场景 | 期望 |
-|---|---|---|
-| C01 | 最小有效配置 | 编译成功 |
-| C02 | 空配置 | 编译成功但无业务 route；readiness/调用按策略失败 |
-| C03 | 重复 adapter id/name | 拒绝 |
-| C04 | Route 引用未知 Provider | 拒绝 |
-| C05 | Provider 引用未知 Adapter | 拒绝 |
-| C06 | 未知 SDK kind | 拒绝 |
-| C07 | 重复 rule id | 拒绝 |
-| C08 | 同 scope/priority/specificity 的冲突 response rule | 拒绝 |
-| C09 | 两个 request rule 写同一路径不同值 | 拒绝 |
-| C10 | remove Provider 必填字段 | 拒绝 |
-| C11 | 不支持的 DSL action | 拒绝 |
-| C12 | 非法 JSON path | 拒绝 |
-| C13 | Thinking mapping 缺少 Provider 声明支持的 level | 编译拒绝；不允许运行时猜测 |
-| C14 | timeout 为负数 | 拒绝 |
-| C15 | timeout 字段缺失 | 使用默认值 |
-| C16 | timeout 显式为 0 | 拒绝；不解释为无限或缺失 |
-| C17 | timeout 超硬上限 | 拒绝，不静默 clamp |
-| C18 | TTFT > request timeout | 拒绝 |
-| C19 | idle > stream lifetime | 拒绝 |
-| C20 | retry attempts 字段缺失 | 使用代码默认 |
-| C21 | retry attempts 显式为 0 | 禁用重试 |
-| C22 | retry attempts 超硬上限 | 拒绝 |
-| C23 | fallback 形成循环 | 拒绝 |
-| C24 | 配置 map/slice 编译后被原始对象修改 | CompiledSnapshot 不受影响 |
-| C25 | snapshot revision 缺失 | 拒绝 |
-| C26 | rule priority 相同但 specificity 不同 | 更具体规则确定性优先 |
-| C27 | 完全相同规则顺序随机化 | 编译结果和运行结果一致 |
+C01–C27 是已实施的 compiler/snapshot 完成定义。`internal/adapter/compiler_test.go` 的 `TestCompileC02EmptyConfigProducesNoRoutes`、`TestCompileC03ToC12IdentityRulesAndDSLGuards`、`TestCompileC13ToC22ThinkingTimeoutRetryAndPrecedence`、`TestCompileC23ToC27FallbackDeterminismAndNoAliases`，连同基础 compiler、snapshot Store 与 fixture tests，直接验证下列范围；`FuzzCompile` 为 parser/DSL fuzz smoke。
+
+| 编号 | 已实施场景与断言 |
+|---|---|
+| C01 | 最小有效配置可编译，并应用默认值、硬上限及 timeout 关系。 |
+| C02 | 空配置可编译为无业务 route 的 config。 |
+| C03 | map key/ID mismatch、重复名称和重复 route ID 被拒绝。 |
+| C04–C05 | 未知 model/provider/adapter 引用被拒绝。 |
+| C06 | 未知 SDK kind 被拒绝。 |
+| C07 | request/response/retry rule 的重复 ID 被拒绝。 |
+| C08 | response priority 的真实冲突被拒绝；非冲突规则确定性排序。 |
+| C09 | 同一 JSON path 的冲突写入被拒绝。 |
+| C10 | 受保护字段不能通过有限 DSL remove/rename/set 修改。 |
+| C11 | 非法 action 及非 allowlisted/denylisted header/query 被拒绝。 |
+| C12 | RFC 6901 JSON pointer 的合法性、深度和长度边界受校验。 |
+| C13 | thinking output/budget 必须受 model capability 限制。 |
+| C14–C17 | 负数、零、超硬上限 duration 被拒绝；缺失字段应用代码默认值。 |
+| C18–C19 | TTFT 不得大于 request，idle 不得大于 stream lifetime。 |
+| C20–C22 | retry 默认值、显式零禁用、上限和 code → global → adapter → provider → route precedence 受校验。 |
+| C23 | fallback cycle 被拒绝，深链迭代处理。 |
+| C24 | raw input、compiled clone、published Store value 和 `Current` view 之间不共享可变别名。 |
+| C25 | 缺失或不匹配 snapshot revision、零 generation 与 invalid publish 被拒绝。 |
+| C26 | response rule 与 route 按稳定 priority/ID 规则确定性排序，真实冲突拒绝。 |
+| C27 | 编译结果不依赖 map iteration；clone、排序与 Store view 保持确定性。 |
+
+Compiler 默认值已由测试断言：request `2m`、TTFT `45s`、stream idle `30s`、stream max lifetime `10m`、retry backoff `200ms`、max total attempts `3`、max same-target attempts `2`、max total retry duration `90s`。fixture 的显式值不替代这些缺失字段默认值断言。
 
 ## 5. Model Selector 与 Routing 测试
 
@@ -653,6 +650,10 @@ go test -race ./...
 
 ### 16.1 Fuzz targets
 
+已实施的唯一 fuzz target 是 `internal/adapter/compiler_test.go` 中的 `FuzzCompile`：它以变化的 Provider Base URL 和有限 DSL JSON pointer 调用 `Compile`，作为 compiler fuzz smoke。除常规 `go test` 对其 seed 的执行外，尚未配置短时或持续 fuzz 运行。
+
+以下 target 仍是后续设计，尚未实现：
+
 ```text
 FuzzParseModelSelector
 FuzzCompileAdapterConfig
@@ -664,7 +665,7 @@ FuzzMapUpstreamError
 FuzzRenderProtocolError
 ```
 
-不变量：
+这些 target 的不变量：
 
 - 不 panic；
 - 不越界；
@@ -756,7 +757,7 @@ pnpm --filter @tokenmp/contracts check:generated:executor
 cd services/executor && go test ./internal/server/...
 ```
 
-`check:generated:executor` 是现有 `go-auth` CI job 中必经的新鲜度门禁；`go test ./internal/server/...`（路由一致性）与 Docker/集成验证仍待后续独立阶段（见阶段 14）。
+现有 `go-auth` CI job 已运行 `check:generated:executor`、generated transport/route conformance race tests，以及从 `services/executor` 执行的 `go test -race -count=1 ./internal/adapter/... ./internal/snapshot/...`。后者是 Config compiler/immutable snapshot Store 的最小 race 门禁，仅覆盖纯 Go compiler/snapshot packages；不运行数据库、SDK、runtime config source 或 request pipeline，也不构成独立 Executor CI job。Docker/集成验证仍待后续独立阶段（见阶段 14）。
 
 ### `executor-integration`
 
@@ -768,7 +769,7 @@ go test -race -count=1 ./test/integration/...
 
 ### `executor-fuzz-smoke`
 
-在 Config/Protocol parser 实现稳定后，对指定 fuzz target 执行短时 smoke fuzz。完整长时 fuzz 放定时任务或手工执行，不阻塞 Foundation 阶段。
+该 CI 分组尚未实施。已存在的 `FuzzCompile` 可在未来由此分组执行短时 smoke fuzz；其他 target 必须先实现。完整长时或持续 fuzz 应放在定时任务或手工执行，尚未实施，且不阻塞 Foundation 阶段。
 
 ### `executor-docker`
 
@@ -780,7 +781,7 @@ go test -race -count=1 ./test/integration/...
 |---|---|
 | Foundation | **已实施**：运行时 config、health、graceful shutdown，以及 Mock/InMemory ports 和 quota terminal contract/unit tests |
 | Codegen | **已实施**：freshness + route/HTTP conformance（不表示 runtime 路由注册或业务执行） |
-| Config model | C01–C27 + compiler fuzz smoke |
+| Config compiler/snapshot | **已实施（模块内 + 最小 CI race 门禁）**：compiler、immutable generation-aware Store、三份 fixture 的严格解码/真实编译/发布测试、C01–C27 覆盖和 `FuzzCompile` smoke；现有 `go-auth` job 运行 `go test -race -count=1 ./internal/adapter/... ./internal/snapshot/...`，不运行 DB/SDK/runtime；默认值已与架构基线对齐 |
 | Routing | selector + candidate scope + deterministic ordering |
 | Adapter engine | thinking + DSL + response mapping |
 | OpenAI SDK | request/response + retry=0 + context cancel |
