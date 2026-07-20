@@ -77,7 +77,7 @@ docs/        # 架构、ADR、接口、数据与运维文档
 tools/       # 仓库级脚本和工程工具
 ```
 
-仓库级 workspace、工具链及顶层逻辑分区已经创建。已实施模块为 `packages/ui-tokens`、`packages/contracts`、`services/auth` 与 `services/executor`：contracts 包含 Auth 和 Executor 的语言中立 API 契约；Auth 已实现 Identity Flows；Executor 处于 Mock-first Foundation 阶段，已实现 health、配置、优雅关闭、Mock/InMemory ports 与 quota reservation 终态状态机，但公开模型业务路由尚未实现。contracts 侧 Executor 生成配置/脚本已预置且为 experimental；`services/executor` 尚未生成、提交或注册 generated models/server，`check:generated:executor` 尚非现行门禁。apps、infra 和 tools 当前没有具体模块。后续每个模块必须在实施前由用户确认，并通过独立变更引入。
+仓库级 workspace、工具链及顶层逻辑分区已经创建。已实施模块为 `packages/ui-tokens`、`packages/contracts`、`services/auth` 与 `services/executor`：contracts 包含 Auth 和 Executor 的语言中立 API 契约；Auth 已实现 Identity Flows；Executor 处于 Mock-first Foundation 阶段，已实现 health、配置、优雅关闭、Mock/InMemory ports 与 quota reservation 终态状态机，但公开模型业务路由尚未实现。contracts 侧 Executor 生成配置/脚本、generated models/strict server、adapter skeleton 与 route/HTTP conformance tests 已实施；生成物随变更提交，`check:generated:executor` 是现有 `go-auth` CI job 中的门禁步骤。公开模型业务路由不注册到 runtime，业务执行未实现；仍无数据库、SDK、Docker 或独立 Executor CI job。apps、infra 和 tools 当前没有具体模块。后续每个模块必须在实施前由用户确认，并通过独立变更引入。
 
 ## 5. 可部署单元规则
 
@@ -301,7 +301,7 @@ TokenMP v3 是多语言 Monorepo：
 - Go workspace：`go.work` 已创建，包含 `use ./services/auth` 与 `use ./services/executor`。
 - 当前模块数量：4（`packages/ui-tokens`、`packages/contracts`、`services/auth`、`services/executor`）；其他顶层分区及其 `AGENTS.md` 仍属于仓库骨架，不代表具体应用、infra 或 tool 已实施。
 - `services/auth/` 已实现 Auth Identity Flows（注册/登录/JWT/Refresh Token 轮换等，见 ADR 0005）。
-- `services/executor/` 是 Mock-first Foundation：已实现 health、配置、优雅关闭、Mock/InMemory ports 与 quota reservation 终态状态机；无数据库、SDK、Docker、CI 或公开模型业务路由。contracts 侧 Executor 生成配置/脚本已预置且为 experimental；`services/executor` 尚未生成、提交或注册 generated models/server，`check:generated:executor` 尚非现行门禁。
+- `services/executor/` 是 Mock-first Foundation：已实现 health、配置、优雅关闭、Mock/InMemory ports 与 quota reservation 终态状态机；无数据库、SDK、Docker、CI 或公开模型业务路由。contracts 侧 Executor 生成配置/脚本、generated models/strict server、adapter skeleton 与 route/HTTP conformance tests 已实施；生成物随变更提交，`check:generated:executor` 是现有 `go-auth` CI job 中的门禁步骤。公开模型业务路由不注册到 runtime，业务执行未实现；仍无数据库、SDK、Docker 或独立 Executor CI job。
 
 详细理由见 `docs/adr/0001-monorepo-tooling.md` 与 `docs/adr/0004-auth-service-foundation.md`。
 

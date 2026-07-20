@@ -5,7 +5,7 @@
 - 架构来源：`architecture.md`
 - API 契约：`packages/contracts/openapi/executor/v1.yaml`
 
-Foundation 已实施的测试范围：运行时配置校验、`GET` / `HEAD /healthz`、优雅关闭、以及 config、identity、quota、request log 和 runtime 端口的 Mock/InMemory contract 测试；其中 quota 覆盖 reservation 从 `reserved` 到 `finalized` 或 `released` 的唯一终态、同终态幂等和相反终态冲突。本文其余 SDK、adapter、公开模型路由、流处理、集成、fuzz、性能、Docker 与 CI 测试仍是后续设计。
+Foundation 已实施的测试范围：运行时配置校验、`GET` / `HEAD /healthz`、优雅关闭、config、identity、quota、request log 和 runtime 端口的 Mock/InMemory contract 测试，以及 generated transport 的生成物标记检查（`freshness_test.go`）与路由契约一致性测试（`internal/server/contract_test.go`）；其中 quota 覆盖 reservation 从 `reserved` 到 `finalized` 或 `released` 的唯一终态、同终态幂等和相反终态冲突。本文其余 SDK、业务 adapter、公开模型运行时路由、流处理、集成、fuzz、性能、Docker 与 CI 测试仍是后续设计。
 
 ## 1. 测试目标
 
@@ -55,12 +55,15 @@ Optional live-provider certification (manual/isolated, not baseline CI)
 - 生成代码与契约新鲜；
 - 实际路由 method+path 与契约双向一致。
 
-建议新增：
+已实施：
 
 ```text
-packages/contracts/tests/openapi-executor-v1.test.mjs
-services/executor/internal/server/contract_test.go
+packages/contracts/tests/openapi-executor-v1.test.mjs   # 契约本身验证
+services/executor/internal/contract/executorv1/freshness_test.go   # 生成物标记检查
+services/executor/internal/server/contract_test.go   # generated Handler 路由与契约双向比较
 ```
+
+注：`internal/server/contract_test.go` 以 kin-openapi 加载契约（对 `description`/`nullable` 与 `$ref` 的 OAS 3.0 同位词法使用 `AllowExtraSiblingFields` 宽容，与项目契约验证器一致），遍历 generated `Handler` 的 Chi 路由，与契约 method+path 双向比较（7 条路由）。该测试仅证明生成路由与契约一致，不代表运行时已注册业务路由——运行时 `main` 仍只服务 `/healthz`。
 
 ### 2.2 Pure unit tests
 
@@ -746,9 +749,14 @@ go build ./...
 pnpm --filter @tokenmp/contracts lint
 pnpm --filter @tokenmp/contracts typecheck
 pnpm --filter @tokenmp/contracts test
-# services/executor 与生成模式落地后才启用：
+# generated models/strict server 随变更提交，纳入新鲜度检查；
+# 该检查已作为最小新鲜度步骤接入现有 go-auth CI job：
 pnpm --filter @tokenmp/contracts check:generated:executor
+# 路由契约一致性（kin-openapi 加载契约与 generated Handler 双向比较）：
+cd services/executor && go test ./internal/server/...
 ```
+
+`check:generated:executor` 是现有 `go-auth` CI job 中必经的新鲜度门禁；`go test ./internal/server/...`（路由一致性）与 Docker/集成验证仍待后续独立阶段（见阶段 14）。
 
 ### `executor-integration`
 
@@ -771,7 +779,7 @@ go test -race -count=1 ./test/integration/...
 | 阶段 | 最低门槛 |
 |---|---|
 | Foundation | **已实施**：运行时 config、health、graceful shutdown，以及 Mock/InMemory ports 和 quota terminal contract/unit tests |
-| Codegen | freshness + route conformance |
+| Codegen | **已实施**：freshness + route/HTTP conformance（不表示 runtime 路由注册或业务执行） |
 | Config model | C01–C27 + compiler fuzz smoke |
 | Routing | selector + candidate scope + deterministic ordering |
 | Adapter engine | thinking + DSL + response mapping |
