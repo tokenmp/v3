@@ -1,0 +1,169 @@
+{
+  "Revision": "2026-07-21-anthropic",
+  "CreatedAt": "2026-07-21T00:00:00Z",
+  "Global": {
+    "Retry": {
+      "MaxTotalAttempts": 3,
+      "MaxSameTargetAttempts": 2,
+      "MaxTotalDuration": "45s",
+      "Backoff": "500ms",
+      "Rules": [
+        {
+          "ID": "global-retry-429",
+          "Priority": 10,
+          "HTTPStatuses": [429],
+          "Action": "next_credential"
+        }
+      ]
+    },
+    "Timeout": {
+      "RequestTimeout": "180s",
+      "TTFTTimeout": "30s",
+      "StreamIdleTimeout": "45s",
+      "StreamMaxLifetime": "600s",
+      "RetryBackoff": "500ms"
+    }
+  },
+  "Models": {
+    "chat-anthropic": {
+      "ID": "chat-anthropic",
+      "DisplayName": "Anthropic Chat",
+      "Capabilities": ["chat", "streaming", "tools", "vision", "thinking"],
+      "Thinking": {
+        "Supported": true,
+        "DefaultEffort": "medium",
+        "MaxEffort": "max",
+        "MinBudgetToken": 0,
+        "MaxBudgetToken": 32000
+      }
+    }
+  },
+  "Providers": {
+    "anthropic-default": {
+      "ID": "anthropic-default",
+      "Name": "Anthropic Default",
+      "BaseURL": "https://api.anthropic.example",
+      "SDKKind": "anthropic",
+      "Protocol": "anthropic_messages",
+      "Retry": {},
+      "Timeout": {}
+    }
+  },
+  "Routes": [
+    {
+      "ID": "route-chat-anthropic",
+      "ModelID": "chat-anthropic",
+      "ProviderID": "anthropic-default",
+      "AdapterID": "adapter-anthropic-default",
+      "UpstreamModel": "claude-default",
+      "Priority": 100,
+      "Enabled": true,
+      "Protocol": "anthropic_messages",
+      "Retry": {},
+      "Timeout": {}
+    }
+  ],
+  "Adapters": {
+    "adapter-anthropic-default": {
+      "ID": "adapter-anthropic-default",
+      "Name": "Anthropic Default Adapter",
+      "Version": 1,
+      "SDKKind": "anthropic",
+      "Protocol": "anthropic_messages",
+      "Auth": {
+        "Kind": "api_key_header",
+        "Header": "x-api-key",
+        "Prefix": "",
+        "CredentialRef": "vault://anthropic-default/credential/default"
+      },
+      "Capability": {
+        "Require": ["chat", "streaming", "tools"],
+        "Deny": []
+      },
+      "Thinking": {
+        "Supported": true,
+        "DefaultEffort": "medium",
+        "EffortMapping": {
+          "none": "none",
+          "minimal": "minimal",
+          "low": "low",
+          "medium": "medium",
+          "high": "high",
+          "xhigh": "high",
+          "max": "high"
+        },
+        "BudgetMapping": {
+          "low": 4000,
+          "medium": 8000,
+          "high": 16000,
+          "max": 32000
+        },
+        "MinBudgetToken": 0,
+        "MaxBudgetToken": 32000
+      },
+      "Request": {
+        "AllowedHeaders": ["Content-Type", "Accept", "x-api-key", "anthropic-version"],
+        "AllowedQuery": [],
+        "Rules": []
+      },
+      "Response": {
+        "Rules": [
+          {
+            "ID": "resp-529-to-429",
+            "Priority": 10,
+            "Match": {
+              "HTTPStatuses": [529],
+              "ErrorTypes": ["overloaded"]
+            },
+            "Output": {
+              "HTTPStatus": 429,
+              "ErrorCode": "rate_limited",
+              "ErrorType": "rate_limited",
+              "Message": "upstream overloaded; retryable as rate limited"
+            }
+          },
+          {
+            "ID": "resp-429",
+            "Priority": 20,
+            "Match": {
+              "HTTPStatuses": [429]
+            },
+            "Output": {
+              "HTTPStatus": 429,
+              "ErrorCode": "rate_limited",
+              "ErrorType": "rate_limited",
+              "Message": "upstream rate limited"
+            }
+          }
+        ]
+      },
+      "Retry": {
+        "MaxTotalAttempts": 3,
+        "MaxSameTargetAttempts": 2,
+        "MaxTotalDuration": "45s",
+        "Backoff": "500ms",
+        "Rules": [
+          {
+            "ID": "retry-429",
+            "Priority": 10,
+            "HTTPStatuses": [429],
+            "Action": "next_credential"
+          },
+          {
+            "ID": "retry-5xx",
+            "Priority": 20,
+            "HTTPStatuses": [500, 502, 503, 529],
+            "Action": "next_route"
+          }
+        ]
+      },
+      "Timeout": {
+        "RequestTimeout": "180s",
+        "TTFTTimeout": "30s",
+        "StreamIdleTimeout": "45s",
+        "StreamMaxLifetime": "600s",
+        "RetryBackoff": "500ms"
+      }
+    }
+  }
+}
