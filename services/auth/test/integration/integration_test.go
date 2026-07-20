@@ -31,10 +31,10 @@ import (
 
 	"github.com/tokenmp/v3/services/auth/internal/auth"
 	"github.com/tokenmp/v3/services/auth/internal/database"
-	"github.com/tokenmp/v3/services/auth/internal/handler"
 	"github.com/tokenmp/v3/services/auth/internal/repository"
 	"github.com/tokenmp/v3/services/auth/internal/security/jwt"
 	"github.com/tokenmp/v3/services/auth/internal/server"
+	"github.com/tokenmp/v3/services/auth/internal/transport/authv1api"
 )
 
 // dbDSN returns the test database URL. It must point at a database dedicated
@@ -561,7 +561,7 @@ func newAuthStack(t *testing.T, dsn string) (*httptest.Server, *auth.Service, *j
 	txRunner := repository.NewTxRunner(gdb)
 	clock := realClockUTC{}
 	svc := auth.NewService(userRepo, sessionRepo, txRunner, issuer, clock, 15*time.Minute, 30*24*time.Hour)
-	userStore := handler.NewUserRepoAdapter(userRepo)
+	userStore := authv1api.NewUserRepoAdapter(userRepo)
 
 	pinger := database.PingerFromDB(gdb)
 	srv := server.New("127.0.0.1:0", pinger, verifier, svc, userStore)

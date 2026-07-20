@@ -1,4 +1,4 @@
-package handler
+package authv1api
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 )
 
 // UserRepoAdapter adapts an auth.UserRepository into the UserStore interface
-// required by RequireUser. It loads a user and returns the fields the
+// required by bearerMiddleware. It loads a user and returns the fields the
 // middleware needs (status, token_version, role). Any repository error is
 // surfaced to the middleware, which maps every error to a uniform 401 so the
 // cause never reaches the client.

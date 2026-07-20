@@ -20,10 +20,9 @@ import (
 	"github.com/tokenmp/v3/services/auth/internal/auth"
 	"github.com/tokenmp/v3/services/auth/internal/config"
 	"github.com/tokenmp/v3/services/auth/internal/database"
-	"github.com/tokenmp/v3/services/auth/internal/handler"
 	"github.com/tokenmp/v3/services/auth/internal/repository"
 	"github.com/tokenmp/v3/services/auth/internal/security/jwt"
-	"github.com/tokenmp/v3/services/auth/internal/server"
+	"github.com/tokenmp/v3/services/auth/internal/transport/authv1api"
 )
 
 func main() {
@@ -95,10 +94,17 @@ func run() error {
 
 	clock := realClock{}
 	authService := auth.NewService(userRepo, sessionRepo, txRunner, issuer, clock, cfg.AccessTokenTTL, cfg.RefreshTokenTTL)
-	userStore := handler.NewUserRepoAdapter(userRepo)
+	userStore := authv1api.NewUserRepoAdapter(userRepo)
 
 	pinger := database.PingerFromDB(db)
-	srv := server.New(cfg.HTTPAddr, pinger, verifier, authService, userStore)
+	srv := authv1api.NewServer(authv1api.ServerConfig{
+		Addr:        cfg.HTTPAddr,
+		Pinger:      pinger,
+		JWTVerifier: verifier,
+		UserStore:   userStore,
+		AuthService: authService,
+		AccessTTL:   cfg.AccessTokenTTL,
+	})
 
 	errCh := make(chan error, 1)
 	go func() {

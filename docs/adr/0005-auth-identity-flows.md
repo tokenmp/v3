@@ -210,8 +210,9 @@ internal/security
   refresh           — 32-byte token gen + SHA-256 hash
 internal/repository — GORM user/session repos + TxRunner; classified errors
 internal/auth       — service: Register/Login/Refresh/Logout/LogoutAll/Me/ChangePassword
-internal/handler    — HTTP handlers + RequireUser middleware + uniform errors
-internal/server     — Chi router wiring
+internal/contract/authv1 — generated OpenAPI models + Chi strict server boundary
+internal/transport/authv1api — StrictServerInterface adapter, auth/body/cache middleware
+internal/server     — compatibility facade retained for integration tests
 ```
 
 ### Testing
@@ -228,11 +229,12 @@ internal/server     — Chi router wiring
     (family revoked and persisted despite the 401), expired/unknown refresh,
     logout idempotent, logout-all version bump, password change (success,
     wrong current, weak new), me
-  - `handler`/`middleware`: HTTP contracts for every endpoint, error body
-    shape, no-credential-leak, stale-access-after-version-bump,
-    disabled-account 401, tampered token 401, unknown-field rejection
+  - `transport/authv1api`: generated-route HTTP contracts for every endpoint,
+    error body shape, no-credential-leak, stale-access-after-version-bump,
+    disabled-account 401, tampered token 401, unknown-field rejection, and
+    cache/header behavior
   - `config`: JWT env validation (negative TTL, refresh <= access)
-  - `server`: routes + shutdown (unchanged from foundation)
+  - `server`: compatibility-facade routes + shutdown
 - **Integration tests** (`-tags=integration`, CI only, real PostgreSQL 17):
   full register → login → /me → refresh rotation → reuse (family revoked) →
   bcrypt legacy upgrade (asserts stored hash → Argon2id, no version bump) →
@@ -283,7 +285,8 @@ index). AutoMigrate remains forbidden.
   `token_version` bump (password change, logout-all).
 - The README, module AGENTS.md, OpenAPI and docs index are updated; the
   foundation "not implemented" status is replaced by the implemented flow
-  status.
+  status. The historical `internal/handler` test coverage migrated to
+  `internal/transport/authv1api` when the contract-generated boundary landed.
 - Rate limiting remains a documented deployment blocker.
 - Key management is now a deployment concern: operators must provision and
   rotate the Ed25519 key pair out-of-band; the runtime image does not contain

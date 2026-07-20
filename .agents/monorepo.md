@@ -77,7 +77,7 @@ docs/        # 架构、ADR、接口、数据与运维文档
 tools/       # 仓库级脚本和工程工具
 ```
 
-仓库级 workspace、工具链及顶层逻辑分区已经创建。`packages/ui-tokens` 是首个 Node.js workspace 模块；`services/auth` 是首个 Go 服务（Auth Foundation）。apps、infra 和 tools 当前没有具体模块。后续每个模块必须在实施前由用户确认，并通过独立变更引入。
+仓库级 workspace、工具链及顶层逻辑分区已经创建。`packages/ui-tokens` 是首个 Node.js workspace 模块；`packages/contracts` 是语言中立 API 契约 package；`services/auth` 是首个 Go 服务（已实现 Auth Identity Flows）。apps、infra 和 tools 当前没有具体模块。后续每个模块必须在实施前由用户确认，并通过独立变更引入。
 
 ## 5. 可部署单元规则
 
@@ -299,8 +299,8 @@ TokenMP v3 是多语言 Monorepo：
 - TypeScript：6.0.3。
 - Go：1.26.5，通过 `mise.toml` 固定。
 - Go workspace：`go.work` 已创建，`use ./services/auth`。
-- 当前模块数量：2（`packages/ui-tokens`、`services/auth`）；其他顶层分区及其 `AGENTS.md` 仍属于仓库骨架，不代表具体应用、infra 或 tool 已实施。
-- `services/auth/` 是首个 Go 服务，当前为 Auth Foundation（仅骨架与 health 端点，不实现注册/登录/JWT）。
+- 当前模块数量：3（`packages/ui-tokens`、`packages/contracts`、`services/auth`）；其他顶层分区及其 `AGENTS.md` 仍属于仓库骨架，不代表具体应用、infra 或 tool 已实施。
+- `services/auth/` 是首个 Go 服务，已实现 Auth Identity Flows（注册/登录/JWT/Refresh Token 轮换等，见 ADR 0005）。
 
 详细理由见 `docs/adr/0001-monorepo-tooling.md` 与 `docs/adr/0004-auth-service-foundation.md`。
 
@@ -309,7 +309,7 @@ TokenMP v3 是多语言 Monorepo：
 - 各 Go 服务的版本策略：统一版本或独立版本。
 - 发布工具和远端缓存方案。
 - 各应用与服务的运行时框架（首个 Go 服务的运行时框架已确认为 Chi + GORM，其他服务仍逐个确认）。
-- 契约格式和代码生成工具。
+- Auth Go server generation 已固定使用 oapi-codegen v2.8.0（见 `packages/contracts/` 与 ADR 0006）；其他服务或语言的代码生成策略仍未决定。
 
 Agent 提议未决选型时必须提供：
 
@@ -389,7 +389,7 @@ pnpm workspace、Turborepo 和基础 TypeScript 工具链已落地。Go workspac
 - 模块目录、职责、消费者和依赖方向。
 - 运行时框架及公开契约。
 - 如果涉及 Go，在 `go.work` 新增 `use` 条目并补充模块级 `AGENTS.md`。
-- 契约格式与代码生成策略。
+- Auth Go server generation 已固定使用 oapi-codegen v2.8.0（见 `packages/contracts/` 与 ADR 0006）；其他服务或语言的代码生成策略仍未决定。
 - 模块测试、CI、缓存和发布要求。
 - Docker build context、镜像和部署边界。
 - 现有代码来源、迁移顺序和兼容要求。

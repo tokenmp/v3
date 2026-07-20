@@ -57,9 +57,6 @@ func TestServer_Readyz503OnPingError(t *testing.T) {
 
 func TestServer_RecovererNoPanic(t *testing.T) {
 	s := New("127.0.0.1:0", fakePinger{nil}, nil, nil, nil)
-	// chi middleware.Recoverer swallows panics and returns 500; ensure
-	// a handler panic does not crash the test goroutine.
-	// We simulate via direct call to ensure router is wired with recoverer.
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	s.Router().ServeHTTP(rec, req)
