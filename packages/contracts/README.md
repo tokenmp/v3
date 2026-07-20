@@ -20,6 +20,7 @@ Auth conformance test ──直接加载验证──▶ @tokenmp/contracts
 | 契约 | 服务 | 版本 | 路径 |
 |---|---|---|---|
 | Auth API | Auth Service | v1 | `openapi/auth/v1.yaml` |
+| Executor API | Executor Service | v1 | `openapi/executor/v1.yaml` |
 
 ## 消费者须知
 
@@ -42,7 +43,9 @@ pnpm --filter @tokenmp/contracts typecheck           # 跨文件 operationId 唯
 pnpm --filter @tokenmp/contracts test                # Node test runner 契约测试
 pnpm --filter @tokenmp/contracts build               # 复制契约到 dist/
 pnpm --filter @tokenmp/contracts generate:auth:go    # 生成 Auth Go server 代码
-pnpm --filter @tokenmp/contracts check:generated     # 验证生成物新鲜度
+pnpm --filter @tokenmp/contracts generate:executor:go # 生成 Executor Go server 代码
+pnpm --filter @tokenmp/contracts check:generated     # 验证 Auth 生成物新鲜度
+pnpm --filter @tokenmp/contracts check:generated:executor # 验证 Executor 生成物新鲜度
 ```
 
 ## Go 生成治理

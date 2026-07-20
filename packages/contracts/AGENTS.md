@@ -13,17 +13,21 @@
 - 模块说明：`README.md`
 - 架构决策：`../../docs/adr/0006-api-contracts-package.md`
 - Auth 契约：`openapi/auth/v1.yaml`
-- Go 生成配置：`go/auth-v1-models.yaml`、`go/auth-v1-server.yaml`
-- Go 生成脚本：`go/generate.sh`
-- Go 新鲜度检查：`go/check-generated.sh`
+- Executor 契约：`openapi/executor/v1.yaml`
+- Go 生成配置：`go/auth-v1-models.yaml`、`go/auth-v1-server.yaml`、`go/executor-v1-models.yaml`、`go/executor-v1-server.yaml`
+- Go 生成脚本：`go/generate.sh`、`go/generate-executor.sh`
+- Go 新鲜度检查：`go/check-generated.sh`、`go/check-generated-executor.sh`
 
 ## 对外能力与返回契约
 
 | 能力/导出 | 输入与前置条件 | 返回/副作用 | 稳定性 | 契约来源 |
 |---|---|---|---|---|
 | `@tokenmp/contracts/openapi/auth/v1.yaml` | YAML 读取能力 | Auth Service v1 OpenAPI 3.0.3 契约；无副作用 | stable | `openapi/auth/v1.yaml` |
-| `generate:auth:go` 脚本 | Go 1.26.5+，oapi-codegen v2.8.0（自动下载） | 生成 `models.gen.go` 与 `server.gen.go` | stable | 两份 `go/auth-v1-*.yaml` + `openapi/auth/v1.yaml` |
+| `@tokenmp/contracts/openapi/executor/v1.yaml` | YAML 读取能力 | Executor Service v1 OpenAPI 3.0.3 契约；无副作用 | stable | `openapi/executor/v1.yaml` |
+| `generate:auth:go` 脚本 | Go 1.26.5+，oapi-codegen v2.8.0（自动下载） | 生成 Auth `models.gen.go` 与 `server.gen.go` | stable | 两份 `go/auth-v1-*.yaml` + `openapi/auth/v1.yaml` |
+| `generate:executor:go` 脚本 | Go 1.26.5+，oapi-codegen v2.8.0（自动下载） | 生成 Executor `models.gen.go` 与 `server.gen.go` | stable | 两份 `go/executor-v1-*.yaml` + `openapi/executor/v1.yaml` |
 | `check:generated` 脚本 | Go 1.26.5+ | 临时目录重生成并 byte compare；exit 0=新鲜，exit 1=过期 | stable | 同上 |
+| `check:generated:executor` 脚本 | Go 1.26.5+ | 临时目录重生成并 byte compare；exit 0=新鲜，exit 1=过期 | stable | 同上 |
 
 ## 依赖关系与消费者
 
@@ -68,9 +72,11 @@ pnpm --filter @tokenmp/contracts build
 
 # Go 代码生成
 pnpm --filter @tokenmp/contracts generate:auth:go
+pnpm --filter @tokenmp/contracts generate:executor:go
 
 # 生成物新鲜度检查
 pnpm --filter @tokenmp/contracts check:generated
+pnpm --filter @tokenmp/contracts check:generated:executor
 ```
 
 - 最小验证：`lint`（YAML 基本结构 + 禁止内部术语）、`typecheck`（跨文件 operationId 唯一性 + $ref 解析）、`test`（Node test runner 契约测试）、`build`（复制到 dist）。
