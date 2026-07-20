@@ -182,6 +182,89 @@ describe("Malformed YAML detection", () => {
   });
 });
 
+describe("Schema Object required validation", () => {
+  const tmpDir = path.join(packageRoot, "tests", "__tmp_schema_required__");
+
+  after(async () => {
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it("rejects non-string-array required values in nested Schema Objects without rejecting operation required flags", async () => {
+    const fixture = `openapi: 3.0.3
+info:
+  title: Schema required fixture
+  version: 0.1.0
+paths:
+  /widgets:
+    post:
+      operationId: createWidget
+      parameters:
+        - name: dry_run
+          in: query
+          required: true
+          schema:
+            type: boolean
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                payload:
+                  type: object
+                  required: true
+                list:
+                  type: array
+                  items:
+                    type: object
+                    required: [1]
+                map:
+                  type: object
+                  additionalProperties:
+                    type: object
+                    required: false
+                combined:
+                  allOf:
+                    - type: object
+                      required: invalid
+                  anyOf:
+                    - type: object
+                      required: [valid, 2]
+                  oneOf:
+                    - type: object
+                      required: null
+                  not:
+                    type: object
+                    required: {}
+components:
+  schemas:
+    Root:
+      type: object
+      required: true
+`;
+    const tmpFile = path.join(tmpDir, "schema-required.yaml");
+    await mkdir(tmpDir, { recursive: true });
+    await writeFile(tmpFile, fixture, "utf8");
+
+    const errors = await validateOpenAPI([tmpFile], "--lint");
+    const expectedPointers = [
+      "#/components/schemas/Root/required",
+      "#/paths/~1widgets/post/requestBody/content/application~1json/schema/properties/payload/required",
+      "#/paths/~1widgets/post/requestBody/content/application~1json/schema/properties/list/items/required",
+      "#/paths/~1widgets/post/requestBody/content/application~1json/schema/properties/map/additionalProperties/required",
+      "#/paths/~1widgets/post/requestBody/content/application~1json/schema/properties/combined/allOf/0/required",
+      "#/paths/~1widgets/post/requestBody/content/application~1json/schema/properties/combined/anyOf/0/required",
+      "#/paths/~1widgets/post/requestBody/content/application~1json/schema/properties/combined/oneOf/0/required",
+      "#/paths/~1widgets/post/requestBody/content/application~1json/schema/properties/combined/not/required",
+    ];
+    for (const pointer of expectedPointers) {
+      assert.ok(errors.some((error) => error.startsWith(pointer)), `Expected error at ${pointer}: ${errors.join("; ")}`);
+    }
+    assert.ok(!errors.some((error) => error.includes("/parameters/0/required") || error.includes("/requestBody/required")), errors.join("; "));
+  });
+});
+
 describe("validate.mjs exported helpers", () => {
   it("collectRefs finds all $ref values", () => {
     const obj = {

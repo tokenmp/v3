@@ -31,6 +31,84 @@ export function resolvePointer(doc, pointer) {
   return current;
 }
 
+function escapeJsonPointerToken(token) {
+  return String(token).replaceAll("~", "~0").replaceAll("/", "~1");
+}
+
+function isMapping(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Validate a Schema Object and its schema-bearing children.
+ *
+ * OpenAPI uses `required: true` on Parameter and Request Body Objects, so this
+ * intentionally runs only after reaching a Schema Object rather than scanning
+ * every `required` key in the document.
+ */
+export function validateSchemaObject(schema, pointer, errors) {
+  if (!isMapping(schema)) return;
+
+  if (
+    Object.hasOwn(schema, "required") &&
+    (!Array.isArray(schema.required) || !schema.required.every((name) => typeof name === "string"))
+  ) {
+    errors.push(`${pointer}/required: Schema Object required must be an array of strings`);
+  }
+
+  if (isMapping(schema.properties)) {
+    for (const [name, property] of Object.entries(schema.properties)) {
+      validateSchemaObject(property, `${pointer}/properties/${escapeJsonPointerToken(name)}`, errors);
+    }
+  }
+
+  if (isMapping(schema.items)) {
+    validateSchemaObject(schema.items, `${pointer}/items`, errors);
+  }
+
+  if (isMapping(schema.additionalProperties)) {
+    validateSchemaObject(schema.additionalProperties, `${pointer}/additionalProperties`, errors);
+  }
+
+  for (const keyword of ["allOf", "anyOf", "oneOf"]) {
+    if (!Array.isArray(schema[keyword])) continue;
+    for (const [index, child] of schema[keyword].entries()) {
+      validateSchemaObject(child, `${pointer}/${keyword}/${index}`, errors);
+    }
+  }
+
+  if (isMapping(schema.not)) {
+    validateSchemaObject(schema.not, `${pointer}/not`, errors);
+  }
+}
+
+/** Validate every Schema Object root in an OpenAPI document. */
+export function validateSchemaObjects(doc, errors) {
+  if (!isMapping(doc)) return;
+
+  if (isMapping(doc.components?.schemas)) {
+    for (const [name, schema] of Object.entries(doc.components.schemas)) {
+      validateSchemaObject(schema, `#/components/schemas/${escapeJsonPointerToken(name)}`, errors);
+    }
+  }
+
+  function findSchemaValues(value, pointer) {
+    if (Array.isArray(value)) {
+      for (const [index, child] of value.entries()) findSchemaValues(child, `${pointer}/${index}`);
+      return;
+    }
+    if (!isMapping(value)) return;
+
+    for (const [key, child] of Object.entries(value)) {
+      const childPointer = `${pointer}/${escapeJsonPointerToken(key)}`;
+      if (key === "schema") validateSchemaObject(child, childPointer, errors);
+      findSchemaValues(child, childPointer);
+    }
+  }
+
+  findSchemaValues(doc, "#");
+}
+
 /**
  * Validate a list of OpenAPI YAML files. Returns an array of error strings.
  * @param {string[]} files - Absolute file paths
@@ -125,6 +203,10 @@ export async function validateOpenAPI(files, mode) {
         }
       }
     }
+
+    // Schema Object `required` must be an array of property names. This is
+    // deliberately separate from OpenAPI Parameter/Request Body `required`.
+    validateSchemaObjects(doc, errors);
 
     // Intra-file operationId uniqueness
     if (doc.paths && typeof doc.paths === "object") {

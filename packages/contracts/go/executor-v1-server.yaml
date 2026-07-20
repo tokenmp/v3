@@ -1,5 +1,5 @@
 # oapi-codegen v2.8.0 configuration for Executor v1 Chi and strict server code.
-# Used by: packages/contracts/go/generate.sh
+# Used by: packages/contracts/go/generate-executor.sh
 # Output: services/executor/internal/contract/executorv1/server.gen.go
 # skip-prune preserves references to models generated into the same package.
 package: executorv1

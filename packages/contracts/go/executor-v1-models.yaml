@@ -1,5 +1,5 @@
 # oapi-codegen v2.8.0 configuration for Executor v1 HTTP models.
-# Used by: packages/contracts/go/generate.sh
+# Used by: packages/contracts/go/generate-executor.sh
 # Output: services/executor/internal/contract/executorv1/models.gen.go
 package: executorv1
 generate:
