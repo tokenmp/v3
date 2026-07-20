@@ -13,6 +13,7 @@ const openAIResponseByStatus = {
   404: "OpenAINotFound",
   429: "OpenAIRateLimit",
   500: "OpenAIServerError",
+  501: "OpenAINotImplemented",
   502: "OpenAIUpstreamError",
 };
 const anthropicResponseByStatus = {
@@ -22,6 +23,7 @@ const anthropicResponseByStatus = {
   404: "AnthropicNotFound",
   429: "AnthropicRateLimit",
   500: "AnthropicServerError",
+  501: "AnthropicNotImplemented",
   529: "AnthropicOverloaded",
 };
 const effortLevels = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
@@ -103,10 +105,10 @@ describe("Executor v1 OpenAPI contract", () => {
 
   it("binds every protocol error status to its native response component", () => {
     const openAIEndpoints = [
-      ["/v1/models", "get", { 401: "OpenAIUnauthorized", 500: "OpenAIServerError" }],
+      ["/v1/models", "get", { 401: "OpenAIUnauthorized", 500: "OpenAIServerError", 501: "OpenAINotImplemented" }],
       ["/v1/chat/completions", "post", openAIResponseByStatus],
       ["/v1/responses", "post", openAIResponseByStatus],
-      ["/v1/images/generations", "post", { 400: "OpenAIBadRequest", 401: "OpenAIUnauthorized", 404: "OpenAINotFound", 429: "OpenAIRateLimit", 500: "OpenAIServerError", 502: "OpenAIUpstreamError" }],
+      ["/v1/images/generations", "post", { 400: "OpenAIBadRequest", 401: "OpenAIUnauthorized", 404: "OpenAINotFound", 429: "OpenAIRateLimit", 500: "OpenAIServerError", 501: "OpenAINotImplemented", 502: "OpenAIUpstreamError" }],
     ];
     for (const [endpoint, method, responses] of openAIEndpoints) {
       assertErrorResponses(doc.paths[endpoint][method], responses, "OpenAI");
@@ -131,6 +133,26 @@ describe("Executor v1 OpenAPI contract", () => {
     for (const component of Object.values(anthropicResponseByStatus)) {
       assert.equal(responses[component].content["application/json"].schema.$ref, "#/components/schemas/AnthropicErrorResponse");
     }
+
+    const openAINotImplemented = responses.OpenAINotImplemented.content["application/json"].example;
+    assert.deepStrictEqual(openAINotImplemented, {
+      error: {
+        message: "This endpoint is not implemented.",
+        type: "api_error",
+        code: "NOT_IMPLEMENTED",
+        param: null,
+      },
+      status: 501,
+    });
+    const anthropicNotImplemented = responses.AnthropicNotImplemented.content["application/json"].example;
+    assert.deepStrictEqual(anthropicNotImplemented, {
+      type: "error",
+      error: {
+        type: "api_error",
+        message: "This endpoint is not implemented.",
+      },
+      request_id: "req_abc123",
+    });
   });
 
   it("documents SSE framing and each protocol's terminal event semantics", () => {

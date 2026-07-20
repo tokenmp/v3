@@ -83,6 +83,8 @@ paths:
                 $ref: '#/components/schemas/ModelListResponse'
         '401':
           $ref: '#/components/responses/OpenAIUnauthorized'
+        '501':
+          $ref: '#/components/responses/OpenAINotImplemented'
         '500':
           $ref: '#/components/responses/OpenAIServerError'
 
@@ -125,6 +127,8 @@ paths:
           $ref: '#/components/responses/OpenAINotFound'
         '429':
           $ref: '#/components/responses/OpenAIRateLimit'
+        '501':
+          $ref: '#/components/responses/OpenAINotImplemented'
         '502':
           $ref: '#/components/responses/OpenAIUpstreamError'
         '500':
@@ -173,6 +177,8 @@ paths:
           $ref: '#/components/responses/AnthropicRateLimit'
         '529':
           $ref: '#/components/responses/AnthropicOverloaded'
+        '501':
+          $ref: '#/components/responses/AnthropicNotImplemented'
         '500':
           $ref: '#/components/responses/AnthropicServerError'
 
@@ -216,6 +222,8 @@ paths:
           $ref: '#/components/responses/OpenAINotFound'
         '429':
           $ref: '#/components/responses/OpenAIRateLimit'
+        '501':
+          $ref: '#/components/responses/OpenAINotImplemented'
         '502':
           $ref: '#/components/responses/OpenAIUpstreamError'
         '500':
@@ -249,6 +257,8 @@ paths:
           $ref: '#/components/responses/OpenAINotFound'
         '429':
           $ref: '#/components/responses/OpenAIRateLimit'
+        '501':
+          $ref: '#/components/responses/OpenAINotImplemented'
         '502':
           $ref: '#/components/responses/OpenAIUpstreamError'
         '500':
@@ -341,6 +351,19 @@ components:
           schema:
             type: integer
             description: Seconds to wait before retrying.
+    OpenAINotImplemented:
+      description: Endpoint is defined by the design contract but is not implemented.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/OpenAIErrorResponse'
+          example:
+            error:
+              message: "This endpoint is not implemented."
+              type: api_error
+              code: NOT_IMPLEMENTED
+              param: null
+            status: 501
     OpenAIUpstreamError:
       description: Upstream provider error.
       content:
@@ -444,6 +467,18 @@ components:
             error:
               type: overloaded_error
               message: "服务器暂时过载，请稍后重试。"
+            request_id: req_abc123
+    AnthropicNotImplemented:
+      description: Endpoint is defined by the design contract but is not implemented.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/AnthropicErrorResponse'
+          example:
+            type: error
+            error:
+              type: api_error
+              message: "This endpoint is not implemented."
             request_id: req_abc123
     AnthropicServerError:
       description: Internal server error.

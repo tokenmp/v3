@@ -26,9 +26,9 @@
 ## 已实施模块
 
 - UI Design Tokens：`packages/ui-tokens/AGENTS.md`
-- API Contracts：`packages/contracts/AGENTS.md`（语言中立跨程序 API 协议唯一事实来源；Auth OpenAPI 契约位于 `openapi/auth/v1.yaml`；Executor OpenAPI 契约位于 `openapi/executor/v1.yaml`；Auth conformance test 是当前唯一已实施的直接消费者/验证方；oapi-codegen v2.8.0 从 Auth 契约生成 Go server 代码，输出到 `services/auth/internal/contract/authv1/{models,server}.gen.go`）
+- API Contracts：`packages/contracts/AGENTS.md`（语言中立跨程序 API 协议唯一事实来源；Auth 与 Executor OpenAPI 契约分别位于 `openapi/auth/v1.yaml` 与 `openapi/executor/v1.yaml`；oapi-codegen v2.8.0 为两个 Go 服务生成 models/strict server。Auth 与 Executor conformance tests 是已实施的直接消费者/验证方。）
 - Auth Service：`services/auth/AGENTS.md`（Go 1.26.5，首个 Go module，`go.work` 已创建）。已实现 Auth Identity Flows：注册、登录、Ed25519/EdDSA Access Token、opaque Refresh Token 轮换与 reuse 检测、logout/logout-all、/me、Argon2id 密码哈希与 bcrypt 兼容升级。Auth 实现与测试必须符合 `@tokenmp/contracts` 的协议，属于设计/构建时契约依赖，不是 Go runtime import；消费者不得读取 Auth 源码发现 API。API 路由由 oapi-codegen 生成的 Chi strict handler 注册（contract-first）。
-- Executor Service Foundation：`services/executor/AGENTS.md`（Go 1.26.5 module `github.com/tokenmp/v3/services/executor`，已加入 `go.work`）。已实施 HTTP health、运行时配置、优雅关闭、Mock/InMemory ports 和 quota reservation terminal；未实施公开模型业务路由、数据库、SDK、Docker 或 CI。contracts 侧 Executor 生成配置/脚本已预置且为 experimental；`services/executor` 尚未生成、提交或注册 generated models/server，`check:generated:executor` 尚非现行门禁。
+- Executor Service Foundation：`services/executor/AGENTS.md`（Go 1.26.5 module `github.com/tokenmp/v3/services/executor`，已加入 `go.work`）。已实施 HTTP health、运行时配置、优雅关闭、Mock/InMemory ports、quota reservation terminal、generated models/strict server、adapter skeleton，以及 route/HTTP conformance tests。公开模型业务路由不注册到 runtime，业务执行未实现；仍无数据库、SDK、Docker 或独立 Executor CI job。generated files 随变更提交，`check:generated:executor` 是现有 `go-auth` CI job 中的 CI 门禁步骤。
 
 新增、移动或删除模块时，必须同步维护根索引、分区 `AGENTS.md` 和模块 `AGENTS.md`。
 

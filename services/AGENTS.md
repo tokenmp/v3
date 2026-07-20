@@ -7,7 +7,7 @@
 `services/` 用于可独立开发、测试、构建和部署的后端服务。当前服务清单：
 
 - `auth/`：TokenMP v3 认证服务，Go 1.26.5、Chi、GORM、PostgreSQL（库 `tokenmp_auth`）。已实现 Auth Identity Flows：注册/登录、Ed25519/EdDSA Access Token 签发、opaque Refresh Token 轮换与 reuse 检测、logout/logout-all、/me、Argon2id 密码哈希与 bcrypt 兼容升级；API 契约已抽离至 `packages/contracts/openapi/auth/v1.yaml`（见 ADR 0006），API 路由由 oapi-codegen 生成的 Chi strict handler 注册（contract-first），Auth conformance test（`internal/server/contract_test.go`）是当前唯一已实施的直接消费者/验证方。模块文档：`auth/AGENTS.md`。
-- `executor/`：TokenMP v3 模型请求执行服务 Mock-first Foundation，Go 1.26.5 module `github.com/tokenmp/v3/services/executor`。已实施 HTTP health、运行时配置、优雅关闭、Mock/InMemory ports 和 quota reservation terminal；未实施公开模型业务路由、数据库、SDK、Docker 或 CI。contracts 侧 Executor 生成配置/脚本已预置且为 experimental；`services/executor` 尚未生成、提交或注册 generated models/server，`check:generated:executor` 尚非现行门禁。模块文档：`executor/AGENTS.md`。
+- `executor/`：TokenMP v3 模型请求执行服务 Mock-first Foundation，Go 1.26.5 module `github.com/tokenmp/v3/services/executor`。已实施 HTTP health、运行时配置、优雅关闭、Mock/InMemory ports、quota reservation terminal、generated models/strict server、adapter skeleton，以及 route/HTTP conformance tests。公开模型业务路由不注册到 runtime，业务执行未实现；仍无数据库、SDK、Docker 或独立 Executor CI job。generated files 随变更提交，`check:generated:executor` 是现有 `go-auth` CI job 中的门禁步骤。模块文档：`executor/AGENTS.md`。
 
 ## 新增模块准入
 

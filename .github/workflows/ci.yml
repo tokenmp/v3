@@ -129,12 +129,30 @@ jobs:
           go-version: "1.26.5"
           cache-dependency-path: |
             services/auth/go.sum
+            services/executor/go.sum
 
-      - name: Generated code freshness check
+      - name: Generated code freshness check (Auth)
         run: |
           set -euo pipefail
           cd "$GITHUB_WORKSPACE"
           bash packages/contracts/go/check-generated.sh
+
+      # Minimal Executor generated freshness step. Reuses this go-auth job's
+      # Go 1.26.5 toolchain; no separate Executor CI job, runtime, build, or
+      # test is added. The script byte-compares committed Executor generated
+      # models/server against a temp regeneration.
+      - name: Generated code freshness check (Executor)
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
+          bash packages/contracts/go/check-generated-executor.sh
+
+      # Executor has no database dependency. Test the generated transport and
+      # its contract handler in this existing Go job without registering its
+      # business routes in the runtime server.
+      - name: go test -race (Executor generated transport)
+        working-directory: services/executor
+        run: go test -race ./internal/server/... ./internal/transport/executorv1api/... ./internal/contract/executorv1/...
 
       - name: Install golang-migrate CLI
         env:

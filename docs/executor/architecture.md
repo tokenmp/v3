@@ -19,7 +19,7 @@ Executor 是 TokenMP 的模型请求执行面，负责：
 8. 按配置决定同 Credential 重试、切 Credential、切 Route、切 Provider或切模型。
 9. 管理业务超时、流提交边界、取消、配额和请求日志。
 
-Foundation 不连接数据库，已通过端口接口及 Mock/InMemory 实现提供身份、配置、配额、日志和运行时状态。公开模型业务路由、SDK、adapter、流处理及持久化仍未实施；未来持久化实现不得改变核心执行流程。
+Foundation 不连接数据库，已通过端口接口及 Mock/InMemory 实现提供身份、配置、配额、日志和运行时状态。generated models/strict server、adapter skeleton 与 route/HTTP conformance 已实施；公开模型业务路由的 runtime 注册、业务执行、SDK、流处理及持久化仍未实施；未来持久化实现不得改变核心执行流程。
 
 ## 2. 设计原则
 
@@ -147,7 +147,7 @@ Client
 
 ## 4. 目标目录
 
-`services/executor/` 已作为 Foundation 模块存在。下列目录是完整设计目标；除 Foundation 已落地的 `cmd/executor`、`internal/app`、`internal/config`、端口实现和 health transport 外，其余目录仅在对应阶段创建。
+`services/executor/` 已作为 Foundation 模块存在。下列目录是完整设计目标；除 Foundation 已落地的 `cmd/executor`、`internal/app`、`internal/config`、端口实现、health transport、`internal/contract/executorv1` 和 `internal/transport/executorv1api` 外，其余目录仅在对应阶段创建。
 
 ```text
 services/executor/
@@ -186,7 +186,7 @@ services/executor/
 
 ## 5. Contract 与流式边界
 
-Executor 契约已存在于 `packages/contracts/openapi/executor/v1.yaml`。`services/executor/` 已实现 Foundation，但尚未生成、提交或注册 Executor generated models/server；仓库预置的生成脚本和 `chi-server + strict-server` 配置仍为 experimental，因此 `check:generated:executor` 目前不是现行 CI 门禁。
+Executor 契约已存在于 `packages/contracts/openapi/executor/v1.yaml`。已生成 Executor generated models/strict server，并随变更提交（`services/executor/internal/contract/executorv1/{models,server}.gen.go`）与 transport adapter skeleton（`internal/transport/executorv1api/adapter.go`），并新增路由契约一致性测试（`internal/server/contract_test.go`）以双向比较 generated Chi 路由与契约。但运行时 `main` 仍未注册任何公开业务路由，仍只经 `internal/transport/healthz` 服务 `/healthz`；strict server 生成的 SSE 能力仅为 generated capability，当前不被任何运行时代码调用。`check:generated:executor` 是现有 `go-auth` CI job 中必经的新鲜度门禁（与 Auth 新鲜度步骤相邻），同一 job 还运行 generated contract、strict adapter skeleton 与 route/HTTP conformance 的 race tests；未新增独立 Executor CI job、运行时业务路由或执行 pipeline 测试，Docker 与集成验证仍待阶段 14。
 
 由于公开生成接口同时支持 JSON 和长时间 SSE，实施前必须通过独立变更验证普通 `ServerInterface` 与 StrictServerInterface。普通接口更自然地控制：
 
@@ -519,7 +519,7 @@ Request/Attempt/Event 日志至少记录：
 | 阶段 | 分支建议 | 内容 |
 |---|---|---|
 | 1 | `feat/executor-foundation` | **已实施**：模块骨架、health、运行时配置、优雅关闭、Mock/InMemory ports、最小 quota terminal 状态机 |
-| 2 | `refactor/executor-codegen` | 验证并调整流式生成接口 |
+| 2 | `refactor/executor-codegen` | **已实施**：generated models/strict server、adapter skeleton、生成物新鲜度门禁与 route/HTTP conformance；运行时尚未注册业务路由，业务执行与流处理未实现 |
 | 3 | `feat/executor-config-model` | ConfigSnapshot、校验、编译、fixtures |
 | 4 | `feat/executor-routing` | selector、candidate dimensions |
 | 5 | `feat/executor-adapter-engine` | thinking/request/response 规则 |
