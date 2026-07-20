@@ -39,6 +39,8 @@
 - Auth Service Foundation 决策：`adr/0004-auth-service-foundation.md`
 - Auth Identity Flows 决策：`adr/0005-auth-identity-flows.md`
 - API Contracts Package 决策：`adr/0006-api-contracts-package.md`
+- Executor 架构设计基线（设计已确认，服务尚未实施）：`executor/architecture.md`
+- Executor 测试策略（设计已确认，测试集尚未实施）：`executor/testing-strategy.md`
 - UI 设计规范：`ui/design-system.md`
 
 新增、替代或删除文档时同步维护本索引或相应主题索引。

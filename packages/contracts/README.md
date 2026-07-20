@@ -43,9 +43,9 @@ pnpm --filter @tokenmp/contracts typecheck           # 跨文件 operationId 唯
 pnpm --filter @tokenmp/contracts test                # Node test runner 契约测试
 pnpm --filter @tokenmp/contracts build               # 复制契约到 dist/
 pnpm --filter @tokenmp/contracts generate:auth:go    # 生成 Auth Go server 代码
-pnpm --filter @tokenmp/contracts generate:executor:go # 生成 Executor Go server 代码
+pnpm --filter @tokenmp/contracts generate:executor:go # Executor 模块实施后生成 Go server 代码
 pnpm --filter @tokenmp/contracts check:generated     # 验证 Auth 生成物新鲜度
-pnpm --filter @tokenmp/contracts check:generated:executor # 验证 Executor 生成物新鲜度
+pnpm --filter @tokenmp/contracts check:generated:executor # Executor 模块及生成物实施后验证
 ```
 
 ## Go 生成治理

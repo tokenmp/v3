@@ -7,9 +7,10 @@
 .agents/plans/**
 !.agents/plans/README.md
 
-# Dependencies and task caches
+# Dependencies, local worktrees, and task caches
 node_modules/
 .pnpm-store/
+.worktrees/
 .turbo/
 **/.turbo/
 
