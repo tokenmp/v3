@@ -58,7 +58,7 @@ Monorepo 是代码组织和工程治理方式，不表示所有服务必须：
 - `auth`：负责认证和 JWT，只访问认证数据库。
 - `api`：负责 API Key、业务配置、模型与上游配置、业务及请求日志相关能力。
 - `quota`：负责配额检查、预留、结算、释放及流水。
-- `executor`：核心转发执行服务，保持 Go 实现。Foundation 阶段采用 Mock-first，不直接访问数据库；后续如有持久化需求，只能拥有并访问 Executor 自有数据库。与 API、Quota 等服务的交互必须通过可配置、版本化的内部契约，不得访问其他服务的数据库。
+- `executor`：核心转发执行服务，保持 Go 实现。Foundation 阶段采用 Mock-first，通过 Mock/InMemory ports 验证执行架构，不直接访问数据库；后续如有持久化需求，必须经独立设计，并且只能由 Executor 自己拥有和访问其配置或运行时数据库及 Repository 实现。Executor 不得直接访问 Auth、API、Quota 或其他服务拥有的数据库；与其他服务的交互必须通过明确、可配置、版本化的内部契约。
 - Web、Admin 或 Gateway 属于独立应用/可部署单元，不得把核心执行逻辑复制进前端或网关。
 - 服务间通过明确、可版本化的契约通信，不得跨服务直接读取对方私有数据库或导入对方内部实现。
 
@@ -273,7 +273,7 @@ infra/tools   -> workspace metadata
 - 一个 service 导入另一个 service 的私有源码。
 - 循环依赖。
 - 前端直接依赖后端内部数据库模型。
-- Executor 直接连接其他服务（包括 Auth、Business 或 Logs）的数据库；未来持久化只能使用 Executor 自有数据库。
+- Executor 直接连接 Auth、API、Quota、Business、Logs 或其他服务拥有的数据库；Foundation 不连接数据库。未来若引入 Executor 自有数据库，必须先明确其 schema、migration、凭据和部署所有权。
 - 通过共享数据库表替代正式服务接口。
 
 服务间调用应通过内部 HTTP、消息或后续明确选定的协议，并保留鉴权、超时、重试、幂等和错误语义。

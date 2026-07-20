@@ -25,9 +25,10 @@
 | `@tokenmp/contracts/openapi/auth/v1.yaml` | YAML 读取能力 | Auth Service v1 OpenAPI 3.0.3 契约；无副作用 | stable | `openapi/auth/v1.yaml` |
 | `@tokenmp/contracts/openapi/executor/v1.yaml` | YAML 读取能力 | Executor Service v1 OpenAPI 3.0.3 契约；无副作用 | stable | `openapi/executor/v1.yaml` |
 | `generate:auth:go` 脚本 | Go 1.26.5+，oapi-codegen v2.8.0（自动下载） | 生成 Auth `models.gen.go` 与 `server.gen.go` | stable | 两份 `go/auth-v1-*.yaml` + `openapi/auth/v1.yaml` |
-| `generate:executor:go` 脚本 | Go 1.26.5+，oapi-codegen v2.8.0（自动下载） | experimental：可生成候选 Executor `models.gen.go` 与 `server.gen.go`；尚无生成、提交或注册的产物 | experimental | 两份 `go/executor-v1-*.yaml` + `openapi/executor/v1.yaml` |
+| `generate:executor:go` 脚本 | Go 1.26.5+，oapi-codegen v2.8.0（自动下载） | experimental：可生成候选 Executor `models.gen.go` 与 `server.gen.go`；`services/executor` 已实施 Foundation，但尚无生成、提交或注册的产物 | experimental | 两份 `go/executor-v1-*.yaml` + `openapi/executor/v1.yaml` |
 | `check:generated` 脚本 | Go 1.26.5+ | 临时目录重生成并 byte compare；exit 0=新鲜，exit 1=过期 | stable | Auth 生成物 |
 | `check:generated:executor` 脚本 | Go 1.26.5+ | experimental：候选产物存在时可临时重生成并 byte compare；Executor 尚无提交产物，非现行门禁 | experimental | Executor 生成配置与脚本 |
+
 
 ## 依赖关系与消费者
 
@@ -75,11 +76,12 @@ pnpm --filter @tokenmp/contracts build
 
 # Go 代码生成
 pnpm --filter @tokenmp/contracts generate:auth:go
-pnpm --filter @tokenmp/contracts generate:executor:go # experimental；尚无应提交的 Executor 生成物
+pnpm --filter @tokenmp/contracts generate:executor:go # experimental；Foundation 已实施，但尚无应提交的 Executor 生成物
 
 # 生成物新鲜度检查
 pnpm --filter @tokenmp/contracts check:generated
 pnpm --filter @tokenmp/contracts check:generated:executor # experimental；尚非现行门禁
+
 ```
 
 - 最小验证：`lint`（YAML 基本结构 + 禁止内部术语）、`typecheck`（跨文件 operationId 唯一性 + $ref 解析）、`test`（Node test runner 契约测试）、`build`（复制到 dist）。

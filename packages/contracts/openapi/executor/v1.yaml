@@ -3,14 +3,14 @@ info:
   title: TokenMP v3 Executor API
   version: 0.1.0
   description: |
-    TokenMP v3 Executor API contract — the single source of truth for consumers
-    of the Executor Service HTTP interface. This document describes the
-    implemented endpoints, request/response shapes, authentication mechanism,
-    error semantics, and thinking/reasoning support.
+    TokenMP v3 Executor API is the confirmed design contract and the single
+    source of truth for consumers of the Executor Service HTTP interface.
+    Only the `/healthz` Foundation endpoint is currently implemented. Every
+    other endpoint in this document specifies confirmed intended behavior but
+    is not yet implemented; this contract does not claim SDK integration or
+    upstream forwarding is available today.
 
-    The executor provides OpenAI and Anthropic protocol-compatible forwarding
-    to upstream LLM providers. Clients use standard SDKs (openai, @anthropic-ai/sdk)
-    pointed at the executor base URL with TokenMP API keys.
+    The planned interface is compatible with OpenAI and Anthropic protocols.
 
     **Model Selector Syntax**: The `model` field supports extended selector syntax:
     - `gpt-4o` — base model, uses default route group
@@ -108,7 +108,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CreateChatCompletionResponse'
+                $ref: '#/components/schemas/ChatCompletionResponse'
             text/event-stream:
               schema:
                 type: string
@@ -196,7 +196,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CreateResponseResponse'
+                $ref: '#/components/schemas/ResponseResponse'
             text/event-stream:
               schema:
                 type: string
@@ -806,7 +806,7 @@ components:
             arguments:
               type: string
 
-    CreateChatCompletionResponse:
+    ChatCompletionResponse:
       type: object
       required: [id, object, model, choices]
       properties:
@@ -889,7 +889,6 @@ components:
         max_tokens:
           type: integer
           minimum: 1
-          required: true
           description: Maximum output tokens.
         system:
           oneOf:
@@ -1252,7 +1251,7 @@ components:
         strict:
           type: boolean
 
-    CreateResponseResponse:
+    ResponseResponse:
       type: object
       required: [id, object, status, output, usage]
       properties:
