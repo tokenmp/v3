@@ -287,8 +287,10 @@ migrate -path services/auth/migrations \
 
 Per the module autonomy rule in `.agents/monorepo.md`, the Dockerfile lives
 at `services/auth/Dockerfile` (not at the repository root). The build context
-is still the repository root so `go.mod`/`go.sum`/`go.work` and the service
-source resolve correctly:
+is still the repository root so the Auth `go.mod`/`go.sum` and service source
+resolve correctly. The builder deliberately does not copy the root `go.work`
+and sets `GOWORK=off`, so adding another workspace module does not force that
+module's source into the independently deployable Auth image:
 
 ```bash
 docker build -f services/auth/Dockerfile -t tokenmp-v3-auth:local .

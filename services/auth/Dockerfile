@@ -12,11 +12,13 @@ WORKDIR /workspace
 # Cache module layer. go.mod/go.sum are copied before the rest of the source
 # so dependency downloads are cached across source changes.
 COPY services/auth/go.mod services/auth/go.sum ./services/auth/
-COPY go.work ./
 
-# Download dependencies. We allow the network for the first build; the host
-# Docker build cache persists the module layer across builds.
-RUN cd services/auth && go mod download
+# Build the independently deployable Auth module outside the repository
+# workspace. Copying go.work would require copying every workspace module into
+# this image and would violate the per-service image boundary.
+# We allow the network for the first build; the host Docker build cache persists
+# the module layer across builds.
+RUN cd services/auth && GOWORK=off go mod download
 
 # Copy the rest of the auth service source. Build context is the repo root so
 # migrations and source paths remain stable.
@@ -34,7 +36,7 @@ ARG TARGETOS=linux
 ARG TARGETARCH
 ENV CGO_ENABLED=0
 RUN cd services/auth && \
-    export GOOS="${TARGETOS}" GOARCH="${TARGETARCH:-$(go env GOHOSTARCH)}" && \
+    export GOWORK=off GOOS="${TARGETOS}" GOARCH="${TARGETARCH:-$(go env GOHOSTARCH)}" && \
     go build -trimpath -ldflags="-s -w" -o /out/auth ./cmd/auth && \
     go build -trimpath -ldflags="-s -w" -o /out/healthcheck ./cmd/healthcheck
 
