@@ -977,7 +977,10 @@ func TestEngineMapResponseUsesCompiledOrderDefaultsAndSanitizes(t *testing.T) {
 		status   int
 		code     string
 	}{
-		{name: "timeout", upstream: UpstreamResponse{HTTPStatus: 0, Message: "upstream secret"}, status: 504, code: "UPSTREAM_TIMEOUT"},
+		{name: "legacy timeout", upstream: UpstreamResponse{HTTPStatus: 0, Message: "upstream secret"}, status: 504, code: "UPSTREAM_TIMEOUT"},
+		{name: "classified timeout", upstream: UpstreamResponse{HTTPStatus: 0, ErrorType: "timeout", Message: "upstream secret"}, status: 504, code: "UPSTREAM_TIMEOUT"},
+		{name: "classified transport", upstream: UpstreamResponse{HTTPStatus: 0, ErrorType: "transport", Message: "upstream secret"}, status: 502, code: "UPSTREAM_TRANSPORT_ERROR"},
+		{name: "classified protocol", upstream: UpstreamResponse{HTTPStatus: 0, ErrorType: "protocol", Message: "upstream secret"}, status: 502, code: "UPSTREAM_PROTOCOL_ERROR"},
 		{name: "upstream client error", upstream: UpstreamResponse{HTTPStatus: 404, Message: "upstream secret"}, status: 400, code: "UPSTREAM_INVALID_REQUEST"},
 		{name: "upstream server error", upstream: UpstreamResponse{HTTPStatus: 503, ErrorCode: "not matched", Message: "upstream secret"}, status: 502, code: "UPSTREAM_ERROR"},
 		{name: "protocol error", upstream: UpstreamResponse{HTTPStatus: 200, Message: "upstream secret"}, status: 502, code: "UPSTREAM_PROTOCOL_ERROR"},
