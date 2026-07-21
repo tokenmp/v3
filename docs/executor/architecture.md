@@ -1,6 +1,6 @@
 # Executor Architecture Design
 
-- 状态：设计基线已确认；Foundation、Config compiler/snapshot、routing、Phase 5 Adapter Engine、Phase 6 non-stream SDK adapters、Phase 7 retry State、内部 non-stream Runner、non-stream HTTP transport 层与 phase 7.7 config source 前置（模块内 `internal/configsource`，未接 runtime）已实施；Runner、transport 层与 config 文件源仅为模块内 composition，其余公开执行能力仍按本文逐阶段落地
+- 状态：设计基线已确认；Foundation、Config compiler/snapshot、routing、Phase 5 Adapter Engine、Phase 6 non-stream SDK adapters、Phase 7 retry State、内部 non-stream Runner、non-stream HTTP transport 层、phase 7.7 config source 前置（模块内 `internal/configsource`，未接 runtime）与模块内 quarantine bridge（`internal/quarantinebridge`，把 runtime quarantine port/state 适配为 routing quarantine reader，fail-closed，未接 runtime composition 或 request/write pipeline）已实施；Runner、transport 层、config 文件源仅为模块内 composition，quarantine bridge 是模块内 adapter/anti-corruption 层（未接入 runtime composition 或 request/write pipeline），其余公开执行能力仍按本文逐阶段落地
 - 适用范围：TokenMP v3 `services/executor`
 - 契约来源：`packages/contracts/openapi/executor/v1.yaml`
 - 关联测试方案：`testing-strategy.md`
@@ -391,7 +391,7 @@ degraded=true
 
 旧 adapter 级 `Auth.CredentialRef` 仍可被 compiler 接受；若 route 未声明 credentials，它被合成为 route-local credential，其 ID 为 `legacy-route-sha256-` 加 route ID 的**全长** SHA-256 hex。公开 Resolver Candidate/Plan 只带安全 credential ID/priority，绝不带 credential reference 或 secret material；credential resolution/secret injection 尚未实现。
 
-Resolver/Plan 固定 source snapshot 的 revision/generation 并在该私有 universe 内产生 deterministic candidates。每个 candidate 在 model、provider、route、credential 四个独立 quarantine 维度检查；未找到 state 可用，active state 排除 candidate，除 context cancellation/deadline 外的读取失败 fail closed。`Plan.Next` 为 retry actions 给出已冻结、selector-scoped candidate scope（并排除 visited target）；它**不是** RetryDecider，尚不匹配 retry rules、不管理 attempt budget，且不发起任何上游调用。
+Resolver/Plan 固定 source snapshot 的 revision/generation 并在该私有 universe 内产生 deterministic candidates。每个 candidate 在 model、provider、route、credential 四个独立 quarantine 维度检查；未找到 state 可用，active state 排除 candidate，除 context cancellation/deadline 外的读取失败 fail closed。已实施模块内 `internal/quarantinebridge`：它把 runtime quarantine port/state 适配为 routing quarantine reader（每个 routing quarantine 维度映射到独立的带前缀 runtime target，使跨维度重复 ID 不冲突），并以 fail-closed 错误处理（not-found 保留为 `routing.ErrNotFound`、context 取消归一为裸 sentinel、其余读取失败（含 nil/typed-nil port）均以 `routing.ErrQuarantineUnavailable` 暴露）。它是模块内 anti-corruption 层，未接入 runtime composition 或 request/write pipeline，不构成 runtime composition 或写入能力。`Plan.Next` 为 retry actions 给出已冻结、selector-scoped candidate scope（并排除 visited target）；它**不是** RetryDecider，尚不匹配 retry rules、不管理 attempt budget，且不发起任何上游调用。
 
 ```go
 type RetryAction string
