@@ -42,6 +42,10 @@ func (m *InMemory) SetFaultHook(hook FaultHook) {
 
 // Reserve creates or returns an existing reservation. It is idempotent.
 func (m *InMemory) Reserve(_ context.Context, id string) (model.Reservation, error) {
+	if !validID(id) {
+		return model.Reservation{}, ErrInvalidID
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -69,6 +73,10 @@ func (m *InMemory) Release(ctx context.Context, id string) (model.Reservation, e
 }
 
 func (m *InMemory) transition(_ context.Context, id string, target model.ReservationStatus) (model.Reservation, error) {
+	if !validID(id) {
+		return model.Reservation{}, ErrInvalidID
+	}
+
 	m.mu.Lock()
 
 	r, ok := m.reserves[id]

@@ -18,7 +18,7 @@ func baseInput() ConfigInput {
 		Revision:  "r1",
 		Models:    map[string]ModelInput{"m": {ID: "m", Capabilities: []Capability{CapabilityChat}}},
 		Providers: map[string]ProviderInput{"p": {ID: "p", Name: "provider", BaseURL: "https://provider.example/v1", SDKKind: SDKKindOpenAI, Protocol: ProtocolOpenAIChat}},
-		Adapters:  map[string]AdapterConfig{"a": {ID: "a", Name: "adapter", Version: 1, SDKKind: SDKKindOpenAI, Protocol: ProtocolOpenAIChat, Auth: AuthRule{Kind: AuthNone}}},
+		Adapters:  map[string]AdapterConfig{"a": {ID: "a", Name: "adapter", Version: 1, SDKKind: SDKKindOpenAI, Protocol: ProtocolOpenAIChat, Auth: AuthRule{Kind: AuthBearerHeader, Header: "Authorization", CredentialRef: "vault://provider/default"}}},
 		Routes:    []RouteInput{{ID: "r", ModelID: "m", ProviderID: "p", AdapterID: "a", UpstreamModel: "upstream", Enabled: true, Protocol: ProtocolOpenAIChat}},
 	}
 }
@@ -35,6 +35,70 @@ func mustFail(t *testing.T, in ConfigInput, part string) {
 	_, err := Compile(in)
 	if err == nil || !strings.Contains(err.Error(), part) {
 		t.Fatalf("Compile error = %v, want containing %q", err, part)
+	}
+}
+
+func TestCompileOfficialSDKAuthCompatibility(t *testing.T) {
+	for _, protocol := range []Protocol{ProtocolOpenAIChat, ProtocolOpenAIResponses, ProtocolOpenAIImages} {
+		t.Run(string(protocol), func(t *testing.T) {
+			in := baseInput()
+			p := in.Providers["p"]
+			p.Protocol = protocol
+			in.Providers["p"] = p
+			a := in.Adapters["a"]
+			a.Protocol = protocol
+			in.Adapters["a"] = a
+			in.Routes[0].Protocol = protocol
+			mustCompile(t, in)
+		})
+	}
+
+	for _, tc := range []struct {
+		name string
+		kind SDKKind
+		auth AuthRule
+		want string
+	}{
+		{"openai auth none", SDKKindOpenAI, AuthRule{Kind: AuthNone}, "openai SDK requires"},
+		{"openai api key", SDKKindOpenAI, AuthRule{Kind: AuthAPIKeyHeader, Header: "Authorization"}, "openai SDK requires"},
+		{"openai wrong header", SDKKindOpenAI, AuthRule{Kind: AuthBearerHeader, Header: "X-API-Key"}, "openai SDK requires"},
+		{"anthropic auth none", SDKKindAnthropic, AuthRule{Kind: AuthNone}, "anthropic SDK requires"},
+		{"anthropic bearer", SDKKindAnthropic, AuthRule{Kind: AuthBearerHeader, Header: "Authorization"}, "anthropic SDK requires"},
+		{"anthropic wrong header", SDKKindAnthropic, AuthRule{Kind: AuthAPIKeyHeader, Header: "Authorization"}, "anthropic SDK requires"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			in := baseInput()
+			p := in.Providers["p"]
+			p.SDKKind = tc.kind
+			if tc.kind == SDKKindAnthropic {
+				p.Protocol = ProtocolAnthropic
+			}
+			in.Providers["p"] = p
+			a := in.Adapters["a"]
+			a.SDKKind, a.Auth = tc.kind, tc.auth
+			if tc.kind == SDKKindAnthropic {
+				a.Protocol = ProtocolAnthropic
+				in.Routes[0].Protocol = ProtocolAnthropic
+			}
+			in.Adapters["a"] = a
+			mustFail(t, in, tc.want)
+		})
+	}
+
+	for _, auth := range []AuthRule{
+		{Kind: AuthNone},
+		{Kind: AuthBearerHeader, Header: "Authorization", CredentialRef: "vault://provider/bearer"},
+		{Kind: AuthAPIKeyHeader, Header: "X-API-Key", CredentialRef: "vault://provider/header"},
+		{Kind: AuthAPIKeyQuery, Query: "api_key", CredentialRef: "vault://provider/query"},
+	} {
+		in := baseInput()
+		p := in.Providers["p"]
+		p.SDKKind = SDKKindGenericHTTP
+		in.Providers["p"] = p
+		a := in.Adapters["a"]
+		a.SDKKind, a.Auth = SDKKindGenericHTTP, auth
+		in.Adapters["a"] = a
+		mustCompile(t, in)
 	}
 }
 
@@ -413,7 +477,7 @@ func TestCompileC27InputPermutationsAreDeepEqual(t *testing.T) {
 	in := baseInput()
 	in.Models["z"] = ModelInput{ID: "z", Capabilities: []Capability{CapabilityChat}}
 	in.Providers["q"] = ProviderInput{ID: "q", Name: "q-provider", BaseURL: "https://q.example/v1", SDKKind: SDKKindOpenAI, Protocol: ProtocolOpenAIChat}
-	in.Adapters["b"] = AdapterConfig{ID: "b", Name: "b-adapter", Version: 1, SDKKind: SDKKindOpenAI, Protocol: ProtocolOpenAIChat, Auth: AuthRule{Kind: AuthNone}}
+	in.Adapters["b"] = AdapterConfig{ID: "b", Name: "b-adapter", Version: 1, SDKKind: SDKKindOpenAI, Protocol: ProtocolOpenAIChat, Auth: AuthRule{Kind: AuthBearerHeader, Header: "Authorization", CredentialRef: "vault://q-provider/default"}}
 	in.Routes = append(in.Routes, RouteInput{ID: "z-route", ModelID: "z", ProviderID: "q", AdapterID: "b", UpstreamModel: "z", Priority: 1, Protocol: ProtocolOpenAIChat})
 	want := mustCompile(t, in)
 	for i := 0; i < 50; i++ {
@@ -535,6 +599,12 @@ func TestCompileRoutingCandidates(t *testing.T) {
 			in.Adapters["a"] = a
 		}},
 		{"auth none rejects credentials", "auth none", func(in *ConfigInput) {
+			p := in.Providers["p"]
+			p.SDKKind = SDKKindGenericHTTP
+			in.Providers["p"] = p
+			a := in.Adapters["a"]
+			a.SDKKind, a.Auth = SDKKindGenericHTTP, AuthRule{Kind: AuthNone}
+			in.Adapters["a"] = a
 			in.Routes[0].Credentials = []CredentialInput{{ID: "c", CredentialRef: "vault://provider/c", Enabled: true}}
 		}},
 		{"credential ids global", "duplicate credential ID", func(in *ConfigInput) {

@@ -1,6 +1,6 @@
 # Executor Architecture Design
 
-- 状态：设计基线已确认；Foundation、Config compiler/snapshot、routing、Phase 5 pure-Go Adapter Engine 与 Phase 6 的 OpenAI Chat、Anthropic Messages non-stream SDK adapters 已实施；其余执行能力仍按本文设计逐阶段落地
+- 状态：设计基线已确认；Foundation、Config compiler/snapshot、routing、Phase 5 Adapter Engine、Phase 6 non-stream SDK adapters、Phase 7 retry State 和内部 non-stream Runner 已实施；Runner 仅为模块内 pipeline composition，其余公开执行能力仍按本文逐阶段落地
 - 适用范围：TokenMP v3 `services/executor`
 - 契约来源：`packages/contracts/openapi/executor/v1.yaml`
 - 关联测试方案：`testing-strategy.md`
@@ -19,7 +19,7 @@ Executor 是 TokenMP 的模型请求执行面，负责：
 8. 按配置决定同 Credential 重试、切 Credential、切 Route、切 Provider或切模型。
 9. 管理业务超时、流提交边界、取消、配额和请求日志。
 
-Foundation 不连接数据库，已通过端口接口及 Mock/InMemory 实现提供身份、配置、配额、日志和运行时状态。generated models/strict server、adapter skeleton、route/HTTP conformance、纯 Go Adapter Engine，以及 request-local、serial、pure-Go、无 I/O 的 retry decision/attempt-budget State 已实施；公开模型业务路由的 runtime 注册、credential resolver/secret injector、业务执行、流处理及持久化仍未实施；已实施 internal shared `sdk` port，以及 official `github.com/openai/openai-go/v3` **v3.44.0** OpenAI Chat Completions **non-stream** adapter 和 official `github.com/anthropics/anthropic-sdk-go` **v1.58.0** Anthropic Messages **non-stream** internal adapter。Anthropic adapter 每次调用验证 HTTPS target/path prefix、upstream model 和 opaque secret，使用 `WithoutEnvironmentDefaults`、retry=0、no redirects，且在最终 transport 固定唯一 `x-api-key`、`anthropic-version` 和允许的 header/query；strict OpenAPI request/response validation 覆盖 execution-authoritative model/thinking、tools 和 vision；529 overloaded 安全分类为 unavailable，并由 fixture 映射为 429。TLS `httptest` 与 request/response fuzz 已覆盖。两者均尚未接入 execution pipeline 或 runtime routing，故不是端到端业务能力；retry State 同样未接入 execution pipeline/runtime，且其 `BeginAttempt` 只计逻辑 reservation，不是 wire attempt gate；credential resolver/secret injector、Responses、Images 与 streaming 仍未实施。未来持久化实现不得改变核心执行流程。
+Foundation 不连接数据库，已通过端口接口及 Mock/InMemory 实现提供身份、配置、配额、日志和运行时状态。generated models/strict server、adapter skeleton、route/HTTP conformance、纯 Go Adapter Engine，以及 request-local、serial、pure-Go、无 I/O 的 retry decision/attempt-budget State 已实施；公开模型业务路由的 runtime 注册、HTTP normalizer/renderer、identity、durable idempotency/replay、remote quota/credential resolver、`Retry-After` header parsing、流处理及持久化仍未实施；已实施 internal shared `sdk` port，以及 official `github.com/openai/openai-go/v3` **v3.44.0** OpenAI Chat Completions **non-stream** adapter 和 official `github.com/anthropics/anthropic-sdk-go` **v1.58.0** Anthropic Messages **non-stream** internal adapter。Anthropic adapter 每次调用验证 HTTPS target/path prefix、upstream model 和 opaque secret，使用 `WithoutEnvironmentDefaults`、retry=0、no redirects，且在最终 transport 固定唯一 `x-api-key`、`anthropic-version` 和允许的 header/query；strict OpenAPI request/response validation 覆盖 execution-authoritative model/thinking、tools 和 vision；529 overloaded 安全分类为 unavailable，并由 fixture 映射为 429。TLS `httptest` 与 request/response fuzz 已覆盖。两者由内部 non-stream Runner 消费，但仍未接入 runtime routing，故不是端到端业务能力；Runner 固定 Resolver/Plan owner binding，在每 attempt 纯 Prepare 后解析 credential，组合 Engine、SDK registry 和官方 SDK auth compatibility，并冻结 request-lifetime retry policy、使用 per-attempt timeout、一次 Reserve/安全 terminalizer、mapped failure 与 safe execution events。它不提供 wire-attempt proof、跨进程 exactly-once 或 durable idempotency/replay；HTTP normalizer/renderer、identity、remote quota/credential resolver、`Retry-After` parsing、Responses、Images 与 streaming 仍未实施。未来持久化实现不得改变核心执行流程。
 
 ## 2. 设计原则
 
@@ -129,7 +129,12 @@ HTTP Transport
   ↓
 Protocol Normalizer
   ↓ NormalizedRequest
-Execution Pipeline
+Internal non-stream Runner（已实施；仅模块内）
+  ├─ Resolver/Plan owner binding、Prepare、adapt、SDK registry/auth compatibility
+  ├─ per-attempt credential resolve、frozen retry policy、per-attempt timeout
+  ├─ one quota Reserve + safe terminalizer、mapped failure、safe execution events
+  ↓
+Future public Execution Pipeline
   ├─ identity
   ├─ capability validation
   ├─ route candidates
@@ -270,7 +275,7 @@ schema validation
 
 当前实施状态：完整的模块内 compiler 已落地：`snapshot.Compile` 把 `ConfigSnapshot` 转为 `adapter.ConfigInput` 并调用 `adapter.Compile`，实施 C01–C27 相关的 identity/reference、provider/adapter/protocol compatibility、HTTPS 无 userinfo BaseURL、有限 DSL、capability/thinking、retry/timeout、priority/conflict、fallback、immutability 与 determinism 校验；它按 code defaults → global → adapter → provider → route 合并策略，并按 priority/route ID 确定性排序，输出 `CompiledConfig`。代码默认值为 request `2m`、TTFT `45s`、stream idle `30s`、stream max lifetime `10m`、retry backoff `200ms`、max total attempts `3`、max same-target attempts `2`、max total retry duration `90s`。随后 `NewCompiledSnapshot` 深拷贝冻结，专用 `Store` 以 `atomic.Pointer` 原子发布 Store-owned copy；每个 `Current()` 返回独立视图，因此 later publish 不改变已开始请求所持 revision，且 invalid 或 stale publication 保留 last known good。三份脱敏 fixture 均严格解码、secret 扫描、通过 compiler 并实际发布。它尚未连接 config repository/reload loop 或请求 pipeline。
 
-同一请求和其全部 attempt 必须固定使用同一 revision，保证行为可复现。routing Resolver 已从 `CompiledSnapshot` 深拷贝并固定 revision/generation；其 Plan 与任何未来 request pipeline 的实际 attempt 之间尚未接线。
+同一请求和其全部 attempt 必须固定使用同一 revision，保证行为可复现。routing Resolver 已从 `CompiledSnapshot` 深拷贝并固定 revision/generation；其 Plan 已由内部 non-stream Runner 绑定并用于实际 non-stream attempt；它仍未接入未来公开 runtime pipeline。
 
 ## 8. Adapter 配置模型
 
@@ -339,7 +344,7 @@ degraded=true
 
 ### 8.3 响应映射
 
-模块内 `adapter.Engine.MapResponse` 已实施，输入只接受已分类的上游 metadata，绝不接受或返回任意上游正文。它按 compiler 已固定的规则顺序（priority、specificity、ID）返回首个命中；每个已填充 matcher 维度必须匹配（AND），同一维度的列表值互为替代（OR），没有任何 matcher 的规则 fail closed、不匹配。未命中时固定 default：4xx→400 `UPSTREAM_INVALID_REQUEST`、5xx→502 `UPSTREAM_ERROR`、status 0→504 `UPSTREAM_TIMEOUT`、未分类 2xx/3xx→502 `UPSTREAM_PROTOCOL_ERROR`。它尚未接入 request/execution pipeline。
+模块内 `adapter.Engine.MapResponse` 已实施，输入只接受已分类的上游 metadata，绝不接受或返回任意上游正文。它按 compiler 已固定的规则顺序（priority、specificity、ID）返回首个命中；每个已填充 matcher 维度必须匹配（AND），同一维度的列表值互为替代（OR），没有任何 matcher 的规则 fail closed、不匹配。未命中时固定 default：4xx→400 `UPSTREAM_INVALID_REQUEST`、5xx→502 `UPSTREAM_ERROR`、status 0→504 `UPSTREAM_TIMEOUT`、未分类 2xx/3xx→502 `UPSTREAM_PROTOCOL_ERROR`。它已由内部 Runner 的 classified non-stream failure 路径消费，但尚未接入 runtime HTTP pipeline。
 
 响应规则可匹配：
 
@@ -539,6 +544,7 @@ Request/Attempt/Event 日志至少记录：
 | 5 | `feat/executor-adapter-engine` | **已实施（模块内，未接 pipeline）**：stateless pure-Go/no-I/O Engine 严格解码 JSON object、执行全部有限 DSL actions、literal-only header/query、继续拒绝 `ValueRef`、按 selected model bounds 映射 thinking，并安全 map response（维度间 AND、维度内 OR、compiler established order、fixed default）；atomic/mutation/race/fuzz 覆盖已实施。 |
 | 6 | `feat/executor-sdk-providers` | **已实施（模块内，未接 pipeline/runtime）**：official `github.com/openai/openai-go/v3` v3.44.0 OpenAI Chat Completions 与 `github.com/anthropics/anthropic-sdk-go` v1.58.0 Anthropic Messages non-stream adapters。Anthropic 使用 `WithoutEnvironmentDefaults`、per-call HTTPS target/path prefix/model/secret、retry=0/no redirects、固定 version/唯一 `x-api-key`、strict OpenAPI request+response validation、thinking authority、tools/vision、safe classification 和 529→unavailable（fixture 529→429）；TLS/fuzz 已覆盖。quota cleanup、pipeline/runtime routing、Responses/Images/streaming 仍待后续。 |
 | 7 | `feat/executor-retry-policy` | **已实施（模块内、纯 Go，未接 pipeline/runtime）**：request-local serial retry State 固定 Plan/policy，匹配规则、管理 candidate scope、delay、总量/同 target/总时长 budget 和 commit/cancel gate；`BeginAttempt` 只记录逻辑 reservation，不是 wire attempt gate。 |
+| 7.5 | `feat/executor-nonstream-pipeline` | **部分实施（内部 non-stream Runner，未接 runtime）**：将 Resolver/Plan owner binding、pure Prepare、per-attempt credential resolve、Engine、SDK registry、official SDK auth compatibility、request-lifetime frozen retry policy、per-attempt timeout、one Reserve + safe terminalizer、mapped failure 和 safe execution events 组合；Mock/InMemory/fake tests 已覆盖。未实现公开 HTTP normalizer/renderer/identity、durable idempotency/replay、remote quota/credential resolver 或 `Retry-After` parsing；不声称 wire proof 或跨进程 exactly-once。 |
 | 8 | `feat/executor-streaming` | StreamBridge、TTFT/idle/lifetime |
 | 9 | `feat/executor-sdk-anthropic-streaming` | Anthropic native stream/error 与 thinking signature |
 | 10 | `feat/executor-responses` | Responses 事件状态机 |

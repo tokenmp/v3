@@ -39,8 +39,8 @@
 - Auth Service Foundation 决策：`adr/0004-auth-service-foundation.md`
 - Auth Identity Flows 决策：`adr/0005-auth-identity-flows.md`
 - API Contracts Package 决策：`adr/0006-api-contracts-package.md`
-- Executor 架构设计基线（Foundation、Config compiler/immutable snapshot、routing、Adapter Engine、Phase 7 纯 Go retry State/attempt budget 和两个 non-stream SDK adapters 已实施；retry State 未接 pipeline/runtime，`BeginAttempt` 非 wire gate；raw `Retry-After` 解析、quota 与 stream commit 未实施）：`executor/architecture.md`
-- Executor 测试策略（Foundation、compiler/snapshot、routing、Adapter Engine、Phase 7 retry State 的单元/invariant/race，以及两个 non-stream SDK adapter 测试已实施；pipeline、raw `Retry-After` 解析、quota、stream commit 与其余协议阶段测试未实施）：`executor/testing-strategy.md`
+- Executor 架构设计基线（Foundation、Config compiler/immutable snapshot、routing、Adapter Engine、retry State、两个 non-stream SDK adapter 和内部 non-stream Runner 已实施；Runner 只作模块内 composition，不提供 wire-attempt proof 或跨进程 exactly-once；runtime 公开路由、normalizer/renderer/identity、durable idempotency/replay、remote resolver、`Retry-After` 解析与流处理未实施）：`executor/architecture.md`
+- Executor 测试策略（Foundation、compiler/snapshot、routing、Adapter Engine、retry State、两个 non-stream SDK adapter 及内部 Runner 的 Mock/InMemory/fake 测试已实施；runtime pipeline、`Retry-After` 解析、remote quota/credential resolver、stream commit 与其余协议阶段测试未实施）：`executor/testing-strategy.md`
 - UI 设计规范：`ui/design-system.md`
 
 新增、替代或删除文档时同步维护本索引或相应主题索引。
