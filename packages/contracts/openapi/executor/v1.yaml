@@ -25,6 +25,12 @@ info:
     - Anthropic: `thinking.type` / `thinking.budget_tokens`
     - Unified: effort levels (low/medium/high/xhigh/max) mapped to budget tokens
 
+    For Anthropic Messages, when `thinking.type` is `enabled`, `budget_tokens`
+    is required and must satisfy `1024 <= budget_tokens < max_tokens`; when
+    `thinking.type` is `disabled`, `budget_tokens` must be omitted. The
+    executor defensively enforces these observable bounds regardless of
+    upstream behavior.
+
     **Error Formats**: Error responses follow each protocol's native format:
     - OpenAI (chat/responses/models/images): `{"error": {...}, "status": N}`
     - Anthropic (messages): `{"type": "error", "error": {...}, "request_id": "..."}`
@@ -667,6 +673,7 @@ components:
     CreateChatCompletionRequest:
       type: object
       required: [model, messages]
+      additionalProperties: false
       properties:
         model:
           type: string
@@ -681,7 +688,7 @@ components:
         messages:
           type: array
           items:
-            $ref: '#/components/schemas/ChatMessage'
+            $ref: '#/components/schemas/ChatRequestMessage'
           minItems: 1
         stream:
           type: boolean
@@ -731,6 +738,7 @@ components:
           description: Tool selection strategy.
         response_format:
           type: object
+          additionalProperties: false
           properties:
             type:
               type: string
@@ -740,9 +748,112 @@ components:
           type: string
           description: End-user identifier for abuse monitoring.
 
+    # Request-side chat message. This is the closed (additionalProperties:false)
+    # twin of ChatMessage: finite request fields are fixed, while the
+    # response-side ChatMessage below stays extensible for provider extensions.
+    ChatRequestMessage:
+      type: object
+      required: [role, content]
+      additionalProperties: false
+      description: |
+        Request-side chat message. Finite request fields are closed
+        (additionalProperties:false) so only the documented request shape is
+        accepted; the response-side ChatMessage stays extensible (no
+        additionalProperties:false) so provider extensions still validate.
+      properties:
+        role:
+          type: string
+          enum: [system, user, assistant, tool]
+        content:
+          oneOf:
+            - type: string
+            - type: array
+              items:
+                $ref: '#/components/schemas/ChatRequestContentPart'
+        name:
+          type: string
+          description: Optional participant name.
+        tool_calls:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatRequestToolCall'
+          description: Tool calls made by the assistant.
+        tool_call_id:
+          type: string
+          description: Tool call ID (for role=tool messages).
+        reasoning_content:
+          type: string
+          nullable: true
+          description: Reasoning content from thinking models (assistant messages).
+
+    # Request-side chat content part. Closed twin of ChatContentPart: the
+    # finite image_url nested object is also closed.
+    ChatRequestContentPart:
+      type: object
+      required: [type]
+      additionalProperties: false
+      description: |
+        Request-side chat content part. Finite request fields, including the
+        image_url nested object, are closed (additionalProperties:false); the
+        response-side ChatContentPart stays extensible for provider extensions.
+      properties:
+        type:
+          type: string
+          enum: [text, image_url]
+        text:
+          type: string
+        image_url:
+          type: object
+          additionalProperties: false
+          properties:
+            url:
+              type: string
+              format: uri
+              description: |
+                Image URL. The executor accepts only bounded HTTPS URLs
+                (scheme https, non-empty host, no userinfo) or bounded
+                data: URLs with an image MIME type and ;base64 encoding.
+                HTTP and other schemes are rejected.
+            detail:
+              type: string
+              enum: [auto, low, high]
+
+    # Request-side chat tool call. Closed twin of ChatToolCall: the finite
+    # function nested object is also closed.
+    ChatRequestToolCall:
+      type: object
+      required: [id, type, function]
+      additionalProperties: false
+      description: |
+        Request-side chat tool call. Finite request fields, including the
+        function nested object, are closed (additionalProperties:false); the
+        response-side ChatToolCall stays extensible for provider extensions.
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [function]
+        function:
+          type: object
+          required: [name, arguments]
+          additionalProperties: false
+          properties:
+            name:
+              type: string
+            arguments:
+              type: string
+
+    # Response-side chat message. Intentionally left open (no
+    # additionalProperties:false) so success responses carry provider
+    # extensions (e.g. refusal, annotations) and still contract-validate.
     ChatMessage:
       type: object
       required: [role, content]
+      description: |
+        Response-side chat message used by ChatCompletionChoice.message. Left
+        extensible (no additionalProperties:false) so provider extensions
+        validate; request messages use the closed ChatRequestMessage twin.
       properties:
         role:
           type: string
@@ -769,9 +880,14 @@ components:
           nullable: true
           description: Reasoning content from thinking models (assistant messages).
 
+    # Response-side chat content part. Left open for provider extensions.
     ChatContentPart:
       type: object
       required: [type]
+      description: |
+        Response-side chat content part used inside ChatMessage.content.
+        Left extensible (no additionalProperties:false) so provider extensions
+        validate; request content parts use the closed ChatRequestContentPart.
       properties:
         type:
           type: string
@@ -784,6 +900,11 @@ components:
             url:
               type: string
               format: uri
+              description: |
+                Image URL. The executor accepts only bounded HTTPS URLs
+                (scheme https, non-empty host, no userinfo) or bounded
+                data: URLs with an image MIME type and ;base64 encoding.
+                HTTP and other schemes are rejected.
             detail:
               type: string
               enum: [auto, low, high]
@@ -791,6 +912,7 @@ components:
     ChatTool:
       type: object
       required: [type, function]
+      additionalProperties: false
       properties:
         type:
           type: string
@@ -798,6 +920,7 @@ components:
         function:
           type: object
           required: [name, parameters]
+          additionalProperties: false
           properties:
             name:
               type: string
@@ -805,13 +928,18 @@ components:
               type: string
             parameters:
               type: object
-              description: JSON Schema for function parameters.
+              description: |
+                JSON Schema for function parameters. Arbitrary user-defined
+                JSON Schema is accepted as-is; the field is intentionally left
+                open (no additionalProperties constraint) so any valid schema
+                shape passes through.
             strict:
               type: boolean
 
     ChatToolChoice:
       type: object
       required: [type, function]
+      additionalProperties: false
       properties:
         type:
           type: string
@@ -819,13 +947,19 @@ components:
         function:
           type: object
           required: [name]
+          additionalProperties: false
           properties:
             name:
               type: string
 
+    # Response-side chat tool call. Left open for provider extensions.
     ChatToolCall:
       type: object
       required: [id, type, function]
+      description: |
+        Response-side chat tool call used inside ChatMessage.tool_calls. Left
+        extensible (no additionalProperties:false) so provider extensions
+        validate; request tool calls use the closed ChatRequestToolCall twin.
       properties:
         id:
           type: string
@@ -911,6 +1045,7 @@ components:
     CreateMessageRequest:
       type: object
       required: [model, messages, max_tokens]
+      additionalProperties: false
       properties:
         model:
           type: string
@@ -961,6 +1096,7 @@ components:
           $ref: '#/components/schemas/AnthropicToolChoice'
         metadata:
           type: object
+          additionalProperties: false
           properties:
             user_id:
               type: string
@@ -968,6 +1104,7 @@ components:
     ThinkingConfig:
       type: object
       required: [type]
+      additionalProperties: false
       properties:
         type:
           type: string
@@ -977,7 +1114,9 @@ components:
           type: integer
           minimum: 1024
           description: |
-            Thinking token budget. Must be >= 1024 and < max_tokens.
+            Thinking token budget. Required when type=enabled and must be
+            >= 1024 and strictly less than max_tokens (budget_tokens <
+            max_tokens). When type=disabled this field must be omitted.
             Only valid when type=enabled.
         display:
           type: string
@@ -989,6 +1128,7 @@ components:
     AnthropicSystemBlock:
       type: object
       required: [type, text]
+      additionalProperties: false
       properties:
         type:
           type: string
@@ -997,6 +1137,7 @@ components:
           type: string
         cache_control:
           type: object
+          additionalProperties: false
           properties:
             type:
               type: string
@@ -1005,6 +1146,7 @@ components:
     AnthropicMessage:
       type: object
       required: [role, content]
+      additionalProperties: false
       properties:
         role:
           type: string
@@ -1019,6 +1161,7 @@ components:
     AnthropicContentBlock:
       type: object
       required: [type]
+      additionalProperties: false
       properties:
         type:
           type: string
@@ -1029,14 +1172,22 @@ components:
         # Image block
         source:
           type: object
+          additionalProperties: false
           properties:
             type:
               type: string
               enum: [base64]
             media_type:
               type: string
+              enum: [image/jpeg, image/png, image/gif, image/webp]
+              description: MIME type of the base64-encoded image data.
             data:
               type: string
+              description: |
+                Base64-encoded (standard padded) image bytes. Must decode
+                to a non-empty value within the executor's decoded byte
+                bound. URL-safe alphabet and raw (unpadded) encodings are
+                rejected.
         # Tool use block
         id:
           type: string
@@ -1044,6 +1195,10 @@ components:
           type: string
         input:
           type: object
+          description: |
+            Tool input object. Arbitrary user-defined JSON is accepted as-is;
+            the field is intentionally left open (no additionalProperties
+            constraint) so any valid JSON object passes through.
         # Tool result block
         tool_use_id:
           type: string
@@ -1063,6 +1218,7 @@ components:
         # Cache control
         cache_control:
           type: object
+          additionalProperties: false
           properties:
             type:
               type: string
@@ -1071,6 +1227,7 @@ components:
     AnthropicTool:
       type: object
       required: [name, input_schema]
+      additionalProperties: false
       properties:
         name:
           type: string
@@ -1078,9 +1235,14 @@ components:
           type: string
         input_schema:
           type: object
-          description: JSON Schema for tool input.
+          description: |
+            JSON Schema for tool input. Arbitrary user-defined JSON Schema is
+            accepted as-is; the field is intentionally left open (no
+            additionalProperties constraint) so any valid schema shape passes
+            through.
         cache_control:
           type: object
+          additionalProperties: false
           properties:
             type:
               type: string
@@ -1089,6 +1251,7 @@ components:
     AnthropicToolChoice:
       type: object
       required: [type]
+      additionalProperties: false
       properties:
         type:
           type: string
@@ -1168,6 +1331,7 @@ components:
     CreateResponseRequest:
       type: object
       required: [model, input]
+      additionalProperties: false
       properties:
         model:
           type: string
@@ -1209,9 +1373,11 @@ components:
           enum: [none, auto, required]
         text:
           type: object
+          additionalProperties: false
           properties:
             format:
               type: object
+              additionalProperties: false
               properties:
                 type:
                   type: string
@@ -1220,14 +1386,20 @@ components:
                   type: string
                 schema:
                   type: object
+                  description: |
+                    JSON Schema for structured output. Arbitrary user-defined
+                    JSON Schema is accepted as-is; the field is intentionally
+                    left open (no additionalProperties constraint).
         metadata:
           type: object
+          additionalProperties: false
           properties:
             user_id:
               type: string
 
     ResponseReasoningConfig:
       type: object
+      additionalProperties: false
       properties:
         effort:
           type: string
@@ -1242,6 +1414,7 @@ components:
     ResponseInputItem:
       type: object
       required: [type]
+      additionalProperties: false
       properties:
         type:
           type: string
@@ -1259,6 +1432,7 @@ components:
     ResponseContentPart:
       type: object
       required: [type]
+      additionalProperties: false
       properties:
         type:
           type: string
@@ -1268,10 +1442,16 @@ components:
         image_url:
           type: string
           format: uri
+          description: |
+            Image URL. The executor accepts only bounded HTTPS URLs
+            (scheme https, non-empty host, no userinfo) or bounded
+            data: URLs with an image MIME type and ;base64 encoding.
+            HTTP and other schemes are rejected.
 
     ResponseTool:
       type: object
       required: [type, name, parameters]
+      additionalProperties: false
       properties:
         type:
           type: string
@@ -1282,7 +1462,10 @@ components:
           type: string
         parameters:
           type: object
-          description: JSON Schema for function parameters.
+          description: |
+            JSON Schema for function parameters. Arbitrary user-defined JSON
+            Schema is accepted as-is; the field is intentionally left open
+            (no additionalProperties constraint).
         strict:
           type: boolean
 
@@ -1405,6 +1588,7 @@ components:
     CreateImageRequest:
       type: object
       required: [model, prompt]
+      additionalProperties: false
       properties:
         model:
           type: string

@@ -221,4 +221,160 @@ describe("Executor v1 OpenAPI contract", () => {
     }
     assert.deepStrictEqual(findPropertyLevelBooleanRequired(doc), []);
   });
+
+  it("closes finite request objects with additionalProperties:false while leaving arbitrary user JSON/JSON Schema open", () => {
+    const schemas = doc.components.schemas;
+
+    // Finite request objects and their nested finite schemas must be closed.
+    // The OpenAI Chat message/content-part/tool-call request schemas are
+    // separated from their response-side twins: request schemas are closed
+    // (ChatRequest*), while the response-side ChatMessage/ChatContentPart/
+    // ChatToolCall stay open so success responses carry provider extensions.
+    const closedSchemas = [
+      "CreateChatCompletionRequest",
+      "ChatRequestMessage",
+      "ChatRequestContentPart",
+      "ChatRequestToolCall",
+      "ChatTool",
+      "ChatToolChoice",
+      "CreateMessageRequest",
+      "ThinkingConfig",
+      "AnthropicSystemBlock",
+      "AnthropicMessage",
+      "AnthropicContentBlock",
+      "AnthropicToolChoice",
+      "CreateResponseRequest",
+      "ResponseInputItem",
+      "ResponseContentPart",
+      "ResponseTool",
+      "ResponseReasoningConfig",
+      "CreateImageRequest",
+    ];
+    for (const name of closedSchemas) {
+      assert.equal(
+        schemas[name].additionalProperties,
+        false,
+        `${name} must declare additionalProperties:false`,
+      );
+    }
+
+    // Nested finite objects inside pure-request trees must also be closed,
+    // including the OpenAI Chat request image_url and tool-call function.
+    assert.equal(schemas.ChatTool.properties.function.additionalProperties, false);
+    assert.equal(schemas.ChatToolChoice.properties.function.additionalProperties, false);
+    assert.equal(schemas.ChatRequestContentPart.properties.image_url.additionalProperties, false);
+    assert.equal(schemas.ChatRequestToolCall.properties.function.additionalProperties, false);
+    assert.equal(schemas.CreateChatCompletionRequest.properties.response_format.additionalProperties, false);
+    assert.equal(schemas.AnthropicContentBlock.properties.source.additionalProperties, false);
+    assert.equal(schemas.AnthropicContentBlock.properties.cache_control.additionalProperties, false);
+    assert.equal(schemas.AnthropicSystemBlock.properties.cache_control.additionalProperties, false);
+    assert.equal(schemas.AnthropicTool.properties.cache_control.additionalProperties, false);
+    assert.equal(schemas.CreateMessageRequest.properties.metadata.additionalProperties, false);
+    assert.equal(schemas.CreateResponseRequest.properties.text.additionalProperties, false);
+    assert.equal(schemas.CreateResponseRequest.properties.text.properties.format.additionalProperties, false);
+    assert.equal(schemas.CreateResponseRequest.properties.metadata.additionalProperties, false);
+
+    // The request references the closed ChatRequestMessage twin...
+    assert.equal(
+      schemas.CreateChatCompletionRequest.properties.messages.items.$ref,
+      "#/components/schemas/ChatRequestMessage",
+      "CreateChatCompletionRequest.messages must reference the closed ChatRequestMessage",
+    );
+    // ...while the success response references the open ChatMessage twin.
+    assert.equal(
+      schemas.ChatCompletionChoice.properties.message.$ref,
+      "#/components/schemas/ChatMessage",
+      "ChatCompletionChoice.message must reference the open ChatMessage",
+    );
+
+    // Response-side Chat message/content-part/tool-call schemas must stay
+    // open (extensible) so provider extensions still contract-validate.
+    const responseOpenSchemas = ["ChatMessage", "ChatContentPart", "ChatToolCall"];
+    for (const name of responseOpenSchemas) {
+      assert.notEqual(
+        schemas[name].additionalProperties,
+        false,
+        `${name} is a response-side schema and must stay open`,
+      );
+    }
+
+    // Arbitrary user JSON / JSON Schema must remain open (no additionalProperties key).
+    const openSchemasByPointer = [
+      [schemas.ChatTool.properties.function, "ChatTool.function.parameters"],
+      [schemas.AnthropicContentBlock, "AnthropicContentBlock.input"],
+      [schemas.AnthropicTool, "AnthropicTool.input_schema"],
+      [schemas.AnthropicResponseContentBlock, "AnthropicResponseContentBlock.input"],
+      [schemas.ResponseTool, "ResponseTool.parameters"],
+      [schemas.CreateResponseRequest.properties.text.properties.format, "CreateResponseRequest.text.format.schema"],
+    ];
+    for (const [obj, label] of openSchemasByPointer) {
+      const prop = obj.properties.parameters || obj.properties.input || obj.properties.input_schema || obj.properties.schema;
+      assert.ok(prop, `${label} property must exist`);
+      assert.equal(
+        prop.additionalProperties,
+        undefined,
+        `${label} must remain open (no additionalProperties constraint)`,
+      );
+    }
+  });
+
+  it("does not close success response schemas (responses stay extensible)", () => {
+    const schemas = doc.components.schemas;
+    const responseSchemas = [
+      "ChatCompletionResponse",
+      "ChatCompletionChoice",
+      "ChatUsage",
+      "CreateMessageResponse",
+      "AnthropicResponseContentBlock",
+      "AnthropicUsage",
+      "ResponseResponse",
+      "ResponseOutputItem",
+      "ResponseOutputContent",
+      "ResponseUsage",
+      "CreateImageResponse",
+      "ModelListResponse",
+      "ModelObject",
+      "ModelThinkingConfig",
+      "HealthResponse",
+      "OpenAIErrorResponse",
+      "AnthropicErrorResponse",
+      // OpenAI Chat response-side twins (request twins are closed above).
+      "ChatMessage",
+      "ChatContentPart",
+      "ChatToolCall",
+    ];
+    for (const name of responseSchemas) {
+      assert.notEqual(
+        schemas[name].additionalProperties,
+        false,
+        `${name} is a response/error schema and must not be closed`,
+      );
+    }
+  });
+
+  it("documents the observable Anthropic thinking budget/max conditional rule and source/image safety boundaries", () => {
+    const description = doc.info.description;
+    assert.ok(
+      description.includes("1024 <= budget_tokens < max_tokens"),
+      "info.description must document the thinking budget/max conditional rule",
+    );
+    assert.ok(
+      description.includes("defensively enforces these observable bounds"),
+      "info.description must document defensive enforcement",
+    );
+
+    const source = doc.components.schemas.AnthropicContentBlock.properties.source;
+    assert.deepStrictEqual(source.properties.media_type.enum, ["image/jpeg", "image/png", "image/gif", "image/webp"]);
+    assert.ok(source.properties.data.description.toLowerCase().includes("base64"), "source.data must describe base64 encoding");
+    assert.ok(source.properties.data.description.includes("rejected"), "source.data must describe rejection of unsafe encodings");
+
+    const openAIImageUrl = doc.components.schemas.ChatRequestContentPart.properties.image_url.properties.url;
+    assert.ok(openAIImageUrl.description.includes("https"), "ChatRequestContentPart.image_url.url must describe the HTTPS policy");
+    assert.ok(openAIImageUrl.description.includes("data:"), "ChatRequestContentPart.image_url.url must describe the data: URL policy");
+    assert.ok(openAIImageUrl.description.includes("rejected"), "ChatRequestContentPart.image_url.url must describe rejection");
+
+    const responseImageUrl = doc.components.schemas.ResponseContentPart.properties.image_url;
+    assert.ok(responseImageUrl.description.includes("https"), "ResponseContentPart.image_url must describe the HTTPS policy");
+    assert.ok(responseImageUrl.description.includes("data:"), "ResponseContentPart.image_url must describe the data: URL policy");
+  });
 });

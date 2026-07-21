@@ -27,6 +27,30 @@ func (e AnthropicContentBlockCacheControlType) Valid() bool {
 	}
 }
 
+// Defines values for AnthropicContentBlockSourceMediaType.
+const (
+	Imagegif  AnthropicContentBlockSourceMediaType = "image/gif"
+	Imagejpeg AnthropicContentBlockSourceMediaType = "image/jpeg"
+	Imagepng  AnthropicContentBlockSourceMediaType = "image/png"
+	Imagewebp AnthropicContentBlockSourceMediaType = "image/webp"
+)
+
+// Valid indicates whether the value is a known member of the AnthropicContentBlockSourceMediaType enum.
+func (e AnthropicContentBlockSourceMediaType) Valid() bool {
+	switch e {
+	case Imagegif:
+		return true
+	case Imagejpeg:
+		return true
+	case Imagepng:
+		return true
+	case Imagewebp:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AnthropicContentBlockSourceType.
 const (
 	Base64 AnthropicContentBlockSourceType = "base64"
@@ -324,6 +348,84 @@ func (e ChatMessageRole) Valid() bool {
 	case ChatMessageRoleTool:
 		return true
 	case ChatMessageRoleUser:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ChatRequestContentPartImageUrlDetail.
+const (
+	ChatRequestContentPartImageUrlDetailAuto ChatRequestContentPartImageUrlDetail = "auto"
+	ChatRequestContentPartImageUrlDetailHigh ChatRequestContentPartImageUrlDetail = "high"
+	ChatRequestContentPartImageUrlDetailLow  ChatRequestContentPartImageUrlDetail = "low"
+)
+
+// Valid indicates whether the value is a known member of the ChatRequestContentPartImageUrlDetail enum.
+func (e ChatRequestContentPartImageUrlDetail) Valid() bool {
+	switch e {
+	case ChatRequestContentPartImageUrlDetailAuto:
+		return true
+	case ChatRequestContentPartImageUrlDetailHigh:
+		return true
+	case ChatRequestContentPartImageUrlDetailLow:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ChatRequestContentPartType.
+const (
+	ChatRequestContentPartTypeImageUrl ChatRequestContentPartType = "image_url"
+	ChatRequestContentPartTypeText     ChatRequestContentPartType = "text"
+)
+
+// Valid indicates whether the value is a known member of the ChatRequestContentPartType enum.
+func (e ChatRequestContentPartType) Valid() bool {
+	switch e {
+	case ChatRequestContentPartTypeImageUrl:
+		return true
+	case ChatRequestContentPartTypeText:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ChatRequestMessageRole.
+const (
+	ChatRequestMessageRoleAssistant ChatRequestMessageRole = "assistant"
+	ChatRequestMessageRoleSystem    ChatRequestMessageRole = "system"
+	ChatRequestMessageRoleTool      ChatRequestMessageRole = "tool"
+	ChatRequestMessageRoleUser      ChatRequestMessageRole = "user"
+)
+
+// Valid indicates whether the value is a known member of the ChatRequestMessageRole enum.
+func (e ChatRequestMessageRole) Valid() bool {
+	switch e {
+	case ChatRequestMessageRoleAssistant:
+		return true
+	case ChatRequestMessageRoleSystem:
+		return true
+	case ChatRequestMessageRoleTool:
+		return true
+	case ChatRequestMessageRoleUser:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ChatRequestToolCallType.
+const (
+	ChatRequestToolCallTypeFunction ChatRequestToolCallType = "function"
+)
+
+// Valid indicates whether the value is a known member of the ChatRequestToolCallType enum.
+func (e ChatRequestToolCallType) Valid() bool {
+	switch e {
+	case ChatRequestToolCallTypeFunction:
 		return true
 	default:
 		return false
@@ -1132,15 +1234,25 @@ type AnthropicContentBlock struct {
 	} `json:"cache_control,omitempty"`
 	Content *AnthropicContentBlock_Content `json:"content,omitempty"`
 	Id      *string                        `json:"id,omitempty"`
-	Input   *map[string]interface{}        `json:"input,omitempty"`
-	Name    *string                        `json:"name,omitempty"`
+
+	// Input Tool input object. Arbitrary user-defined JSON is accepted as-is;
+	// the field is intentionally left open (no additionalProperties
+	// constraint) so any valid JSON object passes through.
+	Input *map[string]interface{} `json:"input,omitempty"`
+	Name  *string                 `json:"name,omitempty"`
 
 	// Signature Cryptographic signature for thinking block continuity.
 	Signature *string `json:"signature,omitempty"`
 	Source    *struct {
-		Data      *string                          `json:"data,omitempty"`
-		MediaType *string                          `json:"media_type,omitempty"`
-		Type      *AnthropicContentBlockSourceType `json:"type,omitempty"`
+		// Data Base64-encoded (standard padded) image bytes. Must decode
+		// to a non-empty value within the executor's decoded byte
+		// bound. URL-safe alphabet and raw (unpadded) encodings are
+		// rejected.
+		Data *string `json:"data,omitempty"`
+
+		// MediaType MIME type of the base64-encoded image data.
+		MediaType *AnthropicContentBlockSourceMediaType `json:"media_type,omitempty"`
+		Type      *AnthropicContentBlockSourceType      `json:"type,omitempty"`
 	} `json:"source,omitempty"`
 	Text *string `json:"text,omitempty"`
 
@@ -1163,6 +1275,9 @@ type AnthropicContentBlockContent1 = []AnthropicContentBlock
 type AnthropicContentBlock_Content struct {
 	union json.RawMessage
 }
+
+// AnthropicContentBlockSourceMediaType MIME type of the base64-encoded image data.
+type AnthropicContentBlockSourceMediaType string
 
 // AnthropicContentBlockSourceType defines model for AnthropicContentBlock.Source.Type.
 type AnthropicContentBlockSourceType string
@@ -1249,7 +1364,10 @@ type AnthropicTool struct {
 	} `json:"cache_control,omitempty"`
 	Description *string `json:"description,omitempty"`
 
-	// InputSchema JSON Schema for tool input.
+	// InputSchema JSON Schema for tool input. Arbitrary user-defined JSON Schema is
+	// accepted as-is; the field is intentionally left open (no
+	// additionalProperties constraint) so any valid schema shape passes
+	// through.
 	InputSchema map[string]interface{} `json:"input_schema"`
 	Name        string                 `json:"name"`
 }
@@ -1282,7 +1400,11 @@ type ChatCompletionChoice struct {
 	FinishReason *ChatCompletionChoiceFinishReason `json:"finish_reason"`
 	Index        int                               `json:"index"`
 	Logprobs     *map[string]interface{}           `json:"logprobs,omitempty"`
-	Message      *ChatMessage                      `json:"message,omitempty"`
+
+	// Message Response-side chat message used by ChatCompletionChoice.message. Left
+	// extensible (no additionalProperties:false) so provider extensions
+	// validate; request messages use the closed ChatRequestMessage twin.
+	Message *ChatMessage `json:"message,omitempty"`
 }
 
 // ChatCompletionChoiceFinishReason defines model for ChatCompletionChoice.FinishReason.
@@ -1307,11 +1429,18 @@ type ChatCompletionResponse struct {
 // ChatCompletionResponseObject defines model for ChatCompletionResponse.Object.
 type ChatCompletionResponseObject string
 
-// ChatContentPart defines model for ChatContentPart.
+// ChatContentPart Response-side chat content part used inside ChatMessage.content.
+// Left extensible (no additionalProperties:false) so provider extensions
+// validate; request content parts use the closed ChatRequestContentPart.
 type ChatContentPart struct {
 	ImageUrl *struct {
 		Detail *ChatContentPartImageUrlDetail `json:"detail,omitempty"`
-		Url    *string                        `json:"url,omitempty"`
+
+		// Url Image URL. The executor accepts only bounded HTTPS URLs
+		// (scheme https, non-empty host, no userinfo) or bounded
+		// data: URLs with an image MIME type and ;base64 encoding.
+		// HTTP and other schemes are rejected.
+		Url *string `json:"url,omitempty"`
 	} `json:"image_url,omitempty"`
 	Text *string             `json:"text,omitempty"`
 	Type ChatContentPartType `json:"type"`
@@ -1323,7 +1452,9 @@ type ChatContentPartImageUrlDetail string
 // ChatContentPartType defines model for ChatContentPart.Type.
 type ChatContentPartType string
 
-// ChatMessage defines model for ChatMessage.
+// ChatMessage Response-side chat message used by ChatCompletionChoice.message. Left
+// extensible (no additionalProperties:false) so provider extensions
+// validate; request messages use the closed ChatRequestMessage twin.
 type ChatMessage struct {
 	Content ChatMessage_Content `json:"content"`
 
@@ -1355,13 +1486,89 @@ type ChatMessage_Content struct {
 // ChatMessageRole defines model for ChatMessage.Role.
 type ChatMessageRole string
 
+// ChatRequestContentPart Request-side chat content part. Finite request fields, including the
+// image_url nested object, are closed (additionalProperties:false); the
+// response-side ChatContentPart stays extensible for provider extensions.
+type ChatRequestContentPart struct {
+	ImageUrl *struct {
+		Detail *ChatRequestContentPartImageUrlDetail `json:"detail,omitempty"`
+
+		// Url Image URL. The executor accepts only bounded HTTPS URLs
+		// (scheme https, non-empty host, no userinfo) or bounded
+		// data: URLs with an image MIME type and ;base64 encoding.
+		// HTTP and other schemes are rejected.
+		Url *string `json:"url,omitempty"`
+	} `json:"image_url,omitempty"`
+	Text *string                    `json:"text,omitempty"`
+	Type ChatRequestContentPartType `json:"type"`
+}
+
+// ChatRequestContentPartImageUrlDetail defines model for ChatRequestContentPart.ImageUrl.Detail.
+type ChatRequestContentPartImageUrlDetail string
+
+// ChatRequestContentPartType defines model for ChatRequestContentPart.Type.
+type ChatRequestContentPartType string
+
+// ChatRequestMessage Request-side chat message. Finite request fields are closed
+// (additionalProperties:false) so only the documented request shape is
+// accepted; the response-side ChatMessage stays extensible (no
+// additionalProperties:false) so provider extensions still validate.
+type ChatRequestMessage struct {
+	Content ChatRequestMessage_Content `json:"content"`
+
+	// Name Optional participant name.
+	Name *string `json:"name,omitempty"`
+
+	// ReasoningContent Reasoning content from thinking models (assistant messages).
+	ReasoningContent *string                `json:"reasoning_content,omitempty"`
+	Role             ChatRequestMessageRole `json:"role"`
+
+	// ToolCallId Tool call ID (for role=tool messages).
+	ToolCallId *string `json:"tool_call_id,omitempty"`
+
+	// ToolCalls Tool calls made by the assistant.
+	ToolCalls *[]ChatRequestToolCall `json:"tool_calls,omitempty"`
+}
+
+// ChatRequestMessageContent0 defines model for ChatRequestMessage.Content.0.
+type ChatRequestMessageContent0 = string
+
+// ChatRequestMessageContent1 defines model for ChatRequestMessage.Content.1.
+type ChatRequestMessageContent1 = []ChatRequestContentPart
+
+// ChatRequestMessage_Content defines model for ChatRequestMessage.Content.
+type ChatRequestMessage_Content struct {
+	union json.RawMessage
+}
+
+// ChatRequestMessageRole defines model for ChatRequestMessage.Role.
+type ChatRequestMessageRole string
+
+// ChatRequestToolCall Request-side chat tool call. Finite request fields, including the
+// function nested object, are closed (additionalProperties:false); the
+// response-side ChatToolCall stays extensible for provider extensions.
+type ChatRequestToolCall struct {
+	Function struct {
+		Arguments string `json:"arguments"`
+		Name      string `json:"name"`
+	} `json:"function"`
+	Id   string                  `json:"id"`
+	Type ChatRequestToolCallType `json:"type"`
+}
+
+// ChatRequestToolCallType defines model for ChatRequestToolCall.Type.
+type ChatRequestToolCallType string
+
 // ChatTool defines model for ChatTool.
 type ChatTool struct {
 	Function struct {
 		Description *string `json:"description,omitempty"`
 		Name        string  `json:"name"`
 
-		// Parameters JSON Schema for function parameters.
+		// Parameters JSON Schema for function parameters. Arbitrary user-defined
+		// JSON Schema is accepted as-is; the field is intentionally left
+		// open (no additionalProperties constraint) so any valid schema
+		// shape passes through.
 		Parameters map[string]interface{} `json:"parameters"`
 		Strict     *bool                  `json:"strict,omitempty"`
 	} `json:"function"`
@@ -1371,7 +1578,9 @@ type ChatTool struct {
 // ChatToolType defines model for ChatTool.Type.
 type ChatToolType string
 
-// ChatToolCall defines model for ChatToolCall.
+// ChatToolCall Response-side chat tool call used inside ChatMessage.tool_calls. Left
+// extensible (no additionalProperties:false) so provider extensions
+// validate; request tool calls use the closed ChatRequestToolCall twin.
 type ChatToolCall struct {
 	Function struct {
 		Arguments string `json:"arguments"`
@@ -1418,8 +1627,8 @@ type CreateChatCompletionRequest struct {
 	MaxCompletionTokens *int `json:"max_completion_tokens,omitempty"`
 
 	// MaxTokens Maximum output tokens (does not include reasoning tokens).
-	MaxTokens *int          `json:"max_tokens,omitempty"`
-	Messages  []ChatMessage `json:"messages"`
+	MaxTokens *int                 `json:"max_tokens,omitempty"`
+	Messages  []ChatRequestMessage `json:"messages"`
 
 	// Model Model selector. Supports extended syntax:
 	// - `gpt-4o` — base model
@@ -1611,7 +1820,11 @@ type CreateResponseRequest struct {
 	Temperature *float32                 `json:"temperature,omitempty"`
 	Text        *struct {
 		Format *struct {
-			Name   *string                              `json:"name,omitempty"`
+			Name *string `json:"name,omitempty"`
+
+			// Schema JSON Schema for structured output. Arbitrary user-defined
+			// JSON Schema is accepted as-is; the field is intentionally
+			// left open (no additionalProperties constraint).
 			Schema *map[string]interface{}              `json:"schema,omitempty"`
 			Type   *CreateResponseRequestTextFormatType `json:"type,omitempty"`
 		} `json:"format,omitempty"`
@@ -1766,6 +1979,10 @@ type OpenAIErrorResponseErrorType string
 
 // ResponseContentPart defines model for ResponseContentPart.
 type ResponseContentPart struct {
+	// ImageUrl Image URL. The executor accepts only bounded HTTPS URLs
+	// (scheme https, non-empty host, no userinfo) or bounded
+	// data: URLs with an image MIME type and ;base64 encoding.
+	// HTTP and other schemes are rejected.
 	ImageUrl *string                 `json:"image_url,omitempty"`
 	Text     *string                 `json:"text,omitempty"`
 	Type     ResponseContentPartType `json:"type"`
@@ -1883,7 +2100,9 @@ type ResponseTool struct {
 	Description *string `json:"description,omitempty"`
 	Name        string  `json:"name"`
 
-	// Parameters JSON Schema for function parameters.
+	// Parameters JSON Schema for function parameters. Arbitrary user-defined JSON
+	// Schema is accepted as-is; the field is intentionally left open
+	// (no additionalProperties constraint).
 	Parameters map[string]interface{} `json:"parameters"`
 	Strict     *bool                  `json:"strict,omitempty"`
 	Type       ResponseToolType       `json:"type"`
@@ -1907,7 +2126,9 @@ type ResponseUsage struct {
 
 // ThinkingConfig defines model for ThinkingConfig.
 type ThinkingConfig struct {
-	// BudgetTokens Thinking token budget. Must be >= 1024 and < max_tokens.
+	// BudgetTokens Thinking token budget. Required when type=enabled and must be
+	// >= 1024 and strictly less than max_tokens (budget_tokens <
+	// max_tokens). When type=disabled this field must be omitted.
 	// Only valid when type=enabled.
 	BudgetTokens *int `json:"budget_tokens,omitempty"`
 
@@ -2168,6 +2389,68 @@ func (t ChatMessage_Content) MarshalJSON() ([]byte, error) {
 }
 
 func (t *ChatMessage_Content) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
+
+// AsChatRequestMessageContent0 returns the union data inside the ChatRequestMessage_Content as a ChatRequestMessageContent0
+func (t ChatRequestMessage_Content) AsChatRequestMessageContent0() (ChatRequestMessageContent0, error) {
+	var body ChatRequestMessageContent0
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromChatRequestMessageContent0 overwrites any union data inside the ChatRequestMessage_Content as the provided ChatRequestMessageContent0
+func (t *ChatRequestMessage_Content) FromChatRequestMessageContent0(v ChatRequestMessageContent0) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeChatRequestMessageContent0 performs a merge with any union data inside the ChatRequestMessage_Content, using the provided ChatRequestMessageContent0
+func (t *ChatRequestMessage_Content) MergeChatRequestMessageContent0(v ChatRequestMessageContent0) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsChatRequestMessageContent1 returns the union data inside the ChatRequestMessage_Content as a ChatRequestMessageContent1
+func (t ChatRequestMessage_Content) AsChatRequestMessageContent1() (ChatRequestMessageContent1, error) {
+	var body ChatRequestMessageContent1
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromChatRequestMessageContent1 overwrites any union data inside the ChatRequestMessage_Content as the provided ChatRequestMessageContent1
+func (t *ChatRequestMessage_Content) FromChatRequestMessageContent1(v ChatRequestMessageContent1) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeChatRequestMessageContent1 performs a merge with any union data inside the ChatRequestMessage_Content, using the provided ChatRequestMessageContent1
+func (t *ChatRequestMessage_Content) MergeChatRequestMessageContent1(v ChatRequestMessageContent1) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t ChatRequestMessage_Content) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *ChatRequestMessage_Content) UnmarshalJSON(b []byte) error {
 	err := t.union.UnmarshalJSON(b)
 	return err
 }

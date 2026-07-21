@@ -59,7 +59,7 @@ Auth Go 边界由固定的 oapi-codegen v2.8.0 和两份明确配置确定性生
 
 两个文件均提交、带源契约和 `DO NOT EDIT` 头；`check:generated` 在临时目录重生成并逐一字节比较，且拒绝旧 `generated.go`。GitHub 将 `*.gen.go` 标记为 generated，默认折叠；评审先看 OpenAPI、adapter、测试与 freshness 结果。
 
-Executor 生成配置/脚本、generated models/strict server 与 adapter skeleton 已实施；生成物随变更提交。`check:generated:executor` 在现有 `go-auth` CI job 中作为必经的新鲜度门禁。generated handler 与 adapter 仅用于 route/HTTP conformance tests，不注册到 Executor runtime；业务执行与 SSE 流处理未实现。
+Executor 生成配置/脚本、generated models/strict server 与 transport adapter（Foundation `New()` 501 skeleton + DI `NewNonStream` non-stream adapter）已实施；生成物随变更提交。`check:generated:executor` 在现有 `go-auth` CI job 中作为必经的新鲜度门禁。generated handler 与 adapter（含 normalizer/renderer/strict options/raw-body capture，均模块内）仅用于 route/HTTP conformance 与 generated-handler component tests，不注册到 Executor runtime；业务执行与 SSE 流处理未实现。契约形状与媒体安全边界：有限 request 对象关闭（`additionalProperties:false`），free-form JSON/JSON Schema 字段开放透传，成功 response schema 保持可扩展；image URL 仅接受 bounded HTTPS 或 `data:image` base64，`media_type` 枚举、base64 须标准 padded 且解码非空，详见 `AGENTS.md`。
 
 为保持 diff 可审阅，生成器升级、API 行为变更和 OpenAPI 全文格式化必须分开提交；`operationId` 与 schema 名是稳定生成标识，禁止无意义重命名或重排。
 
@@ -76,7 +76,7 @@ Executor 生成配置/脚本、generated models/strict server 与 adapter skelet
 
 - **运行时**：零第三方依赖。`dist/` 中的 YAML 契约可被任何语言直接消费。
 - **开发期**：`yaml` npm 包（devDependency）用于验证脚本真正解析 YAML，不随 `dist/` 发布。
-- **Go 代码生成**：Auth 使用 oapi-codegen v2.8.0（通过 `go run @version` 下载，不作为 module 依赖）；通过 `output-options.type-mapping` 配置将 `format: email` → `string`、`format: uuid` → `uuid.UUID`（`github.com/google/uuid`），避免 `oapi-codegen/runtime` 依赖。`additional-imports` 提供 `uuid` 别名导入。Executor 生成配置/脚本、generated models/strict server 与 adapter skeleton 已实施；生成物随变更提交，`check:generated:executor` 是现有 `go-auth` CI job 中的门禁步骤。
+- **Go 代码生成**：Auth 使用 oapi-codegen v2.8.0（通过 `go run @version` 下载，不作为 module 依赖）；通过 `output-options.type-mapping` 配置将 `format: email` → `string`、`format: uuid` → `uuid.UUID`（`github.com/google/uuid`），避免 `oapi-codegen/runtime` 依赖。`additional-imports` 提供 `uuid` 别名导入。Executor 生成配置/脚本、generated models/strict server 与 transport adapter（Foundation `New()` 501 + DI `NewNonStream` non-stream，含 raw-body capture/normalizer/renderer/strict options）已实施；生成物随变更提交，`check:generated:executor` 是现有 `go-auth` CI job 中的门禁步骤。
 
 ## 架构决策
 

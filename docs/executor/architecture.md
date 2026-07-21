@@ -1,6 +1,6 @@
 # Executor Architecture Design
 
-- 状态：设计基线已确认；Foundation、Config compiler/snapshot、routing、Phase 5 Adapter Engine、Phase 6 non-stream SDK adapters、Phase 7 retry State 和内部 non-stream Runner 已实施；Runner 仅为模块内 pipeline composition，其余公开执行能力仍按本文逐阶段落地
+- 状态：设计基线已确认；Foundation、Config compiler/snapshot、routing、Phase 5 Adapter Engine、Phase 6 non-stream SDK adapters、Phase 7 retry State、内部 non-stream Runner 与 non-stream HTTP transport 层已实施；Runner 与 transport 层仅为模块内 composition，其余公开执行能力仍按本文逐阶段落地
 - 适用范围：TokenMP v3 `services/executor`
 - 契约来源：`packages/contracts/openapi/executor/v1.yaml`
 - 关联测试方案：`testing-strategy.md`
@@ -19,7 +19,7 @@ Executor 是 TokenMP 的模型请求执行面，负责：
 8. 按配置决定同 Credential 重试、切 Credential、切 Route、切 Provider或切模型。
 9. 管理业务超时、流提交边界、取消、配额和请求日志。
 
-Foundation 不连接数据库，已通过端口接口及 Mock/InMemory 实现提供身份、配置、配额、日志和运行时状态。generated models/strict server、adapter skeleton、route/HTTP conformance、纯 Go Adapter Engine，以及 request-local、serial、pure-Go、无 I/O 的 retry decision/attempt-budget State 已实施；公开模型业务路由的 runtime 注册、HTTP normalizer/renderer、identity、durable idempotency/replay、remote quota/credential resolver、`Retry-After` header parsing、流处理及持久化仍未实施；已实施 internal shared `sdk` port，以及 official `github.com/openai/openai-go/v3` **v3.44.0** OpenAI Chat Completions **non-stream** adapter 和 official `github.com/anthropics/anthropic-sdk-go` **v1.58.0** Anthropic Messages **non-stream** internal adapter。Anthropic adapter 每次调用验证 HTTPS target/path prefix、upstream model 和 opaque secret，使用 `WithoutEnvironmentDefaults`、retry=0、no redirects，且在最终 transport 固定唯一 `x-api-key`、`anthropic-version` 和允许的 header/query；strict OpenAPI request/response validation 覆盖 execution-authoritative model/thinking、tools 和 vision；529 overloaded 安全分类为 unavailable，并由 fixture 映射为 429。TLS `httptest` 与 request/response fuzz 已覆盖。两者由内部 non-stream Runner 消费，但仍未接入 runtime routing，故不是端到端业务能力；Runner 固定 Resolver/Plan owner binding，在每 attempt 纯 Prepare 后解析 credential，组合 Engine、SDK registry 和官方 SDK auth compatibility，并冻结 request-lifetime retry policy、使用 per-attempt timeout、一次 Reserve/安全 terminalizer、mapped failure 与 safe execution events。它不提供 wire-attempt proof、跨进程 exactly-once 或 durable idempotency/replay；HTTP normalizer/renderer、identity、remote quota/credential resolver、`Retry-After` parsing、Responses、Images 与 streaming 仍未实施。未来持久化实现不得改变核心执行流程。
+Foundation 不连接数据库，已通过端口接口及 Mock/InMemory 实现提供身份、配置、配额、日志和运行时状态。generated models/strict server、transport adapter（Foundation `New()` 501 + DI `NewNonStream`）、route/HTTP conformance、纯 Go Adapter Engine，request-local、serial、pure-Go retry State，以及 non-stream HTTP transport 层已实施：`internal/transport/executorv1api` 提供 raw-body 捕获（2 MiB）、strict contract normalizer、protocol renderer、`SafeStrictOptions` 与 DI adapter，并由 generated-handler component tests 覆盖。但公开模型业务路由的 runtime 注册、runtime HTTP normalizer/renderer composition（identity/runtime config/facade/reservation 接入公开 server）、durable idempotency/replay、remote quota/credential resolver、`Retry-After` header parsing、流处理及持久化仍未实施；`app.NewServer`/runtime `main` 仍只服务 `/healthz`。已实施 internal shared `sdk` port，以及 official `github.com/openai/openai-go/v3` **v3.44.0** OpenAI Chat Completions **non-stream** adapter 和 official `github.com/anthropics/anthropic-sdk-go` **v1.58.0** Anthropic Messages **non-stream** internal adapter。Anthropic adapter 每次调用验证 HTTPS target/path prefix、upstream model 和 opaque secret，使用 `WithoutEnvironmentDefaults`、retry=0、no redirects，且在最终 transport 固定唯一 `x-api-key`、`anthropic-version` 和允许的 header/query；strict OpenAPI request/response validation 覆盖 execution-authoritative model/thinking、tools 和 vision；529 overloaded 安全分类为 unavailable，并由 fixture 映射为 429。TLS `httptest` 与 request/response fuzz 已覆盖。两者由内部 non-stream Runner 消费，但仍未接入 runtime routing，故不是端到端业务能力；Runner 固定 Resolver/Plan owner binding，在每 attempt 纯 Prepare 后解析 credential，组合 Engine、SDK registry 和官方 SDK auth compatibility，并冻结 request-lifetime retry policy、使用 per-attempt timeout、一次 Reserve/安全 terminalizer、mapped failure 与 safe execution events。它不提供 wire-attempt proof、跨进程 exactly-once 或 durable idempotency/replay；runtime HTTP normalizer/renderer/identity composition、remote quota/credential resolver、`Retry-After` parsing、Responses、Images 与 streaming 仍未实施。未来持久化实现不得改变核心执行流程。
 
 ## 2. 设计原则
 
@@ -121,14 +121,14 @@ Foundation 已实施：
 ```text
 Client
   ↓
-HTTP Transport
-  ├─ request/trace id
-  ├─ API key extraction
-  ├─ body limit
-  └─ protocol-native error rendering
+HTTP Transport（已实施模块内层：raw-body capture 2 MiB、`SafeStrictOptions` 不泄漏 error handler；runtime identity/公开路由仍未接入）
+  ├─ request/trace id（trusted，service-generated；identity 仍未接入）
+  ├─ API key extraction（未实现）
+  ├─ body limit（已实施 raw-body capture）
+  └─ protocol-native error rendering（已实施 renderer + strict options）
   ↓
-Protocol Normalizer
-  ↓ NormalizedRequest
+Protocol Normalizer（已实施模块内层：strict contract normalizer 镜像 `additionalProperties:false`、thinking/媒体/JSON 边界）
+  ↓ NormalizedRequest（protocol/selector/raw body/thinking/requestID）
 Internal non-stream Runner（已实施；仅模块内）
   ├─ Resolver/Plan owner binding、Prepare、adapt、SDK registry/auth compatibility
   ├─ per-attempt credential resolve、frozen retry policy、per-attempt timeout
@@ -191,7 +191,7 @@ services/executor/
 
 ## 5. Contract 与流式边界
 
-Executor 契约已存在于 `packages/contracts/openapi/executor/v1.yaml`。已生成 Executor generated models/strict server，并随变更提交（`services/executor/internal/contract/executorv1/{models,server}.gen.go`）与 transport adapter skeleton（`internal/transport/executorv1api/adapter.go`），并新增路由契约一致性测试（`internal/server/contract_test.go`）以双向比较 generated Chi 路由与契约。但运行时 `main` 仍未注册任何公开业务路由，仍只经 `internal/transport/healthz` 服务 `/healthz`；strict server 生成的 SSE 能力仅为 generated capability，当前不被任何运行时代码调用。`check:generated:executor` 是现有 `go-auth` CI job 中必经的新鲜度门禁（与 Auth 新鲜度步骤相邻），同一 job 还运行 generated contract、strict adapter skeleton 与 route/HTTP conformance 的 race tests；未新增独立 Executor CI job、运行时业务路由或执行 pipeline 测试，Docker 与集成验证仍待阶段 14。
+Executor 契约已存在于 `packages/contracts/openapi/executor/v1.yaml`。已生成 Executor generated models/strict server，并随变更提交（`services/executor/internal/contract/executorv1/{models,server}.gen.go`）与 transport adapter（`internal/transport/executorv1api/adapter.go`：Foundation `New()` health+501，DI `NewNonStream` non-stream 执行）、raw-body capture/normalizer/renderer/strict options 与 route/HTTP conformance 测试（`internal/server/contract_test.go`）及 generated-handler component tests（`internal/transport/executorv1api/adapter_integration_test.go`）。契约形状与媒体安全边界：有限 request 对象关闭（`additionalProperties:false`），free-form JSON/JSON Schema 字段开放透传，成功 response schema 保持可扩展；image URL 仅接受 bounded HTTPS 或 `data:image` base64，`source.media_type` 枚举、base64 须标准 padded 且解码非空。但运行时 `main` 仍未注册任何公开业务路由，仍只经 `internal/transport/healthz` 服务 `/healthz`；strict server 生成的 SSE 能力仅为 generated capability，当前不被任何运行时代码调用。`check:generated:executor` 是现有 `go-auth` CI job 中必经的新鲜度门禁（与 Auth 新鲜度步骤相邻），同一 job 还运行 generated contract、transport adapter/route/HTTP conformance 的 race tests；未新增独立 Executor CI job、运行时业务路由或执行 pipeline 测试，Docker 与集成验证仍待阶段 14。
 
 由于公开生成接口同时支持 JSON 和长时间 SSE，实施前必须通过独立变更验证普通 `ServerInterface` 与 StrictServerInterface。普通接口更自然地控制：
 
@@ -538,13 +538,15 @@ Request/Attempt/Event 日志至少记录：
 | 阶段 | 分支建议 | 内容 |
 |---|---|---|
 | 1 | `feat/executor-foundation` | **已实施**：模块骨架、health、运行时配置、优雅关闭、Mock/InMemory ports、最小 quota terminal 状态机 |
-| 2 | `refactor/executor-codegen` | **已实施**：generated models/strict server、adapter skeleton、生成物新鲜度门禁与 route/HTTP conformance；运行时尚未注册业务路由，业务执行与流处理未实现 |
+| 2 | `refactor/executor-codegen` | **已实施**：generated models/strict server、transport adapter（Foundation `New()` 501；DI `NewNonStream` 与 normalizer/renderer/strict options/raw-body capture 在后续阶段加入）、生成物新鲜度门禁与 route/HTTP conformance；运行时尚未注册业务路由，业务执行与流处理未实现 |
 | 3 | `feat/executor-config-model` | **已实施（模块内，未接 runtime）**：`snapshot.Compile` → `adapter.Compile`、C01–C27 相关有限 DSL 安全校验、继承/normalization、deterministic ordering、immutable generation-aware Store 与三份脱敏 fixture 的严格解码/真实编译/发布测试；默认值已与本设计基线对齐。 |
 | 4 | `feat/executor-routing` | **已实施（纯 Go，未接 runtime/pipeline）**：strict `model[:group][@provider]` selector（`auto` 禁止 group）、route group/provider selector/route-local non-secret credential/auto+model fallback、legacy `CredentialRef` 全长 SHA-256 合成、revision-pinned immutable Resolver/Plan、deterministic candidates 与 model/provider/route/credential 四维 fail-closed quarantine；公开 Candidate/Plan 仅含安全 credential ID/priority，不含 credential ref 或 secret；`Plan.Next` 仅定义 candidate scope，不是 RetryDecider。 |
 | 5 | `feat/executor-adapter-engine` | **已实施（模块内，未接 pipeline）**：stateless pure-Go/no-I/O Engine 严格解码 JSON object、执行全部有限 DSL actions、literal-only header/query、继续拒绝 `ValueRef`、按 selected model bounds 映射 thinking，并安全 map response（维度间 AND、维度内 OR、compiler established order、fixed default）；atomic/mutation/race/fuzz 覆盖已实施。 |
 | 6 | `feat/executor-sdk-providers` | **已实施（模块内，未接 pipeline/runtime）**：official `github.com/openai/openai-go/v3` v3.44.0 OpenAI Chat Completions 与 `github.com/anthropics/anthropic-sdk-go` v1.58.0 Anthropic Messages non-stream adapters。Anthropic 使用 `WithoutEnvironmentDefaults`、per-call HTTPS target/path prefix/model/secret、retry=0/no redirects、固定 version/唯一 `x-api-key`、strict OpenAPI request+response validation、thinking authority、tools/vision、safe classification 和 529→unavailable（fixture 529→429）；TLS/fuzz 已覆盖。quota cleanup、pipeline/runtime routing、Responses/Images/streaming 仍待后续。 |
 | 7 | `feat/executor-retry-policy` | **已实施（模块内、纯 Go，未接 pipeline/runtime）**：request-local serial retry State 固定 Plan/policy，匹配规则、管理 candidate scope、delay、总量/同 target/总时长 budget 和 commit/cancel gate；`BeginAttempt` 只记录逻辑 reservation，不是 wire attempt gate。 |
-| 7.5 | `feat/executor-nonstream-pipeline` | **部分实施（内部 non-stream Runner，未接 runtime）**：将 Resolver/Plan owner binding、pure Prepare、per-attempt credential resolve、Engine、SDK registry、official SDK auth compatibility、request-lifetime frozen retry policy、per-attempt timeout、one Reserve + safe terminalizer、mapped failure 和 safe execution events 组合；Mock/InMemory/fake tests 已覆盖。未实现公开 HTTP normalizer/renderer/identity、durable idempotency/replay、remote quota/credential resolver 或 `Retry-After` parsing；不声称 wire proof 或跨进程 exactly-once。 |
+| 7.5 | `feat/executor-nonstream-pipeline` | **部分实施（内部 non-stream Runner，未接 runtime）**：将 Resolver/Plan owner binding、pure Prepare、per-attempt credential resolve、Engine、SDK registry、official SDK auth compatibility、request-lifetime frozen retry policy、per-attempt timeout、one Reserve + safe terminalizer、mapped failure 和 safe execution events 组合；Mock/InMemory/fake tests 已覆盖。未实现 runtime composition（identity/runtime config/facade/reservation 接入公开 server 与路由）、durable idempotency/replay、remote quota/credential resolver 或 `Retry-After` parsing；不声称 wire proof 或跨进程 exactly-once。 |
+| 7.6 | `feat/executor-http-nonstream-transport` | **已实施（模块内 transport 层，未接 runtime）**：`internal/transport/executorv1api` 新增 OpenAI Chat 与 Anthropic Messages non-stream raw-body 捕获（`CaptureRawBody`，`MaxCapturedBodyBytes` = 2 MiB）、strict contract normalizer、protocol renderer（bounded local contract check）、`SafeStrictOptions` 与 DI adapter（`NewNonStream`）；generated-handler component tests 将 adapter 接入 generated `NewStrictHandler` 并以 kin-openapi 校验响应。`New()` Foundation 仍 501，`app.NewServer`/runtime `main` 仍只服务 `/healthz`。 |
+| 7.7 | `feat/executor-runtime-composition` | runtime composition：将 identity、runtime config source、facade/reservation 与 `NewNonStream` adapter 接入公开 runtime server/路由（仍未实施） |
 | 8 | `feat/executor-streaming` | StreamBridge、TTFT/idle/lifetime |
 | 9 | `feat/executor-sdk-anthropic-streaming` | Anthropic native stream/error 与 thinking signature |
 | 10 | `feat/executor-responses` | Responses 事件状态机 |
