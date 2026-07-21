@@ -39,8 +39,8 @@
 - Auth Service Foundation 决策：`adr/0004-auth-service-foundation.md`
 - Auth Identity Flows 决策：`adr/0005-auth-identity-flows.md`
 - API Contracts Package 决策：`adr/0006-api-contracts-package.md`
-- Executor 架构设计基线（Foundation、Config compiler/immutable snapshot、routing、Adapter Engine、retry State、两个 non-stream SDK adapter 和内部 non-stream Runner 已实施；Runner 只作模块内 composition，不提供 wire-attempt proof 或跨进程 exactly-once；runtime 公开路由、normalizer/renderer/identity、durable idempotency/replay、remote resolver、`Retry-After` 解析与流处理未实施）：`executor/architecture.md`
-- Executor 测试策略（Foundation、compiler/snapshot、routing、Adapter Engine、retry State、两个 non-stream SDK adapter 及内部 Runner 的 Mock/InMemory/fake 测试已实施；runtime pipeline、`Retry-After` 解析、remote quota/credential resolver、stream commit 与其余协议阶段测试未实施）：`executor/testing-strategy.md`
+- Executor 架构设计基线（Foundation、Config compiler/immutable snapshot、routing、Adapter Engine、retry State、两个 non-stream SDK adapter、内部 non-stream Runner 与 non-stream HTTP transport 层已实施；Runner/transport 层只作模块内 composition，不提供 wire-attempt proof 或跨进程 exactly-once；runtime 公开路由、runtime normalizer/renderer/identity/facade/reservation composition、durable idempotency/replay、remote resolver、`Retry-After` 解析与流处理未实施）：`executor/architecture.md`
+- Executor 测试策略（Foundation、compiler/snapshot、routing、Adapter Engine、retry State、两个 non-stream SDK adapter、内部 Runner 及 non-stream HTTP transport 层的 generated-handler component tests 已实施；runtime pipeline composition、`Retry-After` 解析、remote quota/credential resolver、stream commit 与其余协议阶段测试未实施）：`executor/testing-strategy.md`
 - UI 设计规范：`ui/design-system.md`
 
 新增、替代或删除文档时同步维护本索引或相应主题索引。

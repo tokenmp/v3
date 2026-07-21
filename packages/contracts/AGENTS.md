@@ -38,7 +38,7 @@
 | 依赖 | `yaml` npm 包 | 验证脚本真正解析 YAML | devDependency | `scripts/validate.mjs` | `lint` + `typecheck` |
 | 依赖 | Go 1.26.5+ | oapi-codegen 代码生成 | 开发工具（`go run @version`） | Auth：`go/generate.sh`；Executor：experimental `go/generate-executor.sh` | Auth：`check:generated` + `go test`；Executor：`check:generated:executor` 是现有 `go-auth` CI job 中必经的新鲜度门禁 |
 | 被依赖 | `services/auth` | Auth 实现遵循此契约 | 设计/构建时契约依赖 + 生成代码 | `openapi/auth/v1.yaml` → `{models,server}.gen.go` | Auth conformance test + 生成物新鲜度测试 + 集成测试 |
-| 被依赖 | `services/executor` | Executor Foundation 以契约作为公开路由的设计/构建时事实来源，并生成 generated models/strict server 与 transport adapter skeleton；生成物随变更提交 | OpenAPI 文件引用 + generated Go 代码；无 runtime import contracts package | `openapi/executor/v1.yaml` → `internal/contract/executorv1/{models,server}.gen.go` | generated Handler 路由与一致性测试 |
+| 被依赖 | `services/executor` | Executor Foundation 以契约作为公开路由的设计/构建时事实来源，并生成 generated models/strict server 与 transport adapter（Foundation `New()` 501 skeleton + DI `NewNonStream` non-stream adapter）；生成物随变更提交 | OpenAPI 文件引用 + generated Go 代码；无 runtime import contracts package | `openapi/executor/v1.yaml` → `internal/contract/executorv1/{models,server}.gen.go` | generated Handler 路由与一致性测试 + generated-handler component tests |
 
 未来消费者（Web/Admin/Gateway）将通过此 package 发现 API，但尚未实施，不列入依赖表。Auth conformance test（`services/auth/internal/server/contract_test.go`）与 Executor route conformance test（`services/executor/internal/server/contract_test.go`）是当前已实施的直接消费者/验证方：它们在无数据库环境下加载契约，用 kin-openapi 解析并 Validate，从 Chi 实际路由提取所有 HTTP method+path，与契约双向严格比较。
 
@@ -56,7 +56,16 @@
 ### 生成物
 
 - Auth 输出：`services/auth/internal/contract/authv1/models.gen.go`（仅 models）和 `server.gen.go`（Chi handler、StrictServerInterface、strict response types），均含 `DO NOT EDIT` 头。server 配置以官方 `skip-prune: true` 复用同 package models，不重复生成，并提交进仓库。
-- Executor 输出：`services/executor/internal/contract/executorv1/models.gen.go` 和 `server.gen.go`（Chi handler、StrictServerInterface、strict response types），均含 `DO NOT EDIT` 头并提交到仓库。`services/executor/internal/transport/executorv1api/adapter.go` 提供 generated StrictServerInterface 的 adapter skeleton（health 返回 ok，模型操作返回协议原生 501）。注意：generated transport 已实现并注册到测试，但运行时 `main` 未注册公开业务路由。
+- Executor 输出：`services/executor/internal/contract/executorv1/models.gen.go` 和 `server.gen.go`（Chi handler、StrictServerInterface、strict response types），均含 `DO NOT EDIT` 头并提交到仓库。`services/executor/internal/transport/executorv1api/adapter.go` 提供 generated StrictServerInterface 的 adapter：Foundation `New()` 返回 health ok 与模型操作协议原生 501；DI `NewNonStream(Options{Executor, RequestIDs})` 经注入的 `NonStreamExecutor` 执行 non-stream CreateChatCompletion/CreateMessage。注意：generated transport 已实现并注册到测试，但运行时 `main` 未注册公开业务路由。
+
+### 契约形状与媒体安全边界
+
+Executor v1 契约的 `additionalProperties` 策略区分 request 与 response 两侧：
+
+- **有限 request 对象关闭**：`CreateChatCompletionRequest`、`ChatRequestMessage`、`ChatRequestContentPart`（含 `image_url` 嵌套对象）、`ChatRequestToolCall`（含 `function` 嵌套对象）、`ChatTool`、`ChatToolChoice`、`CreateMessageRequest`、`ThinkingConfig`、`AnthropicSystemBlock`、`AnthropicMessage`、`AnthropicContentBlock`（含 `source`、`cache_control`）、`AnthropicTool`、`AnthropicToolChoice`、`CreateResponseRequest`、`ResponseReasoningConfig`、`ResponseInputItem`、`ResponseContentPart`、`ResponseTool`、`CreateImageRequest` 及若干嵌套对象均声明 `additionalProperties: false`，只接受文档化的有限 request 形状。
+- **free-form JSON / JSON Schema 开放**：`ChatTool.function.parameters`、`AnthropicTool.input_schema`、`ResponseTool.parameters`、`AnthropicContentBlock.input`、`CreateResponseRequest.text.format.schema` 等字段有意不加 `additionalProperties` 约束，以原样透传任意合法 JSON Schema/JSON 对象。
+- **成功响应可扩展**：response 侧的 `ChatMessage`、`ChatContentPart`、`ChatToolCall` 不设 `additionalProperties:false`，使 provider extension（refusal、annotations 等）仍可通过契约校验。
+- **媒体安全边界**：image URL 仅接受 bounded HTTPS（scheme `https`、非空 host、无 userinfo）或带 image MIME 与 `;base64` 的 `data:` URL；HTTP 及其他 scheme 被拒绝。Anthropic `source.media_type` 枚举为 `image/jpeg|png|gif|webp`；`source.data` 须为标准 padded base64，解码后非空且在 executor 解码字节上限内（URL-safe / raw unpadded 编码被拒绝）。执行层在 normalizer 中防御性强制这些可观察边界，与上游行为无关。
 - `dist/.turbo` 不提交。
 
 ### 新鲜度保障
@@ -64,7 +73,7 @@
 - `go/check-generated-executor.sh`：临时目录重生成 + 字节比较 Executor 生成物；不修改工作区，可从任意 cwd 工作；generated models/strict server 随变更提交，纳入新鲜度检查。
 - `services/executor/internal/contract/executorv1/freshness_test.go`：轻量级 Go test，验证两个 `.gen.go` 文件包含 oapi-codegen 源头标记和 DO NOT EDIT 标记，不运行生成器，快速且离线。
 - Auth 完整新鲜度检查（重生成 + 字节对比）由 `go/check-generated.sh` 及 CI `go-auth` job 早期步骤执行，不依赖普通 `go test`。
-- `go/check-generated-executor.sh` 是 Executor 生成物新鲜度检查；generated models/strict server 随变更提交，纳入新鲜度检查。该检查是现有 `go-auth` CI job 中必经的新鲜度门禁（与 Auth 新鲜度步骤相邻）；同一 job 还运行 generated contract、strict adapter skeleton 与 route/HTTP conformance 的 race tests，但未新增独立 Executor CI job、运行时业务路由或执行 pipeline 测试。
+- `go/check-generated-executor.sh` 是 Executor 生成物新鲜度检查；generated models/strict server 随变更提交，纳入新鲜度检查。该检查是现有 `go-auth` CI job 中必经的新鲜度门禁（与 Auth 新鲜度步骤相邻）；同一 job 还运行 generated contract、transport adapter（strict handler + DI `NewNonStream`）/route/HTTP conformance 的 race tests，但未新增独立 Executor CI job、运行时业务路由或执行 pipeline 测试。
 
 ## 开发与验证
 
