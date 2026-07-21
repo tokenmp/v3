@@ -285,7 +285,9 @@ func (e *ClassifiedError) ToUpstreamResponse() adapter.UpstreamResponse {
 	}
 }
 
-// AttemptObserver observes the start of an actual upstream HTTP attempt.
+// AttemptObserver observes a provider transport attempt immediately before its
+// RoundTrip call. This observation does not prove a network write or wire
+// attempt occurred: the transport may reject the request before sending it.
 type AttemptObserver interface {
 	OnAttempt(context.Context, AttemptMetadata)
 }

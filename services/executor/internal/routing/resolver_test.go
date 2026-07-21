@@ -130,6 +130,26 @@ func TestPlanAndCandidateFormattingExcludeVaultLocator(t *testing.T) {
 	}
 }
 
+func TestCandidateTargetIsCompleteQuarantineIdentity(t *testing.T) {
+	candidate := Candidate{
+		ModelID: "model-id",
+		Provider: Provider{
+			ID:       "provider-id",
+			Selector: "provider-selector",
+		},
+		RouteID:    "route-id",
+		Credential: Credential{ID: "credential-id"},
+	}
+	if got, want := candidate.Target(), (QuarantineTarget{ModelID: "model-id", ProviderID: "provider-id", RouteID: "route-id", CredentialID: "credential-id"}); got != want {
+		t.Fatalf("Candidate.Target() = %+v, want %+v", got, want)
+	}
+
+	authNone := Candidate{ModelID: "model-id", Provider: Provider{ID: "provider-id", Selector: "provider-selector"}, RouteID: "route-id"}
+	if got, want := authNone.Target(), (QuarantineTarget{ModelID: "model-id", ProviderID: "provider-id", RouteID: "route-id"}); got != want {
+		t.Fatalf("AuthNone Candidate.Target() = %+v, want %+v", got, want)
+	}
+}
+
 func TestResolveSelectorsOrderAndSafeCandidates(t *testing.T) {
 	tests := []struct {
 		name     string

@@ -7,8 +7,9 @@ import (
 	"github.com/tokenmp/v3/services/executor/internal/sdk"
 )
 
-// observingRoundTripper wraps next and reports exactly one attempt immediately
-// before each RoundTrip. The observer receives only [sdk.AttemptMetadata]. A
+// observingRoundTripper wraps next and reports one transport-attempt
+// observation immediately before each RoundTrip. This does not prove a network
+// write or wire attempt. The observer receives only [sdk.AttemptMetadata]. A
 // panic in the observer is contained so observability can never turn a valid
 // provider request into a process crash or a failed attempt.
 type observingRoundTripper struct {
@@ -17,8 +18,9 @@ type observingRoundTripper struct {
 	metadata sdk.AttemptMetadata
 }
 
-// ObservingRoundTripper wraps next and reports exactly one attempt immediately
-// before each RoundTrip. The observer receives only [sdk.AttemptMetadata].
+// ObservingRoundTripper wraps next and reports one transport-attempt
+// observation immediately before each RoundTrip. The observer receives only
+// [sdk.AttemptMetadata]; it does not prove a network write or wire attempt.
 func ObservingRoundTripper(next http.RoundTripper, observer sdk.AttemptObserver, metadata sdk.AttemptMetadata) http.RoundTripper {
 	if next == nil {
 		next = http.DefaultTransport
