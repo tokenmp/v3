@@ -594,6 +594,9 @@ func validateAdapter(a AdapterConfig) error {
 			return fmt.Errorf("auth has inapplicable fields")
 		}
 	}
+	if err := validateSDKAuthCompatibility(a.SDKKind, a.Auth); err != nil {
+		return err
+	}
 	if err := capabilities(a.Capability.Require); err != nil {
 		return err
 	}
@@ -618,6 +621,26 @@ func validateAdapter(a AdapterConfig) error {
 	}
 	return nil
 }
+
+// validateSDKAuthCompatibility fails closed for official SDKs whose clients
+// own the authentication transport. Generic HTTP retains the full configured
+// authentication surface for adapters that intentionally manage it themselves.
+func validateSDKAuthCompatibility(kind SDKKind, auth AuthRule) error {
+	switch kind {
+	case SDKKindOpenAI:
+		if auth.Kind != AuthBearerHeader || !strings.EqualFold(auth.Header, "Authorization") {
+			return fmt.Errorf("openai SDK requires bearer_header auth using Authorization")
+		}
+	case SDKKindAnthropic:
+		if auth.Kind != AuthAPIKeyHeader || !strings.EqualFold(auth.Header, "x-api-key") {
+			return fmt.Errorf("anthropic SDK requires api_key_header auth using x-api-key")
+		}
+	case SDKKindGenericHTTP:
+		// All valid AuthKind values are intentionally supported below.
+	}
+	return nil
+}
+
 func capabilities(xs []Capability) error {
 	seen := map[Capability]bool{}
 	for _, x := range xs {

@@ -15,8 +15,10 @@ type CallRecord struct {
 }
 
 // Mock implements Port with a full terminal state machine and call recording.
-// All mutable configuration and record fields are private and accessed only
-// through the mutex-guarded constructor/setters and the accessor methods. Mock
+// Invalid-ID calls are recorded, then return ErrInvalidID without invoking an
+// override, fault hook, or reservation state transition. All mutable
+// configuration and record fields are private and accessed only through the
+// mutex-guarded constructor/setters and the accessor methods. Mock
 // is safe for concurrent use: configure once up front, then call concurrently.
 // Fields are never mutated concurrently with reads by the caller's contract.
 // The Calls accessor returns a defensive copy so callers cannot alias the
@@ -92,6 +94,10 @@ func (m *Mock) record(method, id string) {
 func (m *Mock) Reserve(ctx context.Context, id string) (model.Reservation, error) {
 	m.mu.Lock()
 	m.record("Reserve", id)
+	if !validID(id) {
+		m.mu.Unlock()
+		return model.Reservation{}, ErrInvalidID
+	}
 	fn := m.reserveFn
 	if fn == nil {
 		if r, ok := m.reserves[id]; ok {
@@ -126,6 +132,10 @@ func (m *Mock) Release(ctx context.Context, id string) (model.Reservation, error
 func (m *Mock) terminal(ctx context.Context, id, method string, target model.ReservationStatus, finalize bool) (model.Reservation, error) {
 	m.mu.Lock()
 	m.record(method, id)
+	if !validID(id) {
+		m.mu.Unlock()
+		return model.Reservation{}, ErrInvalidID
+	}
 	fn := m.releaseFn
 	if finalize {
 		fn = m.finalizeFn

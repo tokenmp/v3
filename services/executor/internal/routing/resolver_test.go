@@ -73,10 +73,10 @@ func authNoneSnapshot(t *testing.T) *snapshot.CompiledSnapshot {
 			"model": {ID: "model", Capabilities: []adapter.Capability{adapter.CapabilityChat}},
 		},
 		Providers: map[string]adapter.ProviderInput{
-			"provider": {ID: "provider", Name: "provider", BaseURL: "https://provider.example/v1", SDKKind: adapter.SDKKindOpenAI, Protocol: adapter.ProtocolOpenAIChat},
+			"provider": {ID: "provider", Name: "provider", BaseURL: "https://provider.example/v1", SDKKind: adapter.SDKKindGenericHTTP, Protocol: adapter.ProtocolOpenAIChat},
 		},
 		Adapters: map[string]adapter.AdapterConfig{
-			"adapter": {ID: "adapter", Name: "adapter", Version: 1, SDKKind: adapter.SDKKindOpenAI, Protocol: adapter.ProtocolOpenAIChat, Auth: adapter.AuthRule{Kind: adapter.AuthNone}},
+			"adapter": {ID: "adapter", Name: "adapter", Version: 1, SDKKind: adapter.SDKKindGenericHTTP, Protocol: adapter.ProtocolOpenAIChat, Auth: adapter.AuthRule{Kind: adapter.AuthNone}},
 		},
 		Routes: []adapter.RouteInput{{ID: "route", ModelID: "model", ProviderID: "provider", AdapterID: "adapter", UpstreamModel: "upstream", Enabled: true, Protocol: adapter.ProtocolOpenAIChat}},
 	})
@@ -260,6 +260,41 @@ func TestResolveQuarantineEachDimensionAndFailures(t *testing.T) {
 	cancel()
 	if _, err := resolver(t, testSnapshot(t, "rev", 1), nil).Resolve(cancelled, Selector{}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled Resolve() error = %v", err)
+	}
+}
+
+func TestResolverValidatePlanBindsResolverIdentityAndPins(t *testing.T) {
+	source := testSnapshot(t, "pinned", 9)
+	first := resolver(t, source, nil)
+	second := resolver(t, source, nil)
+	plan, err := first.Resolve(context.Background(), Selector{Model: "a"})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if err := first.ValidatePlan(plan); err != nil {
+		t.Fatalf("ValidatePlan issued plan: %v", err)
+	}
+	if err := second.ValidatePlan(plan); !errors.Is(err, ErrInvalidPlan) {
+		t.Fatalf("ValidatePlan other resolver = %v, want ErrInvalidPlan", err)
+	}
+
+	clone := plan
+	if err := first.ValidatePlan(clone); err != nil {
+		t.Fatalf("ValidatePlan value clone: %v", err)
+	}
+	for name, forge := range map[string]func(*Plan){
+		"owner":      func(p *Plan) { p.owner = &resolverIdentity{} },
+		"nil owner":  func(p *Plan) { p.owner = nil },
+		"revision":   func(p *Plan) { p.Revision = "forged" },
+		"generation": func(p *Plan) { p.Generation++ },
+	} {
+		t.Run(name, func(t *testing.T) {
+			forged := plan
+			forge(&forged)
+			if err := first.ValidatePlan(forged); !errors.Is(err, ErrInvalidPlan) || strings.Contains(fmt.Sprint(err), "forged") {
+				t.Fatalf("ValidatePlan forged %s = %v, want safe ErrInvalidPlan", name, err)
+			}
+		})
 	}
 }
 

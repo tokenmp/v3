@@ -3,6 +3,7 @@ package quota
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 
@@ -13,6 +14,78 @@ import (
 // any Port implementation.
 func ContractTests(t *testing.T, newPort func() Port) {
 	t.Helper()
+
+	// --- Invalid ID rejection ---
+
+	for _, id := range []string{"", " ", "\t\n"} {
+		id := id
+		t.Run("invalid ID rejects all operations without state transition "+fmt.Sprintf("%q", id), func(t *testing.T) {
+			t.Parallel()
+			port := newPort()
+			counter, ok := port.(interface{ Count() int })
+			if !ok {
+				t.Fatal("Port must expose Count for invalid-ID state assertion")
+			}
+			for _, operation := range []struct {
+				name string
+				call func(context.Context, string) (model.Reservation, error)
+			}{
+				{name: "Reserve", call: port.Reserve},
+				{name: "Finalize", call: port.Finalize},
+				{name: "Release", call: port.Release},
+			} {
+				got, err := operation.call(context.Background(), id)
+				if !errors.Is(err, ErrInvalidID) {
+					t.Errorf("%s(%q) error = %v, want %v", operation.name, id, err, ErrInvalidID)
+				}
+				if got != (model.Reservation{}) {
+					t.Errorf("%s(%q) reservation = %+v, want zero value", operation.name, id, got)
+				}
+			}
+			if got := counter.Count(); got != 0 {
+				t.Errorf("Count() after invalid operations = %d, want 0", got)
+			}
+		})
+	}
+
+	t.Run("concurrent invalid IDs do not transition existing state", func(t *testing.T) {
+		t.Parallel()
+		port := newPort()
+		counter, ok := port.(interface{ Count() int })
+		if !ok {
+			t.Fatal("Port must expose Count for invalid-ID state assertion")
+		}
+		if _, err := port.Reserve(context.Background(), "valid"); err != nil {
+			t.Fatalf("Reserve(valid) error = %v", err)
+		}
+
+		var wg sync.WaitGroup
+		errs := make(chan error, 300)
+		for i := 0; i < 100; i++ {
+			for _, call := range []func(context.Context, string) (model.Reservation, error){port.Reserve, port.Finalize, port.Release} {
+				wg.Add(1)
+				go func(call func(context.Context, string) (model.Reservation, error)) {
+					defer wg.Done()
+					_, err := call(context.Background(), " \t\n")
+					errs <- err
+				}(call)
+			}
+		}
+		wg.Wait()
+		close(errs)
+		for err := range errs {
+			if !errors.Is(err, ErrInvalidID) {
+				t.Errorf("invalid ID error = %v, want %v", err, ErrInvalidID)
+			}
+		}
+		if got := counter.Count(); got != 1 {
+			t.Errorf("Count() after concurrent invalid operations = %d, want 1", got)
+		}
+		stored, err := port.Reserve(context.Background(), "valid")
+		if err != nil || stored.Status != model.StatusReserved {
+			t.Errorf("stored valid reservation = %+v, %v; want reserved", stored, err)
+		}
+	})
 
 	// --- Reserve idempotency ---
 

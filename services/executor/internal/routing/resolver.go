@@ -22,6 +22,9 @@ var (
 	// ErrQuarantineUnavailable means quarantine state could not be read. It
 	// fails resolution closed rather than risking a known-bad target.
 	ErrQuarantineUnavailable = errors.New("routing quarantine state unavailable")
+	// ErrInvalidPlan means the plan did not originate from this resolver's
+	// private frozen identity and pins. It deliberately discloses no plan data.
+	ErrInvalidPlan = errors.New("routing plan is not available")
 )
 
 // Clock supplies the instant used to evaluate quarantine expiry.
@@ -101,6 +104,7 @@ type Plan struct {
 	Generation uint64
 	Candidates []Candidate
 
+	owner              *resolverIdentity
 	auto               bool
 	autoModelIDs       []string
 	fallbackModels     map[string][]string
@@ -180,9 +184,15 @@ func (p Plan) Next(action adapter.RetryAction, current QuarantineTarget, visited
 	return Candidate{}, false
 }
 
+// resolverIdentity is an unexported, allocation-unique capability. Plans copy
+// its pointer by value, allowing value clones to remain valid while preventing
+// another Resolver (even over the same snapshot) from accepting the plan.
+type resolverIdentity struct{ _ byte }
+
 // Resolver owns a deep-copied compiled config, so later Store publications or
 // callers mutating a snapshot Value cannot affect an in-flight resolver.
 type Resolver struct {
+	identity   *resolverIdentity
 	revision   string
 	generation uint64
 	config     *snapshot.CompiledConfig
@@ -204,7 +214,17 @@ func NewResolver(source *snapshot.CompiledSnapshot, quarantine QuarantineReader,
 	if clock == nil {
 		clock = wallClock{}
 	}
-	return &Resolver{revision: source.Revision(), generation: source.Generation(), config: config, quarantine: quarantine, clock: clock}, nil
+	return &Resolver{identity: &resolverIdentity{}, revision: source.Revision(), generation: source.Generation(), config: config, quarantine: quarantine, clock: clock}, nil
+}
+
+// ValidatePlan confirms that plan was issued by this exact Resolver and is
+// pinned to its current frozen revision and generation. It is intentionally
+// safe to return directly: it includes neither selectors nor routing data.
+func (r *Resolver) ValidatePlan(plan Plan) error {
+	if r == nil || r.config == nil || r.identity == nil || strings.TrimSpace(r.revision) == "" || r.generation == 0 || plan.owner != r.identity || plan.Revision != r.revision || plan.Generation != r.generation {
+		return ErrInvalidPlan
+	}
+	return nil
 }
 
 // Resolve builds enabled, non-quarantined candidates for selector. Quarantine
@@ -216,7 +236,7 @@ func (r *Resolver) Resolve(ctx context.Context, selector Selector) (Plan, error)
 	if err := ctx.Err(); err != nil {
 		return Plan{}, err
 	}
-	plan := Plan{Revision: r.revision, Generation: r.generation, auto: selector.Auto, autoModelIDs: append([]string(nil), r.config.AutoModelIDs...), fallbackModels: make(map[string][]string, len(r.config.Models)), fallbackRoutes: make(map[string][]string, len(r.config.Routes))}
+	plan := Plan{Revision: r.revision, Generation: r.generation, owner: r.identity, auto: selector.Auto, autoModelIDs: append([]string(nil), r.config.AutoModelIDs...), fallbackModels: make(map[string][]string, len(r.config.Models)), fallbackRoutes: make(map[string][]string, len(r.config.Routes))}
 	for modelID, model := range r.config.Models {
 		plan.fallbackModels[modelID] = append([]string(nil), model.FallbackModelIDs...)
 	}
