@@ -1,6 +1,6 @@
 # Executor Architecture Design
 
-- 状态：设计基线已确认；Foundation、Config compiler/snapshot、routing、Phase 5 Adapter Engine、Phase 6 non-stream SDK adapters、Phase 7 retry State、内部 non-stream Runner 与 non-stream HTTP transport 层已实施；Runner 与 transport 层仅为模块内 composition，其余公开执行能力仍按本文逐阶段落地
+- 状态：设计基线已确认；Foundation、Config compiler/snapshot、routing、Phase 5 Adapter Engine、Phase 6 non-stream SDK adapters、Phase 7 retry State、内部 non-stream Runner、non-stream HTTP transport 层与 phase 7.7 config source 前置（模块内 `internal/configsource`，未接 runtime）已实施；Runner、transport 层与 config 文件源仅为模块内 composition，其余公开执行能力仍按本文逐阶段落地
 - 适用范围：TokenMP v3 `services/executor`
 - 契约来源：`packages/contracts/openapi/executor/v1.yaml`
 - 关联测试方案：`testing-strategy.md`
@@ -152,7 +152,7 @@ Client
 
 ## 4. 目标目录
 
-`services/executor/` 已作为 Foundation 模块存在。下列目录是完整设计目标；除 Foundation 已落地的 `cmd/executor`、`internal/app`、`internal/config`、端口实现、health transport、`internal/contract/executorv1` 和 `internal/transport/executorv1api` 外，Config model 阶段已落地 `internal/adapter`（原始配置类型与枚举）、`internal/snapshot`（原始 `ConfigSnapshot` 与不可变 `Store`/`NewCompiledSnapshot`/`CompiledSnapshot` 发布原语）、`internal/routing`（strict selector、revision-pinned Resolver/Plan）与 `fixtures/configs/{default,xfyun,anthropic}.json`；其余目录仅在对应阶段创建。
+`services/executor/` 已作为 Foundation 模块存在。下列目录是完整设计目标；除 Foundation 已落地的 `cmd/executor`、`internal/app`、`internal/config`、端口实现、health transport、`internal/contract/executorv1` 和 `internal/transport/executorv1api` 外，Config model 阶段已落地 `internal/adapter`（原始配置类型与枚举）、`internal/snapshot`（原始 `ConfigSnapshot` 与不可变 `Store`/`NewCompiledSnapshot`/`CompiledSnapshot` 发布原语）、`internal/routing`（strict selector、revision-pinned Resolver/Plan）、`internal/configsource`（strict secret-free 文件源 `LoadFile` 与 `CompileAndPublishInitial` initial generation=1 bootstrap，未接 runtime）与 `fixtures/configs/{default,xfyun,anthropic}.json`；其余目录仅在对应阶段创建。
 
 ```text
 services/executor/
@@ -173,6 +173,7 @@ services/executor/
 │   ├── routing/                # selector、candidate resolver
 │   ├── adapter/                # 配置编译和规则执行引擎
 │   ├── snapshot/               # immutable compiled snapshot
+│   ├── configsource/           # strict secret-free 文件源 LoadFile + CompileAndPublishInitial（未接 runtime）
 │   ├── sdk/                    # shared SDK port；OpenAI Chat non-stream 已实施，Anthropic/受控 HTTP 待后续
 │   ├── protocol/               # normalize/render per protocol
 │   ├── streaming/              # SSE parser、bridge、状态机和 timer
@@ -273,7 +274,7 @@ schema validation
 → atomic publish
 ```
 
-当前实施状态：完整的模块内 compiler 已落地：`snapshot.Compile` 把 `ConfigSnapshot` 转为 `adapter.ConfigInput` 并调用 `adapter.Compile`，实施 C01–C27 相关的 identity/reference、provider/adapter/protocol compatibility、HTTPS 无 userinfo BaseURL、有限 DSL、capability/thinking、retry/timeout、priority/conflict、fallback、immutability 与 determinism 校验；它按 code defaults → global → adapter → provider → route 合并策略，并按 priority/route ID 确定性排序，输出 `CompiledConfig`。代码默认值为 request `2m`、TTFT `45s`、stream idle `30s`、stream max lifetime `10m`、retry backoff `200ms`、max total attempts `3`、max same-target attempts `2`、max total retry duration `90s`。随后 `NewCompiledSnapshot` 深拷贝冻结，专用 `Store` 以 `atomic.Pointer` 原子发布 Store-owned copy；每个 `Current()` 返回独立视图，因此 later publish 不改变已开始请求所持 revision，且 invalid 或 stale publication 保留 last known good。三份脱敏 fixture 均严格解码、secret 扫描、通过 compiler 并实际发布。它尚未连接 config repository/reload loop 或请求 pipeline。
+当前实施状态：完整的模块内 compiler 已落地：`snapshot.Compile` 把 `ConfigSnapshot` 转为 `adapter.ConfigInput` 并调用 `adapter.Compile`，实施 C01–C27 相关的 identity/reference、provider/adapter/protocol compatibility、HTTPS 无 userinfo BaseURL（现在还拒绝 query/fragment/userinfo：`RawQuery`/`ForceQuery`/`Fragment`，错误仅命名公开 provider key，不泄露 URL 或内容）、有限 DSL、capability/thinking、retry/timeout、priority/conflict、fallback、immutability 与 determinism 校验；它按 code defaults → global → adapter → provider → route 合并策略，并按 priority/route ID 确定性排序，输出 `CompiledConfig`。代码默认值为 request `2m`、TTFT `45s`、stream idle `30s`、stream max lifetime `10m`、retry backoff `200ms`、max total attempts `3`、max same-target attempts `2`、max total retry duration `90s`。随后 `NewCompiledSnapshot` 深拷贝冻结，专用 `Store` 以 `atomic.Pointer` 原子发布 Store-owned copy；每个 `Current()` 返回独立视图，因此 later publish 不改变已开始请求所持 revision，且 invalid 或 stale publication 保留 last known good。三份脱敏 fixture 均严格解码、secret 扫描、通过 compiler 并实际发布。它尚未连接 config repository/reload loop 或请求 pipeline。已实施模块内 strict secret-free config 文件源 `internal/configsource`：`LoadFile(ctx, path)` 以 1 MiB（`MaxConfigBytes`）上限、`Lstat` 拒绝 symlink/非 regular、post-open `os.SameFile` TOCTOU 校验、`io.LimitReader` bound、严格 UTF-8、结构走查（重复 key、prototype-pollution key、深度 256、节点 100000）、top-level 必须为 object、`DisallowUnknownFields` 与 trailing-data 拒绝加载 regular 非 symlink 文件，加载后以 lexical + semantic 双通道 `ScanSecrets` 拒绝密钥材料（关闭 JSON-escape 与 URL percent-encoding 旁路）；返回稳定 sentinel error，不泄露 path/content，且 non-wrapping（`errors.Unwrap` 返 nil）。`CompileAndPublishInitial(ctx, store, path)` 经 `LoadFile` + 真实 `snapshot.Compile` 原子发布 initial generation=1 不可变 compiled snapshot，返回仅含 revision/generation/计数的 safe `InitialSnapshotMeta`（不暴露 compiled config 指针）。该包尚未接入 `main`/env/runtime routes/reload；作为 phase 7.7 的 config source 前置完成，下一阶段为 credential env。
 
 同一请求和其全部 attempt 必须固定使用同一 revision，保证行为可复现。routing Resolver 已从 `CompiledSnapshot` 深拷贝并固定 revision/generation；其 Plan 已由内部 non-stream Runner 绑定并用于实际 non-stream attempt；它仍未接入未来公开 runtime pipeline。
 
@@ -470,7 +471,7 @@ stream lifetime max     60m
 
 字段缺失使用默认值，显式 `0` 不表示无限。配置编译拒绝非正 duration、超过硬上限和不合理的相互关系；不静默 clamp。
 
-> 实现对齐状态：compiler 已与本节默认值对齐：request `2m`、TTFT `45s`、idle `30s`、lifetime `10m`、backoff `200ms`、max total attempts `3`、max same-target attempts `2`、max total retry duration `90s`。它仍没有 runtime config source、reload loop 或 request-pipeline consumer。
+> 实现对齐状态：compiler 已与本节默认值对齐：request `2m`、TTFT `45s`、idle `30s`、lifetime `10m`、backoff `200ms`、max total attempts `3`、max same-target attempts `2`、max total retry duration `90s`。它仍没有 runtime config source wiring、reload loop 或 request-pipeline consumer（模块内 `internal/configsource` 已实施 strict secret-free `LoadFile`/`CompileAndPublishInitial` 但未接 runtime）。
 
 ## 11. 流式状态机
 
@@ -546,7 +547,7 @@ Request/Attempt/Event 日志至少记录：
 | 7 | `feat/executor-retry-policy` | **已实施（模块内、纯 Go，未接 pipeline/runtime）**：request-local serial retry State 固定 Plan/policy，匹配规则、管理 candidate scope、delay、总量/同 target/总时长 budget 和 commit/cancel gate；`BeginAttempt` 只记录逻辑 reservation，不是 wire attempt gate。 |
 | 7.5 | `feat/executor-nonstream-pipeline` | **部分实施（内部 non-stream Runner，未接 runtime）**：将 Resolver/Plan owner binding、pure Prepare、per-attempt credential resolve、Engine、SDK registry、official SDK auth compatibility、request-lifetime frozen retry policy、per-attempt timeout、one Reserve + safe terminalizer、mapped failure 和 safe execution events 组合；Mock/InMemory/fake tests 已覆盖。未实现 runtime composition（identity/runtime config/facade/reservation 接入公开 server 与路由）、durable idempotency/replay、remote quota/credential resolver 或 `Retry-After` parsing；不声称 wire proof 或跨进程 exactly-once。 |
 | 7.6 | `feat/executor-http-nonstream-transport` | **已实施（模块内 transport 层，未接 runtime）**：`internal/transport/executorv1api` 新增 OpenAI Chat 与 Anthropic Messages non-stream raw-body 捕获（`CaptureRawBody`，`MaxCapturedBodyBytes` = 2 MiB）、strict contract normalizer、protocol renderer（bounded local contract check）、`SafeStrictOptions` 与 DI adapter（`NewNonStream`）；generated-handler component tests 将 adapter 接入 generated `NewStrictHandler` 并以 kin-openapi 校验响应。`New()` Foundation 仍 501，`app.NewServer`/runtime `main` 仍只服务 `/healthz`。 |
-| 7.7 | `feat/executor-runtime-composition` | runtime composition：将 identity、runtime config source、facade/reservation 与 `NewNonStream` adapter 接入公开 runtime server/路由（仍未实施） |
+| 7.7 | `feat/executor-runtime-composition` | **部分实施（config source 前置，未接 runtime）**：模块内 `internal/configsource` 已实施 strict secret-free 文件源 `LoadFile`（1 MiB、Lstat+post-open `SameFile` TOCTOU、`LimitReader`、严格 UTF-8、结构走查、top-level object、`DisallowUnknownFields`、trailing-data、lexical+semantic `ScanSecrets`，返回不泄露 path/content 的 non-wrapping sentinel error）与 `CompileAndPublishInitial`（经 `LoadFile`+真实 `snapshot.Compile` 原子发布 initial generation=1，返回 safe `InitialSnapshotMeta`）；未接入 `main`/env/runtime routes/reload，下一阶段为 credential env。runtime composition（identity、runtime config source、facade/reservation 与 `NewNonStream` adapter 接入公开 runtime server/路由）仍未实施。 |
 | 8 | `feat/executor-streaming` | StreamBridge、TTFT/idle/lifetime |
 | 9 | `feat/executor-sdk-anthropic-streaming` | Anthropic native stream/error 与 thinking signature |
 | 10 | `feat/executor-responses` | Responses 事件状态机 |

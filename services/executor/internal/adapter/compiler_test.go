@@ -208,6 +208,63 @@ func TestCompileC02EmptyConfigProducesNoRoutes(t *testing.T) {
 	}
 }
 
+// TestCompileBaseURLRejectsQueryFragment verifies that a provider BaseURL may
+// not carry a query string, a forced query, or a fragment. Credentials must
+// never travel in the BaseURL; rejecting these at compile time closes the gap
+// that the secret scanner's URL-query-credential detector defends in depth.
+// The error is the fixed, no-URL-revealing "invalid base URL" message: it
+// names only the public provider key, never the offending URL.
+func TestCompileBaseURLRejectsQueryFragment(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		baseURL string
+	}{
+		{"raw query", "https://provider.example/v1?api_key=secret"},
+		{"raw query safe param", "https://provider.example/v1?mode=fast"},
+		{"force query", "https://provider.example/v1?"},
+		{"fragment", "https://provider.example/v1#section"},
+		{"query and fragment", "https://provider.example/v1?token=x#f"},
+		{"http scheme", "http://provider.example/v1"},
+		{"no host", "https:///v1"},
+		{"userinfo", "https://user:pass@provider.example/v1"},
+	} {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			in := baseInput()
+			p := in.Providers["p"]
+			p.BaseURL = tc.baseURL
+			in.Providers["p"] = p
+			_, err := Compile(in)
+			if err == nil {
+				t.Fatalf("Compile accepted BaseURL %q", tc.baseURL)
+			}
+			if !strings.Contains(err.Error(), "invalid base URL") {
+				t.Errorf("error = %q, want containing %q", err, "invalid base URL")
+			}
+			// The error must never reveal the offending URL or any credential.
+			if strings.Contains(err.Error(), tc.baseURL) {
+				t.Errorf("error reveals URL: %q", err)
+			}
+			if strings.Contains(err.Error(), "secret") || strings.Contains(err.Error(), "api_key") || strings.Contains(err.Error(), "token") {
+				t.Errorf("error may reveal credential material: %q", err)
+			}
+		})
+	}
+}
+
+// TestCompileBaseURLAcceptsCleanHTTPS confirms the happy path still accepts a
+// plain HTTPS BaseURL with path and no query/fragment/userinfo.
+func TestCompileBaseURLAcceptsCleanHTTPS(t *testing.T) {
+	in := baseInput()
+	p := in.Providers["p"]
+	p.BaseURL = "https://provider.example/v1"
+	in.Providers["p"] = p
+	got := mustCompile(t, in)
+	if got.Providers["p"].BaseURL != "https://provider.example/v1" {
+		t.Errorf("BaseURL = %q", got.Providers["p"].BaseURL)
+	}
+}
+
 func TestCompileC03ToC12IdentityRulesAndDSLGuards(t *testing.T) {
 	t.Run("unknown SDK", func(t *testing.T) {
 		in := baseInput()
