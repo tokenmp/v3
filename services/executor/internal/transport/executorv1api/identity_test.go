@@ -11,6 +11,8 @@ import (
 	"testing"
 
 	"github.com/tokenmp/v3/services/executor/internal/identity"
+
+	"github.com/tokenmp/v3/services/executor/internal/authcontext"
 )
 
 type authPort struct {
@@ -37,7 +39,7 @@ func TestAuthMiddlewareProtocolsAndContext(t *testing.T) {
 	var downstream atomic.Int32
 	h := AuthMiddleware(port)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		downstream.Add(1)
-		id, ok := IdentityFromContext(r.Context())
+		id, ok := authcontext.IdentityFromContext(r.Context())
 		if !ok || id.Subject != "sub" {
 			t.Error("missing identity")
 		}

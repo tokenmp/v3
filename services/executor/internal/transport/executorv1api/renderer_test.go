@@ -10,7 +10,9 @@ import (
 	"testing"
 
 	"github.com/tokenmp/v3/services/executor/internal/adapter"
+	executorv1 "github.com/tokenmp/v3/services/executor/internal/contract/executorv1"
 	"github.com/tokenmp/v3/services/executor/internal/execution"
+	"github.com/tokenmp/v3/services/executor/internal/nonstream"
 	"github.com/tokenmp/v3/services/executor/internal/sdk"
 )
 
@@ -226,5 +228,98 @@ func assertOpenAIError(t *testing.T, recorder *httptest.ResponseRecorder, status
 	}
 	if body.Status != status || body.Error.Code != code || body.Error.Type != typ || body.Error.Message != message {
 		t.Fatalf("body = %#v", body)
+	}
+}
+
+func TestRenderModelNotFoundIsProtocolNative404(t *testing.T) {
+	t.Parallel()
+	chat := httptest.NewRecorder()
+	chatResp := RenderChatError(ErrModelNotFound)
+	if chatResp == nil {
+		t.Fatal("RenderChatError returned nil")
+	}
+	if err := chatResp.VisitCreateChatCompletionResponse(chat); err != nil {
+		t.Fatal(err)
+	}
+	var chatBody executorv1.OpenAIErrorResponse
+	if err := json.Unmarshal(chat.Body.Bytes(), &chatBody); err != nil {
+		t.Fatal(err)
+	}
+	if chat.Code != http.StatusNotFound || chatBody.Error.Code == nil || *chatBody.Error.Code != "model_not_found" || chatBody.Error.Type != "invalid_request_error" {
+		t.Fatalf("chat = %d %s", chat.Code, chat.Body.String())
+	}
+
+	message := httptest.NewRecorder()
+	msgResp := RenderMessageErrorWithRequestID(ErrModelNotFound, "trusted.req/1")
+	if msgResp == nil {
+		t.Fatal("RenderMessageError returned nil")
+	}
+	if err := msgResp.VisitCreateMessageResponse(message); err != nil {
+		t.Fatal(err)
+	}
+	var msgBody executorv1.AnthropicErrorResponse
+	if err := json.Unmarshal(message.Body.Bytes(), &msgBody); err != nil {
+		t.Fatal(err)
+	}
+	if message.Code != http.StatusNotFound || msgBody.Error.Type != "not_found_error" || !strings.Contains(message.Body.String(), `"request_id":"trusted.req/1"`) {
+		t.Fatalf("message = %d %s", message.Code, message.Body.String())
+	}
+	// A wrapped ErrModelNotFound must still render as 404, proving the facade
+	// may return errors.Join(ErrModelNotFound, ...) without losing the category.
+	wrapped := errors.Join(ErrModelNotFound, errors.New("internal detail"))
+	wrappedChat := httptest.NewRecorder()
+	wrappedResp := RenderChatError(wrapped)
+	if wrappedResp == nil {
+		t.Fatal("wrapped RenderChatError returned nil")
+	}
+	if err := wrappedResp.VisitCreateChatCompletionResponse(wrappedChat); err != nil {
+		t.Fatal(err)
+	}
+	if wrappedChat.Code != http.StatusNotFound || strings.Contains(wrappedChat.Body.String(), "internal detail") {
+		t.Fatalf("wrapped chat = %d %s", wrappedChat.Code, wrappedChat.Body.String())
+	}
+}
+
+func TestRenderUnauthorizedIsProtocolNative401(t *testing.T) {
+	t.Parallel()
+	chat := httptest.NewRecorder()
+	chatResp := RenderChatError(nonstream.ErrUnauthorized)
+	if chatResp == nil {
+		t.Fatal("RenderChatError returned nil")
+	}
+	if err := chatResp.VisitCreateChatCompletionResponse(chat); err != nil {
+		t.Fatal(err)
+	}
+	var chatBody executorv1.OpenAIErrorResponse
+	if err := json.Unmarshal(chat.Body.Bytes(), &chatBody); err != nil {
+		t.Fatal(err)
+	}
+	if chat.Code != http.StatusUnauthorized || chatBody.Error.Type != "authentication_error" {
+		t.Fatalf("chat = %d %s", chat.Code, chat.Body.String())
+	}
+
+	message := httptest.NewRecorder()
+	msgResp := RenderMessageErrorWithRequestID(nonstream.ErrUnauthorized, "trusted.req/2")
+	if msgResp == nil {
+		t.Fatal("RenderMessage returned nil")
+	}
+	if err := msgResp.VisitCreateMessageResponse(message); err != nil {
+		t.Fatal(err)
+	}
+	if message.Code != http.StatusUnauthorized {
+		t.Fatalf("message = %d %s", message.Code, message.Body.String())
+	}
+	// A wrapped ErrUnauthorized must still render as 401.
+	wrapped := errors.Join(nonstream.ErrUnauthorized, errors.New("internal detail"))
+	wrappedChat := httptest.NewRecorder()
+	wrappedResp := RenderChatError(wrapped)
+	if wrappedResp == nil {
+		t.Fatal("wrapped RenderChatError returned nil")
+	}
+	if err := wrappedResp.VisitCreateChatCompletionResponse(wrappedChat); err != nil {
+		t.Fatal(err)
+	}
+	if wrappedChat.Code != http.StatusUnauthorized || strings.Contains(wrappedChat.Body.String(), "internal detail") {
+		t.Fatalf("wrapped chat = %d %s", wrappedChat.Code, wrappedChat.Body.String())
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/tokenmp/v3/services/executor/internal/authcontext"
 	"github.com/tokenmp/v3/services/executor/internal/identity"
 )
 
@@ -14,8 +15,6 @@ const (
 	invalidAPIKeyCode    = "INVALID_API_KEY"
 	invalidAPIKeyMessage = "Invalid API key provided."
 )
-
-type identityContextKey struct{}
 
 // AuthMiddleware is the outer authentication boundary for generated Executor
 // handlers. Compose it outside CaptureRawBody: AuthMiddleware(source)(
@@ -49,29 +48,10 @@ func AuthMiddleware(source identity.Port) func(http.Handler) http.Handler {
 				writeUnauthorized(w, r.URL.Path)
 				return
 			}
-			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), identityContextKey{}, cloneIdentity(resolved))))
+			next.ServeHTTP(w, r.WithContext(authcontext.WithIdentity(r.Context(), resolved)))
 		})
 	}
 }
-
-// IdentityFromContext returns a copy of the authenticated caller identity.
-// It never exposes API key material and false means authentication did not run
-// or did not succeed.
-func IdentityFromContext(ctx context.Context) (identity.Identity, bool) {
-	if ctx == nil {
-		return identity.Identity{}, false
-	}
-	resolved, ok := ctx.Value(identityContextKey{}).(identity.Identity)
-	if !ok {
-		return identity.Identity{}, false
-	}
-	return cloneIdentity(resolved), true
-}
-
-func cloneIdentity(value identity.Identity) identity.Identity {
-	return identity.Identity{Subject: value.Subject, KeyID: value.KeyID, Role: value.Role, Status: value.Status}
-}
-
 func isNilPort(port identity.Port) bool {
 	if port == nil {
 		return true

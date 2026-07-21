@@ -2,33 +2,25 @@ package executorv1api
 
 import (
 	"context"
-	"encoding/json"
 
-	"github.com/tokenmp/v3/services/executor/internal/adapter"
-	"github.com/tokenmp/v3/services/executor/internal/execution"
+	"github.com/tokenmp/v3/services/executor/internal/nonstream"
 )
 
-// NonStreamExecutor is the narrow execution boundary used by the HTTP
-// transport. Routing, identity, and quota ownership deliberately remain on
-// the other side of this port.
-type NonStreamExecutor interface {
-	Execute(context.Context, NonStreamRequest) (NonStreamResult, error)
-}
+// NonStreamExecutor is the transport-side adapter alias for the
+// transport-neutral nonstream.Executor port. The HTTP transport accepts and
+// returns the transport-neutral shapes; routing, identity, and quota
+// ownership remain on the facade side of this boundary.
+type NonStreamExecutor = nonstream.Executor
 
 // NonStreamRequest is the protocol-normalized input to one non-streaming
-// execution. Body retains the exact validated client bytes; callers must not
-// use a typed request value to recreate it.
-type NonStreamRequest struct {
-	Protocol  adapter.Protocol
-	Selector  string
-	Body      json.RawMessage
-	Thinking  adapter.ThinkingRequest
-	RequestID string
-}
+// execution, as produced by the normalizer. It is an alias of the
+// transport-neutral nonstream.Request so the transport does not duplicate or
+// reconstruct routing and execution state.
+type NonStreamRequest = nonstream.Request
 
 // NonStreamResult aliases the internal execution result so the transport does
 // not duplicate or construct routing and execution state.
-type NonStreamResult = execution.Result
+type NonStreamResult = nonstream.Result
 
 // RequestIDSource supplies a request-scoped, safe request identifier. Identity
 // and idempotency are intentionally outside this transport-only package.
@@ -41,3 +33,15 @@ type RequestIDSourceFunc func(context.Context) string
 
 // RequestID implements RequestIDSource.
 func (f RequestIDSourceFunc) RequestID(ctx context.Context) string { return f(ctx) }
+
+// Safe sentinel aliases. They are the transport-visible spellings of the
+// transport-neutral nonstream errors so normalizer/renderer/test code can
+// reference them unqualified while the renderer matches via errors.Is against
+// nonstream.* (the canonical values). They never carry selector, routing,
+// request, response, credential, or upstream detail.
+var (
+	ErrInvalidRequest = nonstream.ErrInvalidRequest
+	ErrModelNotFound  = nonstream.ErrModelNotFound
+	ErrUnauthorized   = nonstream.ErrUnauthorized
+	ErrMisconfigured  = nonstream.ErrMisconfigured
+)

@@ -20,6 +20,11 @@ import (
 	"github.com/tokenmp/v3/services/executor/internal/snapshot"
 )
 
+// testReservationID is a valid reservation identifier (res_ + 22 URL-safe
+// chars) shared by runner fixtures. It mirrors the requestid grammar so the
+// Runner's grammar gate admits it.
+const testReservationID = "res_aaaaaaaaaaaaaaaaaaaa"
+
 // runnerTestClient is a configurable fake sdk.Client. It records every Complete
 // call and returns the configured completion or classified error per call index.
 type runnerTestClient struct {
@@ -197,7 +202,7 @@ func newRunner(t *testing.T, client sdk.Client, log requestlog.ExecutionPort) (*
 func runnerInput(resolver *routing.Resolver, plan routing.Plan) Input {
 	return Input{
 		RequestID:     "req-1",
-		ReservationID: "res-1",
+		ReservationID: testReservationID,
 		Plan:          plan,
 		Resolver:      resolver,
 		Credentials:   staticCredentials{value: []byte("call-local-secret")},
@@ -432,7 +437,7 @@ func TestRunnerParentDeadlineWinsOverCatchAllRetryAndPreservesReleaseUncertainty
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("Run error = %v, want context.DeadlineExceeded", err)
 	}
-	assertTerminalizationError(t, err, "release", releaseErr, "res-1")
+	assertTerminalizationError(t, err, "release", releaseErr, testReservationID)
 	if calls := client.callCount(); calls != 1 {
 		t.Fatalf("client Complete calls = %d, want 1; parent deadline retried", calls)
 	}
@@ -685,7 +690,7 @@ func TestRunnerNeverReleasesAfterFinalizeEvenIfFinalizeFails(t *testing.T) {
 	if err == nil {
 		t.Fatal("Run error = nil, want terminalization error")
 	}
-	assertTerminalizationError(t, err, "finalize", finalizeErr, "res-1")
+	assertTerminalizationError(t, err, "finalize", finalizeErr, testReservationID)
 	if result.Completion.RawJSON != nil || result.Completion.Status != 0 || result.Completion.RequestID != "" || result.Failure != nil {
 		t.Fatalf("result = %+v, want zero after Finalize uncertainty", result)
 	}
@@ -713,7 +718,7 @@ func TestRunnerPostReserveCredentialFailureJoinsSafeReleaseTerminalization(t *te
 	if !errors.Is(err, routing.ErrCredentialUnavailable) {
 		t.Fatalf("Run error = %v, want routing.ErrCredentialUnavailable", err)
 	}
-	assertTerminalizationError(t, err, "release", releaseErr, "res-1")
+	assertTerminalizationError(t, err, "release", releaseErr, testReservationID)
 	if calls := quotaPort.Calls(); len(calls) != 2 || calls[1].Method != "Release" {
 		t.Fatalf("quota calls = %+v, want Reserve+Release", calls)
 	}
@@ -884,7 +889,7 @@ func TestRunnerNoCandidateRejectedBeforeReserve(t *testing.T) {
 }
 
 func TestRunnerInvalidReservationIDFailsBeforePreflightOrQuota(t *testing.T) {
-	for _, id := range []string{"", " \t\n"} {
+	for _, id := range []string{"", " \t\n", "res_short", "no-prefix-aaaaaaaaaaaa", "res_+invalid+chars!!!", "res_" + strings.Repeat("a", 15), "res_" + strings.Repeat("a", 129)} {
 		id := id
 		t.Run(fmt.Sprintf("%q", id), func(t *testing.T) {
 			client := &runnerTestClient{}
@@ -1355,7 +1360,7 @@ func TestRunnerReleaseFailureJoinsSafeTerminalizationWithClassifiedFailure(t *te
 	if !errors.As(err, &classified) || classified == nil {
 		t.Fatalf("Run error = %v, want classified upstream error", err)
 	}
-	assertTerminalizationError(t, err, "release", releaseErr, "res-1")
+	assertTerminalizationError(t, err, "release", releaseErr, testReservationID)
 	assertZeroResult(t, result)
 	if calls := client.callCount(); calls != 1 {
 		t.Fatalf("client Complete calls = %d, want 1", calls)
@@ -1380,7 +1385,7 @@ func TestRunnerReleaseTerminalizationPreservesContextPrimary(t *testing.T) {
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("Run error = %v, want context.Canceled", err)
 	}
-	assertTerminalizationError(t, err, "release", releaseErr, "res-1")
+	assertTerminalizationError(t, err, "release", releaseErr, testReservationID)
 	assertZeroResult(t, result)
 }
 

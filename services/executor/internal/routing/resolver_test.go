@@ -410,3 +410,49 @@ func TestResolverConcurrentResolve(t *testing.T) {
 		t.Error(err)
 	}
 }
+
+func TestResolverProtocolFilterExcludesCrossProtocolRoutes(t *testing.T) {
+	t.Parallel()
+	source := testSnapshot(t, "proto-revision", 5)
+	r := resolver(t, source, nil)
+
+	// Model "a" has both openai_chat and anthropic_messages routes. A chat
+	// protocol filter must admit only the openai_chat routes (providers p),
+	// excluding the anthropic_messages other-provider route.
+	chat, err := r.Resolve(context.Background(), Selector{Model: "a", Protocol: adapter.ProtocolOpenAIChat})
+	if err != nil {
+		t.Fatalf("Resolve chat: %v", err)
+	}
+	for _, c := range chat.Candidates {
+		if c.Protocol != adapter.ProtocolOpenAIChat {
+			t.Errorf("chat candidate %q protocol = %q, want openai_chat", c.RouteID, c.Protocol)
+		}
+		if c.Provider.ID == "q" {
+			t.Errorf("chat candidate %q is the anthropic provider, should be filtered", c.RouteID)
+		}
+	}
+
+	// An anthropic protocol filter admits only the anthropic_messages route.
+	anthropic, err := r.Resolve(context.Background(), Selector{Model: "a", Protocol: adapter.ProtocolAnthropic})
+	if err != nil {
+		t.Fatalf("Resolve anthropic: %v", err)
+	}
+	if len(anthropic.Candidates) != 1 || anthropic.Candidates[0].Provider.ID != "q" {
+		t.Fatalf("anthropic candidates = %+v, want single provider q", anthropic.Candidates)
+	}
+
+	// An empty protocol filter preserves the prior behavior: all enabled
+	// routes for the model are admitted regardless of protocol.
+	all, err := r.Resolve(context.Background(), Selector{Model: "a"})
+	if err != nil {
+		t.Fatalf("Resolve all: %v", err)
+	}
+	if len(all.Candidates) <= len(chat.Candidates) {
+		t.Fatalf("unfiltered candidates = %d, chat-filtered = %d; unfiltered must be larger", len(all.Candidates), len(chat.Candidates))
+	}
+
+	// A protocol filter with no matching route yields ErrNotFound.
+	if _, err := r.Resolve(context.Background(), Selector{Model: "b", Protocol: adapter.ProtocolAnthropic}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Resolve b/anthropic err = %v, want ErrNotFound", err)
+	}
+}

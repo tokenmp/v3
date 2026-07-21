@@ -8,6 +8,9 @@ import (
 	"testing"
 
 	"github.com/tokenmp/v3/services/executor/internal/adapter"
+	"github.com/tokenmp/v3/services/executor/internal/authcontext"
+	"github.com/tokenmp/v3/services/executor/internal/identity"
+	"github.com/tokenmp/v3/services/executor/internal/nonstream"
 )
 
 func TestNormalizeOpenAIChatPreservesRawBytesAndExtractsThinking(t *testing.T) {
@@ -593,4 +596,29 @@ func FuzzNormalizeAnthropicMessages(f *testing.F) {
 			t.Fatalf("error = %v, want ErrInvalidRequest or ErrStreamingUnsupported", err)
 		}
 	})
+}
+
+func TestNormalizeDerivesPrincipalFromIdentityContext(t *testing.T) {
+	t.Parallel()
+	raw := []byte(`{"model":"m","messages":[{"role":"user","content":"hi"}]}`)
+	id := identity.Identity{Subject: "svc-1", KeyID: "key-1", Role: identity.RoleService, Status: identity.StatusActive}
+	req, err := NormalizeOpenAIChat(authcontext.WithIdentity(withRawBody(raw), id), "req-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.Principal != (nonstream.Principal{Subject: "svc-1", KeyID: "key-1", Role: nonstream.RoleService, Status: nonstream.StatusActive}) {
+		t.Fatalf("principal = %+v", req.Principal)
+	}
+}
+
+func TestNormalizePrincipalZeroWhenNoIdentity(t *testing.T) {
+	t.Parallel()
+	raw := []byte(`{"model":"m","messages":[{"role":"user","content":"hi"}]}`)
+	req, err := NormalizeOpenAIChat(withRawBody(raw), "req-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.Principal != (nonstream.Principal{}) {
+		t.Fatalf("principal = %+v, want zero", req.Principal)
+	}
 }

@@ -11,18 +11,27 @@ import (
 
 	"github.com/tokenmp/v3/services/executor/internal/adapter"
 	executorv1 "github.com/tokenmp/v3/services/executor/internal/contract/executorv1"
+	"github.com/tokenmp/v3/services/executor/internal/nonstream"
 	"github.com/tokenmp/v3/services/executor/internal/sdk"
 )
 
 const (
-	internalErrorCode    = "INTERNAL_ERROR"
-	internalErrorMessage = "An internal error occurred."
-	invalidErrorCode     = "INVALID_REQUEST"
-	invalidErrorMessage  = "Invalid request."
-	streamErrorCode      = "NOT_IMPLEMENTED"
-	streamErrorMessage   = "Streaming is not supported."
-	upstreamErrorCode    = "UPSTREAM_ERROR"
-	upstreamErrorMessage = "Upstream request failed."
+	internalErrorCode             = "INTERNAL_ERROR"
+	internalErrorMessage          = "An internal error occurred."
+	invalidErrorCode              = "INVALID_REQUEST"
+	invalidErrorMessage           = "Invalid request."
+	unauthorizedChatCode          = "invalid_api_key"
+	unauthorizedChatMessage       = "Invalid API key provided."
+	unauthorizedAnthropicCode     = "authentication_error"
+	unauthorizedAnthropicMessage  = "invalid x-api-key"
+	streamErrorCode               = "NOT_IMPLEMENTED"
+	streamErrorMessage            = "Streaming is not supported."
+	modelNotFoundChatCode         = "model_not_found"
+	modelNotFoundChatMessage      = "The requested model does not exist."
+	modelNotFoundAnthropicCode    = "not_found_error"
+	modelNotFoundAnthropicMessage = "model: not found"
+	upstreamErrorCode             = "UPSTREAM_ERROR"
+	upstreamErrorMessage          = "Upstream request failed."
 
 	maxRenderTokenBytes   = 128
 	maxRenderMessageBytes = 512
@@ -68,8 +77,14 @@ func RenderChatError(err error) executorv1.CreateChatCompletionResponseObject {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return nil
 	}
-	if errors.Is(err, ErrInvalidRequest) {
+	if errors.Is(err, nonstream.ErrInvalidRequest) {
 		return chatError(http.StatusBadRequest, invalidErrorCode, "invalid_request_error", invalidErrorMessage)
+	}
+	if errors.Is(err, nonstream.ErrUnauthorized) {
+		return chatError(http.StatusUnauthorized, unauthorizedChatCode, "authentication_error", unauthorizedChatMessage)
+	}
+	if errors.Is(err, nonstream.ErrModelNotFound) {
+		return chatError(http.StatusNotFound, modelNotFoundChatCode, "invalid_request_error", modelNotFoundChatMessage)
 	}
 	if errors.Is(err, ErrStreamingUnsupported) {
 		return chatError(http.StatusNotImplemented, streamErrorCode, "api_error", streamErrorMessage)
@@ -88,8 +103,14 @@ func RenderMessageErrorWithRequestID(err error, requestID string) executorv1.Cre
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return nil
 	}
-	if errors.Is(err, ErrInvalidRequest) {
+	if errors.Is(err, nonstream.ErrInvalidRequest) {
 		return messageError(http.StatusBadRequest, invalidErrorCode, "invalid_request_error", invalidErrorMessage, requestID)
+	}
+	if errors.Is(err, nonstream.ErrUnauthorized) {
+		return messageError(http.StatusUnauthorized, unauthorizedAnthropicCode, "authentication_error", unauthorizedAnthropicMessage, requestID)
+	}
+	if errors.Is(err, nonstream.ErrModelNotFound) {
+		return messageError(http.StatusNotFound, modelNotFoundAnthropicCode, "not_found_error", modelNotFoundAnthropicMessage, requestID)
 	}
 	if errors.Is(err, ErrStreamingUnsupported) {
 		return messageError(http.StatusNotImplemented, streamErrorCode, "api_error", streamErrorMessage, requestID)
