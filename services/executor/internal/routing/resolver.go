@@ -79,9 +79,14 @@ type Candidate struct {
 	Generation uint64
 }
 
-func (c Candidate) target() QuarantineTarget {
+// Target returns Candidate's complete quarantine identity. ProviderID is the
+// immutable provider ID, not its request selector; AuthNone candidates retain
+// their intentionally empty CredentialID.
+func (c Candidate) Target() QuarantineTarget {
 	return QuarantineTarget{ModelID: c.ModelID, ProviderID: c.Provider.ID, RouteID: c.RouteID, CredentialID: c.Credential.ID}
 }
+
+func (c Candidate) target() QuarantineTarget { return c.Target() }
 
 // candidateState retains the private retry universe. It deliberately contains
 // only a safe Candidate: credential resolution belongs to a future port.

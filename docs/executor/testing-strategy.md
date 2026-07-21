@@ -5,7 +5,7 @@
 - 架构来源：`architecture.md`
 - API 契约：`packages/contracts/openapi/executor/v1.yaml`
 
-Foundation 已实施的测试范围：运行时配置校验、`GET` / `HEAD /healthz`、优雅关闭、config、identity、quota、request log 和 runtime 端口的 Mock/InMemory contract 测试，以及 generated transport 的生成物标记检查（`freshness_test.go`）与路由契约一致性测试（`internal/server/contract_test.go`）；其中 quota 覆盖 reservation 从 `reserved` 到 `finalized` 或 `released` 的唯一终态、同终态幂等和相反终态冲突。Config compiler/snapshot 阶段已实施 `snapshot.Compile` → `adapter.Compile`、`internal/adapter/compiler_test.go`、`internal/snapshot/compiler_test.go`、`store_test.go`（无快照、发布深拷贝、旧 revision 稳定、被拒发布保留 last known good、并发读者/发布者）和 fixture tests。三份 fixture 以 `DisallowUnknownFields` 严格解码、secret 扫描、枚举/duration/round-trip/HTTPS BaseURL 检查后实际编译和发布；测试还覆盖 xfyun `503→429`、thinking 至多 `medium`，以及 Anthropic `529→429`。C01–C27 相关 compiler/snapshot 安全、默认值、immutability 与 determinism 测试均已实施，详见第 4 节；`FuzzCompile` 和 `FuzzParseSelector` 已作为 fuzz smoke 实施。routing tests 覆盖 strict selector、revision-pinned deterministic Resolver/Plan、legacy credential synthesis、candidate scopes、四维 fail-closed quarantine、immutable private fallback universe 与并发 resolve；公开 Candidate/Plan 不含 credential ref 或 secret。Phase 5 Adapter Engine tests cover strict JSON, every finite DSL action, literal-only header/query, continued `ValueRef` rejection, model-bounded thinking, safe response mapping, atomicity/mutation isolation, race, and fuzz. Response mapping is module-local, not pipeline-wired. 已实施的 OpenAI Chat 与 Anthropic Messages non-stream SDK adapter tests 均使用 TLS `httptest`，覆盖 per-call HTTPS target/model/secret、SDK retry=0、no redirects、严格请求/响应 validator、安全 injection 与唯一 provider auth、safe attempt observer、success metadata，以及 timeout/transport/protocol/HTTP safe classification；Anthropic 还覆盖 `WithoutEnvironmentDefaults`、`/v1/messages`、唯一 `x-api-key` 和固定 `anthropic-version`、环境 header/target 隔离、thinking authority、tools/vision、`529 overloaded_error→unavailable` 与 fixture `529→429` mapping，并以 `FuzzDecodeMessageParams` 和 `FuzzValidateMessageResponse` 执行参数/响应 validator fuzz smoke。两个 adapter 均未接 pipeline/runtime routing。本文其余 SDK/protocol、公开模型运行时路由、credential resolver/secret injector、RetryDecider/attempt budget、流处理、集成、持续 fuzz、性能、Docker 与 CI 测试仍是后续设计。
+Foundation 已实施的测试范围：运行时配置校验、`GET` / `HEAD /healthz`、优雅关闭、config、identity、quota、request log 和 runtime 端口的 Mock/InMemory contract 测试，以及 generated transport 的生成物标记检查（`freshness_test.go`）与路由契约一致性测试（`internal/server/contract_test.go`）；其中 quota 覆盖 reservation 从 `reserved` 到 `finalized` 或 `released` 的唯一终态、同终态幂等和相反终态冲突。Config compiler/snapshot 阶段已实施 `snapshot.Compile` → `adapter.Compile`、`internal/adapter/compiler_test.go`、`internal/snapshot/compiler_test.go`、`store_test.go`（无快照、发布深拷贝、旧 revision 稳定、被拒发布保留 last known good、并发读者/发布者）和 fixture tests。三份 fixture 以 `DisallowUnknownFields` 严格解码、secret 扫描、枚举/duration/round-trip/HTTPS BaseURL 检查后实际编译和发布；测试还覆盖 xfyun `503→429`、thinking 至多 `medium`，以及 Anthropic `529→429`。C01–C27 相关 compiler/snapshot 安全、默认值、immutability 与 determinism 测试均已实施，详见第 4 节；`FuzzCompile` 和 `FuzzParseSelector` 已作为 fuzz smoke 实施。routing tests 覆盖 strict selector、revision-pinned deterministic Resolver/Plan、legacy credential synthesis、candidate scopes、四维 fail-closed quarantine、immutable private fallback universe 与并发 resolve；公开 Candidate/Plan 不含 credential ref 或 secret。Phase 5 Adapter Engine tests cover strict JSON, every finite DSL action, literal-only header/query, continued `ValueRef` rejection, model-bounded thinking, safe response mapping, atomicity/mutation isolation, race, and fuzz. Response mapping is module-local, not pipeline-wired. 已实施的 OpenAI Chat 与 Anthropic Messages non-stream SDK adapter tests 均使用 TLS `httptest`，覆盖 per-call HTTPS target/model/secret、SDK retry=0、no redirects、严格请求/响应 validator、安全 injection 与唯一 provider auth、safe attempt observer、success metadata，以及 timeout/transport/protocol/HTTP safe classification；Anthropic 还覆盖 `WithoutEnvironmentDefaults`、`/v1/messages`、唯一 `x-api-key` 和固定 `anthropic-version`、环境 header/target 隔离、thinking authority、tools/vision、`529 overloaded_error→unavailable` 与 fixture `529→429` mapping，并以 `FuzzDecodeMessageParams` 和 `FuzzValidateMessageResponse` 执行参数/响应 validator fuzz smoke。两个 adapter 均未接 pipeline/runtime routing。本文其余 SDK/protocol、公开模型运行时路由、credential resolver/secret injector、流处理、集成、持续 fuzz、性能、Docker 与 CI 测试仍是后续设计。retry State 的单元、invariant 与 race tests 已实施；它未接 pipeline/runtime。
 
 ## 1. 测试目标
 
@@ -391,7 +391,9 @@ model B
 - 完全冲突在编译阶段拒绝；
 - selected rule id 出现在 explain trace。
 
-## 9. Retry 与 Attempt Budget 测试（后续；`Plan.Next` scope 不等于 RetryDecider）
+## 9. Retry 与 Attempt Budget 测试（模块内纯 Go 已实施；未接 pipeline/runtime）
+
+`internal/execution/retry` 的单元、invariant 与 race tests 已覆盖 policy/Plan pinning、rule matching、candidate scope、delay、总量/同 target/总时长 budget、commit/cancel、opaque token、serial lifecycle 与实例隔离。`Plan.Next` 仍只定义候选范围；retry State 才匹配规则和管理逻辑 budget。`BeginAttempt` 的计数是 SDK 调用前的逻辑 reservation；该包不调用 SDK 或 transport，故它不宣称为 wire attempt gate，也不与 SDK preflight 或 `RoundTrip` 观测一一对应。
 
 | 编号 | 场景 | 期望 |
 |---|---|---|
@@ -577,7 +579,7 @@ HTTP status 与 body `status` 必须一致。
 仍待后续：
 
 - Responses request/response；
-- Executor retry 每次消耗 attempt 和总时间预算；
+- pipeline 将 retry State 的逻辑 reservation 与 SDK invocation、quota cleanup 和 request logging 接线；不得把该 reservation 宣称为 wire attempt；
 - pipeline quota cleanup、runtime route；
 - stream 建连、读取、close 与 StreamBridge。
 
@@ -596,7 +598,7 @@ HTTP status 与 body `status` 必须一致。
 仍待后续：
 
 - native stream event、thinking signature 流状态和 StreamBridge；
-- Executor retry/attempt budget、pipeline quota cleanup 与 runtime route。
+- retry State 与 SDK invocation 的 pipeline 接线、quota cleanup 与 runtime route。
 
 ### 13.3 Generic HTTP escape hatch
 
@@ -770,7 +772,7 @@ pnpm --filter @tokenmp/contracts check:generated:executor
 cd services/executor && go test ./internal/server/...
 ```
 
-现有 `go-auth` CI job 已运行 `check:generated:executor`、generated transport/route conformance race tests，以及从 `services/executor` 执行的 `go test -race -count=1 ./internal/adapter/... ./internal/snapshot/... ./internal/routing/... ./internal/sdk/...`。后者是 compiler/snapshot/routing/adapter SDK 的最小 race 门禁；`./internal/sdk/...` 自动涵盖 OpenAI 与 Anthropic adapter packages，包括 Anthropic TLS `httptest` 和 fuzz seed tests。SDK HTTP tests 仅访问进程内本地 `httptest.NewTLSServer`，不访问网络、数据库或真实 Provider。该命令不运行 runtime config source 或 request pipeline，也不构成独立 Executor CI job。Docker/集成验证仍待后续独立阶段（见阶段 14）。
+现有 `go-auth` CI job 已运行 `check:generated:executor`、generated transport/route conformance race tests，以及从 `services/executor` 执行的 `go test -race -count=1 ./internal/adapter/... ./internal/snapshot/... ./internal/routing/... ./internal/execution/retry/... ./internal/sdk/...`。后者是 compiler/snapshot/routing/retry/adapter SDK 的最小 race 门禁；`./internal/execution/retry/...` 覆盖 request-local retry State 的单元、invariant 与 race tests，`./internal/sdk/...` 自动涵盖 OpenAI 与 Anthropic adapter packages，包括 Anthropic TLS `httptest` 和 fuzz seed tests。SDK HTTP tests 仅访问进程内本地 `httptest.NewTLSServer`，不访问网络、数据库或真实 Provider。该命令不运行 runtime config source 或 request pipeline，也不构成独立 Executor CI job。Docker/集成验证仍待后续独立阶段（见阶段 14）。
 
 ### `executor-integration`
 
@@ -794,11 +796,11 @@ go test -race -count=1 ./test/integration/...
 |---|---|
 | Foundation | **已实施**：运行时 config、health、graceful shutdown，以及 Mock/InMemory ports 和 quota terminal contract/unit tests |
 | Codegen | **已实施**：freshness + route/HTTP conformance（不表示 runtime 路由注册或业务执行） |
-| Config compiler/snapshot | **已实施（模块内 + 最小 CI race 门禁）**：compiler、immutable generation-aware Store、三份 fixture 的严格解码/真实编译/发布测试、C01–C27 覆盖和 `FuzzCompile` smoke；现有 `go-auth` job 运行 `go test -race -count=1 ./internal/adapter/... ./internal/snapshot/... ./internal/routing/... ./internal/sdk/...`，覆盖 compiler/snapshot/routing/adapter SDK；不运行 DB、真实 Provider 或 runtime；SDK HTTP tests 仅使用本地 TLS `httptest` server；默认值已与架构基线对齐 |
+| Config compiler/snapshot | **已实施（模块内 + 最小 CI race 门禁）**：compiler、immutable generation-aware Store、三份 fixture 的严格解码/真实编译/发布测试、C01–C27 覆盖和 `FuzzCompile` smoke；现有 `go-auth` job 运行 `go test -race -count=1 ./internal/adapter/... ./internal/snapshot/... ./internal/routing/... ./internal/execution/retry/... ./internal/sdk/...`，覆盖 compiler/snapshot/routing/retry/adapter SDK；不运行 DB、真实 Provider 或 runtime；SDK HTTP tests 仅使用本地 TLS `httptest` server；默认值已与架构基线对齐 |
 | Routing | **已实施（纯 Go）**：strict selector、candidate scope、deterministic ordering、revision/generation pinning、legacy credential synthesis、四维 fail-closed quarantine 与 private Plan universe；不表示 RetryDecider、attempt budget 或 runtime pipeline |
 | Adapter engine | **已实施（模块内，未接 pipeline）**：strict JSON、全部有限 DSL actions、literal-only header/query、继续拒绝 `ValueRef`、model-bounded thinking、safe response mapping（AND/OR、compiled order/fixed default）、atomic/mutation/race/fuzz coverage |
-| Provider SDK adapters | **已实施（模块内，未接 pipeline/runtime）**：OpenAI v3.44.0 Chat 与 Anthropic v1.58.0 Messages non-stream；Anthropic `WithoutEnvironmentDefaults`、HTTPS target/path prefix、固定 version/唯一 `x-api-key`、strict OpenAPI request+response validator、thinking authority、tools/vision、529 mapping、TLS/fuzz；Responses/Images/streaming/credential resolver/secret injector/RetryDecider/attempt budget 仍待后续 |
-| Retry | R01–R20 适用项 + property budget invariant |
+| Provider SDK adapters | **已实施（模块内，未接 pipeline/runtime）**：OpenAI v3.44.0 Chat 与 Anthropic v1.58.0 Messages non-stream；Anthropic `WithoutEnvironmentDefaults`、HTTPS target/path prefix、固定 version/唯一 `x-api-key`、strict OpenAPI request+response validator、thinking authority、tools/vision、529 mapping、TLS/fuzz；Responses/Images/streaming/credential resolver/secret injector 仍待后续；retry State 与 SDK 的 pipeline 接线仍待后续 |
+| Retry | **已实施（模块内纯 Go，未接 pipeline/runtime）**：retry State 单元、invariant 与 race tests；R01–R16 的 state-layer 适用项、property budget invariant。R17–R20 中 pipeline/SDK/logging 相关接线仍待后续 |
 | Streaming | TTFT/idle/lifetime + partial disconnect + cancel |
 | Anthropic streaming | native SSE + thinking signature（Messages non-stream JSON/error adapter 已实施） |
 | Responses | lifecycle events + failed/incomplete + reasoning summary |
