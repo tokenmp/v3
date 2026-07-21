@@ -571,27 +571,39 @@ func TestAnthropicResponseMapsOverloadedTo429(t *testing.T) {
 	}
 	a := compiled.Adapters["adapter-anthropic-default"]
 
-	var matched *adapter.ResponseRule
+	var overloaded, rateLimited *adapter.ResponseRule
 	for i := range a.ResponseRules {
 		r := a.ResponseRules[i]
-		for _, st := range r.Match.HTTPStatuses {
-			if st == 529 {
-				matched = &r
-				break
-			}
-		}
-		if matched != nil {
-			break
+		switch r.ID {
+		case "resp-529-to-429":
+			overloaded = &r
+		case "resp-429":
+			rateLimited = &r
 		}
 	}
-	if matched == nil {
-		t.Fatal("anthropic: no ResponseRule matches upstream 529 (overloaded)")
+	if overloaded == nil {
+		t.Fatal("anthropic: missing resp-529-to-429 ResponseRule")
 	}
-	if matched.Output.HTTPStatus != 429 || matched.Output.ErrorCode != "rate_limited" || matched.Output.ErrorType != "rate_limited" {
-		t.Errorf("anthropic 529 compiled mapping = %#v, want 429/rate_limited/rate_limited", matched.Output)
+	if overloaded.Output.HTTPStatus != 429 || overloaded.Output.ErrorCode != "rate_limited" || overloaded.Output.ErrorType != "rate_limited" {
+		t.Errorf("anthropic overloaded compiled mapping = %#v, want 429/rate_limited/rate_limited", overloaded.Output)
 	}
-	if len(matched.Match.ErrorTypes) != 1 || matched.Match.ErrorTypes[0] != "overloaded" {
-		t.Errorf("anthropic 529 compiled match types = %v, want [overloaded]", matched.Match.ErrorTypes)
+	if got := overloaded.Match.HTTPStatuses; len(got) != 1 || got[0] != 529 {
+		t.Errorf("anthropic overloaded compiled match statuses = %v, want [529]", got)
+	}
+	if got := overloaded.Match.ErrorTypes; len(got) != 1 || got[0] != "overloaded_error" {
+		t.Errorf("anthropic overloaded compiled match types = %v, want [overloaded_error]", got)
+	}
+	if rateLimited == nil {
+		t.Fatal("anthropic: missing resp-429 ResponseRule")
+	}
+	if got := rateLimited.Match.HTTPStatuses; len(got) != 1 || got[0] != 429 {
+		t.Errorf("anthropic rate limit compiled match statuses = %v, want [429]", got)
+	}
+	if got := rateLimited.Match.ErrorTypes; len(got) != 0 {
+		t.Errorf("anthropic rate limit compiled match types = %v, want status-only rule", got)
+	}
+	if rateLimited.Output.HTTPStatus != 429 || rateLimited.Output.ErrorCode != "rate_limited" || rateLimited.Output.ErrorType != "rate_limited" {
+		t.Errorf("anthropic rate limit compiled mapping = %#v, want 429/rate_limited/rate_limited", rateLimited.Output)
 	}
 }
 

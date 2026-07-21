@@ -39,8 +39,8 @@
 - Auth Service Foundation 决策：`adr/0004-auth-service-foundation.md`
 - Auth Identity Flows 决策：`adr/0005-auth-identity-flows.md`
 - API Contracts Package 决策：`adr/0006-api-contracts-package.md`
-- Executor 架构设计基线（设计已确认；Foundation、Config compiler/immutable snapshot、routing、纯 Go Adapter Engine 及 OpenAI Chat Completions non-stream SDK adapter 已实施；credential resolver/secret injector、RetryDecider/attempt budget、pipeline/runtime 业务路由、Responses/Images/stream/Anthropic 等仍未实施）：`executor/architecture.md`
-- Executor 测试策略（Foundation、Config compiler/snapshot、routing、Adapter Engine 及 OpenAI Chat non-stream SDK adapter（TLS、严格 validator、安全注入/鉴权、retry=0/redirect、分类/observer/metadata）测试已实施；持续 fuzz、pipeline 与其余协议阶段测试未实施）：`executor/testing-strategy.md`
+- Executor 架构设计基线（设计已确认；Foundation、Config compiler/immutable snapshot、routing、纯 Go Adapter Engine，以及 OpenAI Chat 和 Anthropic Messages non-stream SDK adapters 已实施；credential resolver/secret injector、RetryDecider/attempt budget、pipeline/runtime 业务路由、Responses/Images/streaming 等仍未实施）：`executor/architecture.md`
+- Executor 测试策略（Foundation、Config compiler/snapshot、routing、Adapter Engine，以及 OpenAI Chat 和 Anthropic Messages non-stream SDK adapters（TLS、严格 validator、安全注入/鉴权、retry=0/redirect、分类/observer/metadata；Anthropic 的环境隔离、固定 version、529 mapping 与 request/response fuzz）测试已实施；持续 fuzz、pipeline 与其余协议阶段测试未实施）：`executor/testing-strategy.md`
 - UI 设计规范：`ui/design-system.md`
 
 新增、替代或删除文档时同步维护本索引或相应主题索引。
