@@ -155,18 +155,21 @@ jobs:
         run: go test -race ./internal/server/... ./internal/transport/executorv1api/... ./internal/contract/executorv1/...
 
       # Keep the pure compiler/snapshot/routing/pipeline/adapter SDK/config
-      # source/credential-env/identity-env boundary race-checked in this existing job. It has no database,
-      # runtime config source wiring, or live-provider access; SDK HTTP tests
-      # use only local TLS httptest servers. ./internal/configsource/... covers
-      # the strict secret-free file loader and initial generation=1 bootstrap;
-      # ./internal/credentialenv/... covers the secret-free vault-ref map,
-      # per-attempt lookup/rotation, and compiled-snapshot validation;
-      # ./internal/identityenv/... covers the non-secret identity map and
-      # per-request API-key rotation. No map JSON or credential environment
-      # value is committed to CI.
-      - name: go test -race (Executor compiler/snapshot/routing/pipeline/adapter SDK/config source/credential env/identity env)
+      # source/credential-env/identity-env/quarantine-bridge boundary race-checked
+      # in this existing job. It has no database, runtime config source wiring, or
+      # live-provider access; SDK HTTP tests use only local TLS httptest servers.
+      # ./internal/configsource/... covers the strict secret-free file loader and
+      # initial generation=1 bootstrap; ./internal/credentialenv/... covers the
+      # secret-free vault-ref map, per-attempt lookup/rotation, and
+      # compiled-snapshot validation; ./internal/identityenv/... covers the
+      # non-secret identity map and per-request API-key rotation. No map JSON or
+      # credential environment value is committed to CI. ./internal/quarantinebridge/...
+      # is listed explicitly because it is a separate package from
+      # ./internal/routing/...; the routing race pattern does not automatically
+      # test it, so it must be added to the package list to be covered.
+      - name: go test -race (Executor compiler/snapshot/routing/pipeline/adapter SDK/config source/credential env/identity env/quarantine bridge)
         working-directory: services/executor
-        run: go test -race -count=1 ./internal/adapter/... ./internal/snapshot/... ./internal/routing/... ./internal/execution/... ./internal/requestlog/... ./internal/quota/... ./internal/sdk/... ./internal/configsource/... ./internal/credentialenv/... ./internal/identityenv/...
+        run: go test -race -count=1 ./internal/adapter/... ./internal/snapshot/... ./internal/routing/... ./internal/execution/... ./internal/requestlog/... ./internal/quota/... ./internal/sdk/... ./internal/configsource/... ./internal/credentialenv/... ./internal/identityenv/... ./internal/quarantinebridge/...
 
       - name: Install golang-migrate CLI
         env:
