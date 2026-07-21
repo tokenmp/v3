@@ -216,7 +216,8 @@ func Compile(in ConfigInput) (CompiledConfig, error) {
 		}
 		providerSelectors[selector] = true
 		baseURL, err := url.Parse(p.BaseURL)
-		if err != nil || baseURL.Scheme != "https" || baseURL.Host == "" || baseURL.User != nil {
+		if err != nil || baseURL.Scheme != "https" || baseURL.Host == "" || baseURL.User != nil ||
+			baseURL.RawQuery != "" || baseURL.ForceQuery || baseURL.Fragment != "" {
 			return CompiledConfig{}, fmt.Errorf("provider %q has invalid base URL", key)
 		}
 		r, err := compileRetry(p.Retry, globalRetry)

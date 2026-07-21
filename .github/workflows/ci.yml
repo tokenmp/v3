@@ -154,13 +154,14 @@ jobs:
         working-directory: services/executor
         run: go test -race ./internal/server/... ./internal/transport/executorv1api/... ./internal/contract/executorv1/...
 
-      # Keep the pure compiler/snapshot/routing/pipeline/adapter SDK boundary
-      # race-checked in this existing job. It has no database, runtime config
-      # source, or live-provider access; SDK HTTP tests use only local TLS
-      # httptest servers.
-      - name: go test -race (Executor compiler/snapshot/routing/pipeline/adapter SDK)
+      # Keep the pure compiler/snapshot/routing/pipeline/adapter SDK/config
+      # source boundary race-checked in this existing job. It has no database,
+      # runtime config source wiring, or live-provider access; SDK HTTP tests
+      # use only local TLS httptest servers. ./internal/configsource/... covers
+      # the strict secret-free file loader and initial generation=1 bootstrap.
+      - name: go test -race (Executor compiler/snapshot/routing/pipeline/adapter SDK/config source)
         working-directory: services/executor
-        run: go test -race -count=1 ./internal/adapter/... ./internal/snapshot/... ./internal/routing/... ./internal/execution/... ./internal/requestlog/... ./internal/quota/... ./internal/sdk/...
+        run: go test -race -count=1 ./internal/adapter/... ./internal/snapshot/... ./internal/routing/... ./internal/execution/... ./internal/requestlog/... ./internal/quota/... ./internal/sdk/... ./internal/configsource/...
 
       - name: Install golang-migrate CLI
         env:
