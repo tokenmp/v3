@@ -115,7 +115,7 @@
             "Priority": 10,
             "Match": {
               "HTTPStatuses": [529],
-              "ErrorTypes": ["overloaded"]
+              "ErrorTypes": ["overloaded_error"]
             },
             "Output": {
               "HTTPStatus": 429,
