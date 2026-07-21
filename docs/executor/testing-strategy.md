@@ -1,11 +1,11 @@
 # Executor Testing Strategy
 
-- 状态：测试设计基线；Foundation、Config compiler/snapshot、routing 与 Phase 5 Adapter Engine 测试已实施，后续执行阶段测试尚未实施
+- 状态：测试设计基线；Foundation、Config compiler/snapshot、routing、Phase 5 Adapter Engine 及 Phase 6 OpenAI Chat non-stream SDK adapter 测试已实施，后续执行阶段测试尚未实施
 - 适用范围：TokenMP v3 `services/executor`
 - 架构来源：`architecture.md`
 - API 契约：`packages/contracts/openapi/executor/v1.yaml`
 
-Foundation 已实施的测试范围：运行时配置校验、`GET` / `HEAD /healthz`、优雅关闭、config、identity、quota、request log 和 runtime 端口的 Mock/InMemory contract 测试，以及 generated transport 的生成物标记检查（`freshness_test.go`）与路由契约一致性测试（`internal/server/contract_test.go`）；其中 quota 覆盖 reservation 从 `reserved` 到 `finalized` 或 `released` 的唯一终态、同终态幂等和相反终态冲突。Config compiler/snapshot 阶段已实施 `snapshot.Compile` → `adapter.Compile`、`internal/adapter/compiler_test.go`、`internal/snapshot/compiler_test.go`、`store_test.go`（无快照、发布深拷贝、旧 revision 稳定、被拒发布保留 last known good、并发读者/发布者）和 fixture tests。三份 fixture 以 `DisallowUnknownFields` 严格解码、secret 扫描、枚举/duration/round-trip/HTTPS BaseURL 检查后实际编译和发布；测试还覆盖 xfyun `503→429`、thinking 至多 `medium`，以及 Anthropic `529→429`。C01–C27 相关 compiler/snapshot 安全、默认值、immutability 与 determinism 测试均已实施，详见第 4 节；`FuzzCompile` 和 `FuzzParseSelector` 已作为 fuzz smoke 实施。routing tests 覆盖 strict selector、revision-pinned deterministic Resolver/Plan、legacy credential synthesis、candidate scopes、四维 fail-closed quarantine、immutable private fallback universe 与并发 resolve；公开 Candidate/Plan 不含 credential ref 或 secret。Phase 5 Adapter Engine tests cover strict JSON, every finite DSL action, literal-only header/query, continued `ValueRef` rejection, model-bounded thinking, safe response mapping, atomicity/mutation isolation, race, and fuzz. Response mapping is module-local, not pipeline-wired. 本文其余 SDK、公开模型运行时路由、credential resolver/secret injector、RetryDecider/attempt budget、流处理、集成、持续 fuzz、性能、Docker 与 CI 测试仍是后续设计。
+Foundation 已实施的测试范围：运行时配置校验、`GET` / `HEAD /healthz`、优雅关闭、config、identity、quota、request log 和 runtime 端口的 Mock/InMemory contract 测试，以及 generated transport 的生成物标记检查（`freshness_test.go`）与路由契约一致性测试（`internal/server/contract_test.go`）；其中 quota 覆盖 reservation 从 `reserved` 到 `finalized` 或 `released` 的唯一终态、同终态幂等和相反终态冲突。Config compiler/snapshot 阶段已实施 `snapshot.Compile` → `adapter.Compile`、`internal/adapter/compiler_test.go`、`internal/snapshot/compiler_test.go`、`store_test.go`（无快照、发布深拷贝、旧 revision 稳定、被拒发布保留 last known good、并发读者/发布者）和 fixture tests。三份 fixture 以 `DisallowUnknownFields` 严格解码、secret 扫描、枚举/duration/round-trip/HTTPS BaseURL 检查后实际编译和发布；测试还覆盖 xfyun `503→429`、thinking 至多 `medium`，以及 Anthropic `529→429`。C01–C27 相关 compiler/snapshot 安全、默认值、immutability 与 determinism 测试均已实施，详见第 4 节；`FuzzCompile` 和 `FuzzParseSelector` 已作为 fuzz smoke 实施。routing tests 覆盖 strict selector、revision-pinned deterministic Resolver/Plan、legacy credential synthesis、candidate scopes、四维 fail-closed quarantine、immutable private fallback universe 与并发 resolve；公开 Candidate/Plan 不含 credential ref 或 secret。Phase 5 Adapter Engine tests cover strict JSON, every finite DSL action, literal-only header/query, continued `ValueRef` rejection, model-bounded thinking, safe response mapping, atomicity/mutation isolation, race, and fuzz. Response mapping is module-local, not pipeline-wired. 已实施的 OpenAI Chat non-stream SDK adapter tests 使用 TLS `httptest`，覆盖 per-call HTTPS target/model/secret、SDK retry=0、no redirects、严格 tools/vision/thinking validator、安全 injection/唯一 Bearer auth、safe attempt observer、success metadata 与 timeout/transport/protocol/HTTP safe classification；adapter 未接 pipeline/runtime routing。本文其余 SDK/protocol、公开模型运行时路由、credential resolver/secret injector、RetryDecider/attempt budget、流处理、集成、持续 fuzz、性能、Docker 与 CI 测试仍是后续设计。
 
 ## 1. 测试目标
 
@@ -114,7 +114,7 @@ fixture 必须脱敏，禁止保存生产请求、用户内容或真实密钥。
 
 ### 2.5 SDK adapter tests
 
-使用 `httptest.Server` 作为模拟 Provider。官方 SDK 指向测试 base URL，验证：
+使用本地 `httptest.NewTLSServer` 作为模拟 Provider。官方 SDK 只指向该测试 base URL，验证：
 
 - SDK 实际发送的 path、header 和 body；
 - retry 由 Executor 控制，SDK 自身 retry 被关闭；
@@ -563,19 +563,23 @@ HTTP status 与 body `status` 必须一致。
 
 ## 13. SDK Adapter 测试
 
-### 13.1 OpenAI SDK
+### 13.1 OpenAI SDK（Chat non-stream 已实施；其余待后续）
 
-- 架构不变量：SDK 自动 retry 显式为 0，所有实际上游调用必须计入 Executor attempt；
-- Chat request path/body/header；
-- Responses request path/body/header；
-- custom base URL；
-- 非流 5xx/429、流建连及读取错误均不触发 SDK 隐式 retry；
+已实施：
+
+- official `github.com/openai/openai-go/v3` v3.44.0；
+- Chat Completions non-stream path/body/header、per-call HTTPS custom base URL/model/opaque secret；
+- SDK 自动 retry 显式为 0、no redirects，且 observer 对每次实际 RoundTrip 仅记录安全 metadata；
+- strict contract validator 接受并验证 tools、vision、thinking，预检失败不发 HTTP；
+- 安全 injection/唯一 Bearer auth，环境派生 headers 不能覆盖；
+- TLS tests 覆盖 success status/request-ID metadata、non-stream 5xx/429、malformed 2xx protocol、transport 与 deadline timeout 分类，以及无 remote content 泄漏。
+
+仍待后续：
+
+- Responses request/response；
 - Executor retry 每次消耗 attempt 和总时间预算；
-- request body extension 保留；
-- Context cancel；
-- non-stream usage；
-- stream close；
-- SDK error 转内部 error。
+- pipeline quota cleanup、runtime route；
+- stream 建连、读取、close 与 StreamBridge。
 
 ### 13.2 Anthropic SDK
 
@@ -761,7 +765,7 @@ pnpm --filter @tokenmp/contracts check:generated:executor
 cd services/executor && go test ./internal/server/...
 ```
 
-现有 `go-auth` CI job 已运行 `check:generated:executor`、generated transport/route conformance race tests，以及从 `services/executor` 执行的 `go test -race -count=1 ./internal/adapter/... ./internal/snapshot/...`。后者是 Config compiler/immutable snapshot Store 与 Adapter Engine 的最小 race 门禁，仅覆盖纯 Go adapter/snapshot packages；routing tests 尚未接入该 CI command。不运行数据库、SDK、runtime config source 或 request pipeline，也不构成独立 Executor CI job。Docker/集成验证仍待后续独立阶段（见阶段 14）。
+现有 `go-auth` CI job 已运行 `check:generated:executor`、generated transport/route conformance race tests，以及从 `services/executor` 执行的 `go test -race -count=1 ./internal/adapter/... ./internal/snapshot/... ./internal/routing/... ./internal/sdk/...`。后者是 compiler/snapshot/routing/adapter SDK 的最小 race 门禁，覆盖纯 Go compiler、snapshot、routing 与 SDK adapter packages；SDK HTTP tests 仅访问进程内本地 `httptest.NewTLSServer`，不访问网络、数据库或真实 Provider。该命令不运行 runtime config source 或 request pipeline，也不构成独立 Executor CI job。Docker/集成验证仍待后续独立阶段（见阶段 14）。
 
 ### `executor-integration`
 
@@ -785,10 +789,10 @@ go test -race -count=1 ./test/integration/...
 |---|---|
 | Foundation | **已实施**：运行时 config、health、graceful shutdown，以及 Mock/InMemory ports 和 quota terminal contract/unit tests |
 | Codegen | **已实施**：freshness + route/HTTP conformance（不表示 runtime 路由注册或业务执行） |
-| Config compiler/snapshot | **已实施（模块内 + 最小 CI race 门禁）**：compiler、immutable generation-aware Store、三份 fixture 的严格解码/真实编译/发布测试、C01–C27 覆盖和 `FuzzCompile` smoke；现有 `go-auth` job 运行 `go test -race -count=1 ./internal/adapter/... ./internal/snapshot/...`，不运行 DB/SDK/runtime；routing 尚未接入该 CI command；默认值已与架构基线对齐 |
+| Config compiler/snapshot | **已实施（模块内 + 最小 CI race 门禁）**：compiler、immutable generation-aware Store、三份 fixture 的严格解码/真实编译/发布测试、C01–C27 覆盖和 `FuzzCompile` smoke；现有 `go-auth` job 运行 `go test -race -count=1 ./internal/adapter/... ./internal/snapshot/... ./internal/routing/... ./internal/sdk/...`，覆盖 compiler/snapshot/routing/adapter SDK；不运行 DB、真实 Provider 或 runtime；SDK HTTP tests 仅使用本地 TLS `httptest` server；默认值已与架构基线对齐 |
 | Routing | **已实施（纯 Go）**：strict selector、candidate scope、deterministic ordering、revision/generation pinning、legacy credential synthesis、四维 fail-closed quarantine 与 private Plan universe；不表示 RetryDecider、attempt budget 或 runtime pipeline |
 | Adapter engine | **已实施（模块内，未接 pipeline）**：strict JSON、全部有限 DSL actions、literal-only header/query、继续拒绝 `ValueRef`、model-bounded thinking、safe response mapping（AND/OR、compiled order/fixed default）、atomic/mutation/race/fuzz coverage |
-| OpenAI SDK | request/response + retry=0 + context cancel |
+| OpenAI SDK | **部分已实施（模块内，未接 pipeline/runtime）**：v3.44.0 Chat non-stream、per-call HTTPS target/model/secret、retry=0/no redirects、strict tools/vision/thinking validator、安全 injection/auth、observer/metadata、safe classification 与 TLS tests；Responses/Images/stream/Anthropic/credential resolver/secret injector/RetryDecider/attempt budget 仍待后续 |
 | Retry | R01–R20 适用项 + property budget invariant |
 | Streaming | TTFT/idle/lifetime + partial disconnect + cancel |
 | Anthropic | native JSON/error/SSE + thinking signature |

@@ -249,7 +249,7 @@ func (Engine) MapResponse(adapter CompiledAdapter, upstream UpstreamResponse) Ma
 			return MappedResponse{HTTPStatus: rule.Output.HTTPStatus, ErrorCode: rule.Output.ErrorCode, ErrorType: rule.Output.ErrorType, Message: rule.Output.Message, MatchedID: rule.ID}
 		}
 	}
-	return defaultResponse(upstream.HTTPStatus)
+	return defaultResponse(upstream)
 }
 
 // responseMatches requires every populated dimension to match. Values within
@@ -324,13 +324,22 @@ func containsSubstring(values []string, text string) bool {
 	return false
 }
 
-func defaultResponse(status int) MappedResponse {
+func defaultResponse(upstream UpstreamResponse) MappedResponse {
+	// A classified status-zero failure must not be confused with the legacy
+	// unclassified zero status: timeout is a gateway timeout; transport and
+	// protocol failures are bad gateways.
 	switch {
-	case status == 0:
+	case upstream.ErrorType == "timeout" || upstream.ErrorCode == "timeout":
 		return MappedResponse{HTTPStatus: 504, ErrorCode: "UPSTREAM_TIMEOUT", ErrorType: "upstream_timeout", Message: "upstream timeout"}
-	case status >= 400 && status < 500:
+	case upstream.ErrorType == "transport" || upstream.ErrorCode == "transport":
+		return MappedResponse{HTTPStatus: 502, ErrorCode: "UPSTREAM_TRANSPORT_ERROR", ErrorType: "upstream_transport_error", Message: "upstream transport error"}
+	case upstream.ErrorType == "protocol" || upstream.ErrorCode == "protocol":
+		return MappedResponse{HTTPStatus: 502, ErrorCode: "UPSTREAM_PROTOCOL_ERROR", ErrorType: "upstream_protocol_error", Message: "invalid upstream response"}
+	case upstream.HTTPStatus == 0:
+		return MappedResponse{HTTPStatus: 504, ErrorCode: "UPSTREAM_TIMEOUT", ErrorType: "upstream_timeout", Message: "upstream timeout"}
+	case upstream.HTTPStatus >= 400 && upstream.HTTPStatus < 500:
 		return MappedResponse{HTTPStatus: 400, ErrorCode: "UPSTREAM_INVALID_REQUEST", ErrorType: "upstream_invalid_request", Message: "upstream rejected request"}
-	case status >= 500 && status < 600:
+	case upstream.HTTPStatus >= 500 && upstream.HTTPStatus < 600:
 		return MappedResponse{HTTPStatus: 502, ErrorCode: "UPSTREAM_ERROR", ErrorType: "upstream_error", Message: "upstream error"}
 	default:
 		return MappedResponse{HTTPStatus: 502, ErrorCode: "UPSTREAM_PROTOCOL_ERROR", ErrorType: "upstream_protocol_error", Message: "invalid upstream response"}

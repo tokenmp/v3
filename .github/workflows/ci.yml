@@ -154,11 +154,13 @@ jobs:
         working-directory: services/executor
         run: go test -race ./internal/server/... ./internal/transport/executorv1api/... ./internal/contract/executorv1/...
 
-      # Keep the pure compiler/snapshot/routing boundary race-checked in this
-      # existing job. It has no database, SDK, runtime config source, or request pipeline.
-      - name: go test -race (Executor config compiler, snapshot, and routing)
+      # Keep the pure compiler/snapshot/routing/adapter SDK boundary
+      # race-checked in this existing job. It has no database, runtime config
+      # source, request pipeline, or live-provider access; SDK HTTP tests use
+      # only local TLS httptest servers.
+      - name: go test -race (Executor compiler/snapshot/routing/adapter SDK)
         working-directory: services/executor
-        run: go test -race -count=1 ./internal/adapter/... ./internal/snapshot/... ./internal/routing/...
+        run: go test -race -count=1 ./internal/adapter/... ./internal/snapshot/... ./internal/routing/... ./internal/sdk/...
 
       - name: Install golang-migrate CLI
         env:

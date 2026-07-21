@@ -1,6 +1,6 @@
 # Executor Architecture Design
 
-- 状态：设计基线已确认；Foundation、Config compiler/snapshot、routing 与 Phase 5 pure-Go Adapter Engine 已实施，后续执行能力仍按本文设计逐阶段落地
+- 状态：设计基线已确认；Foundation、Config compiler/snapshot、routing、Phase 5 pure-Go Adapter Engine 与 Phase 6 的 OpenAI Chat non-stream SDK adapter 已实施；其余执行能力仍按本文设计逐阶段落地
 - 适用范围：TokenMP v3 `services/executor`
 - 契约来源：`packages/contracts/openapi/executor/v1.yaml`
 - 关联测试方案：`testing-strategy.md`
@@ -19,7 +19,7 @@ Executor 是 TokenMP 的模型请求执行面，负责：
 8. 按配置决定同 Credential 重试、切 Credential、切 Route、切 Provider或切模型。
 9. 管理业务超时、流提交边界、取消、配额和请求日志。
 
-Foundation 不连接数据库，已通过端口接口及 Mock/InMemory 实现提供身份、配置、配额、日志和运行时状态。generated models/strict server、adapter skeleton、route/HTTP conformance 与纯 Go Adapter Engine 已实施；公开模型业务路由的 runtime 注册、credential resolver/secret injector、业务执行、RetryDecider/attempt budget、SDK/provider、流处理及持久化仍未实施；未来持久化实现不得改变核心执行流程。
+Foundation 不连接数据库，已通过端口接口及 Mock/InMemory 实现提供身份、配置、配额、日志和运行时状态。generated models/strict server、adapter skeleton、route/HTTP conformance 与纯 Go Adapter Engine 已实施；公开模型业务路由的 runtime 注册、credential resolver/secret injector、业务执行、RetryDecider/attempt budget、流处理及持久化仍未实施；已实施 internal shared `sdk` port 与 official `github.com/openai/openai-go/v3` **v3.44.0** 的 OpenAI Chat Completions **non-stream** adapter：per-call HTTPS target、upstream model 与 opaque secret，SDK retry=0、no redirects；strict contract validator 覆盖 tools、vision、thinking；安全 injection/唯一 Bearer auth、safe attempt observer、success status/request-ID metadata，以及 timeout/transport/protocol/HTTP safe classification。TLS `httptest` 已覆盖。它尚未接入 execution pipeline 或 runtime routing，故不是端到端业务能力；credential resolver/secret injector、RetryDecider/attempt budget、Responses、Images、stream 与 Anthropic SDK/provider 仍未实施。未来持久化实现不得改变核心执行流程。
 
 ## 2. 设计原则
 
@@ -62,11 +62,11 @@ OpenAPI 生成类型只存在于 HTTP 边界。核心执行层使用内部 `Norm
 
 | SDK kind | 实现 | 用途 |
 |---|---|---|
-| `openai` | `github.com/openai/openai-go/v3` | OpenAI Chat / Responses 及可无损表达的兼容 Provider |
+| `openai` | `github.com/openai/openai-go/v3` v3.44.0 | OpenAI Chat non-stream 已实施；Responses/stream 及可无损表达的兼容 Provider 仍待后续 |
 | `anthropic` | `github.com/anthropics/anthropic-sdk-go` | Anthropic Messages 及可无损表达的兼容 Provider |
 | `generic_http` | 受控 HTTP adapter | 官方 SDK 无法表达的 Provider extension；不是默认路径 |
 
-SDK 内部会使用 HTTP transport，但它不了解 TokenMP 的 TTFT、流空闲、Route fallback、配额和下游提交语义。这些业务控制由 Executor 通过 Context 和流状态机实现。
+SDK 内部会使用 HTTP transport，但它不了解 TokenMP 的 TTFT、流空闲、Route fallback、配额和下游提交语义。这些业务控制由 Executor 通过 Context 和流状态机实现。当前 OpenAI adapter 仅执行一个 non-stream Chat call；其 target/model/secret 都是 per-call，严格验证 tools/vision/thinking，SDK retry=0 且 redirects 禁止，安全分类失败并记录不含敏感信息的 attempt metadata。
 
 所有官方 SDK client 必须显式关闭 SDK 自带自动重试；受控 HTTP fallback 和代理层同样不得产生未计入 Attempt Budget 的隐藏重试。每一次实际上游调用都必须对应一个可观察的 attempt。
 
@@ -168,7 +168,7 @@ services/executor/
 │   ├── routing/                # selector、candidate resolver
 │   ├── adapter/                # 配置编译和规则执行引擎
 │   ├── snapshot/               # immutable compiled snapshot
-│   ├── sdk/                    # OpenAI、Anthropic、受控 HTTP
+│   ├── sdk/                    # shared SDK port；OpenAI Chat non-stream 已实施，Anthropic/受控 HTTP 待后续
 │   ├── protocol/               # normalize/render per protocol
 │   ├── streaming/              # SSE parser、bridge、状态机和 timer
 │   ├── quota/                  # quota port + mock
@@ -537,7 +537,7 @@ Request/Attempt/Event 日志至少记录：
 | 3 | `feat/executor-config-model` | **已实施（模块内，未接 runtime）**：`snapshot.Compile` → `adapter.Compile`、C01–C27 相关有限 DSL 安全校验、继承/normalization、deterministic ordering、immutable generation-aware Store 与三份脱敏 fixture 的严格解码/真实编译/发布测试；默认值已与本设计基线对齐。 |
 | 4 | `feat/executor-routing` | **已实施（纯 Go，未接 runtime/pipeline）**：strict `model[:group][@provider]` selector（`auto` 禁止 group）、route group/provider selector/route-local non-secret credential/auto+model fallback、legacy `CredentialRef` 全长 SHA-256 合成、revision-pinned immutable Resolver/Plan、deterministic candidates 与 model/provider/route/credential 四维 fail-closed quarantine；公开 Candidate/Plan 仅含安全 credential ID/priority，不含 credential ref 或 secret；`Plan.Next` 仅定义 candidate scope，不是 RetryDecider。 |
 | 5 | `feat/executor-adapter-engine` | **已实施（模块内，未接 pipeline）**：stateless pure-Go/no-I/O Engine 严格解码 JSON object、执行全部有限 DSL actions、literal-only header/query、继续拒绝 `ValueRef`、按 selected model bounds 映射 thinking，并安全 map response（维度间 AND、维度内 OR、compiler established order、fixed default）；atomic/mutation/race/fuzz 覆盖已实施。 |
-| 6 | `feat/executor-sdk-openai` | OpenAI SDK 非流式、SDK retry=0、Context cancel、quota cleanup |
+| 6 | `feat/executor-sdk-openai` | **部分已实施（模块内，未接 pipeline/runtime）**：official `github.com/openai/openai-go/v3` v3.44.0 的 OpenAI Chat Completions non-stream adapter、per-call HTTPS target/model/secret、SDK retry=0、no redirects、strict tools/vision/thinking validator、安全 injection/auth、attempt observer、success metadata、timeout/transport/protocol/HTTP safe classification 与 TLS tests。quota cleanup、pipeline/runtime routing、Responses/Images/stream/Anthropic 仍待后续。 |
 | 7 | `feat/executor-retry-policy` | retry decision、attempt budget、quarantine |
 | 8 | `feat/executor-streaming` | StreamBridge、TTFT/idle/lifetime |
 | 9 | `feat/executor-sdk-anthropic` | Anthropic SDK 与原生流/error |
