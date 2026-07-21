@@ -253,6 +253,12 @@ func (r *Resolver) Resolve(ctx context.Context, selector Selector) (Plan, error)
 		if !route.Enabled || (selector.Group != "" && route.RouteGroup != selector.Group) {
 			continue
 		}
+		// A non-empty programmatic protocol filter admits only routes whose
+		// compiled protocol matches the request protocol, so a chat completion
+		// request can never resolve an anthropic_messages route and vice versa.
+		if selector.Protocol != "" && route.Protocol != selector.Protocol {
+			continue
+		}
 		provider, providerOK := r.config.Providers[route.ProviderID]
 		if !providerOK || provider.ID == "" || (selector.Provider != "" && provider.Selector != selector.Provider) {
 			continue

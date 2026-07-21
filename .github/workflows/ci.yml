@@ -166,10 +166,12 @@ jobs:
       # credential environment value is committed to CI. ./internal/quarantinebridge/...
       # is listed explicitly because it is a separate package from
       # ./internal/routing/...; the routing race pattern does not automatically
-      # test it, so it must be added to the package list to be covered.
+      # test it, so it must be added to the package list to be covered. The
+      # transport-neutral nonstream boundary, facade, auth context, and request-id
+      # packages are likewise independent and are explicitly race-tested.
       - name: go test -race (Executor compiler/snapshot/routing/pipeline/adapter SDK/config source/credential env/identity env/quarantine bridge)
         working-directory: services/executor
-        run: go test -race -count=1 ./internal/adapter/... ./internal/snapshot/... ./internal/routing/... ./internal/execution/... ./internal/requestlog/... ./internal/quota/... ./internal/sdk/... ./internal/configsource/... ./internal/credentialenv/... ./internal/identityenv/... ./internal/quarantinebridge/...
+        run: go test -race -count=1 ./internal/adapter/... ./internal/snapshot/... ./internal/routing/... ./internal/execution/... ./internal/requestlog/... ./internal/quota/... ./internal/sdk/... ./internal/configsource/... ./internal/credentialenv/... ./internal/identityenv/... ./internal/quarantinebridge/... ./internal/nonstream/... ./internal/nonstreamfacade/... ./internal/authcontext/... ./internal/requestid/...
 
       - name: Install golang-migrate CLI
         env:

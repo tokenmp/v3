@@ -10,6 +10,7 @@ import (
 	"github.com/tokenmp/v3/services/executor/internal/adapter"
 	"github.com/tokenmp/v3/services/executor/internal/execution/retry"
 	"github.com/tokenmp/v3/services/executor/internal/quota"
+	"github.com/tokenmp/v3/services/executor/internal/requestid"
 	"github.com/tokenmp/v3/services/executor/internal/requestlog"
 	"github.com/tokenmp/v3/services/executor/internal/routing"
 	"github.com/tokenmp/v3/services/executor/internal/sdk"
@@ -167,8 +168,12 @@ func (r *Runner) Run(ctx context.Context, in Input) (Result, error) {
 		return Result{}, ErrMisconfigured
 	}
 	// Reject malformed request identifiers before every preflight or quota side
-	// effect. Preserve IDs verbatim once valid; trimming is validation only.
-	if strings.TrimSpace(in.ReservationID) == "" {
+	// effect. The reservation id must match the shared requestid grammar
+	// (res_ + 16-128 URL-safe chars); anything else is rejected before plan
+	// validation, preflight, credential resolution, quota reservation, logging,
+	// or an upstream call. RequestID is trimmed-only (no grammar) but equally
+	// fail-closed. IDs are preserved verbatim once valid.
+	if !requestid.ValidReservationID(in.ReservationID) {
 		return Result{}, ErrInvalidReservation
 	}
 	if strings.TrimSpace(in.RequestID) == "" {

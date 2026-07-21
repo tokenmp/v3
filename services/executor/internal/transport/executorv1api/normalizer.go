@@ -13,6 +13,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/tokenmp/v3/services/executor/internal/adapter"
+	"github.com/tokenmp/v3/services/executor/internal/authcontext"
+	"github.com/tokenmp/v3/services/executor/internal/nonstream"
 )
 
 const (
@@ -26,10 +28,6 @@ const (
 )
 
 var (
-	// ErrInvalidRequest is a deliberately non-descriptive protocol-normalizer
-	// failure; callers must render a protocol-native safe error. It never
-	// echoes raw request content.
-	ErrInvalidRequest = errors.New("executorv1api: invalid non-stream request")
 	// ErrStreamingUnsupported distinguishes a valid streaming request from an
 	// invalid request. The non-stream facade must never execute it.
 	ErrStreamingUnsupported = errors.New("executorv1api: streaming is unsupported")
@@ -139,9 +137,16 @@ func normalize(
 	}
 	// raw is capture-owned and immutable. The executor port is a separate
 	// trust boundary, so it receives exactly one independent copy; it must not
-	// be able to mutate the context's raw-body view.
+	// be able to mutate the context's raw-body view. The trusted authenticated
+	// Principal is derived here from the transport auth boundary's
+	// authcontext.IdentityFromContext and carried on the request; it carries no
+	// key material and is defensively revalidated downstream.
+	principal := nonstream.Principal{}
+	if id, ok := authcontext.IdentityFromContext(ctx); ok {
+		principal = nonstream.Principal{Subject: id.Subject, KeyID: id.KeyID, Role: string(id.Role), Status: string(id.Status)}
+	}
 	return NonStreamRequest{
-		Protocol: protocol, Selector: selector, Body: json.RawMessage(append([]byte(nil), raw...)), Thinking: requestThinking, RequestID: requestID,
+		Protocol: protocol, Selector: selector, Body: json.RawMessage(append([]byte(nil), raw...)), Thinking: requestThinking, RequestID: requestID, Principal: principal,
 	}, nil
 }
 

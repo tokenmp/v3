@@ -6,6 +6,8 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/tokenmp/v3/services/executor/internal/adapter"
 )
 
 const (
@@ -21,10 +23,16 @@ var ErrInvalidSelector = errors.New("invalid selector")
 
 // Selector is a parsed model selector. Its canonical representation is
 // model[:group][@provider]. Auto is true precisely when Model is "auto".
+//
+// Protocol is an optional, programmatic route filter set by a caller (for
+// example a transport-facing facade) rather than parsed from the selector
+// string: when non-empty, Resolve admits only routes whose compiled Protocol
+// matches. It is intentionally not part of the canonical grammar.
 type Selector struct {
 	Model    string
 	Group    string
 	Provider string
+	Protocol adapter.Protocol
 	Auto     bool
 }
 
