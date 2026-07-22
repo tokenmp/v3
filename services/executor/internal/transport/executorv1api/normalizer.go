@@ -14,6 +14,7 @@ import (
 
 	"github.com/tokenmp/v3/services/executor/internal/adapter"
 	"github.com/tokenmp/v3/services/executor/internal/authcontext"
+	"github.com/tokenmp/v3/services/executor/internal/execution"
 	"github.com/tokenmp/v3/services/executor/internal/nonstream"
 )
 
@@ -78,12 +79,83 @@ func makeFieldSet(names ...string) fieldSet {
 	return set
 }
 
+// DetectOpenAIChatStream performs only the bounded structural JSON gate on the
+// captured raw body, then reads the optional stream flag. It deliberately does
+// not validate the request schema, normalize it, or allocate a request ID.
+func DetectOpenAIChatStream(ctx context.Context) (bool, error) {
+	return detectStreamFlag(ctx)
+}
+
+// DetectAnthropicMessagesStream is the Messages counterpart of
+// DetectOpenAIChatStream.
+func DetectAnthropicMessagesStream(ctx context.Context) (bool, error) {
+	return detectStreamFlag(ctx)
+}
+
+// detectStreamFlag shares the normalizer's strict structural decode (including
+// the capture bound, UTF-8, one-object, duplicate/prototype, depth/node, and
+// trailing-content checks) but intentionally reads no schema fields beyond
+// stream. This permits Hybrid to delegate stream:false to the generated strict
+// wrapper, where the non-stream adapter performs the sole full normalization.
+func detectStreamFlag(ctx context.Context) (bool, error) {
+	raw, ok := rawBodyView(ctx)
+	if !ok {
+		return false, ErrInvalidRequest
+	}
+	root, err := parseRequestJSON(ctx, raw)
+	if err != nil {
+		return false, ErrInvalidRequest
+	}
+	value, exists := root["stream"]
+	if !exists {
+		return false, nil
+	}
+	stream, ok := value.(bool)
+	if !ok {
+		return false, ErrInvalidRequest
+	}
+	return stream, nil
+}
+
 // NormalizeOpenAIChat extracts the non-stream execution inputs from the raw
 // body captured before the generated decoder. It performs full strict schema
 // validation of the entire CreateChatCompletionRequest tree (root and every
 // nested schema: messages, content parts, tools, tool choices, tool calls,
 // response_format, reasoning_effort) and retains the raw JSON bytes verbatim.
 func NormalizeOpenAIChat(ctx context.Context, requestID string) (NonStreamRequest, error) {
+	result, err := NormalizeOpenAIChatRequest(ctx, requestID)
+	if err != nil {
+		return NonStreamRequest{}, err
+	}
+	if result.Stream {
+		return NonStreamRequest{}, ErrStreamingUnsupported
+	}
+	return result.Request, nil
+}
+
+// NormalizedRequest is a fully schema-validated request plus its execution
+// mode. A true Stream value is valid here and is not executed by this layer.
+type NormalizedRequest struct {
+	Request NonStreamRequest
+	Stream  bool
+}
+
+// StreamRequest returns the streaming-boundary form of this normalized request.
+// It makes independent body storage so a future handler and its Sink cannot
+// mutate the normalized result retained by its caller. Callers must only use it
+// after Stream is true; mode dispatch remains outside this normalizer.
+func (r NormalizedRequest) StreamRequest(sink execution.ProtocolSink) StreamRequest {
+	req := r.Request
+	return StreamRequest{
+		Protocol: req.Protocol, Selector: req.Selector,
+		Body: json.RawMessage(append([]byte(nil), req.Body...)), Thinking: req.Thinking,
+		RequestID: req.RequestID, Principal: req.Principal, Sink: sink,
+	}
+}
+
+// NormalizeOpenAIChatRequest validates a Chat request exactly once and returns
+// its normalized request plus whether the caller selected streaming mode.
+func NormalizeOpenAIChatRequest(ctx context.Context, requestID string) (NormalizedRequest, error) {
 	return normalize(ctx, requestID, adapter.ProtocolOpenAIChat, validateChatRequest, normalizeChatThinking)
 }
 
@@ -93,6 +165,19 @@ func NormalizeOpenAIChat(ctx context.Context, requestID string) (NonStreamReques
 // blocks, system blocks, thinking, tools, tool_choice, metadata) and retains
 // the raw JSON bytes verbatim.
 func NormalizeAnthropicMessages(ctx context.Context, requestID string) (NonStreamRequest, error) {
+	result, err := NormalizeAnthropicMessagesRequest(ctx, requestID)
+	if err != nil {
+		return NonStreamRequest{}, err
+	}
+	if result.Stream {
+		return NonStreamRequest{}, ErrStreamingUnsupported
+	}
+	return result.Request, nil
+}
+
+// NormalizeAnthropicMessagesRequest validates a Messages request exactly once
+// and returns its normalized request plus whether streaming was selected.
+func NormalizeAnthropicMessagesRequest(ctx context.Context, requestID string) (NormalizedRequest, error) {
 	return normalize(ctx, requestID, adapter.ProtocolAnthropic, validateMessageRequest, normalizeMessageThinking)
 }
 
@@ -102,38 +187,37 @@ func normalize(
 	protocol adapter.Protocol,
 	validate func(map[string]any) error,
 	thinking func(map[string]any) (adapter.ThinkingRequest, error),
-) (NonStreamRequest, error) {
+) (NormalizedRequest, error) {
 	raw, ok := rawBodyView(ctx)
 	if !ok {
-		return NonStreamRequest{}, ErrInvalidRequest
+		return NormalizedRequest{}, ErrInvalidRequest
 	}
 	root, err := parseRequestJSON(ctx, raw)
 	if err != nil {
-		return NonStreamRequest{}, ErrInvalidRequest
+		return NormalizedRequest{}, ErrInvalidRequest
 	}
 	// Full strict schema validation runs first: a schema-invalid request is
 	// uniformly ErrInvalidRequest (native 400), regardless of any stream field.
 	// Only after the entire tree validates is a schema-valid stream:true
 	// recognized as an unsupported streaming request.
 	if err := validate(root); err != nil {
-		return NonStreamRequest{}, ErrInvalidRequest
+		return NormalizedRequest{}, ErrInvalidRequest
 	}
-	if stream, exists := root["stream"]; exists {
-		value, ok := stream.(bool)
+	stream := false
+	if value, exists := root["stream"]; exists {
+		var ok bool
+		stream, ok = value.(bool)
 		if !ok {
-			return NonStreamRequest{}, ErrInvalidRequest
-		}
-		if value {
-			return NonStreamRequest{}, ErrStreamingUnsupported
+			return NormalizedRequest{}, ErrInvalidRequest
 		}
 	}
 	selector, ok := root["model"].(string)
 	if !ok || strings.TrimSpace(selector) == "" || len(selector) > maxSelectorBytes {
-		return NonStreamRequest{}, ErrInvalidRequest
+		return NormalizedRequest{}, ErrInvalidRequest
 	}
 	requestThinking, err := thinking(root)
 	if err != nil {
-		return NonStreamRequest{}, err
+		return NormalizedRequest{}, err
 	}
 	// raw is capture-owned and immutable. The executor port is a separate
 	// trust boundary, so it receives exactly one independent copy; it must not
@@ -145,9 +229,9 @@ func normalize(
 	if id, ok := authcontext.IdentityFromContext(ctx); ok {
 		principal = nonstream.Principal{Subject: id.Subject, KeyID: id.KeyID, Role: string(id.Role), Status: string(id.Status)}
 	}
-	return NonStreamRequest{
+	return NormalizedRequest{Request: NonStreamRequest{
 		Protocol: protocol, Selector: selector, Body: json.RawMessage(append([]byte(nil), raw...)), Thinking: requestThinking, RequestID: requestID, Principal: principal,
-	}, nil
+	}, Stream: stream}, nil
 }
 
 // normalizeChatThinking maps the validated reasoning_effort enum to a

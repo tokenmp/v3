@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/tokenmp/v3/services/executor/internal/nonstream"
+	"github.com/tokenmp/v3/services/executor/internal/stream"
 )
 
 // NonStreamExecutor is the transport-side adapter alias for the
@@ -45,3 +46,10 @@ var (
 	ErrUnauthorized   = nonstream.ErrUnauthorized
 	ErrMisconfigured  = nonstream.ErrMisconfigured
 )
+
+// StreamExecutor and related aliases expose the future transport-neutral
+// streaming boundary without wiring an HTTP sink or changing current adapter
+// behavior.
+type StreamExecutor = stream.Executor
+type StreamRequest = stream.Request
+type StreamResult = stream.Result

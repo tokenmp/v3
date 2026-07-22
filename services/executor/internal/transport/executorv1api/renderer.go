@@ -70,6 +70,37 @@ func RenderMessageWithRequestID(result NonStreamResult, requestID string) execut
 	return messageError(http.StatusInternalServerError, internalErrorCode, "api_error", internalErrorMessage, requestID)
 }
 
+// RenderChatStreamResult renders the only pre-commit terminal stream outcome
+// that may be sent as JSON. Once an SSE sink has committed, the hybrid handler
+// deliberately ignores this response and never appends JSON to the stream.
+func RenderChatStreamResult(result StreamResult) executorv1.CreateChatCompletionResponseObject {
+	if result.Failure != nil {
+		return chatFailure(*result.Failure)
+	}
+	return chatError(http.StatusInternalServerError, internalErrorCode, "api_error", internalErrorMessage)
+}
+
+// RenderMessageStreamResult is the Anthropic-native counterpart of
+// RenderChatStreamResult. request_id is trusted service-local data only.
+func RenderMessageStreamResult(result StreamResult, requestID string) executorv1.CreateMessageResponseObject {
+	if result.Failure != nil {
+		return messageFailure(*result.Failure, requestID)
+	}
+	return messageError(http.StatusInternalServerError, internalErrorCode, "api_error", internalErrorMessage, requestID)
+}
+
+func writeChatResponse(w http.ResponseWriter, response executorv1.CreateChatCompletionResponseObject) {
+	if response != nil {
+		_ = response.VisitCreateChatCompletionResponse(w)
+	}
+}
+
+func writeMessageResponse(w http.ResponseWriter, response executorv1.CreateMessageResponseObject) {
+	if response != nil {
+		_ = response.VisitCreateMessageResponse(w)
+	}
+}
+
 // RenderChatError renders a safe local transport error. A canceled or expired
 // request returns nil: the HTTP adapter owns those request-lifecycle outcomes
 // and must not try to write a second response.

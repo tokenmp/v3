@@ -106,6 +106,26 @@ func TestExecutorProcess(t *testing.T) {
 		}
 	})
 
+	t.Run("authenticated stream chat missing model returns pre-commit JSON 404", func(t *testing.T) {
+		configPath := writeProcessConfig(t, minimalEmptyConfig)
+		address := freeAddress(t)
+		cmd := helperCommand(t, address, configPath, processIdentityMap)
+		if err := cmd.Start(); err != nil {
+			t.Fatalf("start executor: %v", err)
+		}
+		t.Cleanup(func() { stopProcess(cmd) })
+
+		waitForHealthz(t, "http://"+address+"/healthz")
+		body := `{"model":"missing","messages":[{"role":"user","content":"hi"}],"stream":true}`
+		resp := processRequest(t, address, http.MethodPost, "/v1/chat/completions", body, "Bearer "+processAPIKey)
+		if resp.StatusCode != http.StatusNotFound {
+			t.Fatalf("status = %d, want 404; body=%s", resp.StatusCode, readBody(resp))
+		}
+		if responseBody := readBody(resp); !strings.Contains(responseBody, "invalid_request_error") {
+			t.Fatalf("body = %q, want OpenAI JSON pre-commit error", responseBody)
+		}
+	})
+
 	t.Run("authenticated 501 route stays not-implemented", func(t *testing.T) {
 		configPath := writeProcessConfig(t, minimalEmptyConfig)
 		address := freeAddress(t)

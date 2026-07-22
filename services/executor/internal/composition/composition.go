@@ -35,6 +35,7 @@ import (
 	"github.com/tokenmp/v3/services/executor/internal/sdk/anthropicadapter"
 	"github.com/tokenmp/v3/services/executor/internal/sdk/openaiadapter"
 	"github.com/tokenmp/v3/services/executor/internal/snapshot"
+	"github.com/tokenmp/v3/services/executor/internal/streamfacade"
 	"github.com/tokenmp/v3/services/executor/internal/transport/executorv1api"
 )
 
@@ -68,9 +69,9 @@ var (
 	ErrSDKAdapter = errors.New("composition: sdk adapter unavailable")
 )
 
-// supportedSDKPairs is the exact set of (SDKKind, Protocol) pairs for which an
-// official non-stream adapter is registered. It mirrors the SDK registry
-// registrations below and is the startup gate for enabled routes.
+// supportedSDKPairs is the exact set of (SDKKind, Protocol) pairs for which
+// composition registers both official completion and stream capabilities.
+// It is a defense-in-depth allowlist for the startup registry capability gate.
 var supportedSDKPairs = map[execution.SDKClientKey]struct{}{
 	{SDKKind: adapter.SDKKindOpenAI, Protocol: adapter.ProtocolOpenAIChat}:   {},
 	{SDKKind: adapter.SDKKindAnthropic, Protocol: adapter.ProtocolAnthropic}: {},
@@ -79,8 +80,8 @@ var supportedSDKPairs = map[execution.SDKClientKey]struct{}{
 // Build assembles the Executor runtime composition root and returns the
 // http.Handler serving all seven generated routes: anonymous GET/HEAD
 // /healthz, authenticated /v1/models|/v1/responses|/v1/images/generations
-// (each 501), and authenticated non-stream /v1/chat/completions and
-// /v1/messages execution. lookupEnv is the process environment accessor
+// (each 501), and authenticated Chat/Messages execution in non-stream or
+// SSE stream mode. lookupEnv is the process environment accessor
 // (typically os.LookupEnv); it is retained by the credential and identity
 // resolvers so per-attempt/per-request secret rotation is observed.
 //
@@ -100,11 +101,15 @@ func Build(ctx context.Context, cfg config.Config, lookupEnv func(string) (strin
 		return nil, ErrSnapshotUnavailable
 	}
 
-	// ── Startup gate: reject enabled routes with unsupported SDK/protocol ──
-	// Only OpenAI Chat and Anthropic Messages non-stream adapters are
-	// registered; an enabled route for any other protocol (Responses, Images,
-	// generic HTTP) cannot be served and must fail closed before listening.
-	if err := rejectUnsupportedEnabledRoutes(*compiled); err != nil {
+	// ── SDK registry + startup capability gate ──
+	// Both completion and stream capabilities must be registered for every
+	// enabled route before listening. This makes stream:true fail closed at
+	// startup rather than discovering a partial registry at request time.
+	registry, err := buildSDKRegistry()
+	if err != nil {
+		return nil, ErrSDKAdapter
+	}
+	if err := rejectUnsupportedEnabledRoutes(*compiled, registry); err != nil {
 		return nil, err
 	}
 
@@ -129,13 +134,7 @@ func Build(ctx context.Context, cfg config.Config, lookupEnv func(string) (strin
 	quotaPort := quota.NewInMemory()
 	executionLog := requestlog.NewInMemoryExecution()
 
-	// ── SDK registry: exact official OpenAI Chat + Anthropic Messages pairs ──
-	registry, err := buildSDKRegistry()
-	if err != nil {
-		return nil, ErrSDKAdapter
-	}
-
-	// ── Runner + facade ──
+	// ── Completion + stream runners and facades ──
 	runner := &execution.Runner{
 		Quota:       quotaPort,
 		SDKRegistry: registry,
@@ -147,11 +146,22 @@ func Build(ctx context.Context, cfg config.Config, lookupEnv func(string) (strin
 		Credentials: credentialResolver,
 		Quarantine:  quarantineReader,
 	})
+	streamDriver := &execution.StreamDriver{
+		Quota:       quotaPort,
+		SDKRegistry: registry,
+		Logger:      executionLog,
+	}
+	streamFacade := streamfacade.New(streamfacade.Options{
+		Store:       store,
+		Driver:      streamDriver,
+		Credentials: credentialResolver,
+		Quarantine:  quarantineReader,
+	})
 
-	// ── Generated strict handler with SafeStrictOptions ──
-	adapterHandler := executorv1api.NewNonStream(executorv1api.Options{Executor: facade})
-	strict := executorv1.NewStrictHandlerWithOptions(adapterHandler, nil, executorv1api.SafeStrictOptions())
-	generated := executorv1.Handler(strict)
+	// ── Generated handler with strict non-stream + SSE stream dispatch ──
+	nonStreamAdapter := executorv1api.NewNonStream(executorv1api.Options{Executor: facade})
+	hybrid := executorv1api.NewHybrid(executorv1api.HybridOptions{Strict: nonStreamAdapter, StreamExecutor: streamFacade})
+	generated := executorv1.Handler(hybrid)
 
 	// AuthMiddleware is the outer boundary: it protects all /v1 paths,
 	// including unknown paths that will become 404, and keeps /healthz
@@ -161,12 +171,12 @@ func Build(ctx context.Context, cfg config.Config, lookupEnv func(string) (strin
 	return handler, nil
 }
 
-// rejectUnsupportedEnabledRoutes fails closed if any enabled route declares an
-// SDK/protocol pair for which no official non-stream adapter is registered.
-// Disabled routes are not required to be supported. The error carries only
+// rejectUnsupportedEnabledRoutes fails closed if any enabled route lacks the
+// exact official completion or streaming SDK capability. Disabled routes are
+// not required to be supported. The error carries only
 // the composition sentinel; it never names the offending route, provider, or
 // adapter so misconfiguration cannot leak topology.
-func rejectUnsupportedEnabledRoutes(compiled adapter.CompiledConfig) error {
+func rejectUnsupportedEnabledRoutes(compiled adapter.CompiledConfig, registry *execution.SDKRegistry) error {
 	for _, route := range compiled.Routes {
 		if !route.Enabled {
 			continue
@@ -178,7 +188,13 @@ func rejectUnsupportedEnabledRoutes(compiled adapter.CompiledConfig) error {
 			return ErrUnsupportedRoute
 		}
 		key := execution.SDKClientKey{SDKKind: provider.SDKKind, Protocol: route.Protocol}
-		if _, supported := supportedSDKPairs[key]; !supported {
+		if _, supported := supportedSDKPairs[key]; !supported || registry == nil {
+			return ErrUnsupportedRoute
+		}
+		if _, err := registry.Client(key.SDKKind, key.Protocol); err != nil {
+			return ErrUnsupportedRoute
+		}
+		if _, err := registry.StreamClient(key.SDKKind, key.Protocol); err != nil {
 			return ErrUnsupportedRoute
 		}
 		// The adapter's SDKKind/Protocol must also agree with the provider, an
@@ -191,9 +207,10 @@ func rejectUnsupportedEnabledRoutes(compiled adapter.CompiledConfig) error {
 	return nil
 }
 
-// buildSDKRegistry registers exactly the two official non-stream adapters:
-// openai/openai_chat (openai-go v3) and anthropic/anthropic_messages
-// (anthropic-sdk-go). Both clients are target-agnostic: the target URL,
+// buildSDKRegistry registers exactly the two official completion and stream
+// capabilities: openai/openai_chat (openai-go v3) and
+// anthropic/anthropic_messages (anthropic-sdk-go). Each pair uses the same
+// target-agnostic client instance; the target URL,
 // upstream model, and opaque secret are supplied per call. A construction or
 // registration failure is a startup misconfiguration.
 func buildSDKRegistry() (*execution.SDKRegistry, error) {
@@ -205,11 +222,17 @@ func buildSDKRegistry() (*execution.SDKRegistry, error) {
 	if err := registry.Register(adapter.SDKKindOpenAI, adapter.ProtocolOpenAIChat, openaiClient); err != nil {
 		return nil, ErrSDKAdapter
 	}
+	if err := registry.RegisterStream(adapter.SDKKindOpenAI, adapter.ProtocolOpenAIChat, openaiClient); err != nil {
+		return nil, ErrSDKAdapter
+	}
 	anthropicClient, err := anthropicadapter.NewClient()
 	if err != nil {
 		return nil, ErrSDKAdapter
 	}
 	if err := registry.Register(adapter.SDKKindAnthropic, adapter.ProtocolAnthropic, anthropicClient); err != nil {
+		return nil, ErrSDKAdapter
+	}
+	if err := registry.RegisterStream(adapter.SDKKindAnthropic, adapter.ProtocolAnthropic, anthropicClient); err != nil {
 		return nil, ErrSDKAdapter
 	}
 	return registry, nil
