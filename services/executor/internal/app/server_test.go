@@ -18,7 +18,10 @@ func TestNewServerConfiguresConnectionBoundaries(t *testing.T) {
 
 	readHeaderTimeout := 10 * time.Second
 	idleTimeout := 60 * time.Second
-	server := NewServer(readHeaderTimeout, idleTimeout)
+	server, err := NewServer(http.NewServeMux(), readHeaderTimeout, idleTimeout)
+	if err != nil {
+		t.Fatalf("NewServer() error = %v", err)
+	}
 
 	if server.Handler == nil {
 		t.Error("NewServer().Handler = nil")
@@ -37,9 +40,76 @@ func TestNewServerConfiguresConnectionBoundaries(t *testing.T) {
 	}
 }
 
+func TestNewServerRejectsNilHandler(t *testing.T) {
+	t.Parallel()
+
+	if _, err := NewServer(nil, time.Second, 2*time.Second); !errors.Is(err, ErrNilHandler) {
+		t.Fatalf("NewServer(nil) error = %v, want ErrNilHandler", err)
+	}
+}
+
+// nilPointerHandler and nilFuncHandler exercise the typed-nil interface pitfall:
+// each is a non-nil http.Handler wrapping a nil concrete value, so the plain
+// `handler == nil` comparison is false. NewServer must still reject them and
+// never hand a panic-on-dispatch handler to http.Server.
+type nilPointerHandler struct{}
+
+func (*nilPointerHandler) ServeHTTP(http.ResponseWriter, *http.Request) {}
+
+func TestNewServerRejectsTypedNilHandler(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		handler http.Handler
+	}{
+		{"nil pointer", (*nilPointerHandler)(nil)},
+		{"nil func", http.HandlerFunc(nil)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if tc.handler == nil {
+				t.Fatal("setup error: handler is untyped nil, not typed-nil")
+			}
+			_, err := NewServer(tc.handler, time.Second, 2*time.Second)
+			if !errors.Is(err, ErrNilHandler) {
+				t.Fatalf("NewServer(%s) error = %v, want ErrNilHandler", tc.name, err)
+			}
+		})
+	}
+}
+
+func TestNewServerAcceptsTypedHandler(t *testing.T) {
+	t.Parallel()
+
+	// A non-nil pointer handler and a non-nil func handler must both be
+	// accepted, proving the typed-nil guard does not over-reject.
+	cases := []struct {
+		name    string
+		handler http.Handler
+	}{
+		{"pointer", &nilPointerHandler{}},
+		{"func", http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})},
+		{"mux", http.NewServeMux()},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			server, err := NewServer(tc.handler, time.Second, 2*time.Second)
+			if err != nil {
+				t.Fatalf("NewServer(%s) error = %v", tc.name, err)
+			}
+			if server.Handler == nil {
+				t.Error("NewServer().Handler = nil")
+			}
+		})
+	}
+}
+
 func TestRunRejectsInvalidArguments(t *testing.T) {
 	listener := newListener(t)
-	server := NewServer(time.Second, 2*time.Second)
+	server, _ := NewServer(http.NewServeMux(), time.Second, 2*time.Second)
 
 	tests := []struct {
 		name            string
@@ -88,7 +158,7 @@ func TestRunRejectsInvalidArguments(t *testing.T) {
 
 func TestRunWrapsUnexpectedServeError(t *testing.T) {
 	serveErr := errors.New("listener failed")
-	err := Run(context.Background(), failingListener{err: serveErr}, NewServer(time.Second, 2*time.Second), time.Second)
+	err := Run(context.Background(), failingListener{err: serveErr}, mustNewServer(t, http.NewServeMux(), time.Second, 2*time.Second), time.Second)
 	if !errors.Is(err, serveErr) {
 		t.Fatalf("Run() error = %v, want wrapped %v", err, serveErr)
 	}
@@ -99,7 +169,7 @@ func TestRunWrapsUnexpectedServeError(t *testing.T) {
 
 func TestRunServesAndGracefullyShutsDown(t *testing.T) {
 	listener := newListener(t)
-	server := NewServer(time.Second, 2*time.Second)
+	server := mustNewServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }), time.Second, 2*time.Second)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := runServer(ctx, listener, server, time.Second)
@@ -121,7 +191,7 @@ func TestRunServesAndGracefullyShutsDown(t *testing.T) {
 
 func TestRunTreatsErrServerClosedAsNormal(t *testing.T) {
 	listener := newListener(t)
-	server := NewServer(time.Second, 2*time.Second)
+	server := mustNewServer(t, http.NewServeMux(), time.Second, 2*time.Second)
 	done := runServer(context.Background(), listener, server, time.Second)
 
 	if err := server.Close(); err != nil {
@@ -241,6 +311,15 @@ func receive[T any](t *testing.T, channel <-chan T, description string) T {
 		var zero T
 		return zero
 	}
+}
+
+func mustNewServer(t *testing.T, handler http.Handler, readHeaderTimeout, idleTimeout time.Duration) *http.Server {
+	t.Helper()
+	server, err := NewServer(handler, readHeaderTimeout, idleTimeout)
+	if err != nil {
+		t.Fatalf("NewServer() error = %v", err)
+	}
+	return server
 }
 
 func newListener(t *testing.T) net.Listener {

@@ -10,6 +10,7 @@ import (
 	"syscall"
 
 	"github.com/tokenmp/v3/services/executor/internal/app"
+	"github.com/tokenmp/v3/services/executor/internal/composition"
 	"github.com/tokenmp/v3/services/executor/internal/config"
 )
 
@@ -21,9 +22,20 @@ func main() {
 }
 
 func run() error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	cfg, err := config.Load(os.LookupEnv)
 	if err != nil {
 		return fmt.Errorf("load configuration: %w", err)
+	}
+
+	// Compose the HTTP handler before opening the listener so a missing
+	// configuration file, invalid credential/identity mapping, or an
+	// unsupported enabled route fails closed without ever binding a port.
+	handler, err := composition.Build(ctx, cfg, os.LookupEnv)
+	if err != nil {
+		return fmt.Errorf("build composition: %w", err)
 	}
 
 	listener, err := net.Listen("tcp", cfg.HTTPAddr)
@@ -32,7 +44,10 @@ func run() error {
 	}
 	defer listener.Close()
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	return app.Run(ctx, listener, app.NewServer(cfg.ReadHeaderTimeout, cfg.IdleTimeout), cfg.ShutdownTimeout)
+	server, err := app.NewServer(handler, cfg.ReadHeaderTimeout, cfg.IdleTimeout)
+	if err != nil {
+		return fmt.Errorf("create server: %w", err)
+	}
+
+	return app.Run(ctx, listener, server, cfg.ShutdownTimeout)
 }
