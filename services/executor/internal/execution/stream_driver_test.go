@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/tokenmp/v3/services/executor/internal/adapter"
-	"github.com/tokenmp/v3/services/executor/internal/model"
 	"github.com/tokenmp/v3/services/executor/internal/quota"
 	"github.com/tokenmp/v3/services/executor/internal/requestlog"
+	"github.com/tokenmp/v3/services/executor/internal/routing"
 	"github.com/tokenmp/v3/services/executor/internal/sdk"
 	"github.com/tokenmp/v3/services/executor/internal/streaming"
 )
@@ -58,13 +58,16 @@ func (*typedNilDriverSink) Flush(context.Context) error                       { 
 
 type typedNilQuota struct{}
 
-func (*typedNilQuota) Reserve(context.Context, string) (model.Reservation, error) {
+func (*typedNilQuota) ReserveReservation(context.Context, quota.ReserveRequest) (quota.Reservation, error) {
 	panic("must not call")
 }
-func (*typedNilQuota) Finalize(context.Context, string) (model.Reservation, error) {
+func (*typedNilQuota) FinalizeReservation(context.Context, quota.FinalizeRequest) (quota.Reservation, error) {
 	panic("must not call")
 }
-func (*typedNilQuota) Release(context.Context, string) (model.Reservation, error) {
+func (*typedNilQuota) ReleaseReservation(context.Context, quota.ReleaseRequest) (quota.Reservation, error) {
+	panic("must not call")
+}
+func (*typedNilQuota) Lookup(context.Context, quota.ReservationID) (quota.Reservation, error) {
 	panic("must not call")
 }
 
@@ -108,13 +111,13 @@ func streamFinish(sequence uint64) sdk.StreamEvent {
 }
 func streamUsage(sequence uint64) sdk.StreamEvent {
 	e := streamEvent(sequence, streaming.EventUsage)
-	e.Meta.Usage = &streaming.Usage{TotalTokens: 1}
+	e.Meta.Usage = &streaming.Usage{PromptTokens: 1, CompletionTokens: 2, TotalTokens: 3}
 	return e
 }
 
-func streamDriver(t *testing.T, client sdk.StreamClient) (*StreamDriver, *quota.Mock) {
+func streamDriver(t *testing.T, client sdk.StreamClient) (*StreamDriver, *quota.TypedMock) {
 	t.Helper()
-	port := quota.NewMock()
+	port := quota.NewTypedMock()
 	registry := NewSDKRegistry()
 	if err := registry.RegisterStream(adapter.SDKKindOpenAI, adapter.ProtocolOpenAIChat, client); err != nil {
 		t.Fatalf("RegisterStream: %v", err)
@@ -122,6 +125,19 @@ func streamDriver(t *testing.T, client sdk.StreamClient) (*StreamDriver, *quota.
 	clock := &fakeClock{}
 	return &StreamDriver{Quota: port, SDKRegistry: registry, Logger: requestlog.NewInMemoryExecution(), Clock: clock, Sleeper: &recordingSleeper{clock: clock}}, port
 }
+func streamDriverInput(resolver *routing.Resolver, plan routing.Plan, sink ProtocolSink) StreamInput {
+	return StreamInput{
+		RequestID:     "req",
+		QuotaIdentity: QuotaIdentity{Subject: "subject", KeyID: "key-1", Protocol: "openai_chat"},
+		ReservationID: testReservationID,
+		Plan:          plan,
+		Resolver:      resolver,
+		Credentials:   staticCredentials{value: []byte("secret")},
+		Body:          []byte(`{"messages":[]}`),
+		Sink:          sink,
+	}
+}
+
 func TestStreamDriverOpeningRetryThenCompletes(t *testing.T) {
 	resolver, plan := runnerFixture(t)
 	client := &driverStreamClient{}
@@ -132,15 +148,15 @@ func TestStreamDriverOpeningRetryThenCompletes(t *testing.T) {
 		return sdk.StreamOpen{Source: &driverSource{events: []sdk.StreamEvent{streamEvent(1, streaming.EventSemantic), streamUsage(2), streamFinish(3)}}}, nil
 	}
 	driver, port := streamDriver(t, client)
-	result, err := driver.Run(context.Background(), StreamInput{RequestID: "req-stream", ReservationID: testReservationID, Plan: plan, Resolver: resolver, Credentials: staticCredentials{value: []byte("secret")}, Body: []byte(`{"messages":[]}`), Sink: &driverSink{}})
+	result, err := driver.Run(context.Background(), streamDriverInput(resolver, plan, &driverSink{}))
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if client.opens != 2 || !result.Outcome.Committed || result.Outcome.State != streaming.StateCompleted {
 		t.Fatalf("opens/outcome = %d/%+v", client.opens, result.Outcome)
 	}
-	calls := port.Calls()
-	if len(calls) != 2 || calls[1].Method != "Finalize" {
+	calls := port.TypedCalls()
+	if len(calls) != 2 || calls[1].Method != "FinalizeReservation" {
 		t.Fatalf("quota calls = %+v", calls)
 	}
 }
@@ -155,11 +171,11 @@ func TestStreamDriverNativePrecommitClassifiedErrorRetries(t *testing.T) {
 		return sdk.StreamOpen{Source: &driverSource{events: []sdk.StreamEvent{streamEvent(1, streaming.EventSemantic), streamUsage(2), streamFinish(3)}}}, nil
 	}
 	driver, port := streamDriver(t, client)
-	result, err := driver.Run(context.Background(), StreamInput{RequestID: "req", ReservationID: testReservationID, Plan: plan, Resolver: resolver, Credentials: staticCredentials{value: []byte("secret")}, Body: []byte(`{"messages":[]}`), Sink: &driverSink{}})
+	result, err := driver.Run(context.Background(), streamDriverInput(resolver, plan, &driverSink{}))
 	if err != nil || client.opens != 2 || result.Outcome.State != streaming.StateCompleted {
 		t.Fatalf("result/err/opens = %+v/%v/%d", result, err, client.opens)
 	}
-	if calls := port.Calls(); len(calls) != 2 || calls[1].Method != "Finalize" {
+	if calls := port.TypedCalls(); len(calls) != 2 || calls[1].Method != "FinalizeReservation" {
 		t.Fatalf("quota calls = %+v", calls)
 	}
 }
@@ -170,12 +186,12 @@ func TestStreamDriverSemanticCompleteFinalizes(t *testing.T) {
 		return sdk.StreamOpen{Source: &driverSource{events: []sdk.StreamEvent{streamEvent(1, streaming.EventSemantic), streamUsage(2), streamFinish(3)}}}, nil
 	}}
 	driver, port := streamDriver(t, client)
-	result, err := driver.Run(context.Background(), StreamInput{RequestID: "req", ReservationID: testReservationID, Plan: plan, Resolver: resolver, Credentials: staticCredentials{value: []byte("secret")}, Body: []byte(`{"messages":[]}`), Sink: &driverSink{}})
+	result, err := driver.Run(context.Background(), streamDriverInput(resolver, plan, &driverSink{}))
 	if err != nil || result.Outcome.State != streaming.StateCompleted || result.Outcome.UnresolvedCost {
 		t.Fatalf("result/err = %+v / %v", result, err)
 	}
-	calls := port.Calls()
-	if len(calls) != 2 || calls[1].Method != "Finalize" {
+	calls := port.TypedCalls()
+	if len(calls) != 2 || calls[1].Method != "FinalizeReservation" {
 		t.Fatalf("quota calls = %+v", calls)
 	}
 }
@@ -186,12 +202,12 @@ func TestStreamDriverPrecommitFailureReleases(t *testing.T) {
 		return sdk.StreamOpen{Source: &driverSource{events: []sdk.StreamEvent{streamFinish(1)}}}, nil
 	}}
 	driver, port := streamDriver(t, client)
-	_, err := driver.Run(context.Background(), StreamInput{RequestID: "req", ReservationID: testReservationID, Plan: plan, Resolver: resolver, Credentials: staticCredentials{value: []byte("secret")}, Body: []byte(`{"messages":[]}`), Sink: &driverSink{}})
+	_, err := driver.Run(context.Background(), streamDriverInput(resolver, plan, &driverSink{}))
 	if !errors.Is(err, ErrUnclassified) {
 		t.Fatalf("Run error = %v", err)
 	}
-	calls := port.Calls()
-	if len(calls) != 2 || calls[1].Method != "Release" {
+	calls := port.TypedCalls()
+	if len(calls) != 2 || calls[1].Method != "ReleaseReservation" {
 		t.Fatalf("quota calls = %+v", calls)
 	}
 }
@@ -202,12 +218,12 @@ func TestStreamDriverPostcommitNeverRetries(t *testing.T) {
 		return sdk.StreamOpen{Source: &driverSource{events: []sdk.StreamEvent{streamEvent(1, streaming.EventSemantic), {Sequence: 2, Meta: streaming.Event{Sequence: 2, Kind: streaming.EventNativeError}, Classified: sdk.NewClassifiedError(sdk.ErrProtocol, 0, "", "stream_error", "protocol")}}}}, nil
 	}}
 	driver, port := streamDriver(t, client)
-	result, err := driver.Run(context.Background(), StreamInput{RequestID: "req", ReservationID: testReservationID, Plan: plan, Resolver: resolver, Credentials: staticCredentials{value: []byte("secret")}, Body: []byte(`{"messages":[]}`), Sink: &driverSink{}})
+	result, err := driver.Run(context.Background(), streamDriverInput(resolver, plan, &driverSink{}))
 	if err != nil || client.opens != 1 || !result.Outcome.Committed || result.Outcome.State != streaming.StateFailedAfterCommit {
 		t.Fatalf("result/err/opens = %+v/%v/%d", result, err, client.opens)
 	}
-	calls := port.Calls()
-	if len(calls) != 2 || calls[1].Method != "Release" {
+	calls := port.TypedCalls()
+	if len(calls) != 2 || calls[1].Method != "ReleaseReservation" {
 		t.Fatalf("quota calls = %+v", calls)
 	}
 }
@@ -216,7 +232,7 @@ func TestStreamDriverTypedNilDependenciesFailClosed(t *testing.T) {
 	resolver, plan := runnerFixture(t)
 	client := &driverStreamClient{open: func(context.Context, sdk.StreamCall) (sdk.StreamOpen, error) { panic("must not open") }}
 	driver, _ := streamDriver(t, client)
-	base := StreamInput{RequestID: "req", ReservationID: testReservationID, Plan: plan, Resolver: resolver, Credentials: staticCredentials{value: []byte("secret")}, Body: []byte(`{"messages":[]}`), Sink: &driverSink{}}
+	base := streamDriverInput(resolver, plan, &driverSink{})
 	var nilQuota *typedNilQuota
 	driver.Quota = nilQuota
 	if _, err := driver.Run(context.Background(), base); !errors.Is(err, ErrMisconfigured) {
@@ -262,12 +278,12 @@ func TestStreamDriverPostCommitConfirmedUsageFinalizesAndLogsFailure(t *testing.
 	}}
 	driver, port := streamDriver(t, client)
 	log := driver.Logger.(*requestlog.InMemoryExecution)
-	result, err := driver.Run(context.Background(), StreamInput{RequestID: "req", ReservationID: testReservationID, Plan: plan, Resolver: resolver, Credentials: staticCredentials{value: []byte("secret")}, Body: []byte(`{"messages":[]}`), Sink: &driverSink{}})
+	result, err := driver.Run(context.Background(), streamDriverInput(resolver, plan, &driverSink{}))
 	if err != nil || result.Outcome.State != streaming.StateFailedAfterCommit || result.Outcome.UnresolvedCost {
 		t.Fatalf("result/err = %+v/%v", result, err)
 	}
-	calls := port.Calls()
-	if len(calls) != 2 || calls[1].Method != "Finalize" {
+	calls := port.TypedCalls()
+	if len(calls) != 2 || calls[1].Method != "FinalizeReservation" {
 		t.Fatalf("quota calls = %+v", calls)
 	}
 	events := log.Events(context.Background())
@@ -286,12 +302,13 @@ func TestStreamDriverCancellationImmediatelyAfterBridgeDoesNotClaimSuccess(t *te
 	driver, port := streamDriver(t, client)
 	log := driver.Logger.(*requestlog.InMemoryExecution)
 	sink := &cancelAfterFlushSink{cancel: cancel}
-	result, err := driver.Run(ctx, StreamInput{RequestID: "req", ReservationID: testReservationID, Plan: plan, Resolver: resolver, Credentials: staticCredentials{value: []byte("secret")}, Body: []byte(`{"messages":[]}`), Sink: sink})
+	in := streamDriverInput(resolver, plan, sink)
+	result, err := driver.Run(ctx, in)
 	if !errors.Is(err, context.Canceled) || result != (StreamResult{}) {
 		t.Fatalf("Run = %+v, %v", result, err)
 	}
-	calls := port.Calls()
-	if len(calls) != 2 || calls[1].Method != "Finalize" {
+	calls := port.TypedCalls()
+	if len(calls) != 2 || calls[1].Method != "FinalizeReservation" {
 		t.Fatalf("quota calls = %+v, want Reserve+Finalize", calls)
 	}
 	for _, event := range log.Events(context.Background()) {
@@ -307,11 +324,11 @@ func TestStreamDriverFinalizeFailureNeverLogsSuccess(t *testing.T) {
 		return sdk.StreamOpen{Source: &driverSource{events: []sdk.StreamEvent{streamEvent(1, streaming.EventSemantic), streamUsage(2), streamFinish(3)}}}, nil
 	}}
 	driver, port := streamDriver(t, client)
-	port.SetFinalizeFn(func(context.Context, string) (model.Reservation, error) {
-		return model.Reservation{}, errors.New("provider raw finalize error")
+	port.SetFinalizeReservationFn(func(context.Context, quota.FinalizeRequest) (quota.Reservation, error) {
+		return quota.Reservation{}, errors.New("provider raw finalize error")
 	})
 	log := driver.Logger.(*requestlog.InMemoryExecution)
-	result, err := driver.Run(context.Background(), StreamInput{RequestID: "req", ReservationID: testReservationID, Plan: plan, Resolver: resolver, Credentials: staticCredentials{value: []byte("secret")}, Body: []byte(`{"messages":[]}`), Sink: &driverSink{}})
+	result, err := driver.Run(context.Background(), streamDriverInput(resolver, plan, &driverSink{}))
 	if result != (StreamResult{}) || !errors.Is(err, ErrTerminalization) {
 		t.Fatalf("Run = %+v, %v", result, err)
 	}
@@ -330,12 +347,12 @@ func TestStreamDriverParentCancelWins(t *testing.T) {
 		return sdk.StreamOpen{Source: &driverSource{events: []sdk.StreamEvent{streamEvent(1, streaming.EventSemantic)}}}, nil
 	}}
 	driver, port := streamDriver(t, client)
-	_, err := driver.Run(ctx, StreamInput{RequestID: "req", ReservationID: testReservationID, Plan: plan, Resolver: resolver, Credentials: staticCredentials{value: []byte("secret")}, Body: []byte(`{"messages":[]}`), Sink: &driverSink{}})
+	_, err := driver.Run(ctx, streamDriverInput(resolver, plan, &driverSink{}))
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("Run error = %v", err)
 	}
-	calls := port.Calls()
-	if len(calls) != 2 || calls[1].Method != "Release" {
+	calls := port.TypedCalls()
+	if len(calls) != 2 || calls[1].Method != "ReleaseReservation" {
 		t.Fatalf("quota calls = %+v", calls)
 	}
 }

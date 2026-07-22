@@ -131,7 +131,7 @@ func Build(ctx context.Context, cfg config.Config, lookupEnv func(string) (strin
 	// ── Runtime + quarantine + quota + execution log (in-memory) ──
 	statePort := runtime.NewInMemory(runtimeVersion)
 	quarantineReader := quarantinebridge.New(statePort)
-	quotaPort := quota.NewInMemory()
+	quotaPort := quota.NewDomainInMemory()
 	executionLog := requestlog.NewInMemoryExecution()
 
 	// ── Completion + stream runners and facades ──

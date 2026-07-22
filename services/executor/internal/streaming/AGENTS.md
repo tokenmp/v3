@@ -15,7 +15,7 @@
 | `Source` interface | `Next(ctx)`/`Close()`; `Event.Sequence` must be non-zero and strictly increasing | `Next` honor ctx、返回 `ErrEndOfStream` 或 safe classified error；`Close` 幂等、可与 in-flight `Next` 并发、安全且 non-blocking/bounded，并尽可能 unblocks `Next` | experimental | `types.go` |
 | `Sink` interface | `Commit(ctx,[]Event)`/`WriteEvent`/`Flush` (preserves validated source sequence) | Commit 成功 = whole batch written+flushed 的**逻辑 Sink contract**；失败 = downstream uncertain，不重试；不声明 HTTP atomicity 或 wire proof | experimental | `types.go` |
 | `Bridge.Run(ctx)` | 非 nil `Source`/`Sink`/valid `Timeouts`、`MaxTotal∈(0,MaxTotalHardCap]`、`MaxEvents∈(0,MaxEventsHardCap]` | `(Outcome, error)`；pre-commit failure 返 non-nil sentinel；post-commit failure 返 nil error + failed Outcome；success 返 nil + `StateCompleted` | experimental | `bridge.go` |
-| `Outcome` | — | `State`/`Reason`/`Committed`/`Usage`/`Finish`/`UnresolvedCost`/`TTFT`；pre-commit failure 时 `Usage` 恒为零 | experimental | `bridge.go` |
+| `Outcome` | — | `State`/`Reason`/`Committed`/`Usage`/`UsageKnown`/`Finish`/`UnresolvedCost`/`TTFT`；`UsageKnown` 区分协议明确确认的零 usage 与未报告 usage；pre-commit failure 时 `Usage` 恒为零 | experimental | `bridge.go` |
 
 ## 模块边界
 

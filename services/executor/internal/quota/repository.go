@@ -10,13 +10,11 @@ import (
 	"time"
 )
 
-// Repository is the Phase 12 typed quota domain port. It is deliberately
-// separate from Port while Runner and StreamDriver still use the legacy port.
-// Phase 12.2 will migrate those consumers and remove Port.
+// Repository is the typed quota domain port consumed by all execution paths.
 type Repository interface {
-	ReserveReservation(context.Context, Reservation) (Reservation, error)
-	FinalizeReservation(context.Context, ReservationID, FinalizeOutcome) (Reservation, error)
-	ReleaseReservation(context.Context, ReservationID, ReleaseReason) (Reservation, error)
+	ReserveReservation(context.Context, ReserveRequest) (Reservation, error)
+	FinalizeReservation(context.Context, FinalizeRequest) (Reservation, error)
+	ReleaseReservation(context.Context, ReleaseRequest) (Reservation, error)
 	Lookup(context.Context, ReservationID) (Reservation, error)
 }
 
@@ -26,6 +24,8 @@ var (
 	ErrInvalidEstimate    = errors.New("invalid quota estimate")
 	ErrInvalidOutcome     = errors.New("invalid quota finalize outcome")
 	ErrInvalidRelease     = errors.New("invalid quota release reason")
+	ErrConflict           = errors.New("quota reservation conflict")
+	ErrNotFound           = errors.New("quota reservation not found")
 )
 
 // ReservationID is an owned quota-domain ID. quota intentionally does not
@@ -58,12 +58,18 @@ func (id ReservationID) Valid() bool {
 // Metadata is the safe, bounded attribution captured when a reservation is
 // made. It contains no request body, credential reference, endpoint, or key.
 type Metadata struct {
-	RequestID        string
-	Subject          string
-	KeyID            string
-	Protocol         string
-	Model            string
+	RequestID string
+	Subject   string
+	KeyID     string
+	Protocol  string
+	Model     string
+	// InitialCandidate is retained for Phase 12.1 record compatibility. New
+	// consumers must attribute each safe candidate dimension below.
 	InitialCandidate string
+	ProviderID       string
+	RouteID          string
+	CredentialID     string
+	AdapterID        string
 	Revision         string
 	Generation       uint64
 }
@@ -72,11 +78,51 @@ var safeToken = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
 
 const maxGeneration uint64 = 1_000_000_000_000
 
-func (m Metadata) valid() bool {
-	return m.Generation > 0 && m.Generation <= maxGeneration && safeToken.MatchString(m.RequestID) && safeToken.MatchString(m.Subject) &&
-		safeToken.MatchString(m.KeyID) && safeToken.MatchString(m.Protocol) && safeToken.MatchString(m.Model) &&
-		safeToken.MatchString(m.InitialCandidate) && safeToken.MatchString(m.Revision)
+// ValidateRequestIdentity validates the request-owned metadata that execution
+// must reject before candidate preflight can inspect configuration or resolve a
+// credential. Candidate attribution is validated by Metadata.Validate once the
+// first prepared call is available.
+func ValidateRequestID(requestID string) error {
+	if !safeToken.MatchString(requestID) {
+		return ErrInvalidMetadata
+	}
+	return nil
 }
+
+// ValidateQuotaIdentity validates request-authenticated quota attribution
+// independently from a generated request ID.
+func ValidateQuotaIdentity(subject, keyID, protocol string) error {
+	if !safeToken.MatchString(subject) || !safeToken.MatchString(keyID) || !safeToken.MatchString(protocol) {
+		return ErrInvalidMetadata
+	}
+	return nil
+}
+
+func ValidateRequestIdentity(requestID, subject, keyID, protocol string) error {
+	if err := ValidateRequestID(requestID); err != nil {
+		return err
+	}
+	return ValidateQuotaIdentity(subject, keyID, protocol)
+}
+
+// Validate verifies all safe, bounded reservation attribution. It is exported
+// so consumers can fail before Reserve rather than depending on a repository
+// implementation to reject malformed metadata.
+func (m Metadata) Validate() error {
+	if err := ValidateRequestIdentity(m.RequestID, m.Subject, m.KeyID, m.Protocol); err != nil {
+		return err
+	}
+	if m.Generation == 0 || m.Generation > maxGeneration || !safeToken.MatchString(m.Model) || !safeToken.MatchString(m.Revision) {
+		return ErrInvalidMetadata
+	}
+	if (safeToken.MatchString(m.ProviderID) && safeToken.MatchString(m.RouteID) && safeToken.MatchString(m.AdapterID) &&
+		(m.CredentialID == "" || safeToken.MatchString(m.CredentialID))) || safeToken.MatchString(m.InitialCandidate) {
+		return nil
+	}
+	return ErrInvalidMetadata
+}
+
+func (m Metadata) valid() bool { return m.Validate() == nil }
 
 // EstimateBasis identifies the estimate schema. Only BasisNone is accepted in
 // Phase 12.1; later phases may add explicitly versioned token-estimate bases.
@@ -101,23 +147,50 @@ const (
 type ConfirmedUsage struct {
 	InputTokens  uint64
 	OutputTokens uint64
+	TotalTokens  uint64
 }
 
 const maxConfirmedTokens uint64 = 1_000_000_000
 
 func (u ConfirmedUsage) valid() bool {
-	return u.InputTokens <= maxConfirmedTokens && u.OutputTokens <= maxConfirmedTokens && u.InputTokens+u.OutputTokens <= maxConfirmedTokens
+	return u.Valid()
 }
+
+// Valid reports whether usage is within the quota-domain accounting bounds.
+func (u ConfirmedUsage) Valid() bool {
+	return u.InputTokens <= maxConfirmedTokens && u.OutputTokens <= maxConfirmedTokens &&
+		u.TotalTokens <= maxConfirmedTokens && u.InputTokens+u.OutputTokens <= maxConfirmedTokens &&
+		u.TotalTokens == u.InputTokens+u.OutputTokens
+}
+
+type CompletionOutcome string
+
+const (
+	OutcomeCompleted        CompletionOutcome = "completed"
+	OutcomeAfterCommitError CompletionOutcome = "after_commit_error"
+	OutcomeClientCancelled  CompletionOutcome = "client_cancelled"
+)
 
 type FinalizeOutcome struct {
 	Disposition AccountingDisposition
+	Outcome     CompletionOutcome
 	Usage       ConfirmedUsage
 }
 
+func (o FinalizeOutcome) normalized() FinalizeOutcome {
+	if o.Outcome == "" {
+		o.Outcome = OutcomeCompleted
+	}
+	return o
+}
 func (o FinalizeOutcome) valid() bool {
+	o = o.normalized()
+	if o.Outcome != OutcomeCompleted && o.Outcome != OutcomeAfterCommitError && o.Outcome != OutcomeClientCancelled {
+		return false
+	}
 	switch o.Disposition {
 	case AccountingUnpricedSuccess:
-		return o.Usage == (ConfirmedUsage{})
+		return o.Usage == (ConfirmedUsage{}) && o.Outcome == OutcomeCompleted
 	case AccountingConfirmedUsage:
 		return o.Usage.valid()
 	default:
@@ -132,11 +205,13 @@ const (
 	ReleaseFailed       ReleaseReason = "failed"
 	ReleasePrecondition ReleaseReason = "precondition_failed"
 	ReleaseTimeout      ReleaseReason = "timeout"
+	ReleaseAfterCommit  ReleaseReason = "after_commit_error"
+	ReleaseUnresolved   ReleaseReason = "unresolved_usage"
 )
 
 func (r ReleaseReason) valid() bool {
 	switch r {
-	case ReleaseCancelled, ReleaseFailed, ReleasePrecondition, ReleaseTimeout:
+	case ReleaseCancelled, ReleaseFailed, ReleasePrecondition, ReleaseTimeout, ReleaseAfterCommit, ReleaseUnresolved:
 		return true
 	default:
 		return false
@@ -169,6 +244,27 @@ func (s TerminalSettlement) validFor(state ReservationState) bool {
 	}
 }
 
+// ReserveRequest is the exact claim required to create or replay a reservation.
+// It is deliberately separate from the stored record so callers cannot set state
+// or creation time.
+type ReserveRequest struct {
+	ID       ReservationID
+	Metadata Metadata
+	Estimate Estimate
+}
+
+// FinalizeRequest and ReleaseRequest make terminal intent and settlement
+// explicit. Exact replay of the first request is idempotent; a divergent intent
+// or settlement conflicts.
+type FinalizeRequest struct {
+	ID      ReservationID
+	Outcome FinalizeOutcome
+}
+type ReleaseRequest struct {
+	ID     ReservationID
+	Reason ReleaseReason
+}
+
 // Reservation is an owned, deep-copyable typed quota record. Format is
 // intentionally redacted and never renders principal IDs, model names, or IDs.
 type Reservation struct {
@@ -180,8 +276,12 @@ type Reservation struct {
 	CreatedAt  time.Time
 }
 
-func (r Reservation) validForReserve() bool {
-	return r.ID.Valid() && r.Metadata.valid() && r.Estimate.valid() && r.State == ReservationReserved && r.Settlement.validFor(ReservationReserved) && r.CreatedAt.IsZero()
+func (r ReserveRequest) valid() bool {
+	return r.ID.Valid() && r.Metadata.valid() && r.Estimate.valid()
+}
+
+func (r ReserveRequest) reservation() Reservation {
+	return Reservation{ID: r.ID, Metadata: r.Metadata, Estimate: r.Estimate, State: ReservationReserved}
 }
 
 func (r Reservation) clone() Reservation {

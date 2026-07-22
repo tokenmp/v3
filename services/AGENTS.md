@@ -14,7 +14,7 @@ Executor internal module index — Phase 10 HTTP streaming 已实施：`internal
 
 Phase 11 Images HTTP：legacy OpenAI Images 已注册到 execution registry、composition 与 `/v1/images/generations` non-stream transport。SDK/transport 共用 `internal/imagecontract` request/response validator（untrimmed nonempty prompt、1 MiB prompt、512-byte CTL-free user、default `url`、16 MiB/10 MiB/12 MiB、usage/extensions/revised-prompt），base64 streaming validate，所有 Images 终态 `Cache-Control: no-store`。不支持 GPT Image 特有参数或 usage quota；Responses 仍 501。既有 `go-auth` `./internal/sdk/...` race pattern 覆盖 SDK；独立 `./internal/imagecontract/...` 已显式加入 CI race package list。
 
-Phase 12.1 typed quota domain：`executor/internal/quota/` 新增独立 `Repository` 和 typed value domain（locally validated `res_` ID、bounded safe metadata、仅 `BasisNone` estimate、typed terminal settlement/`Lookup`），并由 `DomainInMemory` 与 `TypedMock` shared contract/race/fuzz suite 覆盖；typed state 与仍由 Runner、StreamDriver、runtime 消费的 legacy `Port` state 有意分离。Phase 12.2 必须迁移消费者并删除 legacy Port；无 usage charging、数据库或 durable storage。模块规则见 `executor/internal/quota/AGENTS.md`。
+Phase 12 typed quota domain：`executor/internal/quota/` typed `Repository` 和 typed value domain（locally validated `res_` ID、bounded safe metadata、仅 `BasisNone` estimate、typed terminal settlement/`Lookup`），并由 `DomainInMemory` 与 `TypedMock` shared contract/race/fuzz suite 覆盖；legacy `Port`/`InMemory`/`Mock` 已删除，`Repository`/`DomainInMemory`/`TypedMock` 是唯一实现。Runner 使用 `AccountingUnpricedSuccess`；StreamDriver 使用 `AccountingConfirmedUsage`（`streaming.UsageKnown` 时携带 `ConfirmedUsage`）或 `AccountingUnpricedSuccess`。无 usage charging、数据库或 durable storage。模块规则见 `executor/internal/quota/AGENTS.md`。
 
 ## 新增模块准入
 
