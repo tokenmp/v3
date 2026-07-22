@@ -148,14 +148,50 @@ type Call struct {
 	Secret    CredentialSecret
 }
 
+// maxSDKUsageTokens is the absolute upper bound on any single usage token
+// counter extracted from a provider response. It aligns with
+// streaming.MaxTotalHardCap so the non-stream and stream paths share the
+// same hard cap. Any counter exceeding this bound marks the entire usage
+// as unknown (Known=false) so a faulty provider cannot turn an accounting
+// record into an unbounded value.
+const maxSDKUsageTokens uint64 = 1_000_000
+
+// Usage is the safe, bounded usage counters extracted from a provider
+// response. It is populated only by adapter extraction; callers must not
+// set it directly. When Known is true, Valid() must also hold or the
+// caller must treat the usage as unknown.
+type Usage struct {
+	PromptTokens     uint64
+	CompletionTokens uint64
+	TotalTokens      uint64
+}
+
+// Valid reports whether usage counters are within the SDK hard cap and
+// consistent: each counter ≤ maxSDKUsageTokens and
+// PromptTokens+CompletionTokens==TotalTokens.
+func (u Usage) Valid() bool {
+	return u.PromptTokens <= maxSDKUsageTokens &&
+		u.CompletionTokens <= maxSDKUsageTokens &&
+		u.TotalTokens <= maxSDKUsageTokens &&
+		u.PromptTokens+u.CompletionTokens == u.TotalTokens
+}
+
 // Completion is the raw successful non-streaming provider result. RawJSON is
 // retained for the protocol renderer; callers must not put it in errors or
 // attempt-observer metadata. Status and RequestID are copied from the HTTP
 // response metadata only; no response body or *http.Response escapes.
+//
+// Usage carries the extracted token counters when Known is true. When Known
+// is false, Usage is zero-valued and must not be used for accounting. Any
+// malformed, inconsistent, or out-of-bounds extraction sets Known=false so
+// the runner falls back to unpriced success rather than recording incorrect
+// usage.
 type Completion struct {
 	RawJSON   json.RawMessage
 	Status    int
 	RequestID string
+	Usage     Usage
+	Known     bool
 }
 
 // Client is the upstream SDK port. A provider adapter implements it to perform
