@@ -171,7 +171,8 @@ jobs:
       # separate package from ./internal/routing/...; the routing race pattern
       # does not automatically test it, so it must be added to the package list
       # to be covered. The transport-neutral nonstream boundary, facade, auth
-      # context, and request-id packages are likewise independent and are
+      # context, request-id, and Phase 8 protocol-neutral streaming foundation
+      # packages are likewise independent and are
       # explicitly race-tested. ./internal/composition/... wires the runtime
       # composition root (store, config source, credential/identity resolvers,
       # in-memory runtime/quarantine/quota/log, SDK registry, Runner, facade,
@@ -183,9 +184,9 @@ jobs:
       # runs the real binary against a temp empty config and asserts health,
       # 401 on anonymous /v1, 404 on an authenticated chat with a missing model,
       # and fail-before-listen on invalid composition/config.
-      - name: go test -race (Executor compiler/snapshot/routing/pipeline/adapter SDK/config source/credential env/identity env/quarantine bridge/composition/config/app/process)
+      - name: go test -race (Executor compiler/snapshot/routing/pipeline/adapter SDK/config source/credential env/identity env/quarantine bridge/streaming foundation/composition/config/app/process)
         working-directory: services/executor
-        run: go test -race -count=1 ./internal/adapter/... ./internal/snapshot/... ./internal/routing/... ./internal/execution/... ./internal/requestlog/... ./internal/quota/... ./internal/sdk/... ./internal/configsource/... ./internal/credentialenv/... ./internal/identityenv/... ./internal/quarantinebridge/... ./internal/nonstream/... ./internal/nonstreamfacade/... ./internal/authcontext/... ./internal/requestid/... ./internal/composition/... ./internal/config/... ./internal/app/... ./cmd/executor/...
+        run: go test -race -count=1 ./internal/adapter/... ./internal/snapshot/... ./internal/routing/... ./internal/execution/... ./internal/requestlog/... ./internal/quota/... ./internal/sdk/... ./internal/configsource/... ./internal/credentialenv/... ./internal/identityenv/... ./internal/quarantinebridge/... ./internal/nonstream/... ./internal/nonstreamfacade/... ./internal/authcontext/... ./internal/requestid/... ./internal/streaming/... ./internal/composition/... ./internal/config/... ./internal/app/... ./cmd/executor/...
 
       - name: Install golang-migrate CLI
         env:

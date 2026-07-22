@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/tokenmp/v3/services/executor/internal/adapter"
@@ -51,6 +53,89 @@ func TestCredentialSecret_CopyAndClear(t *testing.T) {
 	// Use must reject a nil callback.
 	if err := secret.Use(nil); err == nil {
 		t.Fatal("Use(nil) must error")
+	}
+}
+
+func TestScopedCredentialSecret_RevokesAndClearsBacking(t *testing.T) {
+	t.Parallel()
+	secret, revoke := NewScopedCredentialSecret([]byte("scoped-secret"))
+	if err := secret.Use(func(value []byte) error {
+		if got := string(value); got != "scoped-secret" {
+			t.Fatalf("Use value = %q", got)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("Use before revoke: %v", err)
+	}
+
+	backing := secret.scoped.value
+	revoke()
+	revoke() // idempotent
+	for i, b := range backing {
+		if b != 0 {
+			t.Fatalf("revoked scoped backing[%d] = %d, want zero", i, b)
+		}
+	}
+	if err := secret.Use(func([]byte) error { t.Fatal("Use after revoke called callback"); return nil }); !errors.Is(err, ErrSecretUnavailable) {
+		t.Fatalf("Use after revoke = %v, want ErrSecretUnavailable", err)
+	}
+	// This package-level test intentionally verifies the owned backing is wiped;
+	// callers outside sdk have no way to observe it.
+	if secret.scoped.value != nil {
+		t.Fatal("revoked scoped backing must be nil")
+	}
+}
+
+func TestScopedCredentialSecret_RevokeWaitsForUse(t *testing.T) {
+	t.Parallel()
+	secret, revoke := NewScopedCredentialSecret([]byte("scoped-secret"))
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	used := make(chan error, 1)
+	go func() {
+		used <- secret.Use(func([]byte) error {
+			close(entered)
+			<-release
+			return nil
+		})
+	}()
+	<-entered
+
+	revoked := make(chan struct{})
+	go func() { revoke(); close(revoked) }()
+	select {
+	case <-revoked:
+		t.Fatal("Revoke returned while Use callback was active")
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(release)
+	if err := <-used; err != nil {
+		t.Fatalf("Use: %v", err)
+	}
+	<-revoked
+	if err := secret.Use(func([]byte) error { return nil }); !errors.Is(err, ErrSecretUnavailable) {
+		t.Fatalf("Use after concurrent revoke = %v, want ErrSecretUnavailable", err)
+	}
+}
+
+func TestScopedCredentialSecret_ConcurrentUseAndRevoke(t *testing.T) {
+	t.Parallel()
+	secret, revoke := NewScopedCredentialSecret([]byte("scoped-secret"))
+	var start sync.WaitGroup
+	start.Add(1)
+	results := make(chan error, 16)
+	for range 16 {
+		go func() {
+			start.Wait()
+			results <- secret.Use(func([]byte) error { return nil })
+		}()
+	}
+	start.Done()
+	revoke()
+	for range 16 {
+		if err := <-results; err != nil && !errors.Is(err, ErrSecretUnavailable) {
+			t.Fatalf("concurrent Use = %v", err)
+		}
 	}
 }
 

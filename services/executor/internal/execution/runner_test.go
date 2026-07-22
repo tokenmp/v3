@@ -240,6 +240,27 @@ func TestRunnerSuccessPreflightReserveFinalizeAndLogsOnce(t *testing.T) {
 	}
 }
 
+func TestRunnerRevokesSavedSDKCallAfterComplete(t *testing.T) {
+	client := &runnerTestClient{}
+	log := requestlog.NewInMemoryExecution()
+	runner, _, _ := newRunner(t, client, log)
+	resolver, plan := runnerFixture(t)
+
+	if _, err := runner.Run(context.Background(), runnerInput(resolver, plan)); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	client.mu.Lock()
+	if len(client.recordedCall) != 1 {
+		client.mu.Unlock()
+		t.Fatalf("recorded calls = %d, want 1", len(client.recordedCall))
+	}
+	saved := client.recordedCall[0]
+	client.mu.Unlock()
+	if err := saved.Secret.Use(func([]byte) error { t.Fatal("saved SDK call secret remained usable"); return nil }); !errors.Is(err, sdk.ErrSecretUnavailable) {
+		t.Fatalf("saved SDK call Secret.Use = %v, want sdk.ErrSecretUnavailable", err)
+	}
+}
+
 func TestRunnerParentCancellationAfterCompleteWinsOverSuccess(t *testing.T) {
 	// Once Complete returns, the caller's cancellation has precedence even if
 	// the SDK returned a success concurrently. The reservation is released via
