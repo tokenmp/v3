@@ -182,9 +182,11 @@ func (r *Runner) Run(ctx context.Context, in Input) (Result, error) {
 	if len(in.Plan.Candidates) == 0 {
 		return Result{}, ErrNoCandidate
 	}
-	// A Plan is a resolver-bound capability, not caller-owned input. Validate it
-	// before Prepare, credential resolution, or Reserve.
-	if err := in.Resolver.ValidatePlan(in.Plan); err != nil {
+	// A Plan is a resolver-bound capability, not caller-owned input. Constructing
+	// the shared preparer validates it before Prepare, credential resolution, or
+	// Reserve.
+	preparer, err := NewAttemptPreparer(in.Resolver, in.Plan, r.SDKRegistry, in.Body, in.Thinking)
+	if err != nil {
 		return Result{}, err
 	}
 
@@ -196,10 +198,11 @@ func (r *Runner) Run(ctx context.Context, in Input) (Result, error) {
 	// effective retry policy is frozen for the entire request: fallback routes
 	// may have different configured policies, but they cannot widen, narrow, or
 	// otherwise change the attempt budget after this point.
-	firstPrepared, _, _, err := r.preflight(ctx, in, first)
+	firstCall, err := preparer.Preflight(ctx, first)
 	if err != nil {
 		return Result{}, err
 	}
+	firstPrepared := firstCall.preparedAttempt()
 	if firstPrepared.Timeout.Request <= 0 {
 		return Result{}, ErrMisconfigured
 	}
@@ -217,7 +220,7 @@ func (r *Runner) Run(ctx context.Context, in Input) (Result, error) {
 	attemptNo := 0
 	for {
 		attemptNo++
-		prepared, applied, client, err := r.preflight(ctx, in, candidate)
+		preparedCall, err := preparer.Preflight(ctx, candidate)
 		if err != nil {
 			// Per-attempt preflight failure after Reserve: retain its safe primary
 			// error, while reporting an uncertain Release separately if necessary.
@@ -226,43 +229,41 @@ func (r *Runner) Run(ctx context.Context, in Input) (Result, error) {
 			}
 			return Result{}, r.releaseFailure(ctx, terminalizer, err)
 		}
+		prepared := preparedCall.preparedAttempt()
 		if prepared.Timeout.Request <= 0 {
 			return Result{}, r.releaseFailure(ctx, terminalizer, ErrMisconfigured)
 		}
-		// Resolve exactly once per actual attempt, after its pure preflight and
-		// before BeginAttempt so no secret resolution separates the attempt budget
-		// reservation from the wire call.
-		secret, err := in.Resolver.ResolveCredential(ctx, candidate, in.Credentials)
+
+		// The shared session resolves exactly once and immediately starts the
+		// retry attempt. It deliberately does not call an SDK; Complete remains
+		// owned here so streaming can use the same lifecycle with OpenStream.
+		var completion sdk.Completion
+		var callErr error
+		attempt, credentialAcquired, began, err := preparedCall.NewAttemptSession(state, retryPolicy, in.Credentials).Execute(ctx, func(client sdk.Client, call sdk.Call) {
+			// Each SDK invocation has the route's compiled request timeout, bounded
+			// by the caller context. Provider adapters classify deadline expiry as a
+			// safe timeout; always cancel promptly to release the timer.
+			attemptCtx, attemptCancel := context.WithTimeout(ctx, prepared.Timeout.Request)
+			completion, callErr = client.Complete(attemptCtx, call)
+			attemptCancel()
+		})
 		if err != nil {
-			if cerr := ctx.Err(); cerr != nil {
-				err = cerr
+			if !credentialAcquired {
+				if cerr := ctx.Err(); cerr != nil {
+					err = cerr
+				}
+				return Result{}, r.releaseFailure(ctx, terminalizer, err)
+			}
+			if !began {
+				primary := error(ErrBudgetExhausted)
+				if cerr := ctx.Err(); cerr != nil {
+					primary = cerr
+				}
+				return Result{}, r.releaseFailure(ctx, terminalizer, primary)
 			}
 			return Result{}, r.releaseFailure(ctx, terminalizer, err)
 		}
-
-		// BeginAttempt is immediately adjacent to Complete: nothing between
-		// them may fail the request, so the logical attempt and the wire call
-		// start from the same budget reservation.
-		attempt, err := state.BeginAttempt(ctx, candidate, retryPolicy)
-		if err != nil {
-			primary := error(ErrBudgetExhausted)
-			if cerr := ctx.Err(); cerr != nil {
-				primary = cerr
-			}
-			return Result{}, r.releaseFailure(ctx, terminalizer, primary)
-		}
-
-		// Each SDK invocation has the route's compiled request timeout, bounded
-		// by the caller context. Provider adapters classify deadline expiry as a
-		// safe timeout; always cancel promptly to release the timer.
-		attemptCtx, attemptCancel := context.WithTimeout(ctx, prepared.Timeout.Request)
-		completion, err := client.Complete(attemptCtx, sdk.Call{
-			Candidate: prepared.Candidate,
-			Target:    prepared.Target,
-			Request:   applied,
-			Secret:    secret,
-		})
-		attemptCancel()
+		err = callErr
 
 		// The caller's lifecycle always wins once Complete has returned. In
 		// particular, a parent deadline must not be reclassified as an upstream
@@ -359,34 +360,6 @@ func (r *Runner) Run(ctx context.Context, in Input) (Result, error) {
 		}
 		candidate = decision.Candidate
 	}
-}
-
-// preflight pins the candidate, applies the request, verifies SDK auth, and
-// looks up the SDK client. It is deliberately pure with respect to credentials:
-// it must not resolve a secret and is safe to run before quota Reserve.
-func (r *Runner) preflight(ctx context.Context, in Input, candidate routing.Candidate) (routing.PreparedAttempt, adapter.AppliedRequest, sdk.Client, error) {
-	prepared, err := in.Resolver.Prepare(candidate)
-	if err != nil {
-		return routing.PreparedAttempt{}, adapter.AppliedRequest{}, nil, err
-	}
-	engine := adapter.Engine{}
-	applied, err := engine.Apply(ctx, adapter.ApplyInput{
-		Adapter:       prepared.Adapter,
-		ModelThinking: prepared.ModelThinking,
-		Body:          in.Body,
-		Thinking:      in.Thinking,
-	})
-	if err != nil {
-		return routing.PreparedAttempt{}, adapter.AppliedRequest{}, nil, err
-	}
-	if !sdkAuthCompatible(prepared.Adapter.SDKKind, prepared.Adapter.Auth.Kind) {
-		return routing.PreparedAttempt{}, adapter.AppliedRequest{}, nil, ErrIncompatibleAuth
-	}
-	client, err := r.SDKRegistry.Client(prepared.Adapter.SDKKind, prepared.Adapter.Protocol)
-	if err != nil {
-		return routing.PreparedAttempt{}, adapter.AppliedRequest{}, nil, err
-	}
-	return prepared, applied, client, nil
 }
 
 // sdkAuthCompatible constrains official SDKs to their sole credential channel.

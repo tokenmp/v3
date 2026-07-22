@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 	"unicode"
 	"unicode/utf8"
 
@@ -50,26 +51,80 @@ type AttemptMetadata struct {
 }
 
 // CredentialSecret is an opaque credential value. Construct it with
-// NewCredentialSecret; the input is copied. It intentionally has no method
-// that returns a string or byte slice. Use permits a provider implementation to
-// use a temporary copy and clears that copy when the callback returns.
+// NewCredentialSecret or NewScopedCredentialSecret; it intentionally has no
+// method that returns a string or byte slice. Use permits a provider
+// implementation to use a temporary copy and clears that copy when the callback
+// returns.
 //
 // Callers must not retain or mutate the callback value.
-type CredentialSecret struct{ value []byte }
+type CredentialSecret struct {
+	value  []byte
+	scoped *credentialSecretScope
+}
+
+type credentialSecretScope struct {
+	mu      sync.RWMutex
+	value   []byte
+	revoked bool
+}
+
+// ErrSecretUnavailable is returned when a scoped credential is used after its
+// lease has been revoked. It carries no credential material.
+var ErrSecretUnavailable = errors.New("sdk: credential secret unavailable")
 
 // NewCredentialSecret copies value so future mutations of the caller's slice
-// cannot affect an SDK call.
+// cannot affect an SDK call. Its lifetime is not revocable and is appropriate
+// for a resolver's per-call opaque value.
 func NewCredentialSecret(value []byte) CredentialSecret {
 	return CredentialSecret{value: append([]byte(nil), value...)}
+}
+
+// NewScopedCredentialSecret returns a credential restricted to a synchronous
+// internal call scope and an idempotent revoker. The input is copied. Once the
+// revoker returns, all future Use calls fail with ErrSecretUnavailable and the
+// owned backing bytes have been cleared. Revocation waits for an in-progress
+// Use callback, so no callback still has a temporary copy when it returns.
+//
+// This is an internal SDK capability: callers must defer revoke immediately
+// around the one provider callback and must not retain the returned secret.
+func NewScopedCredentialSecret(value []byte) (CredentialSecret, func()) {
+	scope := &credentialSecretScope{value: append([]byte(nil), value...)}
+	return CredentialSecret{scoped: scope}, func() {
+		scope.mu.Lock()
+		defer scope.mu.Unlock()
+		if scope.revoked {
+			return
+		}
+		clear(scope.value)
+		scope.value = nil
+		scope.revoked = true
+	}
 }
 
 // Use invokes fn with a temporary credential copy, then clears that copy. It
 // is the only way an adapter implementation can access the secret material.
 func (s CredentialSecret) Use(fn func([]byte) error) error {
+	if s.scoped == nil {
+		if fn == nil {
+			return errors.New("sdk: credential use callback is nil")
+		}
+		value := append([]byte(nil), s.value...)
+		defer clear(value)
+		return fn(value)
+	}
+
+	// Hold the read lock through fn: Revoke cannot return while an adapter is
+	// still synchronously using its temporary copy, and new uses cannot begin
+	// after revocation obtains the write lock.
+	s.scoped.mu.RLock()
+	defer s.scoped.mu.RUnlock()
+	if s.scoped.revoked {
+		return ErrSecretUnavailable
+	}
 	if fn == nil {
 		return errors.New("sdk: credential use callback is nil")
 	}
-	value := append([]byte(nil), s.value...)
+	value := append([]byte(nil), s.scoped.value...)
 	defer clear(value)
 	return fn(value)
 }
