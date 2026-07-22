@@ -173,7 +173,7 @@ jobs:
       # to be covered. The transport-neutral nonstream boundary, facade, auth
       # context, request-id, and Phase 8 protocol-neutral streaming foundation
       # packages are likewise independent and are
-      # explicitly race-tested. ./internal/composition/... wires the runtime
+      # explicitly race-tested. `./internal/sdk/...` also covers the Phase 8.1 shared stream port and OpenAI internal stream adapter; any future fuzz target remains local-only and is not a CI step. ./internal/composition/... wires the runtime
       # composition root (store, config source, credential/identity resolvers,
       # in-memory runtime/quarantine/quota/log, SDK registry, Runner, facade,
       # generated strict handler, AuthMiddleware+CaptureRawBody) and rejects
