@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tokenmp/v3/services/executor/internal/adapter"
 	"github.com/tokenmp/v3/services/executor/internal/config"
 )
 
@@ -215,19 +216,39 @@ func TestBuildAuthenticatedChatMissingModelReturns404(t *testing.T) {
 		t.Fatalf("Build() error = %v", err)
 	}
 
-	// A well-formed chat request whose model does not exist in the empty
-	// config resolves no route and must yield a protocol-native 404.
-	body := `{"model":"missing","messages":[{"role":"user","content":"hi"}],"stream":false}`
-	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:8081/v1/chat/completions", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+testAPIKey)
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404; body=%s", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), "invalid_request_error") {
-		t.Fatalf("body = %q, want invalid_request_error", rec.Body.String())
+	for _, tc := range []struct {
+		name, path, body, wantType string
+	}{
+		{
+			name: "non-stream chat", path: "/v1/chat/completions",
+			body:     `{"model":"missing","messages":[{"role":"user","content":"hi"}],"stream":false}`,
+			wantType: "invalid_request_error",
+		},
+		{
+			name: "stream chat pre-commit", path: "/v1/chat/completions",
+			body:     `{"model":"missing","messages":[{"role":"user","content":"hi"}],"stream":true}`,
+			wantType: "invalid_request_error",
+		},
+		{
+			name: "stream messages pre-commit", path: "/v1/messages",
+			body:     `{"model":"missing","max_tokens":1,"messages":[{"role":"user","content":"hi"}],"stream":true}`,
+			wantType: `"type":"error"`,
+		},
+	} {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:8081"+tc.path, strings.NewReader(tc.body))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Authorization", "Bearer "+testAPIKey)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			if rec.Code != http.StatusNotFound {
+				t.Fatalf("status = %d, want 404; body=%s", rec.Code, rec.Body.String())
+			}
+			if !strings.Contains(rec.Body.String(), tc.wantType) {
+				t.Fatalf("body = %q, want %s", rec.Body.String(), tc.wantType)
+			}
+		})
 	}
 }
 
@@ -281,6 +302,61 @@ func TestBuildModelsResponsesImagesAreAuth501(t *testing.T) {
 			handler.ServeHTTP(authRec, authReq)
 			if authRec.Code != http.StatusNotImplemented {
 				t.Fatalf("authenticated %s status = %d, want 501", tc.path, authRec.Code)
+			}
+		})
+	}
+}
+
+func TestBuildSDKRegistryRegistersExactCompletionAndStreamPairs(t *testing.T) {
+	t.Parallel()
+
+	registry, err := buildSDKRegistry()
+	if err != nil {
+		t.Fatalf("buildSDKRegistry() error = %v", err)
+	}
+	for _, pair := range []struct {
+		kind     adapter.SDKKind
+		protocol adapter.Protocol
+	}{
+		{adapter.SDKKindOpenAI, adapter.ProtocolOpenAIChat},
+		{adapter.SDKKindAnthropic, adapter.ProtocolAnthropic},
+	} {
+		completion, err := registry.Client(pair.kind, pair.protocol)
+		if err != nil {
+			t.Fatalf("Client(%q, %q): %v", pair.kind, pair.protocol, err)
+		}
+		stream, err := registry.StreamClient(pair.kind, pair.protocol)
+		if err != nil {
+			t.Fatalf("StreamClient(%q, %q): %v", pair.kind, pair.protocol, err)
+		}
+		if any(completion) != any(stream) {
+			t.Fatalf("pair (%q, %q) uses distinct completion and stream instances", pair.kind, pair.protocol)
+		}
+	}
+}
+
+func TestBuildAcceptsEnabledRoutesWithCompletionAndStreamCapabilities(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name, fixture, credentialRef string
+	}{
+		{"openai", "default.json", "vault://openai-default/credential/default"},
+		{"anthropic", "anthropic.json", "vault://anthropic-default/credential/default"},
+	} {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			fixturePath := filepath.Join("..", "..", "fixtures", "configs", tc.fixture)
+			content, err := os.ReadFile(fixturePath)
+			if err != nil {
+				t.Fatalf("read fixture %s: %v", fixturePath, err)
+			}
+			path := writeConfig(t, string(content))
+			env := healthyEnv(t, path)
+			env["EXECUTOR_CREDENTIAL_REF_MAP_JSON"] = `{"` + tc.credentialRef + `":"EXECUTOR_CREDENTIAL_TEST"}`
+			env["EXECUTOR_CREDENTIAL_TEST"] = "test-credential"
+			if _, err := Build(context.Background(), testConfig(path, env["EXECUTOR_CREDENTIAL_REF_MAP_JSON"]), envLookup(env)); err != nil {
+				t.Fatalf("Build() error = %v, want enabled route accepted", err)
 			}
 		})
 	}

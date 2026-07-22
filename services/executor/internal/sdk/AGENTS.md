@@ -8,7 +8,7 @@
 - 已实施：official OpenAI Chat `NewStreaming` internal adapter；每次仅开一个 stream，retry=0、禁止 redirect、per-call 唯一 Bearer auth，返回仅安全的 2xx status/request-ID opening metadata。adapter 严格解析/classify chunk，bounded no-raw SSE observer 证明恰好一个 terminal `[DONE]`；`Close` 幂等并与 cancellation 一起释放 in-flight read。
 - Phase 9 已实施：official `github.com/anthropics/anthropic-sdk-go` v1.58.0 Messages internal `StreamClient`。opening 强制 HTTPS target/path prefix、execution-authoritative model/thinking、`WithoutEnvironmentDefaults`、retry=0/no redirects、sole per-call `x-api-key`、fixed `anthropic-version` 与 `Accept: text/event-stream`。adapter-owned bounded SSE parser/state（而非 SDK event object）严格解析 `message_start`、text/thinking/tool delta、thinking signature、ping、native error、usage 与 `message_stop`；source sequence 单调递增，canonical payload 不超过 256 KiB。signature 仅保存在 canonical payload 供下游，不进入 meta/log/普通格式化；native error payload 为空且分类 first-wins，后续 SDK decoder error 不覆盖。
 - 已实施内部 `execution` payload source/sink 边界：以 sequence-indexed owned payload 暂存配对 metadata，最多 35 × 256 KiB；它不含 Driver。
-- 不负责：stream-driver orchestration、SSE downstream rendering、HTTP transport/composition 或公开运行时 stream。`AttemptSession.ExecuteStream` 仅提供单 attempt 的 scoped-secret opening 前置，仍不实施 retry/quota driver；schema-valid `stream:true` 仍返回 501；不声称 HTTP atomicity、wire-attempt proof 或 public/provider E2E。
+- 不负责：stream-driver orchestration、SSE downstream rendering或 HTTP transport。Phase 10 的 composition 将本包精确 OpenAI/Anthropic `StreamClient` 注册给 `StreamDriver`，公开 Chat/Messages `stream:true` 因此已启用；本包仍不拥有 retry/quota driver 或 SSE downstream 渲染，也不声称 HTTP atomicity、wire-attempt proof 或 public/provider E2E。
 
 ## 开发与验证
 
@@ -25,7 +25,7 @@ go vet ./internal/sdk/...
 
 - **DO NOT** 将 raw SSE frame、请求、response body、URL 或 credential 放入 `StreamEvent.Meta`、日志或普通格式化输出。
 - **DO NOT** 在 SDK adapter 启用 retry 或 redirect，或让非 per-call provider auth 覆盖唯一认证 header。
-- **DO NOT** 将 OpenAI 或 Anthropic internal stream adapter 写成 public/provider E2E，或写成已连接 HTTP transport、composition `RegisterStream` 或 runtime；schema-valid `stream:true` 仍为 501。
+- **DO NOT** 将 OpenAI 或 Anthropic stream adapter 写成 public/provider E2E，或让 adapter 自己拥有 HTTP transport/composition；Phase 10 composition 是唯一 runtime consumer，Chat/Messages `stream:true` 已启用。
 - **DO NOT** 接受 EOF 作为成功完成；OpenAI adapter 只接受 bounded observer 证明的精确单个 `[DONE]`。
 
 ## 文档维护触发器

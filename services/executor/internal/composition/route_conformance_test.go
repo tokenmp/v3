@@ -76,14 +76,14 @@ var contractExpectations = map[string]routeExpectation{
 	"POST /v1/chat/completions": {
 		anonStatus: http.StatusUnauthorized,
 		authStatus: http.StatusNotFound,
-		body:       `{"model":"missing","messages":[{"role":"user","content":"hi"}],"stream":false}`,
-		note:       "auth-protected; empty config resolves no model → 404",
+		body:       `{"model":"missing","messages":[{"role":"user","content":"hi"}],"stream":true}`,
+		note:       "auth-protected; stream request pre-commit resolves no model → JSON 404",
 	},
 	"POST /v1/messages": {
 		anonStatus: http.StatusUnauthorized,
 		authStatus: http.StatusNotFound,
-		body:       `{"model":"missing","max_tokens":1,"messages":[{"role":"user","content":"hi"}],"stream":false}`,
-		note:       "auth-protected; empty config resolves no model → 404",
+		body:       `{"model":"missing","max_tokens":1,"messages":[{"role":"user","content":"hi"}],"stream":true}`,
+		note:       "auth-protected; stream request pre-commit resolves no model → JSON 404",
 	},
 	"POST /v1/responses": {
 		anonStatus: http.StatusUnauthorized,

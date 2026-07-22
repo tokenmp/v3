@@ -22,8 +22,10 @@ type Client struct {
 	observer sdk.AttemptObserver
 }
 
-// Compile-time assertion that *Client satisfies the [sdk.Client] port.
+// Compile-time assertions that *Client supplies both independently registered
+// completion and stream capabilities used by runtime composition.
 var _ sdk.Client = (*Client)(nil)
+var _ sdk.StreamClient = (*Client)(nil)
 
 // Option configures a Client.
 type Option func(*Config) error

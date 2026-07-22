@@ -622,3 +622,62 @@ func TestNormalizePrincipalZeroWhenNoIdentity(t *testing.T) {
 		t.Fatalf("principal = %+v, want zero", req.Principal)
 	}
 }
+
+func TestDualModeNormalizersReturnSchemaValidStreamWithoutExecution(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		fn   func(context.Context, string) (NormalizedRequest, error)
+		raw  []byte
+		want adapter.Protocol
+	}{
+		{"chat", NormalizeOpenAIChatRequest, []byte(`{"model":"m","messages":[{"role":"user","content":"hi"}],"stream":true}`), adapter.ProtocolOpenAIChat},
+		{"messages", NormalizeAnthropicMessagesRequest, []byte(`{"model":"m","max_tokens":1,"messages":[{"role":"user","content":"hi"}],"stream":true}`), adapter.ProtocolAnthropic},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := tc.fn(withRawBody(tc.raw), "request-1")
+			if err != nil {
+				t.Fatalf("Normalize: %v", err)
+			}
+			if !got.Stream || got.Request.Protocol != tc.want || got.Request.RequestID != "request-1" || string(got.Request.Body) != string(tc.raw) {
+				t.Fatalf("normalized = %#v", got)
+			}
+		})
+	}
+}
+
+func TestDualModeNormalizersRejectInvalidStreamTrueAs400(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		fn   func(context.Context, string) (NormalizedRequest, error)
+		raw  []byte
+	}{
+		{"chat", NormalizeOpenAIChatRequest, []byte(`{"model":"m","messages":[{"role":"invalid","content":"hi"}],"stream":true}`)},
+		{"messages", NormalizeAnthropicMessagesRequest, []byte(`{"model":"m","max_tokens":1,"messages":[{"role":"user","content":[{"type":"bad"}]}],"stream":true}`)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := tc.fn(withRawBody(tc.raw), "id"); !errors.Is(err, ErrInvalidRequest) {
+				t.Fatalf("err = %v, want ErrInvalidRequest", err)
+			}
+		})
+	}
+}
+
+func TestNormalizedRequestStreamRequestCopiesBodyAndCarriesTrustedFields(t *testing.T) {
+	t.Parallel()
+	raw := []byte(`{"model":"m","messages":[{"role":"user","content":"hi"}],"stream":true}`)
+	ctx := authcontext.WithIdentity(withRawBody(raw), identity.Identity{Subject: "svc", KeyID: "key", Role: identity.RoleService, Status: identity.StatusActive})
+	normalized, err := NormalizeOpenAIChatRequest(ctx, "req-1")
+	if err != nil {
+		t.Fatalf("NormalizeOpenAIChatRequest: %v", err)
+	}
+	streamRequest := normalized.StreamRequest(nil)
+	if !normalized.Stream || streamRequest.Protocol != adapter.ProtocolOpenAIChat || streamRequest.RequestID != "req-1" || streamRequest.Principal.Subject != "svc" {
+		t.Fatalf("stream request = %#v", streamRequest)
+	}
+	streamRequest.Body[0] ^= 1
+	if string(streamRequest.Body) == string(normalized.Request.Body) {
+		t.Fatal("stream request body aliases normalized request")
+	}
+}
