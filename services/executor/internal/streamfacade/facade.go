@@ -269,6 +269,7 @@ func (f *Facade) Execute(ctx context.Context, req stream.Request) (stream.Result
 
 	in := execution.StreamInput{
 		RequestID:     req.RequestID,
+		QuotaIdentity: execution.QuotaIdentity{Subject: req.Principal.Subject, KeyID: req.Principal.KeyID, Protocol: string(req.Protocol)},
 		ReservationID: reservationID,
 		Plan:          plan,
 		Resolver:      resolver,

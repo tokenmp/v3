@@ -5,7 +5,7 @@
 - 架构来源：`architecture.md`
 - API 契约：`packages/contracts/openapi/executor/v1.yaml`
 
-Foundation、compiler/snapshot、routing、non-stream pipeline、SDK adapters、composition 和 process tests 均已实施。Phase 10 tests 进一步覆盖 Chat/Messages `stream:true` hybrid dispatch、auth-before-capture、pre-commit JSON error、post-commit no fallback、flushing SSE framing（OpenAI `[DONE]` / Anthropic native events）、stream/streamfacade race packages 与 empty-config route/process JSON 404。Phase 11 Images tests 覆盖 shared `internal/imagecontract` SDK/transport parity、default wire/renderer `url`、strict URL/streaming base64/usage/extensions/revised prompt、16 MiB/10 MiB/12 MiB caps、invalid request zero execution、format mismatch、no-store terminal responses、completion-only registry/composition/transport runtime wiring、race 与本地 fuzz；facade 精确委托 Runner，Runner 一次 quota reservation 并按冻结策略 retry。Phase 12.1 typed quota tests 覆盖 `Repository`、`DomainInMemory` 和 `TypedMock` 的 shared contract、race 与本地 fuzz：locally validated `res_` ID、bounded/redacted metadata、仅 `BasisNone` estimate、exact replay/conflict、typed terminal settlement、`Lookup`、post-commit fault 与 defensive copies。typed state 有意不与仍被 Runner、StreamDriver、runtime 消费的 legacy `quota.Port` state 共享；Phase 12.2 必须迁移消费者并删除 legacy Port。仍不覆盖 HTTP atomicity、wire proof、跨进程 exactly-once 或 live provider E2E；不支持 GPT Image 特有参数或 usage quota，也没有 usage charging、数据库或 durable storage。
+Foundation、compiler/snapshot、routing、non-stream pipeline、SDK adapters、composition 和 process tests 均已实施。Phase 10 tests 进一步覆盖 Chat/Messages `stream:true` hybrid dispatch、auth-before-capture、pre-commit JSON error、post-commit no fallback、flushing SSE framing（OpenAI `[DONE]` / Anthropic native events）、stream/streamfacade race packages 与 empty-config route/process JSON 404。Phase 11 Images tests 覆盖 shared `internal/imagecontract` SDK/transport parity、default wire/renderer `url`、strict URL/streaming base64/usage/extensions/revised prompt、16 MiB/10 MiB/12 MiB caps、invalid request zero execution、format mismatch、no-store terminal responses、completion-only registry/composition/transport runtime wiring、race 与本地 fuzz；facade 精确委托 Runner，Runner 一次 quota reservation 并按冻结策略 retry。Phase 12 typed quota tests 覆盖 `Repository`、`DomainInMemory` 和 `TypedMock` 的 shared contract、race 与本地 fuzz：locally validated `res_` ID、bounded/redacted metadata、仅 `BasisNone` estimate、exact replay/conflict、typed terminal settlement、`Lookup`、post-commit fault 与 defensive copies。legacy `quota.Port` 已删除；`Repository`/`DomainInMemory`/`TypedMock` 是唯一实现。仍不覆盖 HTTP atomicity、wire proof、跨进程 exactly-once 或 live provider E2E；不支持 GPT Image 特有参数或 usage quota，也没有 usage charging、数据库或 durable storage。
 
 durable idempotency/replay、remote quota/credential resolver、`Retry-After` parsing、live provider E2E、持续 fuzz、性能与 Docker 仍是后续设计。
 
@@ -661,11 +661,11 @@ Phase 9 streaming tests 已实施：
 | finalize 临时失败 | 幂等重试，不允许再 release |
 | cleanup 重复执行 | 无重复终态 |
 
-### 14.2 Phase 12.1 typed quota domain
+### 14.2 Phase 12 typed quota domain
 
 `internal/quota.Repository` 的 shared suite 对 `DomainInMemory` 和 `TypedMock` 运行相同断言：reserve/lookup 的 defensive ownership、exact reserve and terminal replay、divergent input or opposite terminal `ErrConflict`、invalid or pre-cancelled input zero-write、lock-wait cancellation、post-commit fault preserving committed state、mock override/call-copy isolation、redacted formatting，以及并发 reserve。`FuzzDomainInMemoryRejectsMalformedReservationWithoutWrite` 检查 malformed reservation 不写入状态。
 
-这些测试不证明 runtime quota 行为：typed state 与 legacy `quota.Port` 分离；Runner、StreamDriver 和 runtime consumer migration/deletion of legacy Port 是 Phase 12.2 的必需范围。Phase 12.1 无 usage charging、数据库或 durable storage。
+legacy `quota.Port` 已删除；`Repository`/`DomainInMemory`/`TypedMock` 是唯一实现。Runner 使用 `AccountingUnpricedSuccess` finalize；StreamDriver 使用 `AccountingConfirmedUsage`（当 `streaming.UsageKnown` 为 true 时携带 `ConfirmedUsage` token 计数）或 `AccountingUnpricedSuccess`。无 usage charging、数据库或 durable storage。
 
 ### 14.3 Request log lifecycle
 
@@ -854,7 +854,7 @@ go test -race -count=1 ./test/integration/...
 | Streaming | **Phase 10 已实施（runtime Chat/Messages SSE）**：hybrid plain+strict dispatch、auth-before-capture、pre-commit JSON/post-commit no fallback、flushing native SSE sink、OpenAI `[DONE]`、Anthropic native event framing、StreamDriver 与 exact SDK stream registry composition；transport/stream/streamfacade/composition/process race coverage。无 HTTP atomicity、wire proof、跨进程 exactly-once 或 public/provider E2E；Responses 仍 501；Images legacy non-stream 已执行。 |
 | Anthropic streaming | **已实施并接入 runtime**：native SSE + thinking signature，HTTP SSE transport/composition/runtime 已用于 Messages `stream:true` |
 | Responses | lifecycle events + failed/incomplete + reasoning summary |
-| Quota | **Phase 12.1 typed domain 已实施，未接线**：`Repository`、`DomainInMemory`、`TypedMock` shared contract/race/fuzz tests 覆盖 typed reservation exact replay/conflict、terminal settlement、cancellation/fault/ownership/redaction；typed state 与 legacy `quota.Port` 分离，Runner/StreamDriver/runtime migration + legacy Port deletion 必须在 Phase 12.2 完成。无 usage charging、DB 或 durable storage。 |
+| Quota | **Phase 12 typed domain 已实施并接线**：`Repository`、`DomainInMemory`、`TypedMock` shared contract/race/fuzz tests 覆盖 typed reservation exact replay/conflict、terminal settlement、cancellation/fault/ownership/redaction；legacy `Port` 已删除；Runner 使用 `AccountingUnpricedSuccess`，StreamDriver 使用 `AccountingConfirmedUsage`（`UsageKnown` 时携带 `ConfirmedUsage`）或 `AccountingUnpricedSuccess`。无 usage charging、DB 或 durable storage。 |
 | Logging | single terminal + redaction tests |
 | CI/Docker | full local-equivalent suite + image build |
 

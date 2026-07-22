@@ -34,9 +34,12 @@ var (
 	// It is returned before plan validation, preflight, credential resolution,
 	// quota reservation, logging, or an upstream call.
 	ErrInvalidReservation = errors.New("execution: invalid reservation id")
-	// ErrInvalidRequestID means RequestID is empty or whitespace-only. Like an
-	// invalid reservation ID, it is rejected before all request side effects.
+	// ErrInvalidRequestID means RequestID is empty, malformed, or unsafe. Like
+	// an invalid reservation ID, it is rejected before all request side effects.
 	ErrInvalidRequestID = errors.New("execution: invalid request id")
+	// ErrInvalidQuotaIdentity means request-owned quota attribution is malformed
+	// and was rejected before plan preflight or credential resolution.
+	ErrInvalidQuotaIdentity = errors.New("execution: invalid quota identity")
 	// ErrUnclassified means an upstream call returned a failure that was not a
 	// safe *sdk.ClassifiedError. The Runner fails closed: it releases the
 	// reservation and returns this sentinel rather than the raw error, which
@@ -86,8 +89,13 @@ const (
 // Input is the complete, request-local input for one non-streaming Run. The
 // Resolver is the same frozen resolver that produced Plan; Runner re-runs
 // Prepare on every attempt. Body is the raw JSON object to be adapted.
+// QuotaIdentity is the safe authenticated attribution carried from the facade.
+// Protocol is the request protocol string, not a provider target.
+type QuotaIdentity struct{ Subject, KeyID, Protocol string }
+
 type Input struct {
 	RequestID     string
+	QuotaIdentity QuotaIdentity
 	ReservationID string
 	Plan          routing.Plan
 	Resolver      *routing.Resolver
@@ -141,7 +149,7 @@ func (contextSleeper) Sleep(ctx context.Context, d time.Duration) error {
 //
 // Runner is not safe for concurrent reuse: one Run drives one request lifecycle.
 type Runner struct {
-	Quota          quota.Port
+	Quota          quota.Repository
 	SDKRegistry    *SDKRegistry
 	Logger         requestlog.ExecutionPort
 	Clock          retry.Clock
@@ -179,8 +187,11 @@ func (r *Runner) Run(ctx context.Context, in Input) (Result, error) {
 	if !requestid.ValidReservationID(in.ReservationID) {
 		return Result{}, ErrInvalidReservation
 	}
-	if strings.TrimSpace(in.RequestID) == "" {
+	if strings.TrimSpace(in.RequestID) == "" || quota.ValidateRequestID(in.RequestID) != nil {
 		return Result{}, ErrInvalidRequestID
+	}
+	if quota.ValidateQuotaIdentity(in.QuotaIdentity.Subject, in.QuotaIdentity.KeyID, in.QuotaIdentity.Protocol) != nil {
+		return Result{}, ErrInvalidQuotaIdentity
 	}
 	if len(in.Plan.Candidates) == 0 {
 		return Result{}, ErrNoCandidate
@@ -206,18 +217,22 @@ func (r *Runner) Run(ctx context.Context, in Input) (Result, error) {
 		return Result{}, err
 	}
 	firstPrepared := firstCall.preparedAttempt()
-	if firstPrepared.Timeout.Request <= 0 {
+	if firstPrepared.Timeout.Request <= 0 || in.QuotaIdentity.Protocol != string(firstPrepared.Target.Protocol) {
 		return Result{}, ErrMisconfigured
 	}
 	retryPolicy := firstPrepared.Retry
 	state := retry.NewState(in.Plan, r.Clock)
 
-	if _, err := r.Quota.Reserve(ctx, in.ReservationID); err != nil {
+	reservation := quota.ReserveRequest{ID: quota.ReservationID(in.ReservationID), Metadata: firstCall.ReservationMetadata(in.RequestID, in.QuotaIdentity), Estimate: quota.Estimate{Basis: quota.BasisNone}}
+	if err := reservation.Metadata.Validate(); err != nil {
+		return Result{}, ErrMisconfigured
+	}
+	if _, err := r.Quota.ReserveReservation(ctx, reservation); err != nil {
 		// Reserve is the only pre-terminal quota operation. Its raw failure is
 		// backend-owned and must not cross the execution boundary.
 		return Result{}, ErrQuotaReserve
 	}
-	terminalizer := NewTerminalizer(r.Quota, in.ReservationID)
+	terminalizer := NewTerminalizer(r.Quota, quota.ReservationID(in.ReservationID))
 
 	candidate := first
 	attemptNo := 0
@@ -291,7 +306,7 @@ func (r *Runner) Run(ctx context.Context, in Input) (Result, error) {
 			_ = state.RecordSuccess(ctx, attempt)
 			_ = state.Commit()
 			cleanupCtx, cleanupCancel := r.cleanupContext(ctx)
-			ferr := terminalizer.Finalize(cleanupCtx)
+			ferr := terminalizer.Finalize(cleanupCtx, quota.FinalizeOutcome{Disposition: quota.AccountingUnpricedSuccess, Outcome: quota.OutcomeCompleted})
 			cleanupCancel()
 			if ferr != nil {
 				// Terminal state is unknown. Do not Release, log success, or return a
@@ -401,13 +416,35 @@ func (r *Runner) releaseCleanup(ctx context.Context, terminalizer *Terminalizer)
 	}
 	cleanupCtx, cancel := r.cleanupContext(ctx)
 	defer cancel()
-	return terminalizer.Release(cleanupCtx)
+	return terminalizer.Release(cleanupCtx, quota.ReleaseFailed)
+}
+
+func (r *Runner) releaseCleanupReason(ctx context.Context, terminalizer *Terminalizer, reason quota.ReleaseReason) error {
+	if terminalizer == nil {
+		return ErrTerminalConflict
+	}
+	cleanupCtx, cancel := r.cleanupContext(ctx)
+	defer cancel()
+	return terminalizer.Release(cleanupCtx, reason)
+}
+
+func releaseReason(primary error) quota.ReleaseReason {
+	if errors.Is(primary, context.Canceled) {
+		return quota.ReleaseCancelled
+	}
+	if errors.Is(primary, context.DeadlineExceeded) {
+		return quota.ReleaseTimeout
+	}
+	if errors.Is(primary, ErrMisconfigured) {
+		return quota.ReleasePrecondition
+	}
+	return quota.ReleaseFailed
 }
 
 // releaseFailure retains the safe primary verdict and adds a safe uncertainty
 // envelope when the one required post-reserve Release cannot be confirmed.
 func (r *Runner) releaseFailure(ctx context.Context, terminalizer *Terminalizer, primary error) error {
-	if err := r.releaseCleanup(ctx, terminalizer); err != nil {
+	if err := r.releaseCleanupReason(ctx, terminalizer, releaseReason(primary)); err != nil {
 		return errors.Join(primary, terminalizationError("release"))
 	}
 	return primary

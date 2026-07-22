@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/tokenmp/v3/services/executor/internal/adapter"
-	"github.com/tokenmp/v3/services/executor/internal/model"
 	"github.com/tokenmp/v3/services/executor/internal/quota"
 	"github.com/tokenmp/v3/services/executor/internal/requestlog"
 	"github.com/tokenmp/v3/services/executor/internal/routing"
@@ -182,9 +181,9 @@ func timeoutTTFT(request adapter.RawDuration) adapter.RawDuration {
 	return "10ms"
 }
 
-func newRunner(t *testing.T, client sdk.Client, log requestlog.ExecutionPort) (*Runner, *quota.Mock, *SDKRegistry) {
+func newRunner(t *testing.T, client sdk.Client, log requestlog.ExecutionPort) (*Runner, *quota.TypedMock, *SDKRegistry) {
 	t.Helper()
-	quotaPort := quota.NewMock()
+	quotaPort := quota.NewTypedMock()
 	registry := NewSDKRegistry()
 	if err := registry.Register(adapter.SDKKindOpenAI, adapter.ProtocolOpenAIChat, client); err != nil {
 		t.Fatalf("Register: %v", err)
@@ -202,6 +201,7 @@ func newRunner(t *testing.T, client sdk.Client, log requestlog.ExecutionPort) (*
 func runnerInput(resolver *routing.Resolver, plan routing.Plan) Input {
 	return Input{
 		RequestID:     "req-1",
+		QuotaIdentity: QuotaIdentity{Subject: "subject", KeyID: "key-1", Protocol: "openai_chat"},
 		ReservationID: testReservationID,
 		Plan:          plan,
 		Resolver:      resolver,
@@ -225,7 +225,7 @@ func TestRunnerSuccessPreflightReserveFinalizeAndLogsOnce(t *testing.T) {
 	}
 
 	// Preflight did not Reserve; the only Reserve is the single committed one.
-	if calls := quotaPort.Calls(); len(calls) != 2 || calls[0].Method != "Reserve" || calls[1].Method != "Finalize" {
+	if calls := quotaPort.TypedCalls(); len(calls) != 2 || calls[0].Method != "ReserveReservation" || calls[1].Method != "FinalizeReservation" {
 		t.Fatalf("quota calls = %+v", calls)
 	}
 	if client.callCount() != 1 {
@@ -265,7 +265,7 @@ func TestRunnerParentCancellationAfterCompleteWinsOverSuccess(t *testing.T) {
 	// Once Complete returns, the caller's cancellation has precedence even if
 	// the SDK returned a success concurrently. The reservation is released via
 	// detached cleanup; no success result, finalization, or retry is allowed.
-	port := quota.NewMock()
+	port := quota.NewTypedMock()
 	completeStarted := make(chan struct{})
 	ctx, ctxCancel := context.WithCancel(context.Background())
 	client := &runnerTestClient{completeFn: func(context.Context, sdk.Call) (sdk.Completion, error) {
@@ -292,7 +292,7 @@ func TestRunnerParentCancellationAfterCompleteWinsOverSuccess(t *testing.T) {
 	if result.Completion.RawJSON != nil || result.Failure != nil {
 		t.Fatalf("result = %+v, want empty result after caller cancellation", result)
 	}
-	if calls := port.Calls(); len(calls) != 2 || calls[0].Method != "Reserve" || calls[1].Method != "Release" {
+	if calls := port.TypedCalls(); len(calls) != 2 || calls[0].Method != "ReserveReservation" || calls[1].Method != "ReleaseReservation" {
 		t.Fatalf("quota calls = %+v, want Reserve+Release only", calls)
 	}
 	events := log.Events(context.Background())
@@ -314,7 +314,7 @@ func TestRunnerRejectsForeignResolverPlanBeforePreflightCredentialOrReserve(t *t
 	if !errors.Is(err, routing.ErrInvalidPlan) {
 		t.Fatalf("Run error = %v, want routing.ErrInvalidPlan", err)
 	}
-	if calls := quotaPort.Calls(); len(calls) != 0 || client.callCount() != 0 {
+	if calls := quotaPort.TypedCalls(); len(calls) != 0 || client.callCount() != 0 {
 		t.Fatalf("foreign Plan used quota or SDK: quota=%+v sdk=%d", calls, client.callCount())
 	}
 	if calls, _ := credentials.snapshot(); calls != 0 {
@@ -337,7 +337,7 @@ func TestRunnerPreflightFailureDoesNotReserve(t *testing.T) {
 	if !errors.Is(err, routing.ErrInvalidCandidate) {
 		t.Fatalf("Run error = %v, want routing.ErrInvalidCandidate", err)
 	}
-	if calls := quotaPort.Calls(); len(calls) != 0 {
+	if calls := quotaPort.TypedCalls(); len(calls) != 0 {
 		t.Fatalf("preflight reserved quota: %+v", calls)
 	}
 	if client.callCount() != 0 {
@@ -381,7 +381,7 @@ func TestRunnerRetriesOnClassifiedFailureThenSucceeds(t *testing.T) {
 	if second.Candidate.CredentialID != "cred-b" {
 		t.Fatalf("retry did not advance credential: %+v", second.Candidate)
 	}
-	if calls := quotaPort.Calls(); len(calls) != 2 || calls[0].Method != "Reserve" || calls[1].Method != "Finalize" {
+	if calls := quotaPort.TypedCalls(); len(calls) != 2 || calls[0].Method != "ReserveReservation" || calls[1].Method != "FinalizeReservation" {
 		t.Fatalf("quota calls = %+v", calls)
 	}
 	events := log.Events(context.Background())
@@ -421,7 +421,7 @@ func TestRunnerPerAttemptContextUsesPreparedRequestTimeout(t *testing.T) {
 	default:
 		t.Fatal("Complete was not called")
 	}
-	if calls := quotaPort.Calls(); len(calls) != 2 || calls[1].Method != "Release" {
+	if calls := quotaPort.TypedCalls(); len(calls) != 2 || calls[1].Method != "ReleaseReservation" {
 		t.Fatalf("quota calls = %+v, want Reserve+Release", calls)
 	}
 }
@@ -440,8 +440,8 @@ func TestRunnerParentDeadlineWinsOverCatchAllRetryAndPreservesReleaseUncertainty
 	log := requestlog.NewInMemoryExecution()
 	runner, quotaPort, _ := newRunner(t, client, log)
 	releaseErr := errors.New("quota release private fault")
-	quotaPort.SetReleaseFn(func(context.Context, string) (model.Reservation, error) {
-		return model.Reservation{}, releaseErr
+	quotaPort.SetReleaseReservationFn(func(context.Context, quota.ReleaseRequest) (quota.Reservation, error) {
+		return quota.Reservation{}, releaseErr
 	})
 	resolver, plan := runnerFixtureWithRuleTimeout(t, adapter.RetryRule{
 		ID: "catch-all", Action: adapter.RetryNextCredential,
@@ -465,7 +465,7 @@ func TestRunnerParentDeadlineWinsOverCatchAllRetryAndPreservesReleaseUncertainty
 	if events := log.Events(context.Background()); len(events) != 1 || events[0].Status != "failed" || events[0].RuleID != "" || events[0].Action != "" {
 		t.Fatalf("events = %+v, want one safe unmapped parent-deadline failure", events)
 	}
-	if calls := quotaPort.Calls(); len(calls) != 2 || calls[0].Method != "Reserve" || calls[1].Method != "Release" {
+	if calls := quotaPort.TypedCalls(); len(calls) != 2 || calls[0].Method != "ReserveReservation" || calls[1].Method != "ReleaseReservation" {
 		t.Fatalf("quota calls = %+v, want Reserve+Release", calls)
 	}
 }
@@ -498,7 +498,7 @@ func TestRunnerAttemptDeadlineRetriesByTimeoutErrorTypeThenSucceeds(t *testing.T
 	if calls := client.callCount(); calls != 2 {
 		t.Fatalf("client Complete calls = %d, want 2", calls)
 	}
-	if calls := quotaPort.Calls(); len(calls) != 2 || calls[0].Method != "Reserve" || calls[1].Method != "Finalize" {
+	if calls := quotaPort.TypedCalls(); len(calls) != 2 || calls[0].Method != "ReserveReservation" || calls[1].Method != "FinalizeReservation" {
 		t.Fatalf("quota calls = %+v, want Reserve+Finalize", calls)
 	}
 	events := log.Events(context.Background())
@@ -575,7 +575,7 @@ func TestRunnerAllAttemptsFailReleasesAfterReserve(t *testing.T) {
 	// default permits MaxTotalAttempts=3. The runner attempts cred-a twice
 	// (StopMaxSameTargetAttempts) and cred-b once (StopMaxTotalAttempts), but
 	// stops the request as a failure. Verify Release happened exactly once.
-	if calls := quotaPort.Calls(); len(calls) != 2 || calls[0].Method != "Reserve" || calls[1].Method != "Release" {
+	if calls := quotaPort.TypedCalls(); len(calls) != 2 || calls[0].Method != "ReserveReservation" || calls[1].Method != "ReleaseReservation" {
 		t.Fatalf("quota calls = %+v", calls)
 	}
 	events := log.Events(context.Background())
@@ -608,7 +608,7 @@ func TestRunnerUnclassifiedFailureIsFailClosedAndReleases(t *testing.T) {
 	if strings.Contains(err.Error(), "secret-leak") || strings.Contains(err.Error(), "raw-request-body") {
 		t.Fatalf("unclassified error leaked upstream material: %v", err)
 	}
-	if calls := quotaPort.Calls(); len(calls) != 2 || calls[1].Method != "Release" {
+	if calls := quotaPort.TypedCalls(); len(calls) != 2 || calls[1].Method != "ReleaseReservation" {
 		t.Fatalf("quota calls = %+v", calls)
 	}
 	if client.callCount() != 1 {
@@ -646,7 +646,7 @@ func TestRunnerContextCancellationDuringCompleteReleasesUnderCleanupTimeout(t *t
 	case <-time.After(5 * time.Second):
 		t.Fatal("Run did not return after cancellation")
 	}
-	if calls := quotaPort.Calls(); len(calls) != 2 || calls[1].Method != "Release" {
+	if calls := quotaPort.TypedCalls(); len(calls) != 2 || calls[1].Method != "ReleaseReservation" {
 		t.Fatalf("quota calls = %+v", calls)
 	}
 }
@@ -658,8 +658,8 @@ func TestRunnerCleanupContextOutlivesRequestCancellation(t *testing.T) {
 	completeStarted := make(chan struct{})
 	startedRelease := make(chan struct{})
 	finish := make(chan struct{})
-	port := quota.NewMock()
-	port.SetReleaseFn(func(ctx context.Context, id string) (model.Reservation, error) {
+	port := quota.NewTypedMock()
+	port.SetReleaseReservationFn(func(ctx context.Context, in quota.ReleaseRequest) (quota.Reservation, error) {
 		if err := ctx.Err(); err != nil {
 			t.Errorf("cleanup context was canceled: %v", err)
 		}
@@ -668,7 +668,7 @@ func TestRunnerCleanupContextOutlivesRequestCancellation(t *testing.T) {
 		}
 		close(startedRelease)
 		<-finish
-		return model.Reservation{ID: id, Status: model.StatusReleased}, nil
+		return quota.Reservation{}, nil
 	})
 	client := &runnerTestClient{completeFn: func(ctx context.Context, _ sdk.Call) (sdk.Completion, error) {
 		close(completeStarted)
@@ -696,9 +696,9 @@ func TestRunnerCleanupContextOutlivesRequestCancellation(t *testing.T) {
 
 func TestRunnerNeverReleasesAfterFinalizeEvenIfFinalizeFails(t *testing.T) {
 	client := &runnerTestClient{}
-	port := quota.NewMock()
+	port := quota.NewTypedMock()
 	finalizeErr := errors.New("finalize storage lost")
-	port.SetFaultHook(func(model.Reservation) error { return finalizeErr })
+	port.SetTypedFaultHook(func(quota.Reservation) error { return finalizeErr })
 	log := requestlog.NewInMemoryExecution()
 	registry := NewSDKRegistry()
 	_ = registry.Register(adapter.SDKKindOpenAI, adapter.ProtocolOpenAIChat, client)
@@ -715,7 +715,7 @@ func TestRunnerNeverReleasesAfterFinalizeEvenIfFinalizeFails(t *testing.T) {
 	if result.Completion.RawJSON != nil || result.Completion.Status != 0 || result.Completion.RequestID != "" || result.Failure != nil {
 		t.Fatalf("result = %+v, want zero after Finalize uncertainty", result)
 	}
-	if calls := port.Calls(); len(calls) != 2 || calls[0].Method != "Reserve" || calls[1].Method != "Finalize" {
+	if calls := port.TypedCalls(); len(calls) != 2 || calls[0].Method != "ReserveReservation" || calls[1].Method != "FinalizeReservation" {
 		t.Fatalf("quota calls = %+v, want Reserve+Finalize only", calls)
 	}
 	if events := log.Events(context.Background()); len(events) != 0 {
@@ -728,8 +728,8 @@ func TestRunnerPostReserveCredentialFailureJoinsSafeReleaseTerminalization(t *te
 	client := &runnerTestClient{}
 	runner, quotaPort, _ := newRunner(t, client, requestlog.NewInMemoryExecution())
 	releaseErr := errors.New("release vault://private/terminal-secret")
-	quotaPort.SetReleaseFn(func(context.Context, string) (model.Reservation, error) {
-		return model.Reservation{}, releaseErr
+	quotaPort.SetReleaseReservationFn(func(context.Context, quota.ReleaseRequest) (quota.Reservation, error) {
+		return quota.Reservation{}, releaseErr
 	})
 	resolver, plan := runnerFixture(t)
 	in := runnerInput(resolver, plan)
@@ -740,7 +740,7 @@ func TestRunnerPostReserveCredentialFailureJoinsSafeReleaseTerminalization(t *te
 		t.Fatalf("Run error = %v, want routing.ErrCredentialUnavailable", err)
 	}
 	assertTerminalizationError(t, err, "release", releaseErr, testReservationID)
-	if calls := quotaPort.Calls(); len(calls) != 2 || calls[1].Method != "Release" {
+	if calls := quotaPort.TypedCalls(); len(calls) != 2 || calls[1].Method != "ReleaseReservation" {
 		t.Fatalf("quota calls = %+v, want Reserve+Release", calls)
 	}
 }
@@ -880,12 +880,12 @@ func TestRunnerMisconfiguredDoesNotReserve(t *testing.T) {
 		t.Fatalf("no-quota error = %v", err)
 	}
 	// Missing SDKRegistry.
-	runner = &Runner{Quota: quota.NewMock()}
+	runner = &Runner{Quota: quota.NewTypedMock()}
 	if _, err := runner.Run(context.Background(), in); !errors.Is(err, ErrMisconfigured) {
 		t.Fatalf("no-registry error = %v", err)
 	}
 	// Missing Resolver.
-	runner = &Runner{Quota: quota.NewMock(), SDKRegistry: NewSDKRegistry()}
+	runner = &Runner{Quota: quota.NewTypedMock(), SDKRegistry: NewSDKRegistry()}
 	in.Resolver = nil
 	if _, err := runner.Run(context.Background(), in); !errors.Is(err, ErrMisconfigured) {
 		t.Fatalf("no-resolver error = %v", err)
@@ -904,7 +904,7 @@ func TestRunnerNoCandidateRejectedBeforeReserve(t *testing.T) {
 	if !errors.Is(err, ErrNoCandidate) {
 		t.Fatalf("Run error = %v, want ErrNoCandidate", err)
 	}
-	if calls := quotaPort.Calls(); len(calls) != 0 {
+	if calls := quotaPort.TypedCalls(); len(calls) != 0 {
 		t.Fatalf("no-candidate reserved quota: %+v", calls)
 	}
 }
@@ -923,7 +923,7 @@ func TestRunnerInvalidReservationIDFailsBeforePreflightOrQuota(t *testing.T) {
 			if !errors.Is(err, ErrInvalidReservation) {
 				t.Fatalf("Run error = %v, want %v", err, ErrInvalidReservation)
 			}
-			if calls := quotaPort.Calls(); len(calls) != 0 {
+			if calls := quotaPort.TypedCalls(); len(calls) != 0 {
 				t.Fatalf("invalid ID called quota: %+v", calls)
 			}
 			if calls := client.callCount(); calls != 0 {
@@ -948,7 +948,7 @@ func TestRunnerInvalidRequestIDFailsBeforePreflightOrQuota(t *testing.T) {
 			if !errors.Is(err, ErrInvalidRequestID) {
 				t.Fatalf("Run error = %v, want %v", err, ErrInvalidRequestID)
 			}
-			if calls := quotaPort.Calls(); len(calls) != 0 || client.callCount() != 0 {
+			if calls := quotaPort.TypedCalls(); len(calls) != 0 || client.callCount() != 0 {
 				t.Fatalf("invalid request ID used quota or SDK: quota=%+v sdk=%d", calls, client.callCount())
 			}
 			if calls, _ := credentials.snapshot(); calls != 0 {
@@ -958,14 +958,47 @@ func TestRunnerInvalidRequestIDFailsBeforePreflightOrQuota(t *testing.T) {
 	}
 }
 
+func TestRunnerInvalidQuotaIdentityFailsBeforePreflightOrQuota(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		identity QuotaIdentity
+	}{
+		{"empty subject", QuotaIdentity{Subject: "", KeyID: "key-1", Protocol: "openai_chat"}},
+		{"empty key", QuotaIdentity{Subject: "subject", KeyID: "", Protocol: "openai_chat"}},
+		{"empty protocol", QuotaIdentity{Subject: "subject", KeyID: "key-1", Protocol: ""}},
+		{"invalid subject", QuotaIdentity{Subject: " invalid", KeyID: "key-1", Protocol: "openai_chat"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := &runnerTestClient{}
+			runner, quotaPort, _ := newRunner(t, client, requestlog.NewInMemoryExecution())
+			resolver, plan := runnerFixture(t)
+			in := runnerInput(resolver, plan)
+			in.QuotaIdentity = tc.identity
+			credentials := &countingCredentials{value: []byte("must-not-resolve")}
+			in.Credentials = credentials
+
+			_, err := runner.Run(context.Background(), in)
+			if !errors.Is(err, ErrInvalidQuotaIdentity) {
+				t.Fatalf("Run error = %v, want %v", err, ErrInvalidQuotaIdentity)
+			}
+			if calls := quotaPort.TypedCalls(); len(calls) != 0 || client.callCount() != 0 {
+				t.Fatalf("invalid quota identity used quota or SDK: quota=%+v sdk=%d", calls, client.callCount())
+			}
+			if calls, _ := credentials.snapshot(); calls != 0 {
+				t.Fatalf("invalid quota identity resolved credential %d times", calls)
+			}
+		})
+	}
+}
+
 func TestRunnerReserveFailureReturnsSafeSentinelWithoutTerminalOrSDK(t *testing.T) {
 	client := &runnerTestClient{}
-	port := quota.NewMock()
+	port := quota.NewTypedMock()
 	// A quota backend error may contain opaque reservation data, credentials, or
 	// endpoint details. Runner must expose only its fixed safe sentinel.
 	rawReserveErr := errors.New("quota failure reservation=res-secret credential=super-secret url=https://quota.internal/res-secret")
-	port.SetReserveFn(func(context.Context, string) (model.Reservation, error) {
-		return model.Reservation{}, rawReserveErr
+	port.SetReserveReservationFn(func(context.Context, quota.ReserveRequest) (quota.Reservation, error) {
+		return quota.Reservation{}, rawReserveErr
 	})
 	log := requestlog.NewInMemoryExecution()
 	registry := NewSDKRegistry()
@@ -991,7 +1024,7 @@ func TestRunnerReserveFailureReturnsSafeSentinelWithoutTerminalOrSDK(t *testing.
 	if result.Completion.RawJSON != nil || result.Completion.Status != 0 || result.Completion.RequestID != "" || result.Failure != nil {
 		t.Fatalf("result = %+v, want zero Result", result)
 	}
-	if calls := port.Calls(); len(calls) != 1 || calls[0].Method != "Reserve" {
+	if calls := port.TypedCalls(); len(calls) != 1 || calls[0].Method != "ReserveReservation" {
 		t.Fatalf("quota calls = %+v, want Reserve only", calls)
 	}
 	if client.callCount() != 0 {
@@ -1017,7 +1050,7 @@ func TestRunnerPrepareFailsAfterReserveReleasesAndSurfacesSafeError(t *testing.T
 	if !errors.Is(err, routing.ErrCredentialUnavailable) {
 		t.Fatalf("Run error = %v, want routing.ErrCredentialUnavailable", err)
 	}
-	if calls := quotaPort.Calls(); len(calls) != 2 || calls[1].Method != "Release" {
+	if calls := quotaPort.TypedCalls(); len(calls) != 2 || calls[1].Method != "ReleaseReservation" {
 		t.Fatalf("quota calls = %+v, want Reserve+Release", calls)
 	}
 	if client.callCount() != 0 {
@@ -1063,7 +1096,7 @@ func TestRunnerEachAttemptRerunsPrepareAndApplyAndClientLookup(t *testing.T) {
 	if calls, refs := credentials.snapshot(); calls != 3 || len(refs) != 3 {
 		t.Fatalf("credential Resolve calls/refs = %d/%q, want 3 resolutions", calls, refs)
 	}
-	if calls := quotaPort.Calls(); len(calls) != 2 || calls[0].Method != "Reserve" || calls[1].Method != "Finalize" {
+	if calls := quotaPort.TypedCalls(); len(calls) != 2 || calls[0].Method != "ReserveReservation" || calls[1].Method != "FinalizeReservation" {
 		t.Fatalf("quota calls = %+v, want Reserve+Finalize", calls)
 	}
 	if events := log.Events(context.Background()); len(events) != 3 {
@@ -1105,7 +1138,7 @@ func TestRunnerOfficialSDKRejectsIncompatibleAuthBeforeReserve(t *testing.T) {
 		t.Fatalf("Resolve(generic): %v", err)
 	}
 	genericClient := &runnerTestClient{}
-	genericQuota := quota.NewMock()
+	genericQuota := quota.NewTypedMock()
 	genericRegistry := NewSDKRegistry()
 	genericRunner := &Runner{Quota: genericQuota, SDKRegistry: genericRegistry}
 	genericInput := runnerInput(genericResolver, genericPlan)
@@ -1117,7 +1150,7 @@ func TestRunnerOfficialSDKRejectsIncompatibleAuthBeforeReserve(t *testing.T) {
 	if calls, _ := genericCredentials.snapshot(); calls != 0 {
 		t.Fatalf("generic AuthNone preflight resolved credentials %d times", calls)
 	}
-	if calls := genericQuota.Calls(); len(calls) != 0 || genericClient.callCount() != 0 {
+	if calls := genericQuota.TypedCalls(); len(calls) != 0 || genericClient.callCount() != 0 {
 		t.Fatalf("unregistered generic path used quota or SDK: quota=%+v sdk=%d", calls, genericClient.callCount())
 	}
 	if err := genericRegistry.Register(adapter.SDKKindGenericHTTP, adapter.ProtocolOpenAIChat, genericClient); err != nil {
@@ -1130,7 +1163,7 @@ func TestRunnerOfficialSDKRejectsIncompatibleAuthBeforeReserve(t *testing.T) {
 	if calls, _ := genericCredentials.snapshot(); calls != 0 {
 		t.Fatalf("generic AuthNone Run resolved credentials %d times", calls)
 	}
-	if calls := genericQuota.Calls(); len(calls) != 2 || calls[0].Method != "Reserve" || calls[1].Method != "Finalize" || genericClient.callCount() != 1 {
+	if calls := genericQuota.TypedCalls(); len(calls) != 2 || calls[0].Method != "ReserveReservation" || calls[1].Method != "FinalizeReservation" || genericClient.callCount() != 1 {
 		t.Fatalf("generic AuthNone calls quota=%+v sdk=%d, want Reserve+Finalize and one Complete", calls, genericClient.callCount())
 	}
 	config.Providers["provider"] = adapter.CompiledProvider{ID: "provider", Name: "provider", Selector: "selected", BaseURL: "https://provider.example/v1", SDKKind: adapter.SDKKindOpenAI, Protocol: adapter.ProtocolOpenAIChat}
@@ -1153,7 +1186,7 @@ func TestRunnerOfficialSDKRejectsIncompatibleAuthBeforeReserve(t *testing.T) {
 	if !errors.Is(err, ErrIncompatibleAuth) {
 		t.Fatalf("Run error = %v, want ErrIncompatibleAuth", err)
 	}
-	if calls := quotaPort.Calls(); len(calls) != 0 || client.callCount() != 0 {
+	if calls := quotaPort.TypedCalls(); len(calls) != 0 || client.callCount() != 0 {
 		t.Fatalf("incompatible auth used quota or SDK: calls=%+v sdk=%d", calls, client.callCount())
 	}
 }
@@ -1218,7 +1251,7 @@ func TestRunnerInvalidRequestTimeoutFailsPreflightWithoutQuotaOrSDK(t *testing.T
 	if !errors.Is(err, ErrMisconfigured) {
 		t.Fatalf("Run error = %v, want ErrMisconfigured", err)
 	}
-	if calls := quotaPort.Calls(); len(calls) != 0 || client.callCount() != 0 {
+	if calls := quotaPort.TypedCalls(); len(calls) != 0 || client.callCount() != 0 {
 		t.Fatalf("invalid timeout used quota or SDK: calls=%+v sdk=%d", calls, client.callCount())
 	}
 }
@@ -1228,7 +1261,7 @@ func TestRunnerUnknownSDKKindDuringPreflightDoesNotReserve(t *testing.T) {
 	// UnknownSDKClientError before any Reserve.
 	client := &runnerTestClient{}
 	log := requestlog.NewInMemoryExecution()
-	quotaPort := quota.NewMock()
+	quotaPort := quota.NewTypedMock()
 	registry := NewSDKRegistry()
 	_ = registry.Register(adapter.SDKKindOpenAI, adapter.ProtocolOpenAIResponses, client)
 	runner := &Runner{Quota: quotaPort, SDKRegistry: registry, Logger: log, Clock: &fakeClock{}, Sleeper: &recordingSleeper{}}
@@ -1238,7 +1271,7 @@ func TestRunnerUnknownSDKKindDuringPreflightDoesNotReserve(t *testing.T) {
 	if !errors.Is(err, ErrSDKClientUnknown) {
 		t.Fatalf("Run error = %v, want ErrSDKClientUnknown", err)
 	}
-	if calls := quotaPort.Calls(); len(calls) != 0 {
+	if calls := quotaPort.TypedCalls(); len(calls) != 0 {
 		t.Fatalf("preflight reserved quota: %+v", calls)
 	}
 	if client.callCount() != 0 {
@@ -1260,7 +1293,7 @@ func TestRunnerApplyFailureDuringPreflightDoesNotReserve(t *testing.T) {
 	if !errors.Is(err, adapter.ErrInvalidInput) {
 		t.Fatalf("Run error = %v, want adapter.ErrInvalidInput", err)
 	}
-	if calls := quotaPort.Calls(); len(calls) != 0 {
+	if calls := quotaPort.TypedCalls(); len(calls) != 0 {
 		t.Fatalf("preflight reserved quota: %+v", calls)
 	}
 }
@@ -1286,7 +1319,7 @@ func TestRunnerSleepCancellationReleasesUnderCleanupTimeout(t *testing.T) {
 	}}
 	log := requestlog.NewInMemoryExecution()
 	clock := &fakeClock{now: time.Date(2026, 7, 21, 12, 0, 0, 0, time.UTC)}
-	quotaPort := quota.NewMock()
+	quotaPort := quota.NewTypedMock()
 	registry := NewSDKRegistry()
 	_ = registry.Register(adapter.SDKKindOpenAI, adapter.ProtocolOpenAIChat, client)
 	runner := &Runner{
@@ -1302,7 +1335,7 @@ func TestRunnerSleepCancellationReleasesUnderCleanupTimeout(t *testing.T) {
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("Run error = %v, want context.Canceled", err)
 	}
-	if calls := quotaPort.Calls(); len(calls) != 2 || calls[1].Method != "Release" {
+	if calls := quotaPort.TypedCalls(); len(calls) != 2 || calls[1].Method != "ReleaseReservation" {
 		t.Fatalf("quota calls = %+v, want Reserve+Release", calls)
 	}
 }
@@ -1356,7 +1389,7 @@ func TestRunnerCancellationDuringRetryWaitReleasesAndDoesNotStartAnotherSDKCall(
 	if calls := client.callCount(); calls != 1 {
 		t.Fatalf("client Complete calls = %d, want 1; retry wait cancellation started another wire call", calls)
 	}
-	if calls := quotaPort.Calls(); len(calls) != 2 || calls[0].Method != "Reserve" || calls[1].Method != "Release" {
+	if calls := quotaPort.TypedCalls(); len(calls) != 2 || calls[0].Method != "ReserveReservation" || calls[1].Method != "ReleaseReservation" {
 		t.Fatalf("quota calls = %+v, want Reserve+Release", calls)
 	}
 }
@@ -1371,8 +1404,8 @@ func TestRunnerReleaseFailureJoinsSafeTerminalizationWithClassifiedFailure(t *te
 	log := requestlog.NewInMemoryExecution()
 	runner, quotaPort, _ := newRunner(t, client, log)
 	releaseErr := errors.New("quota release unavailable")
-	quotaPort.SetReleaseFn(func(context.Context, string) (model.Reservation, error) {
-		return model.Reservation{}, releaseErr
+	quotaPort.SetReleaseReservationFn(func(context.Context, quota.ReleaseRequest) (quota.Reservation, error) {
+		return quota.Reservation{}, releaseErr
 	})
 	resolver, plan := runnerFixtureWithRule(t, adapter.RetryRule{ID: "stop", HTTPStatuses: []int{503}, Action: adapter.RetryNone}, nil)
 
@@ -1386,7 +1419,7 @@ func TestRunnerReleaseFailureJoinsSafeTerminalizationWithClassifiedFailure(t *te
 	if calls := client.callCount(); calls != 1 {
 		t.Fatalf("client Complete calls = %d, want 1", calls)
 	}
-	if calls := quotaPort.Calls(); len(calls) != 2 || calls[0].Method != "Reserve" || calls[1].Method != "Release" {
+	if calls := quotaPort.TypedCalls(); len(calls) != 2 || calls[0].Method != "ReserveReservation" || calls[1].Method != "ReleaseReservation" {
 		t.Fatalf("quota calls = %+v, want Reserve+Release only", calls)
 	}
 }
@@ -1397,8 +1430,8 @@ func TestRunnerReleaseTerminalizationPreservesContextPrimary(t *testing.T) {
 	}}
 	runner, quotaPort, _ := newRunner(t, client, requestlog.NewInMemoryExecution())
 	releaseErr := errors.New("quota release secret=do-not-leak")
-	quotaPort.SetReleaseFn(func(context.Context, string) (model.Reservation, error) {
-		return model.Reservation{}, releaseErr
+	quotaPort.SetReleaseReservationFn(func(context.Context, quota.ReleaseRequest) (quota.Reservation, error) {
+		return quota.Reservation{}, releaseErr
 	})
 	resolver, plan := runnerFixture(t)
 

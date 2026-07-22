@@ -21,9 +21,9 @@ type TypedMock struct {
 	mu sync.Mutex
 	*DomainInMemory
 	calls      []TypedCallRecord
-	reserveFn  func(context.Context, Reservation) (Reservation, error)
-	finalizeFn func(context.Context, ReservationID, FinalizeOutcome) (Reservation, error)
-	releaseFn  func(context.Context, ReservationID, ReleaseReason) (Reservation, error)
+	reserveFn  func(context.Context, ReserveRequest) (Reservation, error)
+	finalizeFn func(context.Context, FinalizeRequest) (Reservation, error)
+	releaseFn  func(context.Context, ReleaseRequest) (Reservation, error)
 	lookupFn   func(context.Context, ReservationID) (Reservation, error)
 }
 
@@ -31,17 +31,17 @@ var _ Repository = (*TypedMock)(nil)
 
 func NewTypedMock() *TypedMock { return &TypedMock{DomainInMemory: NewDomainInMemory()} }
 
-func (m *TypedMock) SetReserveReservationFn(fn func(context.Context, Reservation) (Reservation, error)) {
+func (m *TypedMock) SetReserveReservationFn(fn func(context.Context, ReserveRequest) (Reservation, error)) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.reserveFn = fn
 }
-func (m *TypedMock) SetFinalizeReservationFn(fn func(context.Context, ReservationID, FinalizeOutcome) (Reservation, error)) {
+func (m *TypedMock) SetFinalizeReservationFn(fn func(context.Context, FinalizeRequest) (Reservation, error)) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.finalizeFn = fn
 }
-func (m *TypedMock) SetReleaseReservationFn(fn func(context.Context, ReservationID, ReleaseReason) (Reservation, error)) {
+func (m *TypedMock) SetReleaseReservationFn(fn func(context.Context, ReleaseRequest) (Reservation, error)) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.releaseFn = fn
@@ -63,7 +63,7 @@ func (m *TypedMock) typedCall(method string, id ReservationID) {
 	defer m.mu.Unlock()
 	m.calls = append(m.calls, TypedCallRecord{Method: method, ID: id})
 }
-func (m *TypedMock) ReserveReservation(ctx context.Context, r Reservation) (Reservation, error) {
+func (m *TypedMock) ReserveReservation(ctx context.Context, r ReserveRequest) (Reservation, error) {
 	m.typedCall("ReserveReservation", r.ID)
 	m.mu.Lock()
 	fn := m.reserveFn
@@ -76,8 +76,8 @@ func (m *TypedMock) ReserveReservation(ctx context.Context, r Reservation) (Rese
 	}
 	return m.DomainInMemory.ReserveReservation(ctx, r)
 }
-func (m *TypedMock) FinalizeReservation(ctx context.Context, id ReservationID, o FinalizeOutcome) (Reservation, error) {
-	m.typedCall("FinalizeReservation", id)
+func (m *TypedMock) FinalizeReservation(ctx context.Context, in FinalizeRequest) (Reservation, error) {
+	m.typedCall("FinalizeReservation", in.ID)
 	m.mu.Lock()
 	fn := m.finalizeFn
 	m.mu.Unlock()
@@ -85,12 +85,12 @@ func (m *TypedMock) FinalizeReservation(ctx context.Context, id ReservationID, o
 		if err := ctx.Err(); err != nil {
 			return Reservation{}, err
 		}
-		return fn(ctx, id, o)
+		return fn(ctx, in)
 	}
-	return m.DomainInMemory.FinalizeReservation(ctx, id, o)
+	return m.DomainInMemory.FinalizeReservation(ctx, in)
 }
-func (m *TypedMock) ReleaseReservation(ctx context.Context, id ReservationID, reason ReleaseReason) (Reservation, error) {
-	m.typedCall("ReleaseReservation", id)
+func (m *TypedMock) ReleaseReservation(ctx context.Context, in ReleaseRequest) (Reservation, error) {
+	m.typedCall("ReleaseReservation", in.ID)
 	m.mu.Lock()
 	fn := m.releaseFn
 	m.mu.Unlock()
@@ -98,9 +98,9 @@ func (m *TypedMock) ReleaseReservation(ctx context.Context, id ReservationID, re
 		if err := ctx.Err(); err != nil {
 			return Reservation{}, err
 		}
-		return fn(ctx, id, reason)
+		return fn(ctx, in)
 	}
-	return m.DomainInMemory.ReleaseReservation(ctx, id, reason)
+	return m.DomainInMemory.ReleaseReservation(ctx, in)
 }
 func (m *TypedMock) Lookup(ctx context.Context, id ReservationID) (Reservation, error) {
 	m.typedCall("Lookup", id)

@@ -29,6 +29,11 @@ type Outcome struct {
 	// pre-commit failure.
 	Usage Usage
 
+	// UsageKnown reports that the protocol emitted at least one usage-bearing
+	// event accepted by the stream. It distinguishes confirmed zero usage from
+	// absent usage, which remains unresolved and must not be guessed.
+	UsageKnown bool
+
 	// Finish is the bounded safe finish reason on success (StateCompleted). It
 	// is empty otherwise.
 	Finish string
@@ -224,6 +229,7 @@ func (b *Bridge) Run(ctx context.Context) (Outcome, error) {
 			Reason:         reason,
 			Committed:      true,
 			Usage:          usage,
+			UsageKnown:     hasUsage,
 			UnresolvedCost: !hasUsage,
 			TTFT:           ttftElapsed,
 		}, nil
@@ -234,6 +240,7 @@ func (b *Bridge) Run(ctx context.Context) (Outcome, error) {
 			Reason:         ReasonClientCancelled,
 			Committed:      committed,
 			Usage:          usage,
+			UsageKnown:     hasUsage,
 			UnresolvedCost: committed && !hasUsage,
 			TTFT:           ttftElapsed,
 		}, nil
@@ -420,6 +427,7 @@ func (b *Bridge) Run(ctx context.Context) (Outcome, error) {
 							Reason:         ReasonCommitFailed,
 							Committed:      true,
 							Usage:          usage,
+							UsageKnown:     hasUsage,
 							UnresolvedCost: !hasUsage,
 							TTFT:           clock.Sub(started),
 						}, nil
@@ -477,6 +485,7 @@ func (b *Bridge) Run(ctx context.Context) (Outcome, error) {
 					Reason:         ReasonCompleted,
 					Committed:      true,
 					Usage:          usage,
+					UsageKnown:     hasUsage,
 					Finish:         ev.FinishReason,
 					UnresolvedCost: !hasUsage,
 					TTFT:           ttftElapsed,

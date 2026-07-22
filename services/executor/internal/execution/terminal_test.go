@@ -7,107 +7,129 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tokenmp/v3/services/executor/internal/model"
 	"github.com/tokenmp/v3/services/executor/internal/quota"
 )
 
-func TestTerminalizerSameIntentIsIdempotentAndCallsPortOnce(t *testing.T) {
-	t.Parallel()
+func terminalID() quota.ReservationID { return "res_1234567890123456" }
 
-	port := quota.NewMock()
-	reserveForTerminalizer(t, port, "reservation-1")
-	terminalizer := NewTerminalizer(port, "reservation-1")
-
-	if err := terminalizer.Finalize(context.Background()); err != nil {
-		t.Fatalf("first Finalize() error = %v", err)
-	}
-	if err := terminalizer.Finalize(context.Background()); err != nil {
-		t.Fatalf("second Finalize() error = %v", err)
-	}
-	assertCalls(t, port, []quota.CallRecord{
-		{Method: "Reserve", ID: "reservation-1"},
-		{Method: "Finalize", ID: "reservation-1"},
+func terminalReserve(t *testing.T, r quota.Repository) {
+	t.Helper()
+	_, err := r.ReserveReservation(context.Background(), quota.ReserveRequest{
+		ID:       terminalID(),
+		Metadata: quota.Metadata{RequestID: "req_1", Subject: "subject", KeyID: "key", Protocol: "openai", Model: "model", ProviderID: "provider", RouteID: "route", AdapterID: "adapter", Revision: "rev", Generation: 1},
+		Estimate: quota.Estimate{Basis: quota.BasisNone},
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
-func TestTerminalizerFirstIntentWinsAndOppositeNeverCallsPort(t *testing.T) {
-	t.Parallel()
-
-	port := quota.NewMock()
-	reserveForTerminalizer(t, port, "reservation-1")
+func TestTerminalizerReplaysOnlyExactFinalizeRequest(t *testing.T) {
+	repo := quota.NewTypedMock()
+	terminalReserve(t, repo)
 	started := make(chan struct{})
-	finish := make(chan struct{})
-	port.SetFinalizeFn(func(_ context.Context, id string) (model.Reservation, error) {
+	unblock := make(chan struct{})
+	var got quota.FinalizeRequest
+	repo.SetFinalizeReservationFn(func(_ context.Context, request quota.FinalizeRequest) (quota.Reservation, error) {
+		got = request
 		close(started)
-		<-finish
-		return model.Reservation{ID: id, Status: model.StatusFinalized}, nil
+		<-unblock
+		return quota.Reservation{}, nil
 	})
-	terminalizer := NewTerminalizer(port, "reservation-1")
-
-	finalizeDone := make(chan error, 1)
-	go func() { finalizeDone <- terminalizer.Finalize(context.Background()) }()
+	term := NewTerminalizer(repo, terminalID())
+	first := quota.FinalizeOutcome{Disposition: quota.AccountingConfirmedUsage, Outcome: quota.OutcomeCompleted, Usage: quota.ConfirmedUsage{InputTokens: 2, OutputTokens: 3, TotalTokens: 5}}
+	firstDone := make(chan error, 1)
+	go func() { firstDone <- term.Finalize(context.Background(), first) }()
 	<-started
 
-	if err := terminalizer.Release(context.Background()); !errors.Is(err, ErrTerminalConflict) {
-		t.Fatalf("Release() error = %v, want %v", err, ErrTerminalConflict)
+	sameDone := make(chan error, 1)
+	go func() { sameDone <- term.Finalize(context.Background(), first) }()
+	select {
+	case err := <-sameDone:
+		t.Fatalf("exact replay returned before first call completed: %v", err)
+	default:
 	}
-	close(finish)
-	if err := <-finalizeDone; err != nil {
-		t.Fatalf("Finalize() error = %v", err)
+	if err := term.Finalize(context.Background(), quota.FinalizeOutcome{Disposition: quota.AccountingConfirmedUsage, Outcome: quota.OutcomeCompleted, Usage: quota.ConfirmedUsage{InputTokens: 2, OutputTokens: 4, TotalTokens: 6}}); !errors.Is(err, ErrTerminalConflict) {
+		t.Fatalf("divergent finalize = %v, want %v", err, ErrTerminalConflict)
 	}
-	assertCalls(t, port, []quota.CallRecord{
-		{Method: "Reserve", ID: "reservation-1"},
-		{Method: "Finalize", ID: "reservation-1"},
-	})
+	if err := term.Release(context.Background(), quota.ReleaseFailed); !errors.Is(err, ErrTerminalConflict) {
+		t.Fatalf("opposite release = %v, want %v", err, ErrTerminalConflict)
+	}
+	if calls := repo.TypedCalls(); len(calls) != 2 { // reserve + the first finalize only
+		t.Fatalf("repository calls before unblock = %d, want 2", len(calls))
+	}
+	close(unblock)
+	if err := <-firstDone; err != nil {
+		t.Fatalf("first finalize = %v", err)
+	}
+	if err := <-sameDone; err != nil {
+		t.Fatalf("exact finalize replay = %v", err)
+	}
+	if got.ID != terminalID() || got.Outcome != first {
+		t.Fatalf("repository received %+v, want exact first request", got)
+	}
+	if calls := repo.TypedCalls(); len(calls) != 2 {
+		t.Fatalf("repository calls = %d, want reserve + finalize", len(calls))
+	}
 }
 
-func TestTerminalizerFaultAfterTransitionRetainsIntent(t *testing.T) {
-	t.Parallel()
+func TestTerminalizerReplaysOnlyExactReleaseRequest(t *testing.T) {
+	repo := quota.NewTypedMock()
+	terminalReserve(t, repo)
+	term := NewTerminalizer(repo, terminalID())
+	if err := term.Release(context.Background(), quota.ReleaseTimeout); err != nil {
+		t.Fatalf("first release = %v", err)
+	}
+	if err := term.Release(context.Background(), quota.ReleaseTimeout); err != nil {
+		t.Fatalf("exact release replay = %v", err)
+	}
+	if err := term.Release(context.Background(), quota.ReleaseFailed); !errors.Is(err, ErrTerminalConflict) {
+		t.Fatalf("divergent release = %v, want %v", err, ErrTerminalConflict)
+	}
+	if err := term.Finalize(context.Background(), quota.FinalizeOutcome{Disposition: quota.AccountingUnpricedSuccess}); !errors.Is(err, ErrTerminalConflict) {
+		t.Fatalf("opposite finalize = %v, want %v", err, ErrTerminalConflict)
+	}
+	if calls := repo.TypedCalls(); len(calls) != 2 {
+		t.Fatalf("repository calls = %d, want reserve + release", len(calls))
+	}
+}
 
-	port := quota.NewMock()
-	reserveForTerminalizer(t, port, "reservation-1")
+func TestTerminalizerFaultAfterTransitionRetainsExactIntent(t *testing.T) {
+	repo := quota.NewTypedMock()
+	terminalReserve(t, repo)
 	fault := errors.New("terminal response lost after transition")
-	port.SetFaultHook(func(model.Reservation) error { return fault })
-	terminalizer := NewTerminalizer(port, "reservation-1")
+	repo.SetTypedFaultHook(func(quota.Reservation) error { return fault })
+	term := NewTerminalizer(repo, terminalID())
+	outcome := quota.FinalizeOutcome{Disposition: quota.AccountingUnpricedSuccess, Outcome: quota.OutcomeCompleted}
 
-	if err := terminalizer.Finalize(context.Background()); !errors.Is(err, fault) {
-		t.Fatalf("Finalize() error = %v, want %v", err, fault)
+	if err := term.Finalize(context.Background(), outcome); !errors.Is(err, fault) {
+		t.Fatalf("Finalize = %v, want sticky fault", err)
 	}
-	// The selected call's result is sticky: a local replay must not turn a
-	// post-transition failure into a second port call.
-	if err := terminalizer.Finalize(context.Background()); !errors.Is(err, fault) {
-		t.Fatalf("second Finalize() error = %v, want %v", err, fault)
+	if err := term.Finalize(context.Background(), outcome); !errors.Is(err, fault) {
+		t.Fatalf("exact replay = %v, want sticky fault", err)
 	}
-	if err := terminalizer.Release(context.Background()); !errors.Is(err, ErrTerminalConflict) {
-		t.Fatalf("Release() error = %v, want %v", err, ErrTerminalConflict)
+	if err := term.Release(context.Background(), quota.ReleaseFailed); !errors.Is(err, ErrTerminalConflict) {
+		t.Fatalf("opposite terminal = %v", err)
 	}
-
-	stored, err := port.Reserve(context.Background(), "reservation-1")
-	if err != nil {
-		t.Fatalf("Reserve() after terminal fault error = %v", err)
+	stored, err := repo.Lookup(context.Background(), terminalID())
+	if err != nil || stored.State != quota.ReservationFinalized {
+		t.Fatalf("stored terminal state=%q err=%v", stored.State, err)
 	}
-	if stored.Status != model.StatusFinalized {
-		t.Errorf("stored status = %q, want %q", stored.Status, model.StatusFinalized)
+	if calls := repo.TypedCalls(); len(calls) != 3 { // reserve, finalize, lookup
+		t.Fatalf("repository calls=%d, want 3", len(calls))
 	}
-	assertCalls(t, port, []quota.CallRecord{
-		{Method: "Reserve", ID: "reservation-1"},
-		{Method: "Finalize", ID: "reservation-1"},
-		{Method: "Reserve", ID: "reservation-1"},
-	})
 }
 
-func TestTerminalizerReleaseUsesRunnerProvidedCancellationIndependentCleanupContext(t *testing.T) {
-	t.Parallel()
-
+func TestTerminalizerReleaseUsesCancellationIndependentCleanupContext(t *testing.T) {
 	type contextKey struct{}
 	requestCtx, requestCancel := context.WithCancel(context.WithValue(context.Background(), contextKey{}, "request-value"))
 	requestCancel()
 	cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(requestCtx), time.Second)
 	defer cleanupCancel()
 
-	port := quota.NewMock()
-	reserveForTerminalizer(t, port, "reservation-1")
-	port.SetReleaseFn(func(ctx context.Context, id string) (model.Reservation, error) {
+	repo := quota.NewTypedMock()
+	terminalReserve(t, repo)
+	repo.SetReleaseReservationFn(func(ctx context.Context, in quota.ReleaseRequest) (quota.Reservation, error) {
 		if err := ctx.Err(); err != nil {
 			t.Errorf("cleanup context error = %v, want nil", err)
 		}
@@ -115,27 +137,25 @@ func TestTerminalizerReleaseUsesRunnerProvidedCancellationIndependentCleanupCont
 			t.Errorf("cleanup context value = %v, want request-value", got)
 		}
 		if _, ok := ctx.Deadline(); !ok {
-			t.Error("cleanup context has no timeout deadline")
+			t.Error("cleanup context has no deadline")
 		}
-		return model.Reservation{ID: id, Status: model.StatusReleased}, nil
+		if in.ID != terminalID() || in.Reason != quota.ReleaseCancelled {
+			t.Errorf("release request = %+v", in)
+		}
+		return quota.Reservation{}, nil
 	})
-	terminalizer := NewTerminalizer(port, "reservation-1")
-
-	if err := terminalizer.Release(cleanupCtx); err != nil {
-		t.Fatalf("Release(cleanupCtx) error = %v", err)
+	if err := NewTerminalizer(repo, terminalID()).Release(cleanupCtx, quota.ReleaseCancelled); err != nil {
+		t.Fatalf("Release(cleanupCtx) = %v", err)
 	}
-	assertCalls(t, port, []quota.CallRecord{
-		{Method: "Reserve", ID: "reservation-1"},
-		{Method: "Release", ID: "reservation-1"},
-	})
 }
 
-func TestTerminalizerConcurrentSameIntentCallsPortOnce(t *testing.T) {
-	t.Parallel()
-
-	port := quota.NewMock()
-	reserveForTerminalizer(t, port, "reservation-1")
-	terminalizer := NewTerminalizer(port, "reservation-1")
+func TestTerminalizerConcurrentExactReplayRetainsFirstError(t *testing.T) {
+	repo := quota.NewTypedMock()
+	terminalReserve(t, repo)
+	fault := errors.New("post-commit response lost")
+	repo.SetTypedFaultHook(func(quota.Reservation) error { return fault })
+	term := NewTerminalizer(repo, terminalID())
+	request := quota.FinalizeOutcome{Disposition: quota.AccountingUnpricedSuccess}
 
 	const callers = 32
 	start := make(chan struct{})
@@ -146,39 +166,18 @@ func TestTerminalizerConcurrentSameIntentCallsPortOnce(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			errs <- terminalizer.Release(context.Background())
+			errs <- term.Finalize(context.Background(), request)
 		}()
 	}
 	close(start)
 	wg.Wait()
 	close(errs)
 	for err := range errs {
-		if err != nil {
-			t.Errorf("Release() error = %v", err)
+		if !errors.Is(err, fault) {
+			t.Errorf("Finalize = %v, want sticky %v", err, fault)
 		}
 	}
-	assertCalls(t, port, []quota.CallRecord{
-		{Method: "Reserve", ID: "reservation-1"},
-		{Method: "Release", ID: "reservation-1"},
-	})
-}
-
-func reserveForTerminalizer(t *testing.T, port *quota.Mock, id string) {
-	t.Helper()
-	if _, err := port.Reserve(context.Background(), id); err != nil {
-		t.Fatalf("Reserve() error = %v", err)
-	}
-}
-
-func assertCalls(t *testing.T, port *quota.Mock, want []quota.CallRecord) {
-	t.Helper()
-	if got := port.Calls(); len(got) != len(want) {
-		t.Fatalf("len(Calls()) = %d, want %d; calls = %+v", len(got), len(want), got)
-	} else {
-		for i := range want {
-			if got[i] != want[i] {
-				t.Errorf("Calls()[%d] = %+v, want %+v", i, got[i], want[i])
-			}
-		}
+	if calls := repo.TypedCalls(); len(calls) != 2 {
+		t.Fatalf("repository calls = %d, want reserve + finalize", len(calls))
 	}
 }

@@ -25,7 +25,7 @@ func TestDomainInMemoryCancellationWhileWaitingForLockDoesNotReadOrWrite(t *test
 		{
 			name: "finalize",
 			call: func(ctx context.Context) (Reservation, error) {
-				return repo.FinalizeReservation(ctx, in.ID, FinalizeOutcome{Disposition: AccountingUnpricedSuccess})
+				return repo.FinalizeReservation(ctx, FinalizeRequest{ID: in.ID, Outcome: FinalizeOutcome{Disposition: AccountingUnpricedSuccess}})
 			},
 			check: func(t *testing.T) {
 				t.Helper()
@@ -111,25 +111,25 @@ func TestTypedMockPrecancelDoesNotCallOverride(t *testing.T) {
 	cancel()
 
 	called := false
-	mock.SetReserveReservationFn(func(context.Context, Reservation) (Reservation, error) {
+	mock.SetReserveReservationFn(func(context.Context, ReserveRequest) (Reservation, error) {
 		called = true
 		return Reservation{}, nil
 	})
 	if _, err := mock.ReserveReservation(ctx, in); !errors.Is(err, context.Canceled) || called {
 		t.Fatalf("reserve err=%v override-called=%t", err, called)
 	}
-	mock.SetFinalizeReservationFn(func(context.Context, ReservationID, FinalizeOutcome) (Reservation, error) {
+	mock.SetFinalizeReservationFn(func(context.Context, FinalizeRequest) (Reservation, error) {
 		called = true
 		return Reservation{}, nil
 	})
-	if _, err := mock.FinalizeReservation(ctx, in.ID, FinalizeOutcome{Disposition: AccountingUnpricedSuccess}); !errors.Is(err, context.Canceled) || called {
+	if _, err := mock.FinalizeReservation(ctx, FinalizeRequest{ID: in.ID, Outcome: FinalizeOutcome{Disposition: AccountingUnpricedSuccess}}); !errors.Is(err, context.Canceled) || called {
 		t.Fatalf("finalize err=%v override-called=%t", err, called)
 	}
-	mock.SetReleaseReservationFn(func(context.Context, ReservationID, ReleaseReason) (Reservation, error) {
+	mock.SetReleaseReservationFn(func(context.Context, ReleaseRequest) (Reservation, error) {
 		called = true
 		return Reservation{}, nil
 	})
-	if _, err := mock.ReleaseReservation(ctx, in.ID, ReleaseFailed); !errors.Is(err, context.Canceled) || called {
+	if _, err := mock.ReleaseReservation(ctx, ReleaseRequest{ID: in.ID, Reason: ReleaseFailed}); !errors.Is(err, context.Canceled) || called {
 		t.Fatalf("release err=%v override-called=%t", err, called)
 	}
 	mock.SetLookupFn(func(context.Context, ReservationID) (Reservation, error) {
@@ -147,11 +147,12 @@ func TestTypedDomainFormattingIsRedactedForAllVerbs(t *testing.T) {
 	record := typedReservation(id)
 	record.Metadata.Subject = marker
 	record.Metadata.Model = marker
-	record.Settlement = TerminalSettlement{Outcome: &FinalizeOutcome{Disposition: AccountingConfirmedUsage, Usage: ConfirmedUsage{InputTokens: 123, OutputTokens: 456}}}
 	call := TypedCallRecord{Method: "ReserveReservation", ID: id}
 	mock := NewTypedMock()
 
-	for _, value := range []any{record, id, record.Metadata, record.Estimate, *record.Settlement.Outcome, record.Settlement, call, mock, NewDomainInMemory()} {
+	outcome := FinalizeOutcome{Disposition: AccountingConfirmedUsage, Usage: ConfirmedUsage{InputTokens: 123, OutputTokens: 456, TotalTokens: 579}}
+	settlement := TerminalSettlement{Outcome: &outcome}
+	for _, value := range []any{record, id, record.Metadata, record.Estimate, outcome, settlement, call, mock, NewDomainInMemory()} {
 		for _, verb := range []string{"%v", "%+v", "%#v", "%s", "%q", "%x", "%X"} {
 			got := fmt.Sprintf(verb, value)
 			if strings.Contains(got, marker) || strings.Contains(got, "123") || strings.Contains(got, "456") {
@@ -177,7 +178,7 @@ func TestTypedFaultHookReceivesRecordButFormattingItIsRedacted(t *testing.T) {
 		}
 		return nil
 	})
-	if _, err := repo.FinalizeReservation(context.Background(), in.ID, FinalizeOutcome{Disposition: AccountingUnpricedSuccess}); err != nil || !seen {
+	if _, err := repo.FinalizeReservation(context.Background(), FinalizeRequest{ID: in.ID, Outcome: FinalizeOutcome{Disposition: AccountingUnpricedSuccess}}); err != nil || !seen {
 		t.Fatalf("finalize err=%v hook-seen=%t", err, seen)
 	}
 }

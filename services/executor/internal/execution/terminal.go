@@ -40,8 +40,10 @@ const (
 // returns ErrTerminalConflict and never calls the port, including when the
 // selected port operation fails after committing remotely.
 type Terminalizer struct {
-	port          quota.Port
-	reservationID string
+	repo          quota.Repository
+	reservationID quota.ReservationID
+	finalize      quota.FinalizeRequest
+	release       quota.ReleaseRequest
 
 	mu     sync.Mutex
 	intent terminalIntent
@@ -52,24 +54,26 @@ type Terminalizer struct {
 // NewTerminalizer creates a terminalizer for reservationID. It does not call
 // Reserve or validate reservation state: the Runner is responsible for
 // constructing it only after a successful reservation.
-func NewTerminalizer(port quota.Port, reservationID string) *Terminalizer {
-	return &Terminalizer{port: port, reservationID: reservationID}
+func NewTerminalizer(repo quota.Repository, reservationID quota.ReservationID) *Terminalizer {
+	return &Terminalizer{repo: repo, reservationID: reservationID}
 }
 
 // Finalize selects finalization as this reservation's terminal intent.
-func (t *Terminalizer) Finalize(ctx context.Context) error {
-	return t.terminal(ctx, terminalIntentFinalize)
+func (t *Terminalizer) Finalize(ctx context.Context, outcome quota.FinalizeOutcome) error {
+	return t.terminal(ctx, terminalIntentFinalize, quota.FinalizeRequest{ID: t.reservationID, Outcome: outcome}, quota.ReleaseRequest{})
 }
 
 // Release selects release as this reservation's terminal intent.
-func (t *Terminalizer) Release(ctx context.Context) error {
-	return t.terminal(ctx, terminalIntentRelease)
+func (t *Terminalizer) Release(ctx context.Context, reason quota.ReleaseReason) error {
+	return t.terminal(ctx, terminalIntentRelease, quota.FinalizeRequest{}, quota.ReleaseRequest{ID: t.reservationID, Reason: reason})
 }
 
-func (t *Terminalizer) terminal(ctx context.Context, requested terminalIntent) error {
+func (t *Terminalizer) terminal(ctx context.Context, requested terminalIntent, finalize quota.FinalizeRequest, release quota.ReleaseRequest) error {
 	t.mu.Lock()
 	if t.intent != terminalIntentNone {
-		if t.intent != requested {
+		if t.intent != requested ||
+			(requested == terminalIntentFinalize && !sameFinalizeRequest(t.finalize, finalize)) ||
+			(requested == terminalIntentRelease && !sameReleaseRequest(t.release, release)) {
 			t.mu.Unlock()
 			return ErrTerminalConflict
 		}
@@ -84,6 +88,7 @@ func (t *Terminalizer) terminal(ctx context.Context, requested terminalIntent) e
 	}
 
 	t.intent = requested
+	t.finalize, t.release = finalize, release
 	t.done = make(chan struct{})
 	done := t.done
 	t.mu.Unlock()
@@ -91,9 +96,9 @@ func (t *Terminalizer) terminal(ctx context.Context, requested terminalIntent) e
 	var err error
 	switch requested {
 	case terminalIntentFinalize:
-		_, err = t.port.Finalize(ctx, t.reservationID)
+		_, err = t.repo.FinalizeReservation(ctx, t.finalize)
 	case terminalIntentRelease:
-		_, err = t.port.Release(ctx, t.reservationID)
+		_, err = t.repo.ReleaseReservation(ctx, t.release)
 	default:
 		panic("execution: unknown terminal intent")
 	}
@@ -103,4 +108,19 @@ func (t *Terminalizer) terminal(ctx context.Context, requested terminalIntent) e
 	close(done)
 	t.mu.Unlock()
 	return err
+}
+
+// These value-only comparisons are race-safe under Terminalizer.mu and avoid
+// reflect on a terminal settlement path. They intentionally compare every
+// request field: only an exact replay may wait for/replay the first result.
+func sameFinalizeRequest(a, b quota.FinalizeRequest) bool {
+	return a.ID == b.ID && a.Outcome.Disposition == b.Outcome.Disposition &&
+		a.Outcome.Outcome == b.Outcome.Outcome &&
+		a.Outcome.Usage.InputTokens == b.Outcome.Usage.InputTokens &&
+		a.Outcome.Usage.OutputTokens == b.Outcome.Usage.OutputTokens &&
+		a.Outcome.Usage.TotalTokens == b.Outcome.Usage.TotalTokens
+}
+
+func sameReleaseRequest(a, b quota.ReleaseRequest) bool {
+	return a.ID == b.ID && a.Reason == b.Reason
 }

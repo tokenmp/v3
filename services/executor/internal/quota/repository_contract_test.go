@@ -8,9 +8,10 @@ import (
 	"testing"
 )
 
-func typedReservation(id ReservationID) Reservation {
-	return Reservation{ID: id, Metadata: Metadata{RequestID: "req_123", Subject: "subject-1", KeyID: "key-1", Protocol: "openai", Model: "gpt-4o", InitialCandidate: "candidate-1", Revision: "revision-1", Generation: 1}, Estimate: Estimate{Basis: BasisNone}, State: ReservationReserved}
+func typedReservation(id ReservationID) ReserveRequest {
+	return ReserveRequest{ID: id, Metadata: Metadata{RequestID: "req_123", Subject: "subject-1", KeyID: "key-1", Protocol: "openai", Model: "gpt-4o", InitialCandidate: "candidate-1", Revision: "revision-1", Generation: 1}, Estimate: Estimate{Basis: BasisNone}}
 }
+
 func typedID(n string) ReservationID { return ReservationID("res_" + n + "aaaaaaaaaaaaaaaa") }
 
 // RepositoryContractTests verifies the public typed Repository contract.
@@ -55,19 +56,19 @@ func RepositoryContractTests(t *testing.T, newRepository func() Repository) {
 		repo := newRepository()
 		in := typedReservation(typedID("terminal"))
 		_, _ = repo.ReserveReservation(context.Background(), in)
-		outcome := FinalizeOutcome{Disposition: AccountingConfirmedUsage, Usage: ConfirmedUsage{InputTokens: 7, OutputTokens: 3}}
-		first, err := repo.FinalizeReservation(context.Background(), in.ID, outcome)
+		outcome := FinalizeOutcome{Disposition: AccountingConfirmedUsage, Usage: ConfirmedUsage{InputTokens: 7, OutputTokens: 3, TotalTokens: 10}}
+		first, err := repo.FinalizeReservation(context.Background(), FinalizeRequest{ID: in.ID, Outcome: outcome})
 		if err != nil {
 			t.Fatal(err)
 		}
-		second, err := repo.FinalizeReservation(context.Background(), in.ID, outcome)
+		second, err := repo.FinalizeReservation(context.Background(), FinalizeRequest{ID: in.ID, Outcome: outcome})
 		if err != nil || !sameSettlement(first.Settlement, second.Settlement) {
 			t.Fatalf("finalize replay state=%q err=%v", second.State, err)
 		}
-		if _, err := repo.FinalizeReservation(context.Background(), in.ID, FinalizeOutcome{Disposition: AccountingUnpricedSuccess}); !errors.Is(err, ErrConflict) {
+		if _, err := repo.FinalizeReservation(context.Background(), FinalizeRequest{ID: in.ID, Outcome: FinalizeOutcome{Disposition: AccountingUnpricedSuccess}}); !errors.Is(err, ErrConflict) {
 			t.Fatalf("different finalize = %v", err)
 		}
-		if _, err := repo.ReleaseReservation(context.Background(), in.ID, ReleaseFailed); !errors.Is(err, ErrConflict) {
+		if _, err := repo.ReleaseReservation(context.Background(), ReleaseRequest{ID: in.ID, Reason: ReleaseFailed}); !errors.Is(err, ErrConflict) {
 			t.Fatalf("opposite terminal = %v", err)
 		}
 		stored, err := repo.Lookup(context.Background(), in.ID)
@@ -79,20 +80,20 @@ func RepositoryContractTests(t *testing.T, newRepository func() Repository) {
 		repo := newRepository()
 		in := typedReservation(typedID("release"))
 		_, _ = repo.ReserveReservation(context.Background(), in)
-		if _, err := repo.ReleaseReservation(context.Background(), in.ID, ReleaseTimeout); err != nil {
+		if _, err := repo.ReleaseReservation(context.Background(), ReleaseRequest{ID: in.ID, Reason: ReleaseTimeout}); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := repo.ReleaseReservation(context.Background(), in.ID, ReleaseTimeout); err != nil {
+		if _, err := repo.ReleaseReservation(context.Background(), ReleaseRequest{ID: in.ID, Reason: ReleaseTimeout}); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := repo.ReleaseReservation(context.Background(), in.ID, ReleaseFailed); !errors.Is(err, ErrConflict) {
+		if _, err := repo.ReleaseReservation(context.Background(), ReleaseRequest{ID: in.ID, Reason: ReleaseFailed}); !errors.Is(err, ErrConflict) {
 			t.Fatalf("different release = %v", err)
 		}
 	})
 	t.Run("invalid inputs and precancel do not write", func(t *testing.T) {
 		repo := newRepository()
 		good := typedReservation(typedID("good"))
-		for name, in := range map[string]Reservation{"id": func() Reservation { x := good; x.ID = "bad"; return x }(), "metadata": func() Reservation { x := good; x.Metadata.Subject = " space"; return x }(), "estimate": func() Reservation { x := good; x.Estimate.Basis = "future"; return x }()} {
+		for name, in := range map[string]ReserveRequest{"id": func() ReserveRequest { x := good; x.ID = "bad"; return x }(), "metadata": func() ReserveRequest { x := good; x.Metadata.Subject = " space"; return x }(), "estimate": func() ReserveRequest { x := good; x.Estimate.Basis = "future"; return x }()} {
 			t.Run(name, func(t *testing.T) {
 				if _, err := repo.ReserveReservation(context.Background(), in); err == nil {
 					t.Fatal("ReserveReservation error = nil")
@@ -107,7 +108,7 @@ func RepositoryContractTests(t *testing.T, newRepository func() Repository) {
 		if _, err := repo.Lookup(context.Background(), good.ID); !errors.Is(err, ErrNotFound) {
 			t.Fatalf("precancel wrote state: %v", err)
 		}
-		if _, err := repo.FinalizeReservation(context.Background(), good.ID, FinalizeOutcome{Disposition: AccountingUnpricedSuccess}); !errors.Is(err, ErrNotFound) {
+		if _, err := repo.FinalizeReservation(context.Background(), FinalizeRequest{ID: good.ID, Outcome: FinalizeOutcome{Disposition: AccountingUnpricedSuccess}}); !errors.Is(err, ErrNotFound) {
 			t.Fatalf("unknown finalize = %v", err)
 		}
 		if _, err := repo.Lookup(context.Background(), ReservationID("bad")); !errors.Is(err, ErrInvalidReservation) {
@@ -169,11 +170,11 @@ func TestTypedRepositoryFaultAfterCommit(t *testing.T) {
 			fault := errors.New("after commit")
 			repo.SetTypedFaultHook(func(Reservation) error { return fault })
 			outcome := FinalizeOutcome{Disposition: AccountingUnpricedSuccess}
-			got, err := repo.FinalizeReservation(context.Background(), in.ID, outcome)
+			got, err := repo.FinalizeReservation(context.Background(), FinalizeRequest{ID: in.ID, Outcome: outcome})
 			if !errors.Is(err, fault) || got.State != ReservationFinalized {
 				t.Fatalf("Finalize state=%q err=%v", got.State, err)
 			}
-			got, err = repo.FinalizeReservation(context.Background(), in.ID, outcome)
+			got, err = repo.FinalizeReservation(context.Background(), FinalizeRequest{ID: in.ID, Outcome: outcome})
 			if err != nil || got.State != ReservationFinalized {
 				t.Fatalf("replay state=%q err=%v", got.State, err)
 			}
@@ -184,7 +185,9 @@ func TestTypedRepositoryFaultAfterCommit(t *testing.T) {
 func TestTypedMockCallsAndOverrides(t *testing.T) {
 	mock := NewTypedMock()
 	in := typedReservation(typedID("calls"))
-	mock.SetReserveReservationFn(func(context.Context, Reservation) (Reservation, error) { return Reservation{}, fmt.Errorf("backend") })
+	mock.SetReserveReservationFn(func(context.Context, ReserveRequest) (Reservation, error) {
+		return Reservation{}, fmt.Errorf("backend")
+	})
 	if _, err := mock.ReserveReservation(context.Background(), in); err == nil {
 		t.Fatal("override error = nil")
 	}

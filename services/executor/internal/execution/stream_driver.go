@@ -21,6 +21,7 @@ import (
 // Sink owns protocol rendering; the driver owns neither HTTP nor SSE framing.
 type StreamInput struct {
 	RequestID     string
+	QuotaIdentity QuotaIdentity
 	ReservationID string
 	Plan          routing.Plan
 	Resolver      *routing.Resolver
@@ -41,7 +42,7 @@ type StreamResult struct {
 // quota once, retries only failures before Bridge commit, and never owns
 // transport or runtime wiring. It is not safe for concurrent reuse.
 type StreamDriver struct {
-	Quota          quota.Port
+	Quota          quota.Repository
 	SDKRegistry    *SDKRegistry
 	Clock          retry.Clock
 	Sleeper        Sleeper
@@ -71,8 +72,11 @@ func (d *StreamDriver) Run(ctx context.Context, in StreamInput) (StreamResult, e
 	if !requestid.ValidReservationID(in.ReservationID) {
 		return StreamResult{}, ErrInvalidReservation
 	}
-	if strings.TrimSpace(in.RequestID) == "" {
+	if strings.TrimSpace(in.RequestID) == "" || quota.ValidateRequestID(in.RequestID) != nil {
 		return StreamResult{}, ErrInvalidRequestID
+	}
+	if quota.ValidateQuotaIdentity(in.QuotaIdentity.Subject, in.QuotaIdentity.KeyID, in.QuotaIdentity.Protocol) != nil {
+		return StreamResult{}, ErrInvalidQuotaIdentity
 	}
 	if len(in.Plan.Candidates) == 0 {
 		return StreamResult{}, ErrNoCandidate
@@ -89,15 +93,19 @@ func (d *StreamDriver) Run(ctx context.Context, in StreamInput) (StreamResult, e
 		return StreamResult{}, err
 	}
 	firstPrepared := firstCall.preparedAttempt()
-	if !validStreamTimeouts(firstPrepared) {
+	if !validStreamTimeouts(firstPrepared) || in.QuotaIdentity.Protocol != string(firstPrepared.Target.Protocol) {
 		return StreamResult{}, ErrMisconfigured
 	}
 	policy := firstPrepared.Retry
 	state := retry.NewState(in.Plan, d.Clock)
-	if _, err := d.Quota.Reserve(ctx, in.ReservationID); err != nil {
+	reservation := quota.ReserveRequest{ID: quota.ReservationID(in.ReservationID), Metadata: firstCall.ReservationMetadata(in.RequestID, in.QuotaIdentity), Estimate: quota.Estimate{Basis: quota.BasisNone}}
+	if err := reservation.Metadata.Validate(); err != nil {
+		return StreamResult{}, ErrMisconfigured
+	}
+	if _, err := d.Quota.ReserveReservation(ctx, reservation); err != nil {
 		return StreamResult{}, ErrQuotaReserve
 	}
-	terminalizer := NewTerminalizer(d.Quota, in.ReservationID)
+	terminalizer := NewTerminalizer(d.Quota, quota.ReservationID(in.ReservationID))
 
 	candidate := first
 	attemptNo := 0
@@ -178,14 +186,9 @@ func (d *StreamDriver) Run(ctx context.Context, in StreamInput) (StreamResult, e
 		if outcome.Committed {
 			if parentErr := ctx.Err(); parentErr != nil {
 				_ = state.Cancel()
-				if outcome.UnresolvedCost {
-					if err := d.releaseCleanup(ctx, terminalizer); err != nil {
-						d.logFailure(ctx, in, prepared, attemptNo, source.LastClassified(), retry.Decision{})
-						return StreamResult{}, errors.Join(parentErr, terminalizationError("release"))
-					}
-				} else if err := d.finalizeCleanup(ctx, terminalizer); err != nil {
+				if err := d.settleCommitted(ctx, terminalizer, outcome); err != nil {
 					d.logFailure(ctx, in, prepared, attemptNo, source.LastClassified(), retry.Decision{})
-					return StreamResult{}, errors.Join(parentErr, terminalizationError("finalize"))
+					return StreamResult{}, errors.Join(parentErr, terminalizationError("terminal"))
 				}
 				d.logFailure(ctx, in, prepared, attemptNo, source.LastClassified(), retry.Decision{})
 				return StreamResult{}, parentErr
@@ -194,19 +197,9 @@ func (d *StreamDriver) Run(ctx context.Context, in StreamInput) (StreamResult, e
 			if outcome.State == streaming.StateCompleted {
 				_ = state.RecordSuccess(ctx, attempt)
 			}
-			if outcome.UnresolvedCost {
-				if err := d.releaseCleanup(ctx, terminalizer); err != nil {
-					d.logFailure(ctx, in, prepared, attemptNo, source.LastClassified(), retry.Decision{})
-					return StreamResult{}, terminalizationError("release")
-				}
-				// A completed stream with unresolved cost was released, not a
-				// confirmed successful terminal operation.
+			if err := d.settleCommitted(ctx, terminalizer, outcome); err != nil {
 				d.logFailure(ctx, in, prepared, attemptNo, source.LastClassified(), retry.Decision{})
-				return StreamResult{Outcome: outcome}, nil
-			}
-			if err := d.finalizeCleanup(ctx, terminalizer); err != nil {
-				d.logFailure(ctx, in, prepared, attemptNo, source.LastClassified(), retry.Decision{})
-				return StreamResult{}, terminalizationError("finalize")
+				return StreamResult{}, terminalizationError("terminal")
 			}
 			if outcome.State == streaming.StateCompleted {
 				d.logSuccess(ctx, in, prepared, attemptNo)
@@ -316,18 +309,59 @@ func (d *StreamDriver) releaseCleanup(ctx context.Context, t *Terminalizer) erro
 	}
 	cleanup, cancel := d.cleanupContext(ctx)
 	defer cancel()
-	return t.Release(cleanup)
+	return t.Release(cleanup, quota.ReleaseFailed)
 }
-func (d *StreamDriver) finalizeCleanup(ctx context.Context, t *Terminalizer) error {
+func (d *StreamDriver) releaseCleanupReason(ctx context.Context, t *Terminalizer, reason quota.ReleaseReason) error {
 	if t == nil {
 		return ErrTerminalConflict
 	}
 	cleanup, cancel := d.cleanupContext(ctx)
 	defer cancel()
-	return t.Finalize(cleanup)
+	return t.Release(cleanup, reason)
+}
+func (d *StreamDriver) settleCommitted(ctx context.Context, t *Terminalizer, outcome streaming.Outcome) error {
+	if outcome.UnresolvedCost {
+		return d.releaseCleanupReason(ctx, t, quota.ReleaseUnresolved)
+	}
+	usage, ok := confirmedUsage(outcome.Usage, outcome.UsageKnown)
+	if !ok {
+		return d.releaseCleanupReason(ctx, t, quota.ReleaseUnresolved)
+	}
+	completion := quota.OutcomeAfterCommitError
+	switch outcome.State {
+	case streaming.StateCompleted:
+		completion = quota.OutcomeCompleted
+	case streaming.StateClientCancelled:
+		completion = quota.OutcomeClientCancelled
+	}
+	if t == nil {
+		return ErrTerminalConflict
+	}
+	cleanup, cancel := d.cleanupContext(ctx)
+	defer cancel()
+	return t.Finalize(cleanup, quota.FinalizeOutcome{
+		Disposition: quota.AccountingConfirmedUsage,
+		Outcome:     completion,
+		Usage:       usage,
+	})
+}
+
+func confirmedUsage(usage streaming.Usage, known bool) (quota.ConfirmedUsage, bool) {
+	// A zero-valued usage event is billable only when the source explicitly
+	// confirmed usage. Absence is unresolved; never infer confirmation from
+	// all-zero counters.
+	if !known || usage.PromptTokens < 0 || usage.CompletionTokens < 0 || usage.TotalTokens < 0 {
+		return quota.ConfirmedUsage{}, false
+	}
+	prompt, completion, total := uint64(usage.PromptTokens), uint64(usage.CompletionTokens), uint64(usage.TotalTokens)
+	if prompt > total || completion > total-prompt || prompt+completion != total {
+		return quota.ConfirmedUsage{}, false
+	}
+	confirmed := quota.ConfirmedUsage{InputTokens: prompt, OutputTokens: completion, TotalTokens: total}
+	return confirmed, confirmed.Valid()
 }
 func (d *StreamDriver) releaseFailure(ctx context.Context, t *Terminalizer, primary error) error {
-	if err := d.releaseCleanup(ctx, t); err != nil {
+	if err := d.releaseCleanupReason(ctx, t, releaseReason(primary)); err != nil {
 		return errors.Join(primary, terminalizationError("release"))
 	}
 	return primary

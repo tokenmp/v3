@@ -12,8 +12,7 @@ import (
 // an error leaves the committed state intact, allowing an exact replay.
 type TypedFaultHook func(Reservation) error
 
-// DomainInMemory implements Repository. It deliberately owns typed records
-// separately from the legacy Port map until Phase 12.2 migrates execution.
+// DomainInMemory implements Repository with one authoritative typed state map.
 type DomainInMemory struct {
 	mu        sync.Mutex
 	records   map[ReservationID]Reservation
@@ -32,7 +31,7 @@ func (m *DomainInMemory) SetTypedFaultHook(hook TypedFaultHook) {
 	m.faultHook = hook
 }
 
-func (m *DomainInMemory) ReserveReservation(ctx context.Context, in Reservation) (Reservation, error) {
+func (m *DomainInMemory) ReserveReservation(ctx context.Context, in ReserveRequest) (Reservation, error) {
 	if err := ctx.Err(); err != nil {
 		return Reservation{}, err
 	}
@@ -52,41 +51,43 @@ func (m *DomainInMemory) ReserveReservation(ctx context.Context, in Reservation)
 		}
 		return old.clone(), nil
 	}
-	if !in.validForReserve() {
+	if !in.valid() {
 		if !in.Metadata.valid() {
 			return Reservation{}, ErrInvalidMetadata
 		}
 		return Reservation{}, ErrInvalidEstimate
 	}
-	in.CreatedAt = time.Now().UTC()
-	m.records[in.ID] = in.clone()
-	return in.clone(), nil
+	record := in.reservation()
+	record.CreatedAt = time.Now().UTC()
+	m.records[in.ID] = record.clone()
+	return record.clone(), nil
 }
 
-func (m *DomainInMemory) FinalizeReservation(ctx context.Context, id ReservationID, outcome FinalizeOutcome) (Reservation, error) {
+func (m *DomainInMemory) FinalizeReservation(ctx context.Context, in FinalizeRequest) (Reservation, error) {
 	if err := ctx.Err(); err != nil {
 		return Reservation{}, err
 	}
-	if !id.Valid() {
+	if !in.ID.Valid() {
 		return Reservation{}, ErrInvalidReservation
 	}
-	if !outcome.valid() {
+	in.Outcome = in.Outcome.normalized()
+	if !in.Outcome.valid() {
 		return Reservation{}, ErrInvalidOutcome
 	}
-	return m.terminal(ctx, id, ReservationFinalized, TerminalSettlement{Outcome: &outcome})
+	return m.terminal(ctx, in.ID, ReservationFinalized, TerminalSettlement{Outcome: &in.Outcome})
 }
 
-func (m *DomainInMemory) ReleaseReservation(ctx context.Context, id ReservationID, reason ReleaseReason) (Reservation, error) {
+func (m *DomainInMemory) ReleaseReservation(ctx context.Context, in ReleaseRequest) (Reservation, error) {
 	if err := ctx.Err(); err != nil {
 		return Reservation{}, err
 	}
-	if !id.Valid() {
+	if !in.ID.Valid() {
 		return Reservation{}, ErrInvalidReservation
 	}
-	if !reason.valid() {
+	if !in.Reason.valid() {
 		return Reservation{}, ErrInvalidRelease
 	}
-	return m.terminal(ctx, id, ReservationReleased, TerminalSettlement{Reason: &reason})
+	return m.terminal(ctx, in.ID, ReservationReleased, TerminalSettlement{Reason: &in.Reason})
 }
 
 func (m *DomainInMemory) Lookup(ctx context.Context, id ReservationID) (Reservation, error) {
@@ -148,9 +149,8 @@ func (m *DomainInMemory) terminal(ctx context.Context, id ReservationID, state R
 	return committed, nil
 }
 
-func sameReservationClaim(stored, claim Reservation) bool {
-	return claim.Metadata == stored.Metadata && claim.Estimate == stored.Estimate &&
-		claim.State == ReservationReserved && claim.Settlement == (TerminalSettlement{}) && claim.CreatedAt.IsZero()
+func sameReservationClaim(stored Reservation, claim ReserveRequest) bool {
+	return claim.Metadata == stored.Metadata && claim.Estimate == stored.Estimate
 }
 
 func sameSettlement(a, b TerminalSettlement) bool {

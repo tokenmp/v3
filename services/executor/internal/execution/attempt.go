@@ -9,6 +9,7 @@ import (
 
 	"github.com/tokenmp/v3/services/executor/internal/adapter"
 	"github.com/tokenmp/v3/services/executor/internal/execution/retry"
+	"github.com/tokenmp/v3/services/executor/internal/quota"
 	"github.com/tokenmp/v3/services/executor/internal/routing"
 	"github.com/tokenmp/v3/services/executor/internal/sdk"
 )
@@ -140,6 +141,16 @@ func (p *AttemptPreparer) preflight(ctx context.Context, candidate routing.Candi
 // for other packages: neither provider target nor applied request can be
 // inspected or retained outside execution.
 func (p PreparedCall) preparedAttempt() routing.PreparedAttempt { return p.prepared }
+
+// ReservationMetadata returns the safe snapshot-pinned attribution for the
+// initial candidate. It deliberately exposes neither target nor request data.
+func (p PreparedCall) ReservationMetadata(requestID string, identity QuotaIdentity) quota.Metadata {
+	c := p.candidate
+	return quota.Metadata{RequestID: requestID, Subject: identity.Subject, KeyID: identity.KeyID,
+		Protocol: identity.Protocol, Model: c.ModelID, ProviderID: c.Provider.ID,
+		RouteID: c.RouteID, CredentialID: c.Credential.ID, AdapterID: c.AdapterID,
+		Revision: p.prepared.Revision, Generation: p.prepared.Generation}
+}
 
 // AttemptSession is the single-use transition from a credential-free
 // PreparedCall to one actual attempt. It stores no credential material. Execute
