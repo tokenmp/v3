@@ -190,6 +190,17 @@ type fakeSource struct {
 	closeCount   int64
 }
 
+// assignSequence assigns explicit, increasing test-only source sequences.
+// fakeSource itself preserves inputs exactly so malformed sequence tests cannot
+// accidentally become valid through fixture behavior.
+func assignSequence(events ...Event) []Event {
+	copied := append([]Event(nil), events...)
+	for i := range copied {
+		copied[i].Sequence = uint64(i + 1)
+	}
+	return copied
+}
+
 func newFakeSource(events ...Event) *fakeSource {
 	return &fakeSource{events: append([]Event(nil), events...)}
 }

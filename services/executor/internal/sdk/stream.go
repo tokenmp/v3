@@ -10,13 +10,40 @@ import (
 	"github.com/tokenmp/v3/services/executor/internal/streaming"
 )
 
+// MaxStreamEventDataBytes is the hard cap for one owned canonical provider
+// payload. Keeping this shared boundary at 256 KiB bounds the future driver's
+// pre-commit payload retention to 35 × 256 KiB rather than tens of MiB.
+const MaxStreamEventDataBytes = 256 << 10
+
 // StreamEvent joins the protocol-neutral lifecycle metadata with an owned,
 // canonical protocol payload for a future renderer. Data is never shared with
-// an SDK decoder or caller-owned input buffer.
+// an SDK decoder or caller-owned input buffer, and is at most
+// MaxStreamEventDataBytes bytes. EventNativeError has nil Data.
 type StreamEvent struct {
 	Sequence uint64
 	Meta     streaming.Event
 	Data     json.RawMessage
+	// Classified is present only for EventNativeError. It is safe, owned
+	// terminal metadata for retry/accounting decisions; it never carries raw
+	// provider error text or payload.
+	Classified *ClassifiedError
+}
+
+// CloneStreamEvent returns an independent owned copy suitable for crossing an
+// execution boundary. It copies payload bytes and the safe classified error;
+// it never retains caller-owned mutable data.
+func CloneStreamEvent(event StreamEvent) StreamEvent {
+	if event.Meta.Progress != nil {
+		value := *event.Meta.Progress
+		event.Meta.Progress = &value
+	}
+	if event.Meta.Usage != nil {
+		value := *event.Meta.Usage
+		event.Meta.Usage = &value
+	}
+	event.Data = append(json.RawMessage(nil), event.Data...)
+	event.Classified = CloneClassifiedError(event.Classified)
+	return event
 }
 
 // String, GoString, and Format expose only the fixed type, sequence, and
@@ -32,7 +59,11 @@ func (e StreamEvent) Format(state fmt.State, verb rune) {
 
 // StreamSource is a provider semantic stream. It deliberately differs from
 // streaming.Source: protocol adapters own payload parsing/classification while
-// the streaming core remains metadata-only.
+// the streaming core remains metadata-only. Next is serial and must honor its
+// context. Close is idempotent, safe to call concurrently with an in-flight
+// Next, and non-blocking (or bounded); it must cancel or otherwise unblock an
+// in-flight Next where the provider permits it. After Close, the source must
+// not be reused.
 type StreamSource interface {
 	Next(context.Context) (StreamEvent, error)
 	Close() error

@@ -17,6 +17,7 @@ package streaming
 import (
 	"context"
 	"errors"
+	"fmt"
 )
 
 // EventKind classifies one upstream stream event as the Bridge's state machine
@@ -81,6 +82,11 @@ type Usage struct {
 // NO raw bytes, NO protocol fields, NO downstream renderer interface, and NO
 // credential/URL/routing detail.
 type Event struct {
+	// Sequence is the source-assigned, strictly increasing event sequence. The
+	// Bridge rejects zero, duplicate, and decreasing values at its intake
+	// boundary before any event can be committed or written downstream.
+	Sequence uint64
+
 	// Kind is the event classification. Required; the zero value is treated as
 	// a protocol violation.
 	Kind EventKind
@@ -103,6 +109,14 @@ type Event struct {
 	// pre-commit usage is discarded (pre-commit failure reports zero usage).
 	Usage *Usage
 }
+
+// String, GoString, and Format expose only sequence and kind. Event metadata
+// may originate upstream, so diagnostic formatting must never expose it.
+func (e Event) String() string {
+	return fmt.Sprintf("streaming.Event{Sequence:%d Kind:%s}", e.Sequence, e.Kind)
+}
+func (e Event) GoString() string               { return e.String() }
+func (e Event) Format(state fmt.State, _ rune) { _, _ = state.Write([]byte(e.String())) }
 
 // Source is the protocol-neutral upstream stream event source. A
 // protocol-specific adapter implements it; the Bridge never parses upstream

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tokenmp/v3/services/executor/internal/sdk"
 	"github.com/tokenmp/v3/services/executor/internal/streaming"
 )
 
@@ -58,6 +59,47 @@ func mustParse(t *testing.T, raw []byte) []byte {
 		t.Fatal(err)
 	}
 	return d
+}
+
+func TestParseChunkInBandErrorIsPayloadFreeNativeEvent(t *testing.T) {
+	ev, data, err := parseChunk([]byte(`{"error":{"message":"secret payload","code":"ignored"}}`))
+	if err != nil || ev.Kind != streaming.EventNativeError || data != nil {
+		t.Fatalf("event/data/error = %#v/%q/%v", ev, data, err)
+	}
+}
+
+func TestParseChunkStreamEventDataLimit(t *testing.T) {
+	t.Parallel()
+	// A bounded logprobs array controls total input size without exceeding the
+	// parser's independent 64 KiB per-string cap.
+	prefix := []byte(`{"id":"c","object":"chat.completion.chunk","created":1,"model":"m","choices":[{"index":0,"delta":{"content":"x"},"finish_reason":null,"logprobs":[`)
+	suffix := []byte(`]}]}`)
+	const values = 4
+	filler := sdk.MaxStreamEventDataBytes - len(prefix) - len(suffix) - (2*values + values - 1)
+	if filler < 0 || filler > values*maxStringBytes {
+		t.Fatalf("invalid bounded test filler = %d", filler)
+	}
+	atLimit := append([]byte(nil), prefix...)
+	for i := 0; i < values; i++ {
+		if i > 0 {
+			atLimit = append(atLimit, ',')
+		}
+		length := filler / (values - i)
+		filler -= length
+		atLimit = append(atLimit, '"')
+		atLimit = append(atLimit, bytes.Repeat([]byte("x"), length)...)
+		atLimit = append(atLimit, '"')
+	}
+	atLimit = append(atLimit, suffix...)
+	if len(atLimit) != sdk.MaxStreamEventDataBytes {
+		t.Fatalf("at-limit size = %d", len(atLimit))
+	}
+	if _, data, err := parseChunk(atLimit); err != nil || len(data) > sdk.MaxStreamEventDataBytes {
+		t.Fatalf("at-limit parse = (%d bytes, %v)", len(data), err)
+	}
+	if _, _, err := parseChunk(append(atLimit, ' ')); !errors.Is(err, errChunkProtocol) {
+		t.Fatalf("over-limit parse = %v", err)
+	}
 }
 
 func TestParseChunkRejectsInvalidWithoutLeakingPayload(t *testing.T) {

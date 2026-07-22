@@ -19,6 +19,9 @@ var (
 	// single-use so a credential can never be silently reused for another wire
 	// attempt.
 	ErrAttemptSessionUsed = errors.New("execution: attempt session already used")
+	// ErrStreamCleanup is a safe envelope for a provider-owned source Close
+	// panic or error. Provider text is intentionally never wrapped.
+	ErrStreamCleanup = errors.New("execution: stream cleanup failed")
 )
 
 // AttemptPreparer owns the pure, per-candidate preparation shared by execution
@@ -59,11 +62,12 @@ func NewAttemptPreparer(resolver *routing.Resolver, plan routing.Plan, registry 
 // neither of which may be rendered into logs or errors. Use NewAttemptSession
 // to acquire a call-local credential and start one logical attempt.
 type PreparedCall struct {
-	prepared  routing.PreparedAttempt
-	applied   adapter.AppliedRequest
-	client    sdk.Client
-	resolver  *routing.Resolver
-	candidate routing.Candidate
+	prepared     routing.PreparedAttempt
+	applied      adapter.AppliedRequest
+	client       sdk.Client
+	streamClient sdk.StreamClient
+	resolver     *routing.Resolver
+	candidate    routing.Candidate
 }
 
 // String, GoString, and Format prevent accidental rendering of an applied
@@ -78,6 +82,17 @@ func (PreparedCall) Format(state fmt.State, _ rune) {
 // Preflight returns one independent prepared call for candidate. It has no
 // credential, quota, retry-state, or SDK-call side effect.
 func (p *AttemptPreparer) Preflight(ctx context.Context, candidate routing.Candidate) (PreparedCall, error) {
+	return p.preflight(ctx, candidate, false)
+}
+
+// PreflightStream performs the same credential-free preparation as Preflight,
+// but requires an independently registered exact streaming capability. It does
+// not resolve credentials or open a provider stream.
+func (p *AttemptPreparer) PreflightStream(ctx context.Context, candidate routing.Candidate) (PreparedCall, error) {
+	return p.preflight(ctx, candidate, true)
+}
+
+func (p *AttemptPreparer) preflight(ctx context.Context, candidate routing.Candidate, stream bool) (PreparedCall, error) {
 	if p == nil || p.resolver == nil || p.registry == nil {
 		return PreparedCall{}, ErrMisconfigured
 	}
@@ -103,11 +118,21 @@ func (p *AttemptPreparer) Preflight(ctx context.Context, candidate routing.Candi
 	if !sdkAuthCompatible(prepared.Adapter.SDKKind, prepared.Adapter.Auth.Kind) {
 		return PreparedCall{}, ErrIncompatibleAuth
 	}
+	call := PreparedCall{prepared: prepared, applied: applied, resolver: p.resolver, candidate: candidate}
+	if stream {
+		client, err := p.registry.StreamClient(prepared.Adapter.SDKKind, prepared.Adapter.Protocol)
+		if err != nil {
+			return PreparedCall{}, err
+		}
+		call.streamClient = client
+		return call, nil
+	}
 	client, err := p.registry.Client(prepared.Adapter.SDKKind, prepared.Adapter.Protocol)
 	if err != nil {
 		return PreparedCall{}, err
 	}
-	return PreparedCall{prepared: prepared, applied: applied, client: client, resolver: p.resolver, candidate: candidate}, nil
+	call.client = client
+	return call, nil
 }
 
 // preparedAttempt returns a value copy only to orchestration in this package.
@@ -145,7 +170,7 @@ func (p PreparedCall) NewAttemptSession(state *retry.State, policy adapter.Compi
 // callback returns. A nil callback is rejected before credential resolution or
 // BeginAttempt.
 func (s *AttemptSession) Execute(ctx context.Context, call func(sdk.Client, sdk.Call)) (retry.Attempt, bool, bool, error) {
-	if s == nil || s.prepared.resolver == nil || s.state == nil || call == nil {
+	if s == nil || s.prepared.resolver == nil || s.state == nil || call == nil || isTypedNil(s.credentials) {
 		return retry.Attempt{}, false, false, ErrMisconfigured
 	}
 	if ctx == nil {
@@ -195,4 +220,92 @@ func (s *AttemptSession) Execute(ctx context.Context, call func(sdk.Client, sdk.
 		Secret:    secret,
 	})
 	return attempt, true, true, nil
+}
+
+// ExecuteStream acquires the credential, begins exactly one logical attempt,
+// then synchronously invokes open with the stream capability selected by
+// PreflightStream. It revokes the scoped secret before returning. The returned
+// source, when any, is caller-owned; it must not depend on access to the
+// StreamCall secret after open returns. If opening fails with a source, this
+// method closes that source before returning to avoid a provider resource leak.
+// TTFT and stream lifecycle timing are deliberately not owned by this layer.
+func (s *AttemptSession) ExecuteStream(ctx context.Context, open func(sdk.StreamClient, sdk.StreamCall) (sdk.StreamOpen, error)) (retry.Attempt, bool, bool, sdk.StreamOpen, error) {
+	if s == nil || s.prepared.resolver == nil || isNilInterface(s.prepared.streamClient) || s.state == nil || open == nil || isTypedNil(s.credentials) {
+		return retry.Attempt{}, false, false, sdk.StreamOpen{}, ErrMisconfigured
+	}
+	if ctx == nil {
+		return retry.Attempt{}, false, false, sdk.StreamOpen{}, context.Canceled
+	}
+	if err := ctx.Err(); err != nil {
+		return retry.Attempt{}, false, false, sdk.StreamOpen{}, err
+	}
+
+	s.mu.Lock()
+	if s.used {
+		s.mu.Unlock()
+		return retry.Attempt{}, false, false, sdk.StreamOpen{}, ErrAttemptSessionUsed
+	}
+	s.used = true
+	s.mu.Unlock()
+
+	resolved, err := s.prepared.resolver.ResolveCredential(ctx, s.prepared.candidate, s.credentials)
+	if err != nil {
+		return retry.Attempt{}, false, false, sdk.StreamOpen{}, err
+	}
+	var secret sdk.CredentialSecret
+	var revoke func()
+	if err := resolved.Use(func(value []byte) error {
+		secret, revoke = sdk.NewScopedCredentialSecret(value)
+		return nil
+	}); err != nil {
+		return retry.Attempt{}, false, false, sdk.StreamOpen{}, err
+	}
+	defer revoke()
+
+	attempt, err := s.state.BeginAttempt(ctx, s.prepared.candidate, s.policy)
+	if err != nil {
+		return retry.Attempt{}, true, false, sdk.StreamOpen{}, err
+	}
+	streamCall := sdk.StreamCall{
+		Candidate: s.prepared.prepared.Candidate,
+		Target:    s.prepared.prepared.Target,
+		Request:   s.prepared.applied,
+		Secret:    secret,
+	}
+	opened, err := open(s.prepared.streamClient, streamCall)
+	if err != nil {
+		if cleanupErr := safeCloseStreamSource(opened.Source); cleanupErr != nil {
+			// Preserve an already-classified opening failure for errors.As while
+			// never exposing a provider Close error or panic.
+			err = errors.Join(err, cleanupErr)
+		}
+		return attempt, true, true, sdk.StreamOpen{}, err
+	}
+	if isNilInterface(opened.Source) {
+		// An unusable successful opening still owns its source. Close any genuine
+		// source and expose only the fixed cleanup sentinel on failure.
+		if cleanupErr := safeCloseStreamSource(opened.Source); cleanupErr != nil {
+			return attempt, true, true, sdk.StreamOpen{}, errors.Join(ErrMisconfigured, cleanupErr)
+		}
+		return attempt, true, true, sdk.StreamOpen{}, ErrMisconfigured
+	}
+	return attempt, true, true, opened, nil
+}
+
+// safeCloseStreamSource closes only a genuinely non-nil source. Provider
+// implementations are outside this package, so Close failures and panics are
+// reduced to one safe sentinel rather than leaking provider-controlled text.
+func safeCloseStreamSource(source sdk.StreamSource) (err error) {
+	if isNilInterface(source) {
+		return nil
+	}
+	defer func() {
+		if recover() != nil {
+			err = ErrStreamCleanup
+		}
+	}()
+	if source.Close() != nil {
+		return ErrStreamCleanup
+	}
+	return nil
 }

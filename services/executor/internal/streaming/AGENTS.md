@@ -4,7 +4,7 @@
 
 ## 模块职责
 
-- 负责：transport-neutral streaming execution boundary —— streaming state machine、first-token commit gate、TTFT/stream-idle/stream-lifetime timer control、pre-commit lifecycle buffer、bounded safe Event metadata、monotonic bounded usage、safe terminal `Outcome`。
+- 负责：transport-neutral streaming execution boundary —— streaming state machine、first-token commit gate、TTFT/stream-idle/stream-lifetime timer control、pre-commit lifecycle buffer、strictly increasing non-zero source `Event.Sequence`、bounded safe Event metadata、monotonic bounded usage、safe terminal `Outcome`；post-commit `EventNativeError` 直接产生安全 `ReasonUpstreamError` outcome，不调用 Sink。
 - 不负责：SSE framing/解析、protocol-aware semantic detection（OpenAI/Anthropic/Responses delta 解码）、downstream rendering、`internal/sdk` semantic stream（Phase 8.1 shared port/OpenAI adapter 已实施，但尚未接本包 payload）、`internal/execution` attempt/retry/quota orchestration、`internal/transport`/`internal/composition` runtime 接入、credential/URL/routing detail。当前无模块内 runtime consumer，`stream:true` 仍不可用。任何 raw bytes / protocol field / downstream renderer interface / credential 均不进入本包。
 - 所有者：`services/executor/internal/streaming/{types.go,state.go,clock.go,bridge.go,*_test.go}`。
 
@@ -12,8 +12,8 @@
 
 | 能力/导出 | 输入与前置条件 | 返回/错误/副作用 | 稳定性 | 契约来源 |
 |---|---|---|---|---|
-| `Source` interface | `Next(ctx)`/`Close()` | `Next` honor ctx、返回 `ErrEndOfStream` 或 safe classified error；`Close` 幂等、可与 in-flight `Next` 并发、安全且 non-blocking/bounded，并尽可能 unblocks `Next` | experimental | `types.go` |
-| `Sink` interface | `Commit(ctx,[]Event)`/`WriteEvent`/`Flush` | Commit 成功 = whole batch written+flushed 的**逻辑 Sink contract**；失败 = downstream uncertain，不重试；不声明 HTTP atomicity 或 wire proof | experimental | `types.go` |
+| `Source` interface | `Next(ctx)`/`Close()`; `Event.Sequence` must be non-zero and strictly increasing | `Next` honor ctx、返回 `ErrEndOfStream` 或 safe classified error；`Close` 幂等、可与 in-flight `Next` 并发、安全且 non-blocking/bounded，并尽可能 unblocks `Next` | experimental | `types.go` |
+| `Sink` interface | `Commit(ctx,[]Event)`/`WriteEvent`/`Flush` (preserves validated source sequence) | Commit 成功 = whole batch written+flushed 的**逻辑 Sink contract**；失败 = downstream uncertain，不重试；不声明 HTTP atomicity 或 wire proof | experimental | `types.go` |
 | `Bridge.Run(ctx)` | 非 nil `Source`/`Sink`/valid `Timeouts`、`MaxTotal∈(0,MaxTotalHardCap]`、`MaxEvents∈(0,MaxEventsHardCap]` | `(Outcome, error)`；pre-commit failure 返 non-nil sentinel；post-commit failure 返 nil error + failed Outcome；success 返 nil + `StateCompleted` | experimental | `bridge.go` |
 | `Outcome` | — | `State`/`Reason`/`Committed`/`Usage`/`Finish`/`UnresolvedCost`/`TTFT`；pre-commit failure 时 `Usage` 恒为零 | experimental | `bridge.go` |
 
@@ -84,5 +84,5 @@ gofmt -l internal/streaming/ && go vet ./internal/streaming/
 ## 文档维护触发器
 
 - 公开导出（`Source`/`Sink`/`Bridge`/`Outcome`/`Event`/`State`/`Reason`/`Timeouts`）、返回结构、错误语义或副作用变化。
-- 依赖或消费者功能变化（OpenAI semantic stream adapter 已实施但尚未接本包；attempt/retry/quota、Bridge payload、transport 与 composition 接入均为 future PR）。
+- 依赖或消费者功能变化（OpenAI semantic stream adapter 已实施但尚未接本包；attempt/retry/quota、transport 与 composition 接入均为 future PR）。
 - 验证命令（race/fuzz）变化。

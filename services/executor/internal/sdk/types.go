@@ -4,9 +4,9 @@
 //
 // The port is deliberately narrow. It carries no provider response body,
 // request body, URL, header, or secret in any observer-facing or
-// error-facing surface, and it intentionally exposes no streaming entry
-// point: a [Client] can only [Client.Complete] one non-streaming call.
-// Provider failures are reduced to a [ClassifiedError] whose Error() string
+// error-facing surface. Non-stream and stream capabilities are independently
+// represented by [Client] and [StreamClient], so registering one never implies
+// the other. Provider failures are reduced to a [ClassifiedError] whose Error() string
 // is a fixed category only and never echoes an upstream message, code, type,
 // URL, or raw JSON body.
 package sdk
@@ -159,8 +159,8 @@ type Completion struct {
 }
 
 // Client is the upstream SDK port. A provider adapter implements it to perform
-// exactly one non-streaming call per [Client.Complete]. The port intentionally
-// exposes no streaming entry point.
+// exactly one non-streaming call per [Client.Complete]. Streaming is a
+// separate [StreamClient] capability in stream.go.
 type Client interface {
 	Complete(ctx context.Context, call Call) (Completion, error)
 }
@@ -313,6 +313,37 @@ func (e *ClassifiedError) Type() string {
 		return ""
 	}
 	return e.typ
+}
+
+// CloneClassifiedError returns an independent copy containing only the safe
+// classification fields. It deliberately does not preserve arbitrary wrapped
+// errors because ClassifiedError never owns one.
+func CloneClassifiedError(value *ClassifiedError) *ClassifiedError {
+	if value == nil {
+		return nil
+	}
+	kind := ErrUpstream
+	switch {
+	case errors.Is(value, context.DeadlineExceeded):
+		kind = context.DeadlineExceeded
+	case errors.Is(value, ErrTimeout):
+		kind = ErrTimeout
+	case errors.Is(value, ErrProtocol):
+		kind = ErrProtocol
+	case errors.Is(value, ErrTransport):
+		kind = ErrTransport
+	case errors.Is(value, ErrUnauthorized):
+		kind = ErrUnauthorized
+	case errors.Is(value, ErrForbidden):
+		kind = ErrForbidden
+	case errors.Is(value, ErrNotFound):
+		kind = ErrNotFound
+	case errors.Is(value, ErrRateLimited):
+		kind = ErrRateLimited
+	case errors.Is(value, ErrUnavailable):
+		kind = ErrUnavailable
+	}
+	return NewClassifiedError(kind, value.Status(), value.RequestID(), value.Code(), value.Type())
 }
 
 // ToUpstreamResponse maps the classified error into an [adapter.UpstreamResponse]

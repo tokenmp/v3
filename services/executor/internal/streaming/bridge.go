@@ -164,6 +164,7 @@ func (b *Bridge) Run(ctx context.Context) (Outcome, error) {
 		ttftElapsed  time.Duration
 		lastProgress time.Time // authoritative idle-deadline anchor after commit
 		eventsSeen   int64
+		lastSequence uint64
 	)
 
 	type recvResult struct {
@@ -339,6 +340,16 @@ func (b *Bridge) Run(ctx context.Context) (Outcome, error) {
 				}
 			}
 
+			// Source sequence is a strict intake contract. Validate it before
+			// sanitizing, counting, buffering, committing, or writing so a bad
+			// provider stream cannot create ambiguous downstream ordering.
+			if r.ev.Sequence == 0 || r.ev.Sequence <= lastSequence {
+				if !committed {
+					return preFail(ReasonProtocol, ErrProtocol)
+				}
+				return postFail(ReasonProtocol)
+			}
+			lastSequence = r.ev.Sequence
 			ev := sanitizeEvent(r.ev, maxTotal)
 
 			// Count every received Event before processing. The
@@ -475,10 +486,11 @@ func (b *Bridge) Run(ctx context.Context) (Outcome, error) {
 				if !committed {
 					return preFail(ReasonUpstreamError, ErrUpstreamError)
 				}
-				// Post-commit: forward + flush, then fail.
-				if out, err, ok := writeAndFlush(ev); !ok {
-					return out, err
-				}
+				// Native errors are classified upstream metadata, not renderer
+				// payloads. After commit, terminate without calling Sink; a future
+				// transport closes silently while a future driver consumes the safe
+				// outcome classification. Provider-legal error payloads need their
+				// own event kind and payload contract.
 				return postFail(ReasonUpstreamError)
 
 			default:

@@ -1,6 +1,9 @@
 package streaming
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
 
 // State is a streaming request lifecycle state. States follow the state
 // machine defined in docs/executor/architecture.md §11. Only the transitions
@@ -48,6 +51,20 @@ const (
 	// is cancelled. The Committed flag distinguishes pre/post-commit cancel.
 	StateClientCancelled State = "client_cancelled"
 )
+
+// String, GoString, and Format only render known lifecycle states. This
+// keeps arbitrary invalid State values out of ordinary diagnostic output.
+func (s State) String() string {
+	switch s {
+	case StateInit, StateConnecting, StateWaitingFirstSemanticEvent, StateCommitted,
+		StateStreaming, StateCompleted, StateFailedBeforeCommit, StateFailedAfterCommit, StateClientCancelled:
+		return string(s)
+	default:
+		return "unknown"
+	}
+}
+func (s State) GoString() string               { return s.String() }
+func (s State) Format(state fmt.State, _ rune) { _, _ = state.Write([]byte(s.String())) }
 
 // Terminal reports whether s is a terminal state (no further transitions).
 func (s State) Terminal() bool {
