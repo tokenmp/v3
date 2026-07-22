@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/tokenmp/v3/services/executor/internal/adapter"
 )
@@ -37,6 +38,7 @@ type CompiledSnapshot struct {
 	revision   string
 	value      CompiledConfig // concrete value prevents typed-nil
 	generation uint64
+	createdAt  time.Time
 }
 
 // NewCompiledSnapshot freezes a compiled configuration for publication.
@@ -45,6 +47,13 @@ type CompiledSnapshot struct {
 // The config is deep-copied immediately so later mutations to the caller's
 // input cannot affect the snapshot.
 func NewCompiledSnapshot(revision string, cfg *CompiledConfig, generation uint64) (*CompiledSnapshot, error) {
+	return NewCompiledSnapshotWithTime(revision, cfg, generation, time.Time{})
+}
+
+// NewCompiledSnapshotWithTime is like NewCompiledSnapshot but also records the
+// source configuration's creation timestamp. A zero createdAt is preserved
+// as-is; callers that need the timestamp must supply it explicitly.
+func NewCompiledSnapshotWithTime(revision string, cfg *CompiledConfig, generation uint64, createdAt time.Time) (*CompiledSnapshot, error) {
 	rev := strings.TrimSpace(revision)
 	if rev == "" || cfg == nil || strings.TrimSpace(cfg.Revision) == "" || generation == 0 {
 		return nil, ErrInvalidSnapshot
@@ -56,6 +65,7 @@ func NewCompiledSnapshot(revision string, cfg *CompiledConfig, generation uint64
 		revision:   rev,
 		value:      adapter.CloneCompiledConfig(*cfg),
 		generation: generation,
+		createdAt:  createdAt,
 	}, nil
 }
 
@@ -86,11 +96,22 @@ func (s *CompiledSnapshot) Generation() uint64 {
 	return s.generation
 }
 
+// CreatedAt returns the source configuration's creation timestamp. It returns
+// the zero time if the snapshot was constructed without a timestamp or for a
+// nil receiver.
+func (s *CompiledSnapshot) CreatedAt() time.Time {
+	if s == nil {
+		return time.Time{}
+	}
+	return s.createdAt
+}
+
 // storeEntry is the Store's internal retained snapshot with its generation.
 type storeEntry struct {
 	config     CompiledConfig
 	revision   string
 	generation uint64
+	createdAt  time.Time
 }
 
 // Store atomically publishes complete compiled snapshots. It retains the last
@@ -132,6 +153,7 @@ func (s *Store) Publish(snapshot *CompiledSnapshot) error {
 		config:     adapter.CloneCompiledConfig(snapshot.value),
 		revision:   snapshot.revision,
 		generation: snapshot.generation,
+		createdAt:  snapshot.createdAt,
 	}
 	s.current.Store(entry)
 	return nil
@@ -150,6 +172,7 @@ func (s *Store) Current() (*CompiledSnapshot, error) {
 		revision:   entry.revision,
 		value:      adapter.CloneCompiledConfig(entry.config),
 		generation: entry.generation,
+		createdAt:  entry.createdAt,
 	}, nil
 }
 

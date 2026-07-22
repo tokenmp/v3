@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -253,7 +252,7 @@ func TestBuildAuthenticatedChatMissingModelReturns404(t *testing.T) {
 	}
 }
 
-func TestBuildModelsResponsesImagesAreAuth501(t *testing.T) {
+func TestBuildModelsReturns200AndResponsesIs501(t *testing.T) {
 	t.Parallel()
 
 	path := writeConfig(t, minimalEmptyConfig)
@@ -262,49 +261,66 @@ func TestBuildModelsResponsesImagesAreAuth501(t *testing.T) {
 		t.Fatalf("Build() error = %v", err)
 	}
 
-	cases := []struct {
-		name, method, path string
-	}{
-		{"models", http.MethodGet, "/v1/models"},
-		{"responses", http.MethodPost, "/v1/responses"},
-	}
-	for _, tc := range cases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			// A fresh reader per request: an io.Reader can only be read once, so
-			// reusing one for the anonymous and authenticated dispatch would
-			// send an empty body on the second request.
-			makeBody := func() io.Reader {
-				if tc.method == http.MethodPost {
-					return strings.NewReader(`{"model":"x","input":"hi"}`)
-				}
-				return nil
-			}
-			req := httptest.NewRequest(tc.method, "http://127.0.0.1:8081"+tc.path, makeBody())
-			if req.Body != nil {
-				req.Header.Set("Content-Type", "application/json")
-			}
-			rec := httptest.NewRecorder()
-			handler.ServeHTTP(rec, req)
-			// All /v1 paths are auth-protected; without a bearer the result is
-			// 401, proving they are not anonymous. With a bearer they are 501.
-			if rec.Code != http.StatusUnauthorized {
-				t.Fatalf("anonymous %s status = %d, want 401 (auth-protected)", tc.path, rec.Code)
-			}
+	// /v1/models is auth-protected and returns 200 with an empty model list
+	// when authenticated with a valid bearer.
+	t.Run("models anonymous 401", func(t *testing.T) {
+		t.Parallel()
+		req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8081/v1/models", nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want 401", rec.Code)
+		}
+	})
 
-			authReq := httptest.NewRequest(tc.method, "http://127.0.0.1:8081"+tc.path, makeBody())
-			if authReq.Body != nil {
-				authReq.Header.Set("Content-Type", "application/json")
-			}
-			authReq.Header.Set("Authorization", "Bearer "+testAPIKey)
-			authRec := httptest.NewRecorder()
-			handler.ServeHTTP(authRec, authReq)
-			if authRec.Code != http.StatusNotImplemented {
-				t.Fatalf("authenticated %s status = %d, want 501", tc.path, authRec.Code)
-			}
-		})
-	}
+	t.Run("models authenticated 200", func(t *testing.T) {
+		t.Parallel()
+		req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8081/v1/models", nil)
+		req.Header.Set("Authorization", "Bearer "+testAPIKey)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+		}
+		var body map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		if body["object"] != "list" {
+			t.Errorf("object = %v, want list", body["object"])
+		}
+		data, ok := body["data"].([]any)
+		if !ok {
+			t.Fatalf("data type = %T, want []any", body["data"])
+		}
+		if len(data) != 0 {
+			t.Errorf("len(data) = %d, want 0 (empty config has no models)", len(data))
+		}
+	})
+
+	// /v1/responses remains 501.
+	t.Run("responses anonymous 401", func(t *testing.T) {
+		t.Parallel()
+		req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:8081/v1/responses", strings.NewReader(`{"model":"x","input":"hi"}`))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want 401", rec.Code)
+		}
+	})
+
+	t.Run("responses authenticated 501", func(t *testing.T) {
+		t.Parallel()
+		req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:8081/v1/responses", strings.NewReader(`{"model":"x","input":"hi"}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+testAPIKey)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusNotImplemented {
+			t.Fatalf("status = %d, want 501", rec.Code)
+		}
+	})
 }
 
 func TestBuildSDKRegistryRegistersExactCompletionAndStreamPairs(t *testing.T) {

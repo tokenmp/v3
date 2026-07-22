@@ -70,8 +70,8 @@ var contractExpectations = map[string]routeExpectation{
 	},
 	"GET /v1/models": {
 		anonStatus: http.StatusUnauthorized,
-		authStatus: http.StatusNotImplemented,
-		note:       "auth-protected; not executed by runtime",
+		authStatus: http.StatusOK,
+		note:       "auth-protected; returns empty model list for empty config",
 	},
 	"POST /v1/chat/completions": {
 		anonStatus: http.StatusUnauthorized,

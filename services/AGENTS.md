@@ -16,6 +16,8 @@ Phase 11 Images HTTP：legacy OpenAI Images 已注册到 execution registry、co
 
 Phase 12 typed quota domain：`executor/internal/quota/` typed `Repository` 和 typed value domain（locally validated `res_` ID、bounded safe metadata、仅 `BasisNone` estimate、typed terminal settlement/`Lookup`），并由 `DomainInMemory` 与 `TypedMock` shared contract/race/fuzz suite 覆盖；legacy `Port`/`InMemory`/`Mock` 已删除，`Repository`/`DomainInMemory`/`TypedMock` 是唯一实现。Runner 使用 `AccountingUnpricedSuccess`；StreamDriver 使用 `AccountingConfirmedUsage`（`streaming.UsageKnown` 时携带 `ConfirmedUsage`）或 `AccountingUnpricedSuccess`。无 usage charging、数据库或 durable storage。模块规则见 `executor/internal/quota/AGENTS.md`。
 
+Phase 13 models catalog：`executor/internal/modelcatalog/` 与 `executor/internal/modelcatalogfacade/`。transport-neutral `CatalogProvider` 端口、`CatalogRequest`/`CatalogResult`/`CatalogEntry`/`ThinkingConfig` 形状、secret-free `Principal` 与安全 sentinel，adapter Capability→contract string tag 映射与 ThinkingInput→ThinkingConfig 映射；facade per-request pin snapshot、过滤 enabled route model、quarantine fail-closed 排除、按 ID 排序输出；经 composition 接入 runtime，`GET /v1/models` 返回 snapshot-backed catalog（不再 501）。模块规则见 `executor/internal/modelcatalog/AGENTS.md` 与 `executor/internal/modelcatalogfacade/AGENTS.md`。
+
 ## 新增模块准入
 
 新增 `services/<name>/` 前必须确认：
