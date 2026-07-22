@@ -8,8 +8,8 @@ import (
 	"reflect"
 
 	"github.com/tokenmp/v3/services/executor/internal/authcontext"
-	"github.com/tokenmp/v3/services/executor/internal/modelcatalog"
 	executorv1 "github.com/tokenmp/v3/services/executor/internal/contract/executorv1"
+	"github.com/tokenmp/v3/services/executor/internal/modelcatalog"
 )
 
 const notImplementedMessage = "This endpoint is not implemented."
@@ -200,9 +200,37 @@ func contextLifecycleError(ctx context.Context, err error) error {
 	return nil
 }
 
-// CreateResponse returns an OpenAI-compatible indication that responses are not implemented.
-func (*Adapter) CreateResponse(context.Context, executorv1.CreateResponseRequestObject) (executorv1.CreateResponseResponseObject, error) {
-	return executorv1.CreateResponse501JSONResponse{OpenAINotImplementedJSONResponse: openAINotImplemented()}, nil
+// CreateResponse either returns the Foundation 501 response, fails closed
+// when no executor is wired, or normalizes the captured raw body and executes
+// exactly one non-stream OpenAI Responses request. Streaming requests get a
+// native 501 without execution; invalid requests get a native 400; the
+// trusted request ID is generated at most once and the renderer owns the
+// protocol-native body. Cancellation and deadline expiry are request-lifecycle
+// outcomes: after an executor call they return the original context error with
+// no response.
+func (a *Adapter) CreateResponse(ctx context.Context, _ executorv1.CreateResponseRequestObject) (executorv1.CreateResponseResponseObject, error) {
+	if a.foundation {
+		return executorv1.CreateResponse501JSONResponse{OpenAINotImplementedJSONResponse: openAINotImplemented()}, nil
+	}
+	requestID := a.requestID(ctx)
+	if isNilExecutor(a.nonStream) {
+		return RenderResponseError(errFailClosed), nil
+	}
+	normalized, err := NormalizeOpenAIResponses(ctx, requestID)
+	if lifecycleErr := contextLifecycleError(ctx, err); lifecycleErr != nil {
+		return nil, lifecycleErr
+	}
+	if err != nil {
+		return RenderResponseError(err), nil
+	}
+	result, err := a.nonStream.Execute(ctx, normalized)
+	if lifecycleErr := contextLifecycleError(ctx, err); lifecycleErr != nil {
+		return nil, lifecycleErr
+	}
+	if err != nil {
+		return RenderResponseError(err), nil
+	}
+	return RenderResponse(result), nil
 }
 
 // CreateImage executes one legacy OpenAI Images request through the same
@@ -253,9 +281,9 @@ func anthropicNotImplemented() executorv1.AnthropicNotImplementedJSONResponse {
 // Catalog rendering helpers.
 
 const (
-	statusActive  = "active"
-	roleService   = "service"
-	roleAdmin     = "admin"
+	statusActive   = "active"
+	roleService    = "service"
+	roleAdmin      = "admin"
 	catalogOwnedBy = "tokenmp"
 )
 
@@ -319,10 +347,10 @@ func renderCatalogResult(result modelcatalog.CatalogResult) executorv1.ListModel
 		}
 		if m.Thinking != nil {
 			thinking := executorv1.ModelThinkingConfig{
-				Supported:      m.Thinking.Supported,
-				DefaultEffort:  executorv1.ModelThinkingConfigDefaultEffort(m.Thinking.DefaultEffort),
-				MaxEffort:      executorv1.ModelThinkingConfigMaxEffort(m.Thinking.MaxEffort),
-				EffortLevels:   make([]executorv1.ModelThinkingConfigEffortLevels, 0, len(m.Thinking.EffortLevels)),
+				Supported:     m.Thinking.Supported,
+				DefaultEffort: executorv1.ModelThinkingConfigDefaultEffort(m.Thinking.DefaultEffort),
+				MaxEffort:     executorv1.ModelThinkingConfigMaxEffort(m.Thinking.MaxEffort),
+				EffortLevels:  make([]executorv1.ModelThinkingConfigEffortLevels, 0, len(m.Thinking.EffortLevels)),
 			}
 			for _, l := range m.Thinking.EffortLevels {
 				thinking.EffortLevels = append(thinking.EffortLevels, executorv1.ModelThinkingConfigEffortLevels(l))

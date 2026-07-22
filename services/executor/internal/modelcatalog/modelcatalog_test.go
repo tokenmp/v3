@@ -209,10 +209,10 @@ func TestEffortLevels(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name       string
-		def        adapter.ThinkingEffort
-		maxEffort  adapter.ThinkingEffort
-		want       []string
+		name      string
+		def       adapter.ThinkingEffort
+		maxEffort adapter.ThinkingEffort
+		want      []string
 	}{
 		{
 			name:      "none to max",

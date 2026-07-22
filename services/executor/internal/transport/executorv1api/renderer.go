@@ -118,6 +118,12 @@ func writeMessageResponse(w http.ResponseWriter, response executorv1.CreateMessa
 	}
 }
 
+func writeResponseResponse(w http.ResponseWriter, response executorv1.CreateResponseResponseObject) {
+	if response != nil {
+		_ = response.VisitCreateResponseResponse(w)
+	}
+}
+
 // RenderChatError renders a safe local transport error. A canceled or expired
 // request returns nil: the HTTP adapter owns those request-lifecycle outcomes
 // and must not try to write a second response.
@@ -635,6 +641,101 @@ func openAIError(status int, code, typ, message string) executorv1.OpenAIErrorRe
 	body.Error.Type = executorv1.OpenAIErrorResponseErrorType(typ)
 	return body
 }
+
+// RenderResponse converts a terminal non-stream execution outcome into the
+// native OpenAI Responses response object. A successful completion is passed
+// through byte-for-byte only after a bounded local contract check.
+func RenderResponse(result NonStreamResult) executorv1.CreateResponseResponseObject {
+	if validCompletion(result, validResponse) {
+		return responseRawResponse{body: append([]byte(nil), result.Completion.RawJSON...)}
+	}
+	if result.Failure != nil && completionAbsent(result) {
+		return responseFailure(*result.Failure)
+	}
+	return responseError(http.StatusInternalServerError, internalErrorCode, "api_error", internalErrorMessage)
+}
+
+// RenderResponseError renders a safe local transport error for the Responses
+// endpoint. Cancellation and deadline expiry return nil.
+func RenderResponseError(err error) executorv1.CreateResponseResponseObject {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return nil
+	}
+	if errors.Is(err, nonstream.ErrInvalidRequest) {
+		return responseError(http.StatusBadRequest, invalidErrorCode, "invalid_request_error", invalidErrorMessage)
+	}
+	if errors.Is(err, nonstream.ErrUnauthorized) {
+		return responseError(http.StatusUnauthorized, unauthorizedChatCode, "authentication_error", unauthorizedChatMessage)
+	}
+	if errors.Is(err, nonstream.ErrModelNotFound) {
+		return responseError(http.StatusNotFound, modelNotFoundChatCode, "invalid_request_error", modelNotFoundChatMessage)
+	}
+	if errors.Is(err, ErrStreamingUnsupported) {
+		return responseError(http.StatusNotImplemented, streamErrorCode, "api_error", streamErrorMessage)
+	}
+	return responseError(http.StatusInternalServerError, internalErrorCode, "api_error", internalErrorMessage)
+}
+
+// RenderResponseStreamResult renders the only pre-commit terminal stream
+// outcome that may be sent as JSON. Once an SSE sink has committed, the hybrid
+// handler deliberately ignores this response.
+func RenderResponseStreamResult(result StreamResult) executorv1.CreateResponseResponseObject {
+	if result.Failure != nil {
+		return responseFailure(*result.Failure)
+	}
+	return responseError(http.StatusInternalServerError, internalErrorCode, "api_error", internalErrorMessage)
+}
+
+type responseRawResponse struct{ body []byte }
+
+func (r responseRawResponse) VisitCreateResponseResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, err := w.Write(r.body)
+	return err
+}
+
+func validResponse(root map[string]any) bool {
+	if !isString(root["id"]) || root["object"] != "response" {
+		return false
+	}
+	if status, ok := root["status"]; !ok {
+		return false
+	} else if _, ok := status.(string); !ok {
+		return false
+	}
+	if _, ok := root["output"].([]any); !ok {
+		return false
+	}
+	return validResponseUsage(root["usage"])
+}
+
+func validResponseUsage(v any) bool {
+	u, ok := v.(map[string]any)
+	if !ok {
+		return false
+	}
+	return requiredInteger(u, "input_tokens") && requiredInteger(u, "output_tokens") && requiredInteger(u, "total_tokens")
+}
+
+func responseFailure(failure adapter.MappedResponse) executorv1.CreateResponseResponseObject {
+	status, code, typ, message := safeFailure(failure, false)
+	return responseError(status, code, typ, message)
+}
+
+func responseError(status int, code, typ, message string) executorv1.CreateResponseResponseObject {
+	return responseProtocolError{status: status, body: openAIError(status, code, typ, message)}
+}
+
+type responseProtocolError struct {
+	status int
+	body   executorv1.OpenAIErrorResponse
+}
+
+func (r responseProtocolError) VisitCreateResponseResponse(w http.ResponseWriter) error {
+	return writeJSON(w, r.status, r.body)
+}
+
 func anthropicError(code, typ, message, requestID string) executorv1.AnthropicErrorResponse {
 	body := executorv1.AnthropicErrorResponse{Type: executorv1.Error}
 	body.Error.Message = message

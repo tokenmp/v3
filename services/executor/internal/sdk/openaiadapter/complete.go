@@ -26,6 +26,8 @@ func (c *Client) Complete(ctx context.Context, call sdk.Call) (sdk.Completion, e
 		return c.completeChat(ctx, call)
 	case adapter.ProtocolOpenAIImages:
 		return c.completeImage(ctx, call)
+	case adapter.ProtocolOpenAIResponses:
+		return c.completeResponse(ctx, call)
 	default:
 		return sdk.Completion{}, ErrUnsupportedProtocol
 	}

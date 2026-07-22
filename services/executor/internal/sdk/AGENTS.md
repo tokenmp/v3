@@ -30,7 +30,7 @@ go vet ./internal/sdk/...
 - **DO NOT** 将 OpenAI 或 Anthropic stream adapter 写成 public/provider E2E，或让 adapter 自己拥有 HTTP transport/composition；Phase 10 composition 是唯一 runtime consumer，Chat/Messages `stream:true` 已启用。
 - **DO NOT** 在 adapter 外部设置 `Completion.Usage` 或 `Completion.Known`；这些字段仅供 adapter 提取逻辑填充，调用方不得直接赋值。
 - **DO NOT** 接受 EOF 作为成功完成；OpenAI adapter 只接受 bounded observer 证明的精确单个 `[DONE]`。
-- **DO NOT** 将 legacy Images completion-only non-stream capability 表述为 streaming capability、GPT Image 特有参数或 usage quota；`/v1/images/generations` 已鉴权真实执行，只有 `/v1/models` 与 `/v1/responses` 保持 501。Images `Known` 恒为 `false`，不提取 token usage。
+- **DO NOT** 将 legacy Images completion-only non-stream capability 表述为 streaming capability、GPT Image 特有参数或 usage quota；`/v1/images/generations` 已鉴权真实执行，`/v1/models` 与 `/v1/responses` 已不再 501（Phase 13/14）。Images `Known` 恒为 `false`，不提取 token usage。
 
 ## 文档维护触发器
 

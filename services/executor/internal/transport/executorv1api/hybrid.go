@@ -62,7 +62,47 @@ func (h *Hybrid) ListModels(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Hybrid) CreateResponse(w http.ResponseWriter, r *http.Request) {
-	h.strictServer().CreateResponse(w, r)
+	stream, err := DetectOpenAIResponsesStream(r.Context())
+	if lifecycleErr := contextLifecycleError(r.Context(), err); lifecycleErr != nil {
+		return
+	}
+	if err != nil {
+		writeResponseResponse(w, RenderResponseError(err))
+		return
+	}
+	if !stream {
+		h.strictServer().CreateResponse(w, r)
+		return
+	}
+
+	requestID := h.requestID(r.Context())
+	normalized, err := NormalizeOpenAIResponsesRequest(r.Context(), requestID)
+	if lifecycleErr := contextLifecycleError(r.Context(), err); lifecycleErr != nil {
+		return
+	}
+	if err != nil {
+		writeResponseResponse(w, RenderResponseError(err))
+		return
+	}
+	if !normalized.Stream {
+		writeResponseResponse(w, RenderResponseError(ErrInvalidRequest))
+		return
+	}
+
+	sink, err := NewOpenAIResponsesSSEProtocolSink(w)
+	if err != nil || isNilStreamExecutor(h.streamExecutor) {
+		writeResponseResponse(w, RenderResponseError(errFailClosed))
+		return
+	}
+	result, err := h.streamExecutor.Execute(r.Context(), normalized.StreamRequest(sink))
+	if sink.Committed() || contextLifecycleError(r.Context(), err) != nil {
+		return
+	}
+	if err != nil {
+		writeResponseResponse(w, RenderResponseError(err))
+		return
+	}
+	writeResponseResponse(w, RenderResponseStreamResult(result))
 }
 
 func (h *Hybrid) strictServer() executorv1.ServerInterface {

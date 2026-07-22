@@ -48,10 +48,10 @@ type CatalogRequest struct {
 // catalog response. It is the transport-neutral shape that a renderer maps to
 // the generated ModelThinkingConfig contract type.
 type ThinkingConfig struct {
-	Supported      bool
-	DefaultEffort  string
-	MaxEffort      string
-	EffortLevels   []string
+	Supported       bool
+	DefaultEffort   string
+	MaxEffort       string
+	EffortLevels    []string
 	MinBudgetTokens *int
 	MaxBudgetTokens *int
 }

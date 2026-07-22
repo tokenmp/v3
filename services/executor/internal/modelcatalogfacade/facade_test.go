@@ -71,11 +71,11 @@ func (c *stubClock) Now() time.Time { return c.t }
 func buildStoreWithModels(t *testing.T, models map[string]adapter.ModelInput, routes []adapter.RouteInput, createdAt time.Time) *snapshot.Store {
 	t.Helper()
 	compiled, err := adapter.Compile(adapter.ConfigInput{
-		Revision:  "catalog-test",
-		Models:    models,
+		Revision: "catalog-test",
+		Models:   models,
 		Providers: map[string]adapter.ProviderInput{
-			"openai":    {ID: "openai", Name: "openai", Selector: "openai", BaseURL: "https://openai.example/v1", SDKKind: adapter.SDKKindOpenAI, Protocol: adapter.ProtocolOpenAIChat},
-			"anthropic": {ID: "anthropic", Name: "anthropic", Selector: "anthropic", BaseURL: "https://anthropic.example/v1", SDKKind: adapter.SDKKindAnthropic, Protocol: adapter.ProtocolAnthropic},
+			"openai":     {ID: "openai", Name: "openai", Selector: "openai", BaseURL: "https://openai.example/v1", SDKKind: adapter.SDKKindOpenAI, Protocol: adapter.ProtocolOpenAIChat},
+			"anthropic":  {ID: "anthropic", Name: "anthropic", Selector: "anthropic", BaseURL: "https://anthropic.example/v1", SDKKind: adapter.SDKKindAnthropic, Protocol: adapter.ProtocolAnthropic},
 			"openai-img": {ID: "openai-img", Name: "OpenAI Images", Selector: "openai-img", BaseURL: "https://openai.example/v1", SDKKind: adapter.SDKKindOpenAI, Protocol: adapter.ProtocolOpenAIImages},
 		},
 		Adapters: map[string]adapter.AdapterConfig{

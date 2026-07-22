@@ -73,9 +73,10 @@ var (
 // supportedSDKPairs is the exact runtime completion allowlist. Images is
 // completion-only; Chat and Messages additionally require stream capability.
 var supportedSDKPairs = map[execution.SDKClientKey]struct{}{
-	{SDKKind: adapter.SDKKindOpenAI, Protocol: adapter.ProtocolOpenAIChat}:   {},
-	{SDKKind: adapter.SDKKindOpenAI, Protocol: adapter.ProtocolOpenAIImages}: {},
-	{SDKKind: adapter.SDKKindAnthropic, Protocol: adapter.ProtocolAnthropic}: {},
+	{SDKKind: adapter.SDKKindOpenAI, Protocol: adapter.ProtocolOpenAIChat}:      {},
+	{SDKKind: adapter.SDKKindOpenAI, Protocol: adapter.ProtocolOpenAIImages}:    {},
+	{SDKKind: adapter.SDKKindOpenAI, Protocol: adapter.ProtocolOpenAIResponses}: {},
+	{SDKKind: adapter.SDKKindAnthropic, Protocol: adapter.ProtocolAnthropic}:    {},
 }
 
 // Build assembles the Executor runtime composition root and returns the
@@ -161,8 +162,8 @@ func Build(ctx context.Context, cfg config.Config, lookupEnv func(string) (strin
 
 	// ── Model catalog facade ──
 	catalogFacade := modelcatalogfacade.New(modelcatalogfacade.Options{
-		Store:       store,
-		Quarantine:  quarantineReader,
+		Store:      store,
+		Quarantine: quarantineReader,
 	})
 
 	// ── Generated handler with strict non-stream + SSE stream dispatch ──
@@ -234,7 +235,13 @@ func buildSDKRegistry() (*execution.SDKRegistry, error) {
 	if err := registry.Register(adapter.SDKKindOpenAI, adapter.ProtocolOpenAIImages, openaiClient); err != nil {
 		return nil, ErrSDKAdapter
 	}
+	if err := registry.Register(adapter.SDKKindOpenAI, adapter.ProtocolOpenAIResponses, openaiClient); err != nil {
+		return nil, ErrSDKAdapter
+	}
 	if err := registry.RegisterStream(adapter.SDKKindOpenAI, adapter.ProtocolOpenAIChat, openaiClient); err != nil {
+		return nil, ErrSDKAdapter
+	}
+	if err := registry.RegisterStream(adapter.SDKKindOpenAI, adapter.ProtocolOpenAIResponses, openaiClient); err != nil {
 		return nil, ErrSDKAdapter
 	}
 	anthropicClient, err := anthropicadapter.NewClient()

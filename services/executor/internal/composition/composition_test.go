@@ -252,7 +252,7 @@ func TestBuildAuthenticatedChatMissingModelReturns404(t *testing.T) {
 	}
 }
 
-func TestBuildModelsReturns200AndResponsesIs501(t *testing.T) {
+func TestBuildModelsReturns200AndResponsesExecutes(t *testing.T) {
 	t.Parallel()
 
 	path := writeConfig(t, minimalEmptyConfig)
@@ -298,7 +298,7 @@ func TestBuildModelsReturns200AndResponsesIs501(t *testing.T) {
 		}
 	})
 
-	// /v1/responses remains 501.
+	// /v1/responses is now executable; with an empty config the model is not found.
 	t.Run("responses anonymous 401", func(t *testing.T) {
 		t.Parallel()
 		req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:8081/v1/responses", strings.NewReader(`{"model":"x","input":"hi"}`))
@@ -310,15 +310,15 @@ func TestBuildModelsReturns200AndResponsesIs501(t *testing.T) {
 		}
 	})
 
-	t.Run("responses authenticated 501", func(t *testing.T) {
+	t.Run("responses authenticated model-not-found 404", func(t *testing.T) {
 		t.Parallel()
 		req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:8081/v1/responses", strings.NewReader(`{"model":"x","input":"hi"}`))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+testAPIKey)
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
-		if rec.Code != http.StatusNotImplemented {
-			t.Fatalf("status = %d, want 501", rec.Code)
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("status = %d, want 404; body=%s", rec.Code, rec.Body.String())
 		}
 	})
 }

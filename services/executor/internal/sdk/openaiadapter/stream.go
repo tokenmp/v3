@@ -43,8 +43,11 @@ func (c *Client) Stream(ctx context.Context, call sdk.StreamCall) (sdk.StreamOpe
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if call.Target.Protocol != adapter.ProtocolOpenAIChat {
+	if call.Target.Protocol != adapter.ProtocolOpenAIChat && call.Target.Protocol != adapter.ProtocolOpenAIResponses {
 		return sdk.StreamOpen{}, ErrUnsupportedProtocol
+	}
+	if call.Target.Protocol == adapter.ProtocolOpenAIResponses {
+		return c.streamResponse(ctx, call)
 	}
 	if err := ctx.Err(); err != nil {
 		return sdk.StreamOpen{}, classifyContextError(err)

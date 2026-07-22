@@ -75,7 +75,7 @@ func TestCaptureRawBodyUsesOneCaptureSliceAndRawBodyCopies(t *testing.T) {
 
 func TestCaptureRawBodySkipsGETHEADAndUnknownPaths(t *testing.T) {
 	for _, tc := range []struct{ method, path string }{
-		{http.MethodGet, openAIChatPath}, {http.MethodHead, openAIChatPath}, {http.MethodPost, "/v1/responses"},
+		{http.MethodGet, openAIChatPath}, {http.MethodHead, openAIChatPath}, {http.MethodPost, "/v1/unknown"},
 	} {
 		t.Run(tc.method+tc.path, func(t *testing.T) {
 			h := CaptureRawBody(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

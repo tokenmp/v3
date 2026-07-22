@@ -300,7 +300,7 @@ func (f *Facade) reservationID(ctx context.Context) string {
 
 // nonStreamProtocol reports whether p is an executable non-stream protocol.
 func nonStreamProtocol(p adapter.Protocol) bool {
-	return p == adapter.ProtocolOpenAIChat || p == adapter.ProtocolAnthropic || p == adapter.ProtocolOpenAIImages
+	return p == adapter.ProtocolOpenAIChat || p == adapter.ProtocolAnthropic || p == adapter.ProtocolOpenAIImages || p == adapter.ProtocolOpenAIResponses
 }
 
 // validPrincipal reports whether p is a trusted, active service/admin caller
