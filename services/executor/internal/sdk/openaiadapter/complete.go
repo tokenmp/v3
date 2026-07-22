@@ -13,15 +13,25 @@ import (
 	"github.com/tokenmp/v3/services/executor/internal/sdk"
 )
 
-// Complete performs one non-streaming OpenAI chat completion. The target,
-// secret and SDK client are all call-local; no process environment is mutated.
+// Complete performs exactly one non-streaming official OpenAI SDK operation.
+// The target, secret and SDK client are all call-local; no process environment
+// is mutated. Chat behavior remains in completeChat; Images is intentionally an
+// internal capability only until a later transport/composition phase.
 func (c *Client) Complete(ctx context.Context, call sdk.Call) (sdk.Completion, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if call.Target.Protocol != adapter.ProtocolOpenAIChat {
+	switch call.Target.Protocol {
+	case adapter.ProtocolOpenAIChat:
+		return c.completeChat(ctx, call)
+	case adapter.ProtocolOpenAIImages:
+		return c.completeImage(ctx, call)
+	default:
 		return sdk.Completion{}, ErrUnsupportedProtocol
 	}
+}
+
+func (c *Client) completeChat(ctx context.Context, call sdk.Call) (sdk.Completion, error) {
 	if err := ctx.Err(); err != nil {
 		return sdk.Completion{}, classifyContextError(err)
 	}
