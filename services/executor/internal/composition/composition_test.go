@@ -14,6 +14,7 @@ import (
 
 	"github.com/tokenmp/v3/services/executor/internal/adapter"
 	"github.com/tokenmp/v3/services/executor/internal/config"
+	"github.com/tokenmp/v3/services/executor/internal/execution"
 )
 
 // minimalEmptyConfig is a secret-free config that compiles to no business
@@ -266,7 +267,6 @@ func TestBuildModelsResponsesImagesAreAuth501(t *testing.T) {
 	}{
 		{"models", http.MethodGet, "/v1/models"},
 		{"responses", http.MethodPost, "/v1/responses"},
-		{"images", http.MethodPost, "/v1/images/generations"},
 	}
 	for _, tc := range cases {
 		tc := tc
@@ -333,6 +333,12 @@ func TestBuildSDKRegistryRegistersExactCompletionAndStreamPairs(t *testing.T) {
 			t.Fatalf("pair (%q, %q) uses distinct completion and stream instances", pair.kind, pair.protocol)
 		}
 	}
+	if _, err := registry.Client(adapter.SDKKindOpenAI, adapter.ProtocolOpenAIImages); err != nil {
+		t.Fatalf("image completion client: %v", err)
+	}
+	if _, err := registry.StreamClient(adapter.SDKKindOpenAI, adapter.ProtocolOpenAIImages); !errors.Is(err, execution.ErrSDKClientUnknown) {
+		t.Fatalf("image stream client error = %v, want unknown", err)
+	}
 }
 
 func TestBuildAcceptsEnabledRoutesWithCompletionAndStreamCapabilities(t *testing.T) {
@@ -359,6 +365,24 @@ func TestBuildAcceptsEnabledRoutesWithCompletionAndStreamCapabilities(t *testing
 				t.Fatalf("Build() error = %v, want enabled route accepted", err)
 			}
 		})
+	}
+}
+
+func TestBuildAcceptsEnabledOpenAIImagesWithoutStreamCapability(t *testing.T) {
+	t.Parallel()
+	const imageOnlyConfig = `{
+		"Revision":"composition-images", "CreatedAt":"2026-07-22T00:00:00Z",
+		"Models":{"image":{"ID":"image","DisplayName":"Image","Capabilities":["images"],"Thinking":{"Supported":false}}},
+		"Providers":{"openai":{"ID":"openai","Selector":"openai","Name":"OpenAI","BaseURL":"https://upstream.example/v1","SDKKind":"openai","Protocol":"openai_images","Retry":{},"Timeout":{}}},
+		"Routes":[{"ID":"image-route","ModelID":"image","ProviderID":"openai","AdapterID":"image-adapter","UpstreamModel":"dall-e-3","Priority":1,"Enabled":true,"Protocol":"openai_images","Retry":{},"Timeout":{},"Credentials":[]}],
+		"Adapters":{"image-adapter":{"ID":"image-adapter","Name":"Images","Version":1,"SDKKind":"openai","Protocol":"openai_images","Auth":{"Kind":"bearer_header","Header":"Authorization","CredentialRef":"vault://openai/images"},"Capability":{"Require":["images"],"Deny":[]},"Thinking":{"Supported":false},"Request":{"AllowedHeaders":["Content-Type"],"AllowedQuery":[],"Rules":[]},"Response":{"Rules":[]},"Retry":{},"Timeout":{}}}
+	}`
+	path := writeConfig(t, imageOnlyConfig)
+	env := healthyEnv(t, path)
+	env["EXECUTOR_CREDENTIAL_REF_MAP_JSON"] = `{"vault://openai/images":"EXECUTOR_CREDENTIAL_TEST"}`
+	env["EXECUTOR_CREDENTIAL_TEST"] = "test-credential"
+	if _, err := Build(context.Background(), testConfig(path, env["EXECUTOR_CREDENTIAL_REF_MAP_JSON"]), envLookup(env)); err != nil {
+		t.Fatalf("Build() image-only route error = %v", err)
 	}
 }
 

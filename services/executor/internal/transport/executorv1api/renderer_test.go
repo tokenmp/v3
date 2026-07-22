@@ -323,3 +323,26 @@ func TestRenderUnauthorizedIsProtocolNative401(t *testing.T) {
 		t.Fatalf("wrapped chat = %d %s", wrappedChat.Code, wrappedChat.Body.String())
 	}
 }
+
+func TestRenderImageEnforcesFormatAndSharedResponseBoundary(t *testing.T) {
+	t.Parallel()
+	validURL := `{"created":1,"data":[{"url":"https://images.example/a"}],"usage":{"input_tokens":1,"input_tokens_details":{"image_tokens":1}},"provider_extension":{"nested":true}}`
+	cases := []struct {
+		name, raw, format string
+		want              int
+	}{
+		{"url", validURL, "url", http.StatusOK},
+		{"format mismatch", validURL, "b64_json", http.StatusInternalServerError},
+		{"mixed items", `{"created":1,"data":[{"url":"https://images.example/a"},{"b64_json":"aA=="}]}`, "url", http.StatusInternalServerError},
+		{"ctl revised", `{"created":1,"data":[{"url":"https://images.example/a","revised_prompt":"x\ny"}]}`, "url", http.StatusInternalServerError},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			err := RenderImage(execution.Result{Completion: sdk.Completion{Status: http.StatusOK, RawJSON: json.RawMessage(tc.raw)}}, tc.format).VisitCreateImageResponse(rec)
+			if err != nil || rec.Code != tc.want || rec.Header().Get("Cache-Control") != "no-store" {
+				t.Fatalf("err=%v status=%d cache=%q", err, rec.Code, rec.Header().Get("Cache-Control"))
+			}
+		})
+	}
+}

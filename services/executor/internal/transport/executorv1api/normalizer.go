@@ -15,6 +15,7 @@ import (
 	"github.com/tokenmp/v3/services/executor/internal/adapter"
 	"github.com/tokenmp/v3/services/executor/internal/authcontext"
 	"github.com/tokenmp/v3/services/executor/internal/execution"
+	"github.com/tokenmp/v3/services/executor/internal/imagecontract"
 	"github.com/tokenmp/v3/services/executor/internal/nonstream"
 )
 
@@ -40,6 +41,7 @@ var (
 		"max_completion_tokens", "reasoning_effort", "stop", "tools", "tool_choice",
 		"response_format", "user",
 	)
+	imageRootFields   = makeFieldSet("model", "prompt", "n", "size", "quality", "response_format", "style", "user")
 	messageRootFields = makeFieldSet(
 		"model", "messages", "max_tokens", "system", "thinking", "stream",
 		"temperature", "top_p", "top_k", "stop_sequences", "tools", "tool_choice",
@@ -157,6 +159,32 @@ func (r NormalizedRequest) StreamRequest(sink execution.ProtocolSink) StreamRequ
 // its normalized request plus whether the caller selected streaming mode.
 func NormalizeOpenAIChatRequest(ctx context.Context, requestID string) (NormalizedRequest, error) {
 	return normalize(ctx, requestID, adapter.ProtocolOpenAIChat, validateChatRequest, normalizeChatThinking)
+}
+
+// NormalizedImageRequest carries the executor request and the response format
+// selected by the client (or the observable url default). The renderer must use
+// EffectiveResponseFormat so an injected execution result cannot change it.
+type NormalizedImageRequest struct {
+	Request                 NonStreamRequest
+	EffectiveResponseFormat string
+}
+
+// NormalizeOpenAIImages validates the legacy Images Generate request before
+// execution/quota reservation and retains its original captured JSON bytes.
+func NormalizeOpenAIImages(ctx context.Context, requestID string) (NormalizedImageRequest, error) {
+	result, err := normalize(ctx, requestID, adapter.ProtocolOpenAIImages, validateImageRequest, func(map[string]any) (adapter.ThinkingRequest, error) { return adapter.ThinkingRequest{}, nil })
+	if err != nil {
+		return NormalizedImageRequest{}, err
+	}
+	root, err := parseRequestJSON(ctx, result.Request.Body)
+	if err != nil {
+		return NormalizedImageRequest{}, ErrInvalidRequest
+	}
+	format, ok := imagecontract.ValidateRequest(root)
+	if !ok {
+		return NormalizedImageRequest{}, ErrInvalidRequest
+	}
+	return NormalizedImageRequest{Request: result.Request, EffectiveResponseFormat: format}, nil
 }
 
 // NormalizeAnthropicMessages extracts the non-stream execution inputs from the
@@ -560,6 +588,15 @@ func validChatStop(root map[string]any) bool {
 		}
 	}
 	return true
+}
+
+// ── OpenAI Images schema validation ─────────────────────────────────────
+
+func validateImageRequest(root map[string]any) error {
+	if _, ok := imagecontract.ValidateRequest(root); !ok {
+		return ErrInvalidRequest
+	}
+	return nil
 }
 
 // ── Anthropic Messages schema validation ────────────────────────────────

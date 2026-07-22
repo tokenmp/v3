@@ -30,6 +30,9 @@ func renderStrictRequestError(w http.ResponseWriter, r *http.Request, err error)
 	if isContextLifecycleError(err) {
 		return
 	}
+	if r.URL.Path == openAIImagesPath {
+		w.Header().Set("Cache-Control", "no-store")
+	}
 	if r.URL.Path == anthropicMessagesPath {
 		_ = writeJSON(w, http.StatusBadRequest, anthropicError(invalidErrorCode, "invalid_request_error", invalidErrorMessage, ""))
 		return
@@ -40,6 +43,9 @@ func renderStrictRequestError(w http.ResponseWriter, r *http.Request, err error)
 func renderStrictResponseError(w http.ResponseWriter, r *http.Request, err error) {
 	if isContextLifecycleError(err) {
 		return
+	}
+	if r.URL.Path == openAIImagesPath {
+		w.Header().Set("Cache-Control", "no-store")
 	}
 	if r.URL.Path == anthropicMessagesPath {
 		_ = writeJSON(w, http.StatusInternalServerError, anthropicError(internalErrorCode, "api_error", internalErrorMessage, ""))

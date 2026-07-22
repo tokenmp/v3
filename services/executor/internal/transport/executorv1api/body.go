@@ -12,6 +12,7 @@ const (
 	// provider-adapter limits. Keep the body boundary before generated decoding.
 	MaxCapturedBodyBytes  int64 = 2 << 20
 	openAIChatPath              = "/v1/chat/completions"
+	openAIImagesPath            = "/v1/images/generations"
 	anthropicMessagesPath       = "/v1/messages"
 )
 
@@ -43,17 +44,16 @@ func CaptureRawBody(next http.Handler) http.Handler {
 			writeBodyCaptureError(w, r.URL.Path)
 			return
 		}
-		// io.ReadAll returns the single slice owned by this middleware. It is
-		// immutable by convention after being put in the request context; the
-		// replacement reader only reads that same slice and therefore needs no
-		// copy. Normalization makes the one boundary copy for the executor port.
-		r.Body = io.NopCloser(bytes.NewReader(body))
+		// Generated decoding/defaulting is not trusted to preserve its input
+		// bytes. Keep the capture-owned context slice isolated from r.Body so the
+		// normalizer always sees exact client bytes.
+		r.Body = io.NopCloser(bytes.NewReader(append([]byte(nil), body...)))
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), rawBodyContextKey{}, body)))
 	})
 }
 
 func isCapturedPath(path string) bool {
-	return path == openAIChatPath || path == anthropicMessagesPath
+	return path == openAIChatPath || path == openAIImagesPath || path == anthropicMessagesPath
 }
 
 // RawBody returns an independent copy of the body captured by CaptureRawBody.
@@ -76,9 +76,12 @@ func rawBodyView(ctx context.Context) ([]byte, bool) {
 
 func writeBodyCaptureError(w http.ResponseWriter, path string) {
 	w.Header().Set("Content-Type", "application/json")
+	if path == openAIImagesPath {
+		w.Header().Set("Cache-Control", "no-store")
+	}
 	w.WriteHeader(http.StatusBadRequest)
 	switch path {
-	case openAIChatPath:
+	case openAIChatPath, openAIImagesPath:
 		_, _ = io.WriteString(w, `{"error":{"message":"Invalid request body.","type":"invalid_request_error","code":"INVALID_REQUEST"},"status":400}`)
 	case anthropicMessagesPath:
 		_, _ = io.WriteString(w, `{"type":"error","error":{"type":"invalid_request_error","message":"Invalid request body."}}`)

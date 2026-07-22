@@ -30,8 +30,9 @@ import (
 // without modifying the server package.
 
 const (
-	integrationChatRaw = `{"id":"chatcmpl_1","object":"chat.completion","created":1,"model":"gpt","choices":[{"index":0,"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}`
-	integrationMsgRaw  = `{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"text","text":"hi"}],"model":"claude","stop_reason":"end_turn","usage":{"input_tokens":2,"output_tokens":1}}`
+	integrationChatRaw  = `{"id":"chatcmpl_1","object":"chat.completion","created":1,"model":"gpt","choices":[{"index":0,"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}`
+	integrationMsgRaw   = `{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"text","text":"hi"}],"model":"claude","stop_reason":"end_turn","usage":{"input_tokens":2,"output_tokens":1}}`
+	integrationImageRaw = `{"created":1,"data":[{"url":"https://images.example/generated.png"}]}`
 )
 
 // recorderExecutor is a NonStreamExecutor double that records the exact
@@ -188,6 +189,52 @@ func TestNonStreamIntegrationChatSuccessRawIdentityAndOpenAPI(t *testing.T) {
 	}
 	if !strings.HasPrefix(executor.seenID, requestIDPrefix) {
 		t.Errorf("trusted request ID = %q, want %s prefix", executor.seenID, requestIDPrefix)
+	}
+}
+
+func TestNonStreamIntegrationImageSuccessRawIdentityAndOpenAPI(t *testing.T) {
+	t.Parallel()
+	executor := &recorderExecutor{result: execution.Result{Completion: sdk.Completion{Status: http.StatusOK, RawJSON: json.RawMessage(integrationImageRaw)}}}
+	server := buildServer(t, NewNonStream(Options{Executor: executor}))
+	router := newOpenAPIRouter(t)
+	body := `{"model":"dall-e-3","prompt":"draw a cat","response_format":"url"}`
+	req := newRequest(http.MethodPost, "/v1/images/generations", body)
+	input := findAndValidateRequest(t, router, req)
+	// The OpenAPI validator consumes and may rebuild the test request body;
+	// dispatch a fresh request so capture identity is asserted on client bytes.
+	req = newRequest(http.MethodPost, "/v1/images/generations", body)
+	recorder := httptest.NewRecorder()
+	server.ServeHTTP(recorder, req)
+	validateOpenAPIResponse(t, input, recorder)
+	if recorder.Code != http.StatusOK || recorder.Body.String() != integrationImageRaw || executor.calls.Load() != 1 {
+		t.Fatalf("image response=%d %q calls=%d", recorder.Code, recorder.Body.String(), executor.calls.Load())
+	}
+	if !bytes.Equal(executor.seenBody, []byte(body)) || executor.seenThink.Enabled || executor.seenID == "" {
+		t.Fatalf("image normalized request body=%q thinking=%#v id=%q", executor.seenBody, executor.seenThink, executor.seenID)
+	}
+}
+
+func TestNonStreamIntegrationImageRejectsInvalidProviderResponseAndMapsFailure(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, raw string
+		failure   *adapter.MappedResponse
+		want      int
+	}{
+		{"invalid", `{"created":1,"data":[{}]}`, nil, http.StatusInternalServerError},
+		{"mapped", "", &adapter.MappedResponse{HTTPStatus: 429, ErrorCode: "RATE_LIMITED", ErrorType: "rate_limit_error", Message: "Retry later."}, http.StatusTooManyRequests},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			executor := &recorderExecutor{result: execution.Result{Completion: sdk.Completion{Status: http.StatusOK, RawJSON: json.RawMessage(tc.raw)}, Failure: tc.failure}}
+			if tc.failure != nil {
+				executor.result.Completion = sdk.Completion{}
+			}
+			recorder := httptest.NewRecorder()
+			buildServer(t, NewNonStream(Options{Executor: executor})).ServeHTTP(recorder, newRequest(http.MethodPost, "/v1/images/generations", `{"model":"dall-e-3","prompt":"hi"}`))
+			if recorder.Code != tc.want || executor.calls.Load() != 1 {
+				t.Fatalf("status=%d calls=%d", recorder.Code, executor.calls.Load())
+			}
+		})
 	}
 }
 
@@ -725,6 +772,44 @@ func TestNonStreamIntegrationReasoningEffortNoneDisabledAndSchemaInvalid(t *test
 			}
 			if executor.calls.Load() != 0 {
 				t.Fatalf("executor called %d times for schema-invalid reasoning_effort", executor.calls.Load())
+			}
+		})
+	}
+}
+
+func TestNonStreamIntegrationImagesInvalidRequestNeverExecutesAndNoStore(t *testing.T) {
+	t.Parallel()
+	executor := &recorderExecutor{}
+	server := buildServer(t, NewNonStream(Options{Executor: executor}))
+	for _, body := range []string{
+		`{"model":"dall-e-3","prompt":""}`,
+		`{"model":"dall-e-3","prompt":"x","user":"bad\nuser"}`,
+	} {
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, newRequest(http.MethodPost, "/v1/images/generations", body))
+		if recorder.Code != http.StatusBadRequest || recorder.Header().Get("Cache-Control") != "no-store" || executor.calls.Load() != 0 {
+			t.Fatalf("body=%q status=%d cache=%q calls=%d", body, recorder.Code, recorder.Header().Get("Cache-Control"), executor.calls.Load())
+		}
+	}
+}
+
+func TestNonStreamIntegrationImagesEveryTerminalStatusNoStore(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		adapter *Adapter
+		want    int
+	}{
+		{"success", NewNonStream(Options{Executor: &recorderExecutor{result: execution.Result{Completion: sdk.Completion{Status: http.StatusOK, RawJSON: json.RawMessage(integrationImageRaw)}}}}), http.StatusOK},
+		{"mapped failure", NewNonStream(Options{Executor: &recorderExecutor{result: execution.Result{Failure: &adapter.MappedResponse{HTTPStatus: http.StatusTooManyRequests}}}}), http.StatusTooManyRequests},
+		{"foundation", New(), http.StatusNotImplemented},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			buildServer(t, tc.adapter).ServeHTTP(recorder, newRequest(http.MethodPost, "/v1/images/generations", `{"model":"dall-e-3","prompt":"x"}`))
+			if recorder.Code != tc.want || recorder.Header().Get("Cache-Control") != "no-store" {
+				t.Fatalf("status=%d cache=%q", recorder.Code, recorder.Header().Get("Cache-Control"))
 			}
 		})
 	}
