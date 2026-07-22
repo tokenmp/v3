@@ -13,8 +13,8 @@ import (
 )
 
 const (
-	maxObservedSSELineBytes  = 256 << 10
-	maxObservedSSEFrameBytes = 1 << 20
+	maxObservedSSELineBytes  = sdk.MaxStreamEventDataBytes
+	maxObservedSSEFrameBytes = sdk.MaxStreamEventDataBytes
 	maxObservedSSEFrameLines = 4096
 	maxObservedSSEDataLines  = 1024
 	maxObservedSSEFieldBytes = 128
@@ -359,7 +359,14 @@ func (s *chunkSource) Next(ctx context.Context) (sdk.StreamEvent, error) {
 		s.sequence++
 		sequence := s.sequence
 		s.mu.Unlock()
-		return sdk.StreamEvent{Sequence: sequence, Meta: ev, Data: data}, nil
+		ev.Sequence = sequence
+		streamEvent := sdk.StreamEvent{Sequence: sequence, Meta: ev, Data: data}
+		if ev.Kind == streaming.EventNativeError {
+			// Provider in-band error bodies are never retained. Preserve only a
+			// fixed safe classification for driver retry/mapping decisions.
+			streamEvent.Classified = sdk.NewClassifiedError(sdk.ErrProtocol, 0, "", "stream_error", "protocol")
+		}
+		return streamEvent, nil
 	case <-ctx.Done():
 		_ = s.Close()
 		return sdk.StreamEvent{}, ctx.Err()

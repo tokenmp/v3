@@ -7,12 +7,13 @@ import (
 	"io"
 	"unicode/utf8"
 
+	"github.com/tokenmp/v3/services/executor/internal/sdk"
 	"github.com/tokenmp/v3/services/executor/internal/streaming"
 )
 
 // The parser accepts provider extensions but makes their resource use finite.
 const (
-	maxChunkBytes     = 1 << 20
+	maxChunkBytes     = sdk.MaxStreamEventDataBytes
 	maxChunkJSONDepth = 64
 	maxChunkJSONNodes = 10000
 	maxStringBytes    = 64 << 10

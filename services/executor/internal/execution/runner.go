@@ -164,7 +164,10 @@ func (r *Runner) Run(ctx context.Context, in Input) (Result, error) {
 	if err := ctx.Err(); err != nil {
 		return Result{}, err
 	}
-	if r == nil || r.Quota == nil || r.SDKRegistry == nil || in.Resolver == nil {
+	// Clock/Sleeper may be omitted for safe defaults, but typed-nil values must
+	// fail closed. Credentials may be nil only for AuthNone routes.
+	if r == nil || isNilInterface(r.Quota) || r.SDKRegistry == nil || in.Resolver == nil ||
+		isTypedNil(r.Logger) || isTypedNil(r.Clock) || isTypedNil(r.Sleeper) || isTypedNil(in.Credentials) {
 		return Result{}, ErrMisconfigured
 	}
 	// Reject malformed request identifiers before every preflight or quota side
@@ -422,14 +425,14 @@ func (r *Runner) logContext(ctx context.Context) (context.Context, context.Cance
 }
 
 func (r *Runner) sleeper() Sleeper {
-	if r.Sleeper != nil {
+	if !isNilInterface(r.Sleeper) {
 		return r.Sleeper
 	}
 	return contextSleeper{}
 }
 
 func (r *Runner) now() time.Time {
-	if r.Clock != nil {
+	if !isNilInterface(r.Clock) {
 		return r.Clock.Now()
 	}
 	return time.Now()
@@ -456,7 +459,7 @@ func (r *Runner) baseEvent(in Input, prepared routing.PreparedAttempt, attemptNo
 }
 
 func (r *Runner) logSuccess(ctx context.Context, in Input, prepared routing.PreparedAttempt, attemptNo int) {
-	if r.Logger == nil {
+	if isNilInterface(r.Logger) {
 		return
 	}
 	event := r.baseEvent(in, prepared, attemptNo)
@@ -468,7 +471,7 @@ func (r *Runner) logSuccess(ctx context.Context, in Input, prepared routing.Prep
 }
 
 func (r *Runner) logFailure(ctx context.Context, in Input, prepared routing.PreparedAttempt, attemptNo int, classified *sdk.ClassifiedError, mapped adapter.MappedResponse, decision retry.Decision) {
-	if r.Logger == nil {
+	if isNilInterface(r.Logger) {
 		return
 	}
 	event := r.baseEvent(in, prepared, attemptNo)

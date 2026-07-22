@@ -145,7 +145,7 @@ func TestStreamOpeningMetadataAndLifecycle(t *testing.T) {
 	if err != nil || ev.Meta.Kind != streaming.EventSemantic {
 		t.Fatalf("first Next = %#v, %v", ev, err)
 	}
-	if ev.Sequence != 1 || !bytes.Contains(ev.Data, []byte(`"content":"hi"`)) {
+	if ev.Sequence != 1 || ev.Meta.Sequence != ev.Sequence || !bytes.Contains(ev.Data, []byte(`"content":"hi"`)) {
 		t.Fatalf("event ownership/sequence = %#v", ev)
 	}
 	_, err = open.Source.Next(context.Background())
@@ -191,8 +191,8 @@ func TestStreamNextStrictClassificationSequenceAndTruncation(t *testing.T) {
 				t.Fatalf("events=%d", len(events))
 			}
 			for i, e := range events {
-				if e.Sequence != uint64(i+1) {
-					t.Fatalf("sequence=%d", e.Sequence)
+				if e.Sequence != uint64(i+1) || e.Meta.Sequence != e.Sequence {
+					t.Fatalf("sequence=%d meta.sequence=%d", e.Sequence, e.Meta.Sequence)
 				}
 			}
 			if events[0].Meta.Kind != streaming.EventLifecycle || events[1].Meta.Kind != streaming.EventSemantic || events[2].Meta.Kind != streaming.EventUsage || events[3].Meta.Kind != streaming.EventFinish {

@@ -177,3 +177,91 @@ func TestSDKRegistryConcurrentRegistrationAndLookup(t *testing.T) {
 		t.Errorf("Client() = %#v, %v; want %#v, nil", got, err, client)
 	}
 }
+
+type registryTestStreamClient struct{ id string }
+
+func (registryTestStreamClient) Stream(context.Context, sdk.StreamCall) (sdk.StreamOpen, error) {
+	return sdk.StreamOpen{}, nil
+}
+
+func TestSDKRegistryStreamCapabilityIsIndependentAndExact(t *testing.T) {
+	t.Parallel()
+	registry := NewSDKRegistry()
+	complete := registryTestClient{id: "complete"}
+	stream := registryTestStreamClient{id: "stream"}
+	keyKind, keyProtocol := adapter.SDKKindOpenAI, adapter.ProtocolOpenAIChat
+	if err := registry.Register(keyKind, keyProtocol, complete); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	if err := registry.RegisterStream(keyKind, keyProtocol, stream); err != nil {
+		t.Fatalf("RegisterStream: %v", err)
+	}
+	if got, err := registry.Client(keyKind, keyProtocol); err != nil || got != complete {
+		t.Fatalf("Client = %#v, %v", got, err)
+	}
+	if got, err := registry.StreamClient(keyKind, keyProtocol); err != nil || got != stream {
+		t.Fatalf("StreamClient = %#v, %v", got, err)
+	}
+	if _, err := registry.StreamClient(keyKind, adapter.ProtocolOpenAIResponses); !errors.Is(err, ErrSDKClientUnknown) {
+		t.Fatalf("wrong exact stream key error = %v", err)
+	}
+	if err := registry.RegisterStream(keyKind, keyProtocol, registryTestStreamClient{id: "replacement"}); !errors.Is(err, ErrSDKClientDuplicate) {
+		t.Fatalf("duplicate stream registration = %v", err)
+	}
+}
+
+func TestSDKRegistryRejectsNilStreamClients(t *testing.T) {
+	t.Parallel()
+	registry := NewSDKRegistry()
+	if err := registry.RegisterStream(adapter.SDKKindOpenAI, adapter.ProtocolOpenAIChat, nil); !errors.Is(err, ErrSDKClientNil) {
+		t.Fatalf("RegisterStream(nil) = %v", err)
+	}
+	var typedNil *registryTestPointerStreamClient
+	if err := registry.RegisterStream(adapter.SDKKindOpenAI, adapter.ProtocolOpenAIChat, typedNil); !errors.Is(err, ErrSDKClientNil) {
+		t.Fatalf("RegisterStream(typed nil) = %v", err)
+	}
+}
+
+type registryTestPointerStreamClient struct{}
+
+func (*registryTestPointerStreamClient) Stream(context.Context, sdk.StreamCall) (sdk.StreamOpen, error) {
+	return sdk.StreamOpen{}, nil
+}
+
+func TestSDKRegistryConcurrentStreamRegistrationAndLookup(t *testing.T) {
+	t.Parallel()
+	registry := NewSDKRegistry()
+	client := registryTestStreamClient{id: "only-stream"}
+	const callers = 32
+	start := make(chan struct{})
+	errs := make(chan error, callers)
+	var wg sync.WaitGroup
+	for range callers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			errs <- registry.RegisterStream(adapter.SDKKindOpenAI, adapter.ProtocolOpenAIChat, client)
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	var successes, duplicates int
+	for err := range errs {
+		switch {
+		case err == nil:
+			successes++
+		case errors.Is(err, ErrSDKClientDuplicate):
+			duplicates++
+		default:
+			t.Errorf("RegisterStream() error = %v", err)
+		}
+	}
+	if successes != 1 || duplicates != callers-1 {
+		t.Fatalf("stream registrations = %d successes, %d duplicates", successes, duplicates)
+	}
+	if got, err := registry.StreamClient(adapter.SDKKindOpenAI, adapter.ProtocolOpenAIChat); err != nil || got != client {
+		t.Fatalf("StreamClient = %#v, %v", got, err)
+	}
+}

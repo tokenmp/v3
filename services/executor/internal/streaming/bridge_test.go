@@ -3,6 +3,7 @@ package streaming
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -29,19 +30,19 @@ func TestBridgeMisconfigured(t *testing.T) {
 	}{
 		{"nil bridge", nil},
 		{"nil source", &Bridge{Source: nil, Sink: &recordSink{}, Timeouts: testTimeouts()}},
-		{"nil sink", &Bridge{Source: newFakeSource(), Sink: nil, Timeouts: testTimeouts()}},
-		{"invalid timeouts", &Bridge{Source: newFakeSource(), Sink: &recordSink{}, Timeouts: Timeouts{}}},
-		{"negative maxtotal", &Bridge{Source: newFakeSource(), Sink: &recordSink{}, Timeouts: testTimeouts(), MaxTotal: -1}},
-		{"over-hardcap maxtotal", &Bridge{Source: newFakeSource(), Sink: &recordSink{}, Timeouts: testTimeouts(), MaxTotal: MaxTotalHardCap + 1}},
-		{"negative maxevents", &Bridge{Source: newFakeSource(), Sink: &recordSink{}, Timeouts: testTimeouts(), MaxEvents: -1}},
-		{"over-hardcap maxevents", &Bridge{Source: newFakeSource(), Sink: &recordSink{}, Timeouts: testTimeouts(), MaxEvents: MaxEventsHardCap + 1}},
+		{"nil sink", &Bridge{Source: newFakeSource(assignSequence()...), Sink: nil, Timeouts: testTimeouts()}},
+		{"invalid timeouts", &Bridge{Source: newFakeSource(assignSequence()...), Sink: &recordSink{}, Timeouts: Timeouts{}}},
+		{"negative maxtotal", &Bridge{Source: newFakeSource(assignSequence()...), Sink: &recordSink{}, Timeouts: testTimeouts(), MaxTotal: -1}},
+		{"over-hardcap maxtotal", &Bridge{Source: newFakeSource(assignSequence()...), Sink: &recordSink{}, Timeouts: testTimeouts(), MaxTotal: MaxTotalHardCap + 1}},
+		{"negative maxevents", &Bridge{Source: newFakeSource(assignSequence()...), Sink: &recordSink{}, Timeouts: testTimeouts(), MaxEvents: -1}},
+		{"over-hardcap maxevents", &Bridge{Source: newFakeSource(assignSequence()...), Sink: &recordSink{}, Timeouts: testTimeouts(), MaxEvents: MaxEventsHardCap + 1}},
 		// Typed-nil dependencies: a non-nil interface wrapping a nil pointer
 		// bypasses a plain == nil check and would panic on a method call. The
 		// Bridge MUST fail closed to ErrMisconfigured rather than panic.
 		{"typed-nil source", &Bridge{Source: Source((*fakeSource)(nil)), Sink: &recordSink{}, Timeouts: testTimeouts()}},
-		{"typed-nil sink", &Bridge{Source: newFakeSource(), Sink: Sink((*recordSink)(nil)), Timeouts: testTimeouts()}},
-		{"typed-nil timers", &Bridge{Source: newFakeSource(), Sink: &recordSink{}, Timeouts: testTimeouts(), Timers: TimerSource((*manualTimerSource)(nil))}},
-		{"typed-nil clock", &Bridge{Source: newFakeSource(), Sink: &recordSink{}, Timeouts: testTimeouts(), Clock: Clock((*fakeClock)(nil))}},
+		{"typed-nil sink", &Bridge{Source: newFakeSource(assignSequence()...), Sink: Sink((*recordSink)(nil)), Timeouts: testTimeouts()}},
+		{"typed-nil timers", &Bridge{Source: newFakeSource(assignSequence()...), Sink: &recordSink{}, Timeouts: testTimeouts(), Timers: TimerSource((*manualTimerSource)(nil))}},
+		{"typed-nil clock", &Bridge{Source: newFakeSource(assignSequence()...), Sink: &recordSink{}, Timeouts: testTimeouts(), Clock: Clock((*fakeClock)(nil))}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -56,7 +57,7 @@ func TestBridgeMisconfigured(t *testing.T) {
 
 func TestBridgeDoubleRun(t *testing.T) {
 	t.Parallel()
-	b := newTestBridge(newFakeSource(Event{Kind: EventSemantic}, Event{Kind: EventFinish, FinishReason: "stop"}), &recordSink{}, &manualTimerSource{})
+	b := newTestBridge(newFakeSource(assignSequence(Event{Kind: EventSemantic}, Event{Kind: EventFinish, FinishReason: "stop"})...), &recordSink{}, &manualTimerSource{})
 	if _, err := b.Run(context.Background()); err != nil {
 		t.Fatalf("first Run: %v", err)
 	}
@@ -68,7 +69,7 @@ func TestBridgeDoubleRun(t *testing.T) {
 
 func TestBridgeAlreadyCancelledContext(t *testing.T) {
 	t.Parallel()
-	b := newTestBridge(newFakeSource(), &recordSink{}, &manualTimerSource{})
+	b := newTestBridge(newFakeSource(assignSequence()...), &recordSink{}, &manualTimerSource{})
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	out, err := b.Run(ctx)
@@ -82,14 +83,14 @@ func TestBridgeAlreadyCancelledContext(t *testing.T) {
 
 func TestBridgeCompletedCommitsLifecycleBatchAtomically(t *testing.T) {
 	t.Parallel()
-	src := newFakeSource(
+	src := newFakeSource(assignSequence(
 		Event{Kind: EventLifecycle, EventType: "start"},
 		Event{Kind: EventLifecycle, EventType: "ping"},
 		Event{Kind: EventSemantic},
 		Event{Kind: EventSemantic},
 		Event{Kind: EventUsage, Usage: &Usage{PromptTokens: 5, CompletionTokens: 3, TotalTokens: 8}},
 		Event{Kind: EventFinish, FinishReason: "stop"},
-	)
+	)...)
 	sink := &recordSink{}
 	b := newTestBridge(src, sink, &manualTimerSource{})
 
@@ -149,7 +150,7 @@ func TestBridgeCompletedCommitsLifecycleBatchAtomically(t *testing.T) {
 
 func TestBridgePreCommitEOFIsProtocolFailure(t *testing.T) {
 	t.Parallel()
-	src := newFakeSource() // empty -> immediate EOF
+	src := newFakeSource(assignSequence()...) // empty -> immediate EOF
 	b := newTestBridge(src, &recordSink{}, &manualTimerSource{})
 
 	out, err := b.Run(context.Background())
@@ -169,10 +170,10 @@ func TestBridgePreCommitEOFIsProtocolFailure(t *testing.T) {
 
 func TestBridgePreCommitFinishIsProtocolFailure(t *testing.T) {
 	t.Parallel()
-	src := newFakeSource(
+	src := newFakeSource(assignSequence(
 		Event{Kind: EventLifecycle, EventType: "start"},
 		Event{Kind: EventFinish, FinishReason: "stop"},
-	)
+	)...)
 	b := newTestBridge(src, &recordSink{}, &manualTimerSource{})
 
 	out, err := b.Run(context.Background())
@@ -186,7 +187,7 @@ func TestBridgePreCommitFinishIsProtocolFailure(t *testing.T) {
 
 func TestBridgePreCommitNativeErrorIsUpstreamError(t *testing.T) {
 	t.Parallel()
-	src := newFakeSource(Event{Kind: EventNativeError})
+	src := newFakeSource(assignSequence(Event{Kind: EventNativeError})...)
 	b := newTestBridge(src, &recordSink{}, &manualTimerSource{})
 
 	out, err := b.Run(context.Background())
@@ -203,13 +204,13 @@ func TestBridgePreCommitNativeErrorIsUpstreamError(t *testing.T) {
 
 func TestBridgePostCommitNativeErrorFailsNoRetry(t *testing.T) {
 	t.Parallel()
-	src := newFakeSource(
+	src := newFakeSource(assignSequence(
 		Event{Kind: EventSemantic},
 		Event{Kind: EventNativeError},
 		// These should NEVER be read after a post-commit failure (no retry).
 		Event{Kind: EventSemantic},
 		Event{Kind: EventFinish, FinishReason: "stop"},
-	)
+	)...)
 	src.blockOnEmpty = true // after the native_error, block to expose any retry
 	sink := &recordSink{}
 	b := newTestBridge(src, sink, &manualTimerSource{})
@@ -230,9 +231,9 @@ func TestBridgePostCommitNativeErrorFailsNoRetry(t *testing.T) {
 	if !out.UnresolvedCost {
 		t.Fatalf("should be unresolved (no usage)")
 	}
-	// The native_error event was written + flushed post-commit (1 write).
-	if len(sink.writtenEvents()) != 1 {
-		t.Fatalf("writes = %d, want 1 (native_error)", len(sink.writtenEvents()))
+	// Native errors are safe outcome metadata, never renderer payloads.
+	if len(sink.writtenEvents()) != 0 {
+		t.Fatalf("writes = %d, want 0", len(sink.writtenEvents()))
 	}
 	// No leak: no calls after the failure path.
 	if sink.leakCount() != 0 {
@@ -245,11 +246,11 @@ func TestBridgeCommitFailureIsPostCommitNoRetry(t *testing.T) {
 	// Downstream uncertain on Commit failure: the Bridge resolves a post-commit
 	// failure (nil error) and does NOT retry, even though the source has more
 	// events.
-	src := newFakeSource(
+	src := newFakeSource(assignSequence(
 		Event{Kind: EventLifecycle, EventType: "start"},
 		Event{Kind: EventSemantic},
 		Event{Kind: EventSemantic},
-	)
+	)...)
 	src.blockOnEmpty = true
 	sink := &recordSink{commitErr: errors.New("downstream write failed")}
 	b := newTestBridge(src, sink, &manualTimerSource{})
@@ -278,11 +279,11 @@ func TestBridgeCommitFailureIsPostCommitNoRetry(t *testing.T) {
 
 func TestBridgeWriteEventFailureIsPostCommitNoRetry(t *testing.T) {
 	t.Parallel()
-	src := newFakeSource(
+	src := newFakeSource(assignSequence(
 		Event{Kind: EventSemantic},
 		Event{Kind: EventSemantic},
 		Event{Kind: EventFinish, FinishReason: "stop"},
-	)
+	)...)
 	src.blockOnEmpty = true
 	sink := &recordSink{writeErr: errors.New("write failed")}
 	b := newTestBridge(src, sink, &manualTimerSource{})
@@ -304,11 +305,11 @@ func TestBridgeWriteEventFailureIsPostCommitNoRetry(t *testing.T) {
 
 func TestBridgeFlushFailureIsPostCommitNoRetry(t *testing.T) {
 	t.Parallel()
-	src := newFakeSource(
+	src := newFakeSource(assignSequence(
 		Event{Kind: EventSemantic},
 		Event{Kind: EventSemantic},
 		Event{Kind: EventFinish, FinishReason: "stop"},
-	)
+	)...)
 	src.blockOnEmpty = true
 	sink := &recordSink{flushErr: errors.New("flush failed")}
 	b := newTestBridge(src, sink, &manualTimerSource{})
@@ -327,10 +328,10 @@ func TestBridgeFlushFailureIsPostCommitNoRetry(t *testing.T) {
 
 func TestBridgePostCommitEOFWithoutFinishIsTruncated(t *testing.T) {
 	t.Parallel()
-	src := newFakeSource(
+	src := newFakeSource(assignSequence(
 		Event{Kind: EventSemantic},
 		// then EOF without a finish event
-	)
+	)...)
 	sink := &recordSink{}
 	b := newTestBridge(src, sink, &manualTimerSource{})
 
@@ -384,7 +385,7 @@ func TestBridgeTTFTTimeout(t *testing.T) {
 // post-commit, falsely failing the stream with ReasonTTFTTimeout.
 func TestBridgeTTFTFiredPostCommitNeverFails(t *testing.T) {
 	t.Parallel()
-	src := newFakeSource(Event{Kind: EventSemantic})
+	src := newFakeSource(assignSequence(Event{Kind: EventSemantic})...)
 	src.blockOnEmpty = true // after commit, block so only the stale TTFT
 	// could terminate Run; success proves the firing was ignored.
 	ts := &stopFiresTimerSource{}
@@ -433,7 +434,7 @@ func TestBridgeTTFTFiredPostCommitNeverFails(t *testing.T) {
 
 func TestBridgeStreamIdleTimeout(t *testing.T) {
 	t.Parallel()
-	src := newFakeSource(Event{Kind: EventSemantic})
+	src := newFakeSource(assignSequence(Event{Kind: EventSemantic})...)
 	src.blockOnEmpty = true
 	ts := &manualTimerSource{}
 	b := newTestBridge(src, &recordSink{}, ts)
@@ -489,7 +490,7 @@ func TestBridgeStreamLifetimeTimeoutPreCommit(t *testing.T) {
 
 func TestBridgeStreamLifetimeTimeoutPostCommit(t *testing.T) {
 	t.Parallel()
-	src := newFakeSource(Event{Kind: EventSemantic})
+	src := newFakeSource(assignSequence(Event{Kind: EventSemantic})...)
 	src.blockOnEmpty = true
 	ts := &manualTimerSource{}
 	b := newTestBridge(src, &recordSink{}, ts)
@@ -538,7 +539,7 @@ func TestBridgeClientCancelledBeforeCommit(t *testing.T) {
 
 func TestBridgeClientCancelledAfterCommit(t *testing.T) {
 	t.Parallel()
-	src := newFakeSource(Event{Kind: EventSemantic})
+	src := newFakeSource(assignSequence(Event{Kind: EventSemantic})...)
 	src.blockOnEmpty = true
 	ts := &manualTimerSource{}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -563,10 +564,10 @@ func TestBridgeClientCancelledAfterCommit(t *testing.T) {
 
 func TestBridgeClosesSourceOnceOnSuccess(t *testing.T) {
 	t.Parallel()
-	src := newFakeSource(
+	src := newFakeSource(assignSequence(
 		Event{Kind: EventSemantic},
 		Event{Kind: EventFinish, FinishReason: "stop"},
-	)
+	)...)
 	b := newTestBridge(src, &recordSink{}, &manualTimerSource{})
 	if _, err := b.Run(context.Background()); err != nil {
 		t.Fatalf("Run: %v", err)
@@ -578,7 +579,7 @@ func TestBridgeClosesSourceOnceOnSuccess(t *testing.T) {
 
 func TestBridgeClosesSourceOnceOnPreCommitFailure(t *testing.T) {
 	t.Parallel()
-	src := newFakeSource() // immediate EOF
+	src := newFakeSource(assignSequence()...) // immediate EOF
 	b := newTestBridge(src, &recordSink{}, &manualTimerSource{})
 	if _, err := b.Run(context.Background()); !errors.Is(err, ErrProtocol) {
 		t.Fatalf("err = %v", err)
@@ -590,10 +591,10 @@ func TestBridgeClosesSourceOnceOnPreCommitFailure(t *testing.T) {
 
 func TestBridgeClosesSourceOnceOnPostCommitFailure(t *testing.T) {
 	t.Parallel()
-	src := newFakeSource(
+	src := newFakeSource(assignSequence(
 		Event{Kind: EventSemantic},
 		// then EOF without finish -> truncated
-	)
+	)...)
 	src.blockOnEmpty = false
 	b := newTestBridge(src, &recordSink{}, &manualTimerSource{})
 	if _, err := b.Run(context.Background()); err != nil {
@@ -610,7 +611,7 @@ func TestBridgeBufferOverflowCountFailsBeforeCommit(t *testing.T) {
 	for i := 0; i < MaxBufferedLifecycle+1; i++ {
 		events = append(events, Event{Kind: EventLifecycle})
 	}
-	src := newFakeSource(events...)
+	src := newFakeSource(assignSequence(events...)...)
 	src.blockOnEmpty = true
 	b := newTestBridge(src, &recordSink{}, &manualTimerSource{})
 	out, err := b.Run(context.Background())
@@ -639,7 +640,7 @@ func TestBridgeBufferOverflowByteBudgetFailsBeforeCommit(t *testing.T) {
 	if len(events) > MaxBufferedLifecycle {
 		t.Fatalf("test setup error: %d events > %d", len(events), MaxBufferedLifecycle)
 	}
-	src := newFakeSource(events...)
+	src := newFakeSource(assignSequence(events...)...)
 	src.blockOnEmpty = true
 	b := newTestBridge(src, &recordSink{}, &manualTimerSource{})
 	out, err := b.Run(context.Background())
@@ -656,7 +657,7 @@ func TestBridgeBufferOverflowByteBudgetFailsBeforeCommit(t *testing.T) {
 
 func TestBridgeUsageMonotonicBounded(t *testing.T) {
 	t.Parallel()
-	src := newFakeSource(
+	src := newFakeSource(assignSequence(
 		Event{Kind: EventSemantic},
 		Event{Kind: EventUsage, Usage: &Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15}},
 		// A second usage with lower counters must not decrease.
@@ -664,7 +665,7 @@ func TestBridgeUsageMonotonicBounded(t *testing.T) {
 		// A huge counter is clamped to MaxTotal.
 		Event{Kind: EventUsage, Usage: &Usage{TotalTokens: 9_999_999}},
 		Event{Kind: EventFinish, FinishReason: "stop"},
-	)
+	)...)
 	b := newTestBridge(src, &recordSink{}, &manualTimerSource{})
 	b.MaxTotal = 1_000
 	out, err := b.Run(context.Background())
@@ -687,10 +688,10 @@ func TestBridgeUsageMonotonicBounded(t *testing.T) {
 
 func TestBridgeUnresolvedCostWhenFinishWithoutUsage(t *testing.T) {
 	t.Parallel()
-	src := newFakeSource(
+	src := newFakeSource(assignSequence(
 		Event{Kind: EventSemantic},
 		Event{Kind: EventFinish, FinishReason: "stop"},
-	)
+	)...)
 	b := newTestBridge(src, &recordSink{}, &manualTimerSource{})
 	out, err := b.Run(context.Background())
 	if err != nil {
@@ -706,11 +707,11 @@ func TestBridgeProgressResetsIdleOnlyAfterCommit(t *testing.T) {
 	// Progress is an optional field (idle-reset only), not a Kind. A usage
 	// event carrying Progress post-commit must reset idle without creating a
 	// new timer (Reset re-arms the existing idle timer).
-	src := newFakeSource(
+	src := newFakeSource(assignSequence(
 		Event{Kind: EventSemantic},
 		Event{Kind: EventUsage, Usage: &Usage{TotalTokens: 1}, Progress: &Progress{Processed: 1}},
 		Event{Kind: EventFinish, FinishReason: "stop"},
-	)
+	)...)
 	ts := &manualTimerSource{}
 	b := newTestBridge(src, &recordSink{}, ts)
 	if _, err := b.Run(context.Background()); err != nil {
@@ -725,10 +726,10 @@ func TestBridgeProgressResetsIdleOnlyAfterCommit(t *testing.T) {
 
 func TestBridgeSanitizesTokens(t *testing.T) {
 	t.Parallel()
-	src := newFakeSource(
+	src := newFakeSource(assignSequence(
 		Event{Kind: EventSemantic, EventType: "bad\x00type"},
 		Event{Kind: EventFinish, FinishReason: "bad reason!", EventType: "ok.type"},
-	)
+	)...)
 	sink := &recordSink{}
 	b := newTestBridge(src, sink, &manualTimerSource{})
 	out, err := b.Run(context.Background())
@@ -771,7 +772,7 @@ func TestBridgeSanitizesTokens(t *testing.T) {
 func TestBridgeTimerPrecedenceOverCommit(t *testing.T) {
 	t.Parallel()
 	for i := 0; i < 200; i++ {
-		src := newFakeSource(Event{Kind: EventSemantic})
+		src := newFakeSource(assignSequence(Event{Kind: EventSemantic})...)
 		ts := &manualTimerSource{}
 		sink := &recordSink{}
 		b := newTestBridge(src, sink, ts)
@@ -817,7 +818,7 @@ func TestBridgeTimerPrecedenceOverCommit(t *testing.T) {
 func TestBridgeCancelPrecedenceOverCommit(t *testing.T) {
 	t.Parallel()
 	for i := 0; i < 200; i++ {
-		src := newFakeSource(Event{Kind: EventSemantic})
+		src := newFakeSource(assignSequence(Event{Kind: EventSemantic})...)
 		ts := &manualTimerSource{}
 		sink := &recordSink{}
 		ctx, cancel := context.WithCancel(context.Background())
@@ -888,7 +889,7 @@ func FuzzBridgeRun(f *testing.F) {
 			}
 			events = append(events, ev)
 		}
-		src := newFakeSource(events...)
+		src := newFakeSource(assignSequence(events...)...)
 		sink := &recordSink{}
 		b := newTestBridge(src, sink, &manualTimerSource{})
 		out, _ := b.Run(context.Background())
@@ -930,11 +931,11 @@ func FuzzBridgeRun(f *testing.F) {
 func TestBridgeMaxEventsExactLimitAllowed(t *testing.T) {
 	t.Parallel()
 	// MaxEvents = 3: semantic (commit), usage, finish. Exactly at the limit.
-	src := newFakeSource(
+	src := newFakeSource(assignSequence(
 		Event{Kind: EventSemantic},
 		Event{Kind: EventUsage, Usage: &Usage{PromptTokens: 1, CompletionTokens: 1, TotalTokens: 2}},
 		Event{Kind: EventFinish, FinishReason: "stop"},
-	)
+	)...)
 	sink := &recordSink{}
 	b := newTestBridge(src, sink, &manualTimerSource{})
 	b.MaxEvents = 3
@@ -979,11 +980,11 @@ func TestBridgeMaxEventsPreCommitExceeded(t *testing.T) {
 	// MaxEvents = 2: two lifecycle events are accepted (both pre-commit,
 	// buffered). The third event (a semantic that would commit) exceeds the
 	// limit and must fail pre-commit with ErrEventLimit.
-	src := newFakeSource(
+	src := newFakeSource(assignSequence(
 		Event{Kind: EventLifecycle, EventType: "a"},
 		Event{Kind: EventLifecycle, EventType: "b"},
 		Event{Kind: EventSemantic}, // the (limit+1)th event
-	)
+	)...)
 	src.blockOnEmpty = true
 	sink := &recordSink{}
 	b := newTestBridge(src, sink, &manualTimerSource{})
@@ -1030,12 +1031,12 @@ func TestBridgeMaxEventsPostCommitExceeded(t *testing.T) {
 	// accepted. The third event (a second semantic) exceeds the limit and
 	// must fail post-commit with ReasonEventLimit, nil error. The exceeding
 	// semantic is NOT written downstream.
-	src := newFakeSource(
+	src := newFakeSource(assignSequence(
 		Event{Kind: EventSemantic},                             // 1st: commit
 		Event{Kind: EventUsage, Usage: &Usage{TotalTokens: 5}}, // 2nd: accepted, written
 		Event{Kind: EventSemantic},                             // 3rd: exceeds limit, NOT written
 		Event{Kind: EventFinish, FinishReason: "stop"},         // never read
-	)
+	)...)
 	src.blockOnEmpty = true
 	sink := &recordSink{}
 	b := newTestBridge(src, sink, &manualTimerSource{})
@@ -1095,7 +1096,7 @@ func TestBridgeMaxEventsDefaultsToSafeDefault(t *testing.T) {
 	for i := range events {
 		events[i] = Event{Kind: EventSemantic}
 	}
-	src := newFakeSource(events...)
+	src := newFakeSource(assignSequence(events...)...)
 	src.blockOnEmpty = true
 	b := newTestBridge(src, &recordSink{}, &manualTimerSource{})
 	// MaxEvents intentionally left zero.
@@ -1116,14 +1117,14 @@ func TestBridgeMaxEventsDefaultsToSafeDefault(t *testing.T) {
 // and not silently lost, while EventUsage is not double-merged.
 func TestBridgeUsageAccumulatedRegardlessOfKind(t *testing.T) {
 	t.Parallel()
-	src := newFakeSource(
+	src := newFakeSource(assignSequence(
 		// Semantic carries usage metadata (e.g. an incremental delta usage).
 		Event{Kind: EventSemantic, Usage: &Usage{PromptTokens: 3, CompletionTokens: 2, TotalTokens: 5}},
 		// Explicit usage event: merged exactly once (not double).
 		Event{Kind: EventUsage, Usage: &Usage{PromptTokens: 7, CompletionTokens: 4, TotalTokens: 11}},
 		// Finish carries final usage metadata.
 		Event{Kind: EventFinish, FinishReason: "stop", Usage: &Usage{PromptTokens: 10, CompletionTokens: 6, TotalTokens: 16}},
-	)
+	)...)
 	b := newTestBridge(src, &recordSink{}, &manualTimerSource{})
 	b.MaxTotal = 1_000
 
@@ -1160,11 +1161,11 @@ func TestBridgeUsageAccumulatedRegardlessOfKind(t *testing.T) {
 // risking mis-billing a stream that never committed.
 func TestBridgePreCommitFailureReportsZeroUsage(t *testing.T) {
 	t.Parallel()
-	src := newFakeSource(
+	src := newFakeSource(assignSequence(
 		Event{Kind: EventUsage, Usage: &Usage{PromptTokens: 9, CompletionTokens: 9, TotalTokens: 18}},
 		Event{Kind: EventLifecycle, EventType: "start"},
 		Event{Kind: EventNativeError}, // pre-commit native_error
-	)
+	)...)
 	b := newTestBridge(src, &recordSink{}, &manualTimerSource{})
 	out, err := b.Run(context.Background())
 	if !errors.Is(err, ErrUpstreamError) {
@@ -1207,10 +1208,10 @@ func TestBridgePostCommitTimerPrecedenceOverReadyEvent(t *testing.T) {
 			clock.advance(testTimeouts().StreamLifetime)
 			ts.timer(1).fire()
 		}
-		src := newFakeSource(
+		src := newFakeSource(assignSequence(
 			Event{Kind: EventSemantic}, // event0: commit
 			Event{Kind: EventSemantic}, // event1: post-commit, races with lifetime
-		)
+		)...)
 		src.blockOnEmpty = true
 		b := newTestBridge(src, sink, ts)
 		b.Clock = clock
@@ -1292,4 +1293,72 @@ func waitTimerCount(t *testing.T, ts *manualTimerSource, n int) {
 		time.Sleep(time.Millisecond)
 	}
 	t.Fatalf("timers never reached %d (got %d)", n, ts.count())
+}
+
+func TestBridgeRejectsInvalidSourceSequenceBeforeSink(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name   string
+		events []Event
+	}{
+		{name: "zero", events: []Event{{Sequence: 0, Kind: EventSemantic}}},
+		{name: "duplicate", events: []Event{{Sequence: 1, Kind: EventLifecycle}, {Sequence: 1, Kind: EventSemantic}}},
+		{name: "decreasing", events: []Event{{Sequence: 2, Kind: EventLifecycle}, {Sequence: 1, Kind: EventSemantic}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			src := &fakeSource{events: append([]Event(nil), tc.events...)}
+			sink := &recordSink{}
+			out, err := newTestBridge(src, sink, &manualTimerSource{}).Run(context.Background())
+			if !errors.Is(err, ErrProtocol) || out.State != StateFailedBeforeCommit {
+				t.Fatalf("Run = (%+v, %v), want pre-commit ErrProtocol", out, err)
+			}
+			if len(sink.commitBatches()) != 0 || len(sink.writtenEvents()) != 0 {
+				t.Fatal("invalid sequence reached downstream sink")
+			}
+		})
+	}
+}
+
+func TestBridgePreservesSourceSequenceAtSink(t *testing.T) {
+	t.Parallel()
+	sink := &recordSink{}
+	out, err := newTestBridge(&fakeSource{events: []Event{
+		{Sequence: 4, Kind: EventLifecycle},
+		{Sequence: 8, Kind: EventSemantic},
+		{Sequence: 9, Kind: EventFinish, FinishReason: "stop"},
+	}}, sink, &manualTimerSource{}).Run(context.Background())
+	if err != nil || out.State != StateCompleted {
+		t.Fatalf("Run = (%+v, %v)", out, err)
+	}
+	batch := sink.commitBatches()[0]
+	if batch[0].Sequence != 4 || batch[1].Sequence != 8 {
+		t.Fatalf("commit sequences = %d, %d; want 4, 8", batch[0].Sequence, batch[1].Sequence)
+	}
+	if got := sink.writtenEvents()[0].Sequence; got != 9 {
+		t.Fatalf("write sequence = %d, want 9", got)
+	}
+}
+
+func TestBridgeRejectsDuplicateSequenceAfterCommitWithoutFurtherWrite(t *testing.T) {
+	t.Parallel()
+	sink := &recordSink{}
+	out, err := newTestBridge(&fakeSource{events: []Event{
+		{Sequence: 1, Kind: EventSemantic},
+		{Sequence: 1, Kind: EventUsage, Usage: &Usage{TotalTokens: 1}},
+	}}, sink, &manualTimerSource{}).Run(context.Background())
+	if err != nil || out.State != StateFailedAfterCommit || out.Reason != ReasonProtocol || !out.Committed {
+		t.Fatalf("Run = (%+v, %v), want committed protocol failure", out, err)
+	}
+	if got := len(sink.writtenEvents()); got != 0 {
+		t.Fatalf("post-commit writes = %d, want 0", got)
+	}
+}
+
+func TestEventFormattingRedactsMetadata(t *testing.T) {
+	t.Parallel()
+	ev := Event{Sequence: 7, Kind: EventSemantic, EventType: "provider-secret", FinishReason: "finish-secret"}
+	if got := fmt.Sprintf("%v %#v %+v", ev, ev, ev); got != "streaming.Event{Sequence:7 Kind:semantic} streaming.Event{Sequence:7 Kind:semantic} streaming.Event{Sequence:7 Kind:semantic}" {
+		t.Fatalf("Event formatting = %q", got)
+	}
 }

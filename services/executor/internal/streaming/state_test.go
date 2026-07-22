@@ -2,6 +2,7 @@ package streaming
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -199,4 +200,11 @@ func repeatRune(r rune, n int) string {
 		b = append(b, byte(r))
 	}
 	return string(b)
+}
+
+func TestStateFormattingDoesNotExposeUnknownValue(t *testing.T) {
+	unknown := State("upstream-secret-or-payload")
+	if got := fmt.Sprintf("%v %#v %+v", unknown, unknown, unknown); got != "unknown unknown unknown" {
+		t.Fatalf("State formatting = %q", got)
+	}
 }

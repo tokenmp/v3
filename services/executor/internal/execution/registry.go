@@ -61,14 +61,15 @@ func (e *DuplicateSDKClientError) Unwrap() error { return ErrSDKClientDuplicate 
 // write-once per key: the first client wins and later registrations return a
 // typed duplicate error without replacing it.
 type SDKRegistry struct {
-	mu      sync.RWMutex
-	clients map[SDKClientKey]sdk.Client
+	mu            sync.RWMutex
+	clients       map[SDKClientKey]sdk.Client
+	streamClients map[SDKClientKey]sdk.StreamClient
 }
 
 // NewSDKRegistry returns an empty SDKRegistry ready for concurrent use. The
 // zero value of SDKRegistry is also ready for use.
 func NewSDKRegistry() *SDKRegistry {
-	return &SDKRegistry{clients: make(map[SDKClientKey]sdk.Client)}
+	return &SDKRegistry{clients: make(map[SDKClientKey]sdk.Client), streamClients: make(map[SDKClientKey]sdk.StreamClient)}
 }
 
 // Register associates client with the exact SDK kind/protocol pair. A nil
@@ -105,14 +106,23 @@ func (r *SDKRegistry) Client(kind adapter.SDKKind, protocol adapter.Protocol) (s
 	return client, nil
 }
 
-func isNilSDKClient(client sdk.Client) bool {
-	if client == nil {
-		return true
-	}
+func isNilSDKClient(client sdk.Client) bool { return isNilInterface(client) }
 
-	// An interface holding a typed nil does not compare equal to nil. sdk.Client
-	// implementations are expected to be pointer-backed, so reject this case
-	// before it can panic later in Runner.
+func isNilStreamClient(client sdk.StreamClient) bool { return isNilInterface(client) }
+
+// isNilInterface rejects nil and typed-nil capability implementations before
+// they enter the write-once registry.
+func isNilInterface(client any) bool {
+	return client == nil || isTypedNil(client)
+}
+
+// isTypedNil distinguishes an omitted interface (which some optional
+// dependencies deliberately default) from an interface that holds a nil
+// concrete pointer and would panic when called.
+func isTypedNil(client any) bool {
+	if client == nil {
+		return false
+	}
 	value := reflect.ValueOf(client)
 	switch value.Kind() {
 	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
@@ -120,4 +130,37 @@ func isNilSDKClient(client sdk.Client) bool {
 	default:
 		return false
 	}
+}
+
+// RegisterStream associates a streaming client with the exact SDK
+// kind/protocol pair. Complete and Stream are independently registered
+// capabilities: registering either never replaces or implies the other.
+func (r *SDKRegistry) RegisterStream(kind adapter.SDKKind, protocol adapter.Protocol, client sdk.StreamClient) error {
+	if isNilStreamClient(client) {
+		return ErrSDKClientNil
+	}
+	key := SDKClientKey{SDKKind: kind, Protocol: protocol}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.streamClients == nil {
+		r.streamClients = make(map[SDKClientKey]sdk.StreamClient)
+	}
+	if _, exists := r.streamClients[key]; exists {
+		return &DuplicateSDKClientError{Key: key}
+	}
+	r.streamClients[key] = client
+	return nil
+}
+
+// StreamClient returns the independently registered stream capability for the
+// exact SDK kind/protocol pair.
+func (r *SDKRegistry) StreamClient(kind adapter.SDKKind, protocol adapter.Protocol) (sdk.StreamClient, error) {
+	key := SDKClientKey{SDKKind: kind, Protocol: protocol}
+	r.mu.RLock()
+	client, ok := r.streamClients[key]
+	r.mu.RUnlock()
+	if !ok {
+		return nil, &UnknownSDKClientError{Key: key}
+	}
+	return client, nil
 }
