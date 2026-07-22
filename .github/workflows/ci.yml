@@ -174,8 +174,8 @@ jobs:
       # context, request-id, and Phase 8 streaming packages are likewise independent
       # and explicitly race-tested. `./internal/execution/...` includes the Phase
       # 8.2 internal StreamDriver (AttemptSession/registry/payload adapter/Bridge,
-      # retry/quota/log/result/cleanup); `./internal/sdk/...` covers the OpenAI
-      # semantic stream adapter. No new package pattern is needed; fuzz remains local-only. ./internal/composition/... wires the runtime
+      # retry/quota/log/result/cleanup); `./internal/sdk/...` covers both OpenAI and Anthropic
+      # internal semantic stream adapters. No new package pattern is needed; fuzz remains local-only. ./internal/composition/... wires the runtime
       # composition root (store, config source, credential/identity resolvers,
       # in-memory runtime/quarantine/quota/log, SDK registry, Runner, facade,
       # generated strict handler, AuthMiddleware+CaptureRawBody) and rejects
