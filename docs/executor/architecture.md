@@ -1,6 +1,6 @@
 # Executor Architecture Design
 
-- 状态：设计基线已确认；Foundation、Config compiler/snapshot、routing、Phase 5 Adapter Engine、Phase 6 non-stream SDK adapters、Phase 7 retry State、内部 non-stream Runner、non-stream HTTP transport 层、transport-neutral non-stream facade 前置（`internal/nonstream`、`internal/nonstreamfacade`、`internal/authcontext`、`internal/requestid`）与 phase 7.7 config source 前置（模块内 `internal/configsource`）与模块内 quarantine bridge（`internal/quarantinebridge`）均已实施；Phase 8.1 OpenAI internal stream SDK 与 Phase 8.2 internal StreamDriver（组合 attempt session、stream registry、payload adapter、Bridge、retry/quota/log/result/cleanup）已实施；user-authorized runtime composition（`internal/composition`）仅将既有 non-stream 能力接入公开 runtime server/路由（生成 7 条路由均为运行时实际路由，启动拒绝不受支持的 enabled SDK/protocol route），尚未消费 Phase 8.1 stream capability；Phase 10 HTTP streaming 已把 Chat/Messages `stream:true` 接入公开 runtime；Responses/Images 执行仍待后续
+- 状态：设计基线已确认；Foundation、Config compiler/snapshot、routing、Phase 5 Adapter Engine、Phase 6 non-stream SDK adapters、Phase 7 retry State、内部 non-stream Runner、non-stream HTTP transport 层、transport-neutral non-stream facade 前置（`internal/nonstream`、`internal/nonstreamfacade`、`internal/authcontext`、`internal/requestid`）与 phase 7.7 config source 前置（模块内 `internal/configsource`）与模块内 quarantine bridge（`internal/quarantinebridge`）均已实施；Phase 8.1 OpenAI internal stream SDK 与 Phase 8.2 internal StreamDriver（组合 attempt session、stream registry、payload adapter、Bridge、retry/quota/log/result/cleanup）已实施；user-authorized runtime composition（`internal/composition`）仅将既有 non-stream 能力接入公开 runtime server/路由（生成 7 条路由均为运行时实际路由，启动拒绝不受支持的 enabled SDK/protocol route），尚未消费 Phase 8.1 stream capability；Phase 10 HTTP streaming 已把 Chat/Messages `stream:true` 接入公开 runtime；Phase 11.1 official OpenAI legacy Images internal SDK `Complete` capability 已实施，但未接入 registry/composition/transport，Images 执行仍待后续
 - 适用范围：TokenMP v3 `services/executor`
 - 契约来源：`packages/contracts/openapi/executor/v1.yaml`
 - 关联测试方案：`testing-strategy.md`
@@ -62,11 +62,11 @@ OpenAPI 生成类型只存在于 HTTP 边界。核心执行层使用内部 `Norm
 
 | SDK kind | 实现 | 用途 |
 |---|---|---|
-| `openai` | `github.com/openai/openai-go/v3` v3.44.0 | OpenAI Chat non-stream 与内部 semantic stream adapter 已实施；Responses、公开 stream driver/transport 与兼容 Provider 仍待后续 |
+| `openai` | `github.com/openai/openai-go/v3` v3.44.0 | OpenAI Chat non-stream 与内部 semantic stream adapter 已实施；Phase 11.1 legacy Images Generate internal `Complete` capability 已实施（strict legacy request、default wire `url`、strict URL/base64/usage、16 MiB wire/10 MiB item/12 MiB aggregate），但尚未 registry/composition/transport；Responses、Images execution+HTTP、公开 stream driver/transport 与兼容 Provider 仍待后续 |
 | `anthropic` | `github.com/anthropics/anthropic-sdk-go` v1.58.0 | Anthropic Messages non-stream 与 internal `StreamClient` 已实施；HTTP SSE transport/composition registration 及兼容 Provider 仍待后续 |
 | `generic_http` | 受控 HTTP adapter | 官方 SDK 无法表达的 Provider extension；不是默认路径 |
 
-SDK 内部会使用 HTTP transport，但它不了解 TokenMP 的 TTFT、流空闲、Route fallback、配额和下游提交语义。这些业务控制由 Executor 通过 Context 和流状态机实现。当前两个 adapter 均只执行一个 non-stream call。OpenAI adapter 的 target/model/secret 都是 per-call；Anthropic adapter 还使用 `WithoutEnvironmentDefaults`，校验 HTTPS target/path prefix，并固定唯一 `x-api-key` 和 `anthropic-version`。两者均严格验证请求；Anthropic 还严格验证成功响应、以 execution-authoritative model/thinking 重建参数并覆盖 tools/vision，且将 529 classified as unavailable（fixture 映射为 429）。SDK retry=0 且 redirects 禁止，attempt metadata 不含敏感信息。
+SDK 内部会使用 HTTP transport，但它不了解 TokenMP 的 TTFT、流空闲、Route fallback、配额和下游提交语义。这些业务控制由 Executor 通过 Context 和流状态机实现。每个 non-stream adapter 调用一次 provider operation。OpenAI adapter 的 target/model/secret 都是 per-call；Phase 11.1 Images 使用 official legacy `Images.Generate`，不接受 GPT Image 特有参数，缺省且在 wire 上显式 `response_format:url`，严格验证 HTTPS URL 或标准 padded base64 以及 usage，并将 wire/单项/aggregate 分别限制为 16 MiB/10 MiB/12 MiB；该 internal capability 尚未注册至 execution registry、composition 或 HTTP transport，也不作 usage quota。Anthropic adapter 还使用 `WithoutEnvironmentDefaults`，校验 HTTPS target/path prefix，并固定唯一 `x-api-key` 和 `anthropic-version`。adapter 均严格验证请求；Anthropic 还严格验证成功响应、以 execution-authoritative model/thinking 重建参数并覆盖 tools/vision，且将 529 classified as unavailable（fixture 映射为 429）。SDK retry=0 且 redirects 禁止，attempt metadata 不含敏感信息。
 
 所有官方 SDK client 必须显式关闭 SDK 自带自动重试；受控 HTTP fallback 和代理层同样不得产生未计入 Attempt Budget 的隐藏重试。每一次实际上游调用都必须对应一个可观察的 attempt。
 
@@ -557,7 +557,7 @@ Request/Attempt/Event 日志至少记录：
 | 8.2 | `feat/executor-stream-driver` | **已实施并由 Phase 10 runtime 消费**：AttemptSession、exact stream registry、owned-payload adapter 与 Bridge；pre-commit retry、一次 Reserve/唯一 Finalize/Release、bounded cleanup。 |
 | 9 | `feat/executor-sdk-anthropic-streaming` | **已实施并由 Phase 10 runtime 消费**：Anthropic Messages StreamClient secure opening、bounded parser/state、signature canonical payload-only、native error first-wins。 |
 | 10 | `feat/executor-http-streaming` | **已实施**：Chat/Messages `stream:true` runtime SSE；generated hybrid plain+strict dispatch、auth-before-capture、pre-commit JSON/post-commit no fallback、OpenAI `[DONE]`/Anthropic native framing、StreamDriver+SDK registry composition；无 HTTP atomicity/wire proof，Responses/Images 仍 501。 |
-| 11 | `feat/executor-images` | Images 协议 |
+| 11 | `feat/executor-images` | Images protocol execution + HTTP；Phase 11.1 已实施 official OpenAI legacy Images internal SDK `Complete` capability（strict legacy request、default wire `url`、strict URL/base64/usage、16 MiB wire/10 MiB item/12 MiB aggregate），未 registry/composition/transport，route 仍 501；不支持 GPT Image 特有参数或 usage quota。 |
 | 12 | `feat/executor-quota` | 完整配额策略和 Repository contract suite |
 | 13 | `feat/executor-request-logging` | Request/Attempt/Event 日志 |
 | 14 | `build/executor-ci-docker` | Docker、CI 和集成验证 |

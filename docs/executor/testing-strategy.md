@@ -5,7 +5,7 @@
 - 架构来源：`architecture.md`
 - API 契约：`packages/contracts/openapi/executor/v1.yaml`
 
-Foundation、compiler/snapshot、routing、non-stream pipeline、SDK adapters、composition 和 process tests 均已实施。Phase 10 tests 进一步覆盖 Chat/Messages `stream:true` hybrid dispatch、auth-before-capture、pre-commit JSON error、post-commit no fallback、flushing SSE framing（OpenAI `[DONE]` / Anthropic native events）、stream/streamfacade race packages 与 empty-config route/process JSON 404。仍不覆盖 HTTP atomicity、wire proof、跨进程 exactly-once 或 live provider E2E；Responses/Images 仍 501。
+Foundation、compiler/snapshot、routing、non-stream pipeline、SDK adapters、composition 和 process tests 均已实施。Phase 10 tests 进一步覆盖 Chat/Messages `stream:true` hybrid dispatch、auth-before-capture、pre-commit JSON error、post-commit no fallback、flushing SSE framing（OpenAI `[DONE]` / Anthropic native events）、stream/streamfacade race packages 与 empty-config route/process JSON 404。Phase 11.1 tests 覆盖 internal OpenAI legacy Images SDK capability 的 TLS call isolation、default wire `response_format:url`、strict URL/base64/usage、16 MiB wire/10 MiB item/12 MiB aggregate caps、race 与本地 fuzz；该 capability 尚未 registry/composition/transport，Images route 仍 501。仍不覆盖 HTTP atomicity、wire proof、跨进程 exactly-once 或 live provider E2E；不支持 GPT Image 特有参数或 usage quota，下一阶段为 Images execution + HTTP。
 
 durable idempotency/replay、remote quota/credential resolver、`Retry-After` parsing、live provider E2E、持续 fuzz、性能与 Docker 仍是后续设计。
 
@@ -579,7 +579,7 @@ protocol renderer 与 `SafeStrictOptions` 已实施模块内 component tests 覆
 
 ## 13. SDK Adapter 测试
 
-### 13.1 OpenAI SDK（Chat non-stream 与内部 stream adapter 已实施）
+### 13.1 OpenAI SDK（Chat non-stream、内部 stream 与 Phase 11.1 internal Images capability 已实施）
 
 已实施：
 
@@ -592,11 +592,13 @@ protocol renderer 与 `SafeStrictOptions` 已实施模块内 component tests 覆
 - strict contract validator 接受并验证 tools、vision、thinking，预检失败不发 HTTP；
 - 安全 injection/唯一 Bearer auth，环境派生 headers 不能覆盖；
 - TLS tests 覆盖 success status/request-ID metadata、non-stream 5xx/429、malformed 2xx protocol、transport 与 deadline timeout 分类，以及无 remote content 泄漏。
+- Phase 11.1 internal legacy Images `Images.Generate`: call-local HTTPS target/model/opaque secret、retry=0/no redirects、唯一 Bearer auth；strict legacy request allowlist（不支持 GPT Image 特有参数）；缺省且 wire 显式 `response_format:url`；strict HTTPS URL/标准 padded base64/usage validation；response wire 16 MiB、single decoded base64 item 10 MiB、aggregate 12 MiB；TLS/race tests 与 `FuzzDecodeImageParams`、`FuzzValidateImageResponse`、`FuzzCappedReadCloser` 覆盖该边界。
 
 仍待后续：
 
 - Responses request/response；
-- Responses/Images HTTP transport/composition/runtime execution（Chat/Messages `stream:true` 已实施）；
+- Responses/Images HTTP transport/composition/runtime execution（Chat/Messages `stream:true` 已实施；Phase 11.1 Images SDK capability 未 registry/composition/transport，`/v1/images/generations` 仍鉴权 501）；
+- GPT Image 特有参数与 usage quota；下一阶段为 Images execution + HTTP。
 - durable idempotency/replay、remote quota/credential resolver、`Retry-After` parsing；
 - public/provider E2E streaming、HTTP atomicity 或 wire-attempt proof；下一阶段为 HTTP SSE transport，并在 composition 为 OpenAI 与 Anthropic 注册 StreamClient。
 
@@ -702,7 +704,7 @@ go test -race ./...
 
 ### 16.1 Fuzz targets
 
-已实施 fuzz target 为 `internal/adapter/compiler_test.go` 的 `FuzzCompile`（变化 Provider Base URL 和有限 DSL JSON pointer）、`internal/routing/selector_test.go` 的 `FuzzParseSelector`（grammar/canonical round-trip）、`internal/adapter/engine_test.go` 的 `FuzzEngineApply` 与 malformed-rule fuzz target（strict JSON、runtime rule defense、无 panic/partial result）、`internal/sdk/anthropicadapter` 的 `FuzzDecodeMessageParams` 和 `FuzzValidateMessageResponse`（Anthropic non-stream 请求/成功响应 validator，拒绝非法输入且不 panic），以及 `internal/configsource/configsource_test.go` 的 `FuzzScanSecrets`、`FuzzScanSecretsNestedContainerState` 与 `FuzzParseConfigSentinels`（secret 扫描 lexical+semantic 双通道、嵌套容器状态机与解析 sentinel 无 panic/无泄露）。除常规 `go test` 对 seed 的执行外，尚未配置持续 fuzz；短时 fuzz 可由本地按需运行。
+已实施 fuzz target 为 `internal/adapter/compiler_test.go` 的 `FuzzCompile`（变化 Provider Base URL 和有限 DSL JSON pointer）、`internal/routing/selector_test.go` 的 `FuzzParseSelector`（grammar/canonical round-trip）、`internal/adapter/engine_test.go` 的 `FuzzEngineApply` 与 malformed-rule fuzz target（strict JSON、runtime rule defense、无 panic/partial result）、`internal/sdk/anthropicadapter` 的 `FuzzDecodeMessageParams` 和 `FuzzValidateMessageResponse`（Anthropic non-stream 请求/成功响应 validator，拒绝非法输入且不 panic），`internal/sdk/openaiadapter` 的 `FuzzDecodeImageParams`、`FuzzValidateImageResponse` 与 `FuzzCappedReadCloser`（Phase 11.1 Images strict request/response 和 wire-cap reader，无 panic），以及 `internal/configsource/configsource_test.go` 的 `FuzzScanSecrets`、`FuzzScanSecretsNestedContainerState` 与 `FuzzParseConfigSentinels`（secret 扫描 lexical+semantic 双通道、嵌套容器状态机与解析 sentinel 无 panic/无泄露）。除常规 `go test` 对 seed 的执行外，尚未配置持续 fuzz；短时 fuzz 可由本地按需运行。
 
 以下 target 仍是后续设计，尚未实现：
 
@@ -809,7 +811,7 @@ pnpm --filter @tokenmp/contracts check:generated:executor
 cd services/executor && go test ./internal/server/...
 ```
 
-现有 `go-auth` CI job 已运行 `check:generated:executor`、generated transport/route conformance race tests，以及从 `services/executor` 执行的 `go test -race -count=1 ./internal/adapter/... ./internal/snapshot/... ./internal/routing/... ./internal/execution/... ./internal/requestlog/... ./internal/quota/... ./internal/sdk/... ./internal/configsource/... ./internal/credentialenv/... ./internal/identityenv/... ./internal/quarantinebridge/... ./internal/nonstream/... ./internal/nonstreamfacade/... ./internal/authcontext/... ./internal/requestid/... ./internal/stream/... ./internal/streamfacade/... ./internal/streaming/... ./internal/composition/... ./internal/config/... ./internal/app/... ./cmd/executor/...`。后者是 compiler/snapshot/routing/internal Runner/adapter SDK/config source/composition 的最小 race 门禁；`./internal/execution/...` 覆盖 internal Runner、registry、terminal 与 request-local retry State 的单元、invariant 与 race tests，`./internal/requestlog/...` 与 `./internal/quota/...` 覆盖 Runner 使用的日志和 quota ports，`./internal/configsource/...` 覆盖 strict secret-free 文件源与 initial generation=1 bootstrap，`./internal/config/...` 覆盖 composition-aware 必填 env 校验，`./internal/app/...` 覆盖注入 handler 创建 server，`./cmd/executor/...` 覆盖实际进程启动与 invalid 配置 fail-before-listen。`./internal/sdk/...` 自动涵盖 OpenAI 与 Anthropic adapter packages，包括 Anthropic TLS `httptest` 和 fuzz seed tests。`./internal/composition/...` 覆盖 runtime composition wiring，包括枚举 OpenAPI 契约全部 operation、经全包装 `AuthMiddleware(CaptureRawBody(...))` handler 断言匿名/鉴权状态的路由一致性，与 process binary test（health、unauth chat 401、鉴权空配置 chat 404 与 501 route、invalid 配置未 bind 监听器）。`./internal/quarantinebridge/...` 被显式列出是因为它与 `./internal/routing/...` 是独立 package，routing 的 race pattern 不会自动测试它，必须单独加入包列表才会被覆盖。SDK HTTP tests 仅访问进程内本地 `httptest.NewTLSServer`，不访问网络、数据库或真实 Provider。该命令不运行数据库、live provider 或远端 request pipeline，也不构成独立 Executor CI job；Docker、独立 Executor CI job 与远端/真实 provider 集成仍待后续独立阶段（见阶段 14）。
+现有 `go-auth` CI job 已运行 `check:generated:executor`、generated transport/route conformance race tests，以及从 `services/executor` 执行的 `go test -race -count=1 ./internal/adapter/... ./internal/snapshot/... ./internal/routing/... ./internal/execution/... ./internal/requestlog/... ./internal/quota/... ./internal/sdk/... ./internal/configsource/... ./internal/credentialenv/... ./internal/identityenv/... ./internal/quarantinebridge/... ./internal/nonstream/... ./internal/nonstreamfacade/... ./internal/authcontext/... ./internal/requestid/... ./internal/stream/... ./internal/streamfacade/... ./internal/streaming/... ./internal/composition/... ./internal/config/... ./internal/app/... ./cmd/executor/...`。后者是 compiler/snapshot/routing/internal Runner/adapter SDK/config source/composition 的最小 race 门禁；`./internal/execution/...` 覆盖 internal Runner、registry、terminal 与 request-local retry State 的单元、invariant 与 race tests，`./internal/requestlog/...` 与 `./internal/quota/...` 覆盖 Runner 使用的日志和 quota ports，`./internal/configsource/...` 覆盖 strict secret-free 文件源与 initial generation=1 bootstrap，`./internal/config/...` 覆盖 composition-aware 必填 env 校验，`./internal/app/...` 覆盖注入 handler 创建 server，`./cmd/executor/...` 覆盖实际进程启动与 invalid 配置 fail-before-listen。`./internal/sdk/...` 自动涵盖 OpenAI（包括 Phase 11.1 Images）与 Anthropic adapter packages，包括本地 TLS `httptest`、race 和 fuzz seed tests；CI package pattern 不变，持续 fuzz 不加入 CI。`./internal/composition/...` 覆盖 runtime composition wiring，包括枚举 OpenAPI 契约全部 operation、经全包装 `AuthMiddleware(CaptureRawBody(...))` handler 断言匿名/鉴权状态的路由一致性，与 process binary test（health、unauth chat 401、鉴权空配置 chat 404 与 501 route、invalid 配置未 bind 监听器）。`./internal/quarantinebridge/...` 被显式列出是因为它与 `./internal/routing/...` 是独立 package，routing 的 race pattern 不会自动测试它，必须单独加入包列表才会被覆盖。SDK HTTP tests 仅访问进程内本地 `httptest.NewTLSServer`，不访问网络、数据库或真实 Provider。该命令不运行数据库、live provider 或远端 request pipeline，也不构成独立 Executor CI job；Docker、独立 Executor CI job 与远端/真实 provider 集成仍待后续独立阶段（见阶段 14）。
 
 ### `executor-integration`
 

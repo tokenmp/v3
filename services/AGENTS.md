@@ -12,6 +12,8 @@
 
 Executor internal module index — Phase 10 HTTP streaming 已实施：`internal/stream`/`internal/streamfacade` transport-neutral boundary/facade、`execution.StreamDriver`、精确 OpenAI/Anthropic stream registry，现由 `internal/transport/executorv1api.Hybrid` 与 SSE sink 经 `internal/composition` 接入 runtime。Chat/Messages `stream:true` 启用；hybrid plain handler 对结构化 stream flag 分流，`stream:false` 保持 generated strict non-stream path，`stream:true` 只完整 normalize 一次并执行 stream facade/Driver。`AuthMiddleware(CaptureRawBody(...))` 的顺序保持 auth 在 body read 前；pre-commit 失败是协议原生 JSON，post-commit 不回落 JSON。OpenAI SSE 使用 `data`/唯一 `[DONE]`，Anthropic native `event`/`data` 且无 `[DONE]`；sink 要求 flush、canonical payload 256 KiB。无 HTTP atomicity、wire proof、跨进程 exactly-once 或 public/provider E2E；Responses/Images 仍 501。CI race 显式包含 `./internal/stream/...`、`./internal/streamfacade/...`，route/process tests 覆盖 stream pre-commit JSON errors。模块规则：`executor/internal/{stream,streamfacade,streaming,sdk}/AGENTS.md`。
 
+Phase 11.1 已实施 official OpenAI legacy Images internal SDK `Complete` capability（`openai_images`）：strict legacy request、default wire `response_format:url`、strict HTTPS URL/standard padded base64/usage response validation，以及 16 MiB wire、10 MiB item、12 MiB aggregate caps。它未 registry/composition/transport，`/v1/images/generations` 仍为鉴权 501；不支持 GPT Image 特有参数或 usage quota，下一阶段为 Images execution + HTTP。既有 `go-auth` job 的 `./internal/sdk/...` race pattern 已覆盖该包（仅更新 CI 注释，不增加 package pattern）；模块规则同上。
+
 ## 新增模块准入
 
 新增 `services/<name>/` 前必须确认：
