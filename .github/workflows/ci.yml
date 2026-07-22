@@ -174,9 +174,10 @@ jobs:
       # context, request-id, transport-neutral stream boundary/facade, and Phase 8
       # streaming packages are likewise independent and explicitly race-tested. `./internal/execution/...` includes the Phase
       # 8.2 internal StreamDriver (AttemptSession/registry/payload adapter/Bridge,
-      # retry/quota/log/result/cleanup); `./internal/sdk/...` covers OpenAI (including Phase 11.1
-      # internal legacy Images SDK capability) and Anthropic adapter packages. No new package pattern
-      # is needed; fuzz remains local-only. ./internal/composition/... wires the runtime
+      # retry/quota/log/result/cleanup); `./internal/sdk/...` covers OpenAI legacy Images (now
+      # registered for completion-only non-stream execution) and Anthropic adapter packages.
+      # `./internal/imagecontract/...` is an independent SDK/transport shared validator package,
+      # so it is explicitly race-tested. Fuzz remains local-only. ./internal/composition/... wires the runtime
       # composition root (store, config source, credential/identity resolvers,
       # in-memory runtime/quarantine/quota/log, SDK registry, completion Runner + StreamDriver, non-stream + stream facades,
       # generated hybrid plain/strict handler, AuthMiddleware+CaptureRawBody) and rejects
@@ -189,7 +190,7 @@ jobs:
       # with a missing model, and fail-before-listen on invalid composition/config.
       - name: go test -race (Executor compiler/snapshot/routing/pipeline/adapter SDK/config source/credential env/identity env/quarantine bridge/stream driver/composition/config/app/process)
         working-directory: services/executor
-        run: go test -race -count=1 ./internal/adapter/... ./internal/snapshot/... ./internal/routing/... ./internal/execution/... ./internal/requestlog/... ./internal/quota/... ./internal/sdk/... ./internal/configsource/... ./internal/credentialenv/... ./internal/identityenv/... ./internal/quarantinebridge/... ./internal/nonstream/... ./internal/nonstreamfacade/... ./internal/authcontext/... ./internal/requestid/... ./internal/stream/... ./internal/streamfacade/... ./internal/streaming/... ./internal/composition/... ./internal/config/... ./internal/app/... ./cmd/executor/...
+        run: go test -race -count=1 ./internal/adapter/... ./internal/snapshot/... ./internal/routing/... ./internal/execution/... ./internal/requestlog/... ./internal/quota/... ./internal/sdk/... ./internal/configsource/... ./internal/credentialenv/... ./internal/identityenv/... ./internal/quarantinebridge/... ./internal/imagecontract/... ./internal/nonstream/... ./internal/nonstreamfacade/... ./internal/authcontext/... ./internal/requestid/... ./internal/stream/... ./internal/streamfacade/... ./internal/streaming/... ./internal/composition/... ./internal/config/... ./internal/app/... ./cmd/executor/...
 
       - name: Install golang-migrate CLI
         env:

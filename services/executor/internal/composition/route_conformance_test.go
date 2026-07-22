@@ -28,9 +28,9 @@ import (
 //
 //   - GET/HEAD /healthz are anonymous 200 (auth is never required).
 //   - Every /v1 operation is auth-protected: anonymous → 401.
-//   - /v1/models, /v1/responses, /v1/images/generations return 501 when
-//     authenticated (these operations are not executed by the runtime).
-//   - /v1/chat/completions and /v1/messages execute through the facade; with
+//   - /v1/models and /v1/responses return 501 when authenticated.
+//   - /v1/chat/completions, /v1/messages and /v1/images/generations execute
+//     through the facade; with
 //     an empty config the requested model resolves no route → 404.
 //
 // If a route is added to the contract, the expectation table must be updated
@@ -93,9 +93,9 @@ var contractExpectations = map[string]routeExpectation{
 	},
 	"POST /v1/images/generations": {
 		anonStatus: http.StatusUnauthorized,
-		authStatus: http.StatusNotImplemented,
-		body:       `{"model":"dall-e-3","prompt":"hi"}`,
-		note:       "auth-protected; not executed by runtime",
+		authStatus: http.StatusNotFound,
+		body:       `{"model":"missing-image","prompt":"hi"}`,
+		note:       "auth-protected; image request resolves no model → JSON 404",
 	},
 }
 

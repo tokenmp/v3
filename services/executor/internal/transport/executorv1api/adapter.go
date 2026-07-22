@@ -56,9 +56,9 @@ type Options struct {
 }
 
 // NewNonStream creates an Executor v1 strict server adapter that executes
-// non-stream chat/messages through the injected executor. ListModels,
-// CreateResponse and CreateImage remain protocol-native 501. A nil or
-// typed-nil Executor fails closed to a safe internal error.
+// non-stream chat/messages/images through the injected executor. ListModels
+// and CreateResponse remain protocol-native 501. A nil or typed-nil Executor
+// fails closed to a safe internal error.
 func NewNonStream(opts Options) *Adapter {
 	return &Adapter{nonStream: opts.Executor, requestIDs: opts.RequestIDs}
 }
@@ -171,9 +171,32 @@ func (*Adapter) CreateResponse(context.Context, executorv1.CreateResponseRequest
 	return executorv1.CreateResponse501JSONResponse{OpenAINotImplementedJSONResponse: openAINotImplemented()}, nil
 }
 
-// CreateImage returns an OpenAI-compatible indication that image generation is not implemented.
-func (*Adapter) CreateImage(context.Context, executorv1.CreateImageRequestObject) (executorv1.CreateImageResponseObject, error) {
-	return executorv1.CreateImage501JSONResponse{OpenAINotImplementedJSONResponse: openAINotImplemented()}, nil
+// CreateImage executes one legacy OpenAI Images request through the same
+// transport-neutral executor boundary as Chat. It intentionally has no stream
+// mode and uses the dedicated 16 MiB response renderer cap.
+func (a *Adapter) CreateImage(ctx context.Context, _ executorv1.CreateImageRequestObject) (executorv1.CreateImageResponseObject, error) {
+	if a.foundation {
+		return imageError(http.StatusNotImplemented, "NOT_IMPLEMENTED", "api_error", notImplementedMessage), nil
+	}
+	requestID := a.requestID(ctx)
+	if isNilExecutor(a.nonStream) {
+		return RenderImageError(errFailClosed), nil
+	}
+	normalized, err := NormalizeOpenAIImages(ctx, requestID)
+	if lifecycleErr := contextLifecycleError(ctx, err); lifecycleErr != nil {
+		return nil, lifecycleErr
+	}
+	if err != nil {
+		return RenderImageError(err), nil
+	}
+	result, err := a.nonStream.Execute(ctx, normalized.Request)
+	if lifecycleErr := contextLifecycleError(ctx, err); lifecycleErr != nil {
+		return nil, lifecycleErr
+	}
+	if err != nil {
+		return RenderImageError(err), nil
+	}
+	return RenderImage(result, normalized.EffectiveResponseFormat), nil
 }
 
 func openAINotImplemented() executorv1.OpenAINotImplementedJSONResponse {

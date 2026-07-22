@@ -69,11 +69,11 @@ var (
 	ErrSDKAdapter = errors.New("composition: sdk adapter unavailable")
 )
 
-// supportedSDKPairs is the exact set of (SDKKind, Protocol) pairs for which
-// composition registers both official completion and stream capabilities.
-// It is a defense-in-depth allowlist for the startup registry capability gate.
+// supportedSDKPairs is the exact runtime completion allowlist. Images is
+// completion-only; Chat and Messages additionally require stream capability.
 var supportedSDKPairs = map[execution.SDKClientKey]struct{}{
 	{SDKKind: adapter.SDKKindOpenAI, Protocol: adapter.ProtocolOpenAIChat}:   {},
+	{SDKKind: adapter.SDKKindOpenAI, Protocol: adapter.ProtocolOpenAIImages}: {},
 	{SDKKind: adapter.SDKKindAnthropic, Protocol: adapter.ProtocolAnthropic}: {},
 }
 
@@ -194,8 +194,10 @@ func rejectUnsupportedEnabledRoutes(compiled adapter.CompiledConfig, registry *e
 		if _, err := registry.Client(key.SDKKind, key.Protocol); err != nil {
 			return ErrUnsupportedRoute
 		}
-		if _, err := registry.StreamClient(key.SDKKind, key.Protocol); err != nil {
-			return ErrUnsupportedRoute
+		if key.Protocol != adapter.ProtocolOpenAIImages {
+			if _, err := registry.StreamClient(key.SDKKind, key.Protocol); err != nil {
+				return ErrUnsupportedRoute
+			}
 		}
 		// The adapter's SDKKind/Protocol must also agree with the provider, an
 		// invariant the compiler enforces; check it here for defense-in-depth.
@@ -220,6 +222,9 @@ func buildSDKRegistry() (*execution.SDKRegistry, error) {
 		return nil, ErrSDKAdapter
 	}
 	if err := registry.Register(adapter.SDKKindOpenAI, adapter.ProtocolOpenAIChat, openaiClient); err != nil {
+		return nil, ErrSDKAdapter
+	}
+	if err := registry.Register(adapter.SDKKindOpenAI, adapter.ProtocolOpenAIImages, openaiClient); err != nil {
 		return nil, ErrSDKAdapter
 	}
 	if err := registry.RegisterStream(adapter.SDKKindOpenAI, adapter.ProtocolOpenAIChat, openaiClient); err != nil {

@@ -32,6 +32,18 @@ func newFacade(t *testing.T, runner *recordingRunner) (*Facade, *snapshot.Store)
 	return New(opts), store
 }
 
+func TestFacadeAllowsOpenAIImagesProtocol(t *testing.T) {
+	t.Parallel()
+	runner := &recordingRunner{onceGate: true}
+	facade, _ := newFacade(t, runner)
+	req := chatRequest("chat-model", "image-request")
+	req.Protocol = adapter.ProtocolOpenAIImages
+	_, err := facade.Execute(context.Background(), req)
+	if errors.Is(err, ErrInvalidProtocol) {
+		t.Fatalf("images protocol rejected: %v", err)
+	}
+}
+
 func TestFacadeNilFacadeFailsClosed(t *testing.T) {
 	t.Parallel()
 	var f *Facade

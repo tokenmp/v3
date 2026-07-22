@@ -11,6 +11,7 @@ import (
 
 	"github.com/tokenmp/v3/services/executor/internal/adapter"
 	executorv1 "github.com/tokenmp/v3/services/executor/internal/contract/executorv1"
+	"github.com/tokenmp/v3/services/executor/internal/imagecontract"
 	"github.com/tokenmp/v3/services/executor/internal/nonstream"
 	"github.com/tokenmp/v3/services/executor/internal/sdk"
 )
@@ -35,6 +36,7 @@ const (
 
 	maxRenderTokenBytes   = 128
 	maxRenderMessageBytes = 512
+	maxImageRenderBytes   = 16 << 20
 )
 
 // RenderChatCompletion converts a terminal non-stream execution outcome into
@@ -53,6 +55,21 @@ func RenderChatCompletion(result NonStreamResult) executorv1.CreateChatCompletio
 // RenderMessage converts a terminal non-stream execution outcome into the
 // native Messages response object. request_id is emitted only from the SDK
 // sanitized completion metadata, never from an error or raw provider body.
+// RenderImage passes through a provider result only after a dedicated bounded
+// Images response validation. The SDK repeats stronger provider validation,
+// but this boundary must also reject malformed injected port results.
+func RenderImage(result NonStreamResult, effectiveResponseFormat string) executorv1.CreateImageResponseObject {
+	if result.Failure == nil && result.Completion.Status == http.StatusOK && validImageSuccess(result.Completion.RawJSON, effectiveResponseFormat) {
+		// Completion.RawJSON is already exclusively owned by the execution result.
+		// Keep that one validated slice; serialization writes it exactly once.
+		return imageRawResponse{body: result.Completion.RawJSON}
+	}
+	if result.Failure != nil && completionAbsent(result) {
+		return imageFailure(*result.Failure)
+	}
+	return imageError(http.StatusInternalServerError, internalErrorCode, "api_error", internalErrorMessage)
+}
+
 func RenderMessage(result NonStreamResult) executorv1.CreateMessageResponseObject {
 	return RenderMessageWithRequestID(result, "")
 }
@@ -124,6 +141,22 @@ func RenderChatError(err error) executorv1.CreateChatCompletionResponseObject {
 }
 
 // RenderMessageError is RenderChatError's Anthropic-native counterpart.
+func RenderImageError(err error) executorv1.CreateImageResponseObject {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return nil
+	}
+	if errors.Is(err, nonstream.ErrInvalidRequest) {
+		return imageError(http.StatusBadRequest, invalidErrorCode, "invalid_request_error", invalidErrorMessage)
+	}
+	if errors.Is(err, nonstream.ErrUnauthorized) {
+		return imageError(http.StatusUnauthorized, unauthorizedChatCode, "authentication_error", unauthorizedChatMessage)
+	}
+	if errors.Is(err, nonstream.ErrModelNotFound) {
+		return imageError(http.StatusNotFound, modelNotFoundChatCode, "invalid_request_error", modelNotFoundChatMessage)
+	}
+	return imageError(http.StatusInternalServerError, internalErrorCode, "api_error", internalErrorMessage)
+}
+
 func RenderMessageError(err error) executorv1.CreateMessageResponseObject {
 	return RenderMessageErrorWithRequestID(err, "")
 }
@@ -158,6 +191,16 @@ func (r chatRawResponse) VisitCreateChatCompletionResponse(w http.ResponseWriter
 	return err
 }
 
+type imageRawResponse struct{ body []byte }
+
+func (r imageRawResponse) VisitCreateImageResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	_, err := w.Write(r.body)
+	return err
+}
+
 type messageRawResponse struct{ body []byte }
 
 func (r messageRawResponse) VisitCreateMessageResponse(w http.ResponseWriter) error {
@@ -173,6 +216,18 @@ func validCompletion(result NonStreamResult, validate func(map[string]any) bool)
 
 func completionAbsent(result NonStreamResult) bool {
 	return result.Completion.Status == 0 && len(result.Completion.RawJSON) == 0 && result.Completion.RequestID == ""
+}
+
+func validImageSuccess(raw []byte, wanted string) bool {
+	if len(raw) == 0 || len(raw) > maxImageRenderBytes || !utf8.Valid(raw) {
+		return false
+	}
+	value, err := parseSuccessJSON(raw)
+	if err != nil {
+		return false
+	}
+	root, ok := value.(map[string]any)
+	return ok && imagecontract.ValidateResponse(root, wanted)
 }
 
 func validSuccessJSON(raw []byte, validate func(map[string]any) bool) bool {
@@ -406,11 +461,23 @@ func jsonNumberInteger(value any) bool {
 	_, err := number.Int64()
 	return err == nil
 }
+func nonnegativeJSONInteger(value any) bool {
+	number, ok := value.(json.Number)
+	if !ok {
+		return false
+	}
+	integer, err := number.Int64()
+	return err == nil && integer >= 0
+}
 func nonEmptyString(value any) bool { text, ok := value.(string); return ok && text != "" }
 
 func chatFailure(failure adapter.MappedResponse) executorv1.CreateChatCompletionResponseObject {
 	status, code, typ, message := safeFailure(failure, false)
 	return chatError(status, code, typ, message)
+}
+func imageFailure(failure adapter.MappedResponse) executorv1.CreateImageResponseObject {
+	status, code, typ, message := safeFailure(failure, false)
+	return imageError(status, code, typ, message)
 }
 func messageFailure(failure adapter.MappedResponse, requestID string) executorv1.CreateMessageResponseObject {
 	status, code, typ, message := safeFailure(failure, true)
@@ -517,6 +584,9 @@ func anthropicType(status int, value string) string {
 func chatError(status int, code, typ, message string) executorv1.CreateChatCompletionResponseObject {
 	return chatProtocolError{status: status, body: openAIError(status, code, typ, message)}
 }
+func imageError(status int, code, typ, message string) executorv1.CreateImageResponseObject {
+	return imageProtocolError{status: status, body: openAIError(status, code, typ, message)}
+}
 func messageError(status int, code, typ, message, requestID string) executorv1.CreateMessageResponseObject {
 	return messageProtocolError{status: status, body: anthropicError(code, typ, message, requestID)}
 }
@@ -527,6 +597,16 @@ type chatProtocolError struct {
 }
 
 func (r chatProtocolError) VisitCreateChatCompletionResponse(w http.ResponseWriter) error {
+	return writeJSON(w, r.status, r.body)
+}
+
+type imageProtocolError struct {
+	status int
+	body   executorv1.OpenAIErrorResponse
+}
+
+func (r imageProtocolError) VisitCreateImageResponse(w http.ResponseWriter) error {
+	w.Header().Set("Cache-Control", "no-store")
 	return writeJSON(w, r.status, r.body)
 }
 

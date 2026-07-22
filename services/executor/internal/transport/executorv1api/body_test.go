@@ -48,12 +48,12 @@ func TestCaptureRawBodyUsesOneCaptureSliceAndRawBodyCopies(t *testing.T) {
 		if !ok {
 			t.Fatal("raw body view missing")
 		}
-		// This private test-only mutation proves bytes.NewReader did not make a
-		// third copy. Production code treats view as immutable.
+		// The generated decoder is permitted to mutate/default its decoded
+		// representation, so its reader must not alias capture-owned bytes.
 		view[0] = 'X'
 		first := make([]byte, 1)
-		if _, err := io.ReadFull(r.Body, first); err != nil || first[0] != 'X' {
-			t.Fatalf("replacement reader must share the single capture-owned slice: first=%q err=%v", first, err)
+		if _, err := io.ReadFull(r.Body, first); err != nil || first[0] != '{' {
+			t.Fatalf("replacement reader must not alias capture slice: first=%q err=%v", first, err)
 		}
 		view[0] = '{'
 		exported, ok := RawBody(r.Context())
@@ -91,6 +91,28 @@ func TestCaptureRawBodySkipsGETHEADAndUnknownPaths(t *testing.T) {
 				t.Fatalf("status = %d", recorder.Code)
 			}
 		})
+	}
+}
+
+func TestCaptureRawBodyCapturesImagesAndOversizeUsesOpenAINative400(t *testing.T) {
+	atLimit := bytes.Repeat([]byte("x"), int(MaxCapturedBodyBytes))
+	for _, tc := range []struct {
+		body []byte
+		want int
+	}{{atLimit, http.StatusNoContent}, {append(atLimit, 'x'), http.StatusBadRequest}} {
+		called := false
+		h := CaptureRawBody(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			called = true
+			if _, ok := RawBody(r.Context()); !ok {
+				t.Fatal("image raw body missing")
+			}
+			w.WriteHeader(http.StatusNoContent)
+		}))
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, openAIImagesPath, bytes.NewReader(tc.body)))
+		if rec.Code != tc.want || called != (tc.want == http.StatusNoContent) || (tc.want == http.StatusBadRequest && !strings.Contains(rec.Body.String(), `"status":400`)) {
+			t.Fatalf("status=%d called=%t body=%q", rec.Code, called, rec.Body.String())
+		}
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/tokenmp/v3/services/executor/internal/adapter"
@@ -24,6 +25,25 @@ func TestNormalizeOpenAIChatPreservesRawBytesAndExtractsThinking(t *testing.T) {
 	}
 	if !request.Thinking.Enabled || request.Thinking.Effort != adapter.ThinkingXHigh || request.Thinking.BudgetTokens != nil {
 		t.Fatalf("thinking = %#v", request.Thinking)
+	}
+}
+
+func TestNormalizeOpenAIImagesStrictSchemaAndProtocol(t *testing.T) {
+	raw := []byte(` {"model":"dall-e-3:fast@openai","prompt":"a cat","n":2,"size":"1024x1024","quality":"standard","response_format":"b64_json","style":"vivid","user":"u"} `)
+	request, err := NormalizeOpenAIImages(withRawBody(raw), "image-request")
+	if err != nil {
+		t.Fatalf("NormalizeOpenAIImages: %v", err)
+	}
+	if request.Request.Protocol != adapter.ProtocolOpenAIImages || request.Request.Selector != "dall-e-3:fast@openai" || request.Request.RequestID != "image-request" || string(request.Request.Body) != string(raw) {
+		t.Fatalf("request = %#v", request)
+	}
+	for _, invalid := range [][]byte{
+		[]byte(`{"model":"m","prompt":"p","unknown":true}`), []byte(`{"model":"m","prompt":"p","n":0}`),
+		[]byte(`{"model":"m","prompt":"p","size":"bad"}`), []byte(`{"model":"m","prompt":"p","response_format":"png"}`),
+	} {
+		if _, err := NormalizeOpenAIImages(withRawBody(invalid), "id"); !errors.Is(err, ErrInvalidRequest) {
+			t.Fatalf("NormalizeOpenAIImages(%s) = %v", invalid, err)
+		}
 	}
 }
 
@@ -679,5 +699,34 @@ func TestNormalizedRequestStreamRequestCopiesBodyAndCarriesTrustedFields(t *test
 	streamRequest.Body[0] ^= 1
 	if string(streamRequest.Body) == string(normalized.Request.Body) {
 		t.Fatal("stream request body aliases normalized request")
+	}
+}
+
+func TestNormalizeOpenAIImagesSDKParityBoundariesAndDefault(t *testing.T) {
+	t.Parallel()
+	atPromptCap := strings.Repeat("p", 1<<20)
+	atUserCap := strings.Repeat("u", 512)
+	cases := []struct {
+		name, raw, wantFormat string
+		valid                 bool
+	}{
+		{"default url", `{"model":"m","prompt":"x"}`, "url", true},
+		{"base64", `{"model":"m","prompt":"x","response_format":"b64_json"}`, "b64_json", true},
+		{"prompt exact cap", `{"model":"m","prompt":` + strconv.Quote(atPromptCap) + `}`, "url", true},
+		{"prompt over cap", `{"model":"m","prompt":` + strconv.Quote(atPromptCap+"x") + `}`, "", false},
+		{"user exact cap", `{"model":"m","prompt":"x","user":` + strconv.Quote(atUserCap) + `}`, "url", true},
+		{"user ctl", `{"model":"m","prompt":"x","user":"a\nb"}`, "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := NormalizeOpenAIImages(withRawBody([]byte(tc.raw)), "id")
+			if tc.valid {
+				if err != nil || got.EffectiveResponseFormat != tc.wantFormat {
+					t.Fatalf("err=%v format=%q", err, got.EffectiveResponseFormat)
+				}
+			} else if !errors.Is(err, ErrInvalidRequest) {
+				t.Fatalf("err=%v, want invalid", err)
+			}
+		})
 	}
 }
