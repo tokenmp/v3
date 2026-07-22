@@ -30,6 +30,15 @@ var (
 // the entire JSON tree before the SDK's permissive union decoders run, then
 // rebuilds model and thinking from execution-authoritative values.
 func decodeMessageParams(body []byte, effectiveThinking adapter.EffectiveThinking, targetModel string) (anthropic.MessageNewParams, error) {
+	return decodeMessageParamsMode(body, effectiveThinking, targetModel, false)
+}
+
+// decodeMessageParamsMode establishes the shared Messages request boundary for
+// non-streaming and stream opening. The execution-selected model and thinking
+// are authoritative. Non-streaming preserves its historical false-only stream
+// validation; stream opening accepts an optional boolean caller hint but always
+// rebuilds the wire value to true.
+func decodeMessageParamsMode(body []byte, effectiveThinking adapter.EffectiveThinking, targetModel string, stream bool) (anthropic.MessageNewParams, error) {
 	var params anthropic.MessageNewParams
 	if len(body) == 0 || len(body) > maxParamBodyBytes || !utf8.Valid(body) || strings.TrimSpace(targetModel) == "" {
 		return params, errInvalidMessageParams
@@ -39,9 +48,10 @@ func decodeMessageParams(body []byte, effectiveThinking adapter.EffectiveThinkin
 		return params, errInvalidMessageParams
 	}
 	root, ok := value.(map[string]any)
-	if !ok || validateMessageRequest(root) != nil || reconcileAuthoritative(root, effectiveThinking, targetModel) != nil || normalizeSDKUnions(root) != nil {
+	if !ok || validateMessageRequest(root, stream) != nil || reconcileAuthoritative(root, effectiveThinking, targetModel) != nil || normalizeSDKUnions(root) != nil {
 		return params, errInvalidMessageParams
 	}
+	root["stream"] = stream
 	canonical, err := json.Marshal(root)
 	if err != nil || json.Unmarshal(canonical, &params) != nil || len(params.Messages) == 0 {
 		return anthropic.MessageNewParams{}, errInvalidMessageParams
@@ -194,7 +204,7 @@ func parseJSONValue(ctx context.Context, dec *json.Decoder, depth int, nodes *in
 	return nil, errors.New("invalid JSON token")
 }
 
-func validateMessageRequest(root map[string]any) error {
+func validateMessageRequest(root map[string]any, streamMode bool) error {
 	if !only(root, messageRootFields) || !stringValue(root["model"]) || !positive(root["max_tokens"]) {
 		return errInvalidMessageParams
 	}
@@ -207,7 +217,7 @@ func validateMessageRequest(root map[string]any) error {
 			return errInvalidMessageParams
 		}
 	}
-	if stream, exists := root["stream"]; exists && stream != false ||
+	if stream, exists := root["stream"]; exists && (!isBool(stream) || (!streamMode && stream != false)) ||
 		!optionalNumber(root, "temperature", 0, 1) || !optionalNumber(root, "top_p", 0, 1) || !optionalPositive(root, "top_k") ||
 		!validSystem(root) || !validThinking(root) || !stringsArray(root["stop_sequences"], has(root, "stop_sequences")) ||
 		!validTools(root) || !validToolChoice(root) || !validMetadata(root) {
@@ -395,6 +405,7 @@ func optionalString(value map[string]any, name string) bool {
 	item, exists := value[name]
 	return !exists || stringValue(item)
 }
+func isBool(value any) bool { _, ok := value.(bool); return ok }
 func optionalBool(value map[string]any, name string) bool {
 	item, exists := value[name]
 	if !exists {

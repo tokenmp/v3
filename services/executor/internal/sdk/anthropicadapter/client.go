@@ -127,12 +127,13 @@ func noRedirectClient(hc *http.Client) *http.Client {
 // remains as defense-in-depth, rebuilding only the protocol allowlist, the
 // fixed anthropic-version, validated plan headers, validated plan query, and
 // the per-call credential.
-func (c *Client) perCallHTTPClient(call sdk.Call, apiKey string) *http.Client {
+func (c *Client) perCallHTTPClient(call sdk.Call, apiKey, accept string) *http.Client {
 	var tr http.RoundTripper = sanitizingRoundTripper{
 		next:    c.hc.Transport,
 		headers: call.Request.InjectionPlan.Headers,
 		query:   call.Request.InjectionPlan.Query,
 		apiKey:  apiKey,
+		accept:  accept,
 	}
 	if c.observer != nil {
 		tr = ObservingRoundTripper(tr, c.observer, sdk.AttemptMetadata{CandidateIdentity: call.Candidate, Protocol: call.Target.Protocol})

@@ -287,4 +287,8 @@ func TestSDKPayloadSourceNativeErrorDoesNotConsumePendingPayload(t *testing.T) {
 	if len(source.pending) != 0 || source.pendingBytes != 0 {
 		t.Fatalf("native error retained payload: count=%d bytes=%d", len(source.pending), source.pendingBytes)
 	}
+	classified := source.LastClassified()
+	if classified == nil || !errors.Is(classified, sdk.ErrProtocol) || classified == event.Classified {
+		t.Fatalf("native classification = %#v, want owned event classification", classified)
+	}
 }

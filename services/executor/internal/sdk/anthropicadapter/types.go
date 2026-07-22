@@ -68,6 +68,7 @@ type sanitizingRoundTripper struct {
 	headers map[string]string
 	query   map[string]string
 	apiKey  string
+	accept  string
 }
 
 func (t sanitizingRoundTripper) RoundTrip(request *http.Request) (*http.Response, error) {
@@ -78,7 +79,11 @@ func (t sanitizingRoundTripper) RoundTrip(request *http.Request) (*http.Response
 	r.Header = make(http.Header)
 	// Do not retain any caller-or-env-derived value: rebuild the small protocol
 	// allowlist instead.
-	r.Header.Set("Accept", "application/json")
+	accept := t.accept
+	if accept == "" {
+		accept = "application/json"
+	}
+	r.Header.Set("Accept", accept)
 	r.Header.Set("Content-Type", "application/json")
 	// Pin the protocol version rather than preserving whatever the SDK wrote.
 	r.Header.Set("anthropic-version", "2023-06-01")

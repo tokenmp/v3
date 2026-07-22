@@ -67,7 +67,7 @@ func (c *Client) Complete(ctx context.Context, call sdk.Call) (sdk.Completion, e
 	callOpts := []option.RequestOption{
 		option.WithoutEnvironmentDefaults(),
 		option.WithBaseURL(baseURL.String()),
-		option.WithHTTPClient(c.perCallHTTPClient(call, apiKey)),
+		option.WithHTTPClient(c.perCallHTTPClient(call, apiKey, "application/json")),
 		option.WithMaxRetries(0),
 		option.WithAPIKey(apiKey),
 		option.WithJSONSet("stream", false),
