@@ -315,7 +315,7 @@ func TestHybridNonStreamDelegatesStrictAndMissingStreamExecutorFailsClosed(t *te
 	if streamResponse.Code != http.StatusInternalServerError || strings.Contains(streamResponse.Body.String(), "stream executor") {
 		t.Fatalf("missing stream executor = %d %s", streamResponse.Code, streamResponse.Body.String())
 	}
-	for _, path := range []string{"/v1/models", "/v1/responses"} {
+	for _, path := range []string{"/v1/models"} {
 		recorder := httptest.NewRecorder()
 		method := http.MethodPost
 		if path == "/v1/models" {

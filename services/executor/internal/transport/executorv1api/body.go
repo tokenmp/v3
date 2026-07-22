@@ -13,6 +13,7 @@ const (
 	MaxCapturedBodyBytes  int64 = 2 << 20
 	openAIChatPath              = "/v1/chat/completions"
 	openAIImagesPath            = "/v1/images/generations"
+	openAIResponsesPath         = "/v1/responses"
 	anthropicMessagesPath       = "/v1/messages"
 )
 
@@ -53,7 +54,7 @@ func CaptureRawBody(next http.Handler) http.Handler {
 }
 
 func isCapturedPath(path string) bool {
-	return path == openAIChatPath || path == openAIImagesPath || path == anthropicMessagesPath
+	return path == openAIChatPath || path == openAIImagesPath || path == anthropicMessagesPath || path == openAIResponsesPath
 }
 
 // RawBody returns an independent copy of the body captured by CaptureRawBody.
@@ -81,7 +82,7 @@ func writeBodyCaptureError(w http.ResponseWriter, path string) {
 	}
 	w.WriteHeader(http.StatusBadRequest)
 	switch path {
-	case openAIChatPath, openAIImagesPath:
+	case openAIChatPath, openAIImagesPath, openAIResponsesPath:
 		_, _ = io.WriteString(w, `{"error":{"message":"Invalid request body.","type":"invalid_request_error","code":"INVALID_REQUEST"},"status":400}`)
 	case anthropicMessagesPath:
 		_, _ = io.WriteString(w, `{"type":"error","error":{"type":"invalid_request_error","message":"Invalid request body."}}`)

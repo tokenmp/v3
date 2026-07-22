@@ -301,7 +301,7 @@ func (f *Facade) reservationID(ctx context.Context) string {
 // streamProtocol reports whether p is one of the two streaming protocols
 // the facade is permitted to route.
 func streamProtocol(p adapter.Protocol) bool {
-	return p == adapter.ProtocolOpenAIChat || p == adapter.ProtocolAnthropic
+	return p == adapter.ProtocolOpenAIChat || p == adapter.ProtocolAnthropic || p == adapter.ProtocolOpenAIResponses
 }
 
 // validPrincipal reports whether p is a trusted, active service/admin caller

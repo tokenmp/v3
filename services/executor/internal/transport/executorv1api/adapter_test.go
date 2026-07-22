@@ -9,9 +9,9 @@ import (
 	"testing"
 
 	"github.com/tokenmp/v3/services/executor/internal/authcontext"
+	executorv1 "github.com/tokenmp/v3/services/executor/internal/contract/executorv1"
 	"github.com/tokenmp/v3/services/executor/internal/identity"
 	"github.com/tokenmp/v3/services/executor/internal/modelcatalog"
-	executorv1 "github.com/tokenmp/v3/services/executor/internal/contract/executorv1"
 )
 
 func TestHealth(t *testing.T) {
@@ -199,10 +199,10 @@ func TestListModelsReturnsCatalogWhenProviderWired(t *testing.T) {
 					ID:           "claude-3-opus",
 					Capabilities: []string{"text", "function_calling", "thinking"},
 					Thinking: &modelcatalog.ThinkingConfig{
-						Supported:      true,
-						DefaultEffort:  "medium",
-						MaxEffort:      "high",
-						EffortLevels:   []string{"medium", "high"},
+						Supported:       true,
+						DefaultEffort:   "medium",
+						MaxEffort:       "high",
+						EffortLevels:    []string{"medium", "high"},
 						MinBudgetTokens: &minBudget,
 						MaxBudgetTokens: &maxBudget,
 					},

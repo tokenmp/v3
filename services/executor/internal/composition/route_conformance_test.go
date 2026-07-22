@@ -28,7 +28,7 @@ import (
 //
 //   - GET/HEAD /healthz are anonymous 200 (auth is never required).
 //   - Every /v1 operation is auth-protected: anonymous → 401.
-//   - /v1/models and /v1/responses return 501 when authenticated.
+//   - /v1/models returns 200 when authenticated; /v1/responses returns 404 when authenticated (model not found).
 //   - /v1/chat/completions, /v1/messages and /v1/images/generations execute
 //     through the facade; with
 //     an empty config the requested model resolves no route → 404.
@@ -87,9 +87,9 @@ var contractExpectations = map[string]routeExpectation{
 	},
 	"POST /v1/responses": {
 		anonStatus: http.StatusUnauthorized,
-		authStatus: http.StatusNotImplemented,
+		authStatus: http.StatusNotFound,
 		body:       `{"model":"x","input":"hi"}`,
-		note:       "auth-protected; not executed by runtime",
+		note:       "auth-protected; responses request resolves no model → JSON 404",
 	},
 	"POST /v1/images/generations": {
 		anonStatus: http.StatusUnauthorized,

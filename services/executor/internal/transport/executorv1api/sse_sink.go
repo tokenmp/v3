@@ -43,6 +43,13 @@ func NewOpenAISSEProtocolSink(w http.ResponseWriter) (*SSEProtocolSink, error) {
 	return NewSSEProtocolSink(w, adapter.ProtocolOpenAIChat)
 }
 
+// NewOpenAIResponsesSSEProtocolSink creates an OpenAI Responses SSE sink. It
+// reuses the OpenAI Chat framing (data: {JSON}\n\n with a trailing [DONE])
+// since both OpenAI protocols share that SSE shape.
+func NewOpenAIResponsesSSEProtocolSink(w http.ResponseWriter) (*SSEProtocolSink, error) {
+	return NewSSEProtocolSink(w, adapter.ProtocolOpenAIChat)
+}
+
 // NewAnthropicSSEProtocolSink creates an Anthropic Messages SSE sink.
 func NewAnthropicSSEProtocolSink(w http.ResponseWriter) (*SSEProtocolSink, error) {
 	return NewSSEProtocolSink(w, adapter.ProtocolAnthropic)

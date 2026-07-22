@@ -47,6 +47,10 @@ var (
 		"temperature", "top_p", "top_k", "stop_sequences", "tools", "tool_choice",
 		"metadata",
 	)
+	responsesRootFields = makeFieldSet(
+		"model", "input", "instructions", "max_output_tokens", "metadata",
+		"reasoning", "stream", "temperature", "text", "tool_choice", "tools", "top_p",
+	)
 	messageThinkingFields        = makeFieldSet("type", "budget_tokens", "display")
 	chatMessageFields            = makeFieldSet("role", "content", "name", "tool_calls", "tool_call_id", "reasoning_content")
 	chatContentPartFields        = makeFieldSet("type", "text", "image_url")
