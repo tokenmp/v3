@@ -1,6 +1,6 @@
 # Executor Architecture Design
 
-- 状态：设计基线已确认；Foundation、Config compiler/snapshot、routing、Phase 5 Adapter Engine、Phase 6 non-stream SDK adapters、Phase 7 retry State、内部 non-stream Runner、non-stream HTTP transport 层、transport-neutral non-stream facade 前置（`internal/nonstream`、`internal/nonstreamfacade`、`internal/authcontext`、`internal/requestid`）与 phase 7.7 config source 前置（模块内 `internal/configsource`）与模块内 quarantine bridge（`internal/quarantinebridge`）均已实施；Phase 8.1 OpenAI internal stream SDK 与 Phase 8.2 internal StreamDriver（组合 attempt session、stream registry、payload adapter、Bridge、retry/quota/log/result/cleanup）已实施；user-authorized runtime composition（`internal/composition`）仅将既有 non-stream 能力接入公开 runtime server/路由（生成 7 条路由均为运行时实际路由，启动拒绝不受支持的 enabled SDK/protocol route），尚未消费 Phase 8.1 stream capability；Phase 10 HTTP streaming 已把 Chat/Messages `stream:true` 接入公开 runtime；Phase 11 legacy OpenAI Images execution + HTTP 已实施：registry/composition/transport 已接线，Responses 执行仍待后续
+- 状态：设计基线已确认；Foundation、Config compiler/snapshot、routing、Phase 5 Adapter Engine、Phase 6 non-stream SDK adapters、Phase 7 retry State、内部 non-stream Runner、non-stream HTTP transport 层、transport-neutral non-stream facade 前置（`internal/nonstream`、`internal/nonstreamfacade`、`internal/authcontext`、`internal/requestid`）与 phase 7.7 config source 前置（模块内 `internal/configsource`）与模块内 quarantine bridge（`internal/quarantinebridge`）均已实施；Phase 8.1 OpenAI internal stream SDK 与 Phase 8.2 internal StreamDriver（组合 attempt session、stream registry、payload adapter、Bridge、retry/quota/log/result/cleanup）已实施；user-authorized runtime composition（`internal/composition`）仅将既有 non-stream 能力接入公开 runtime server/路由（生成 7 条路由均为运行时实际路由，启动拒绝不受支持的 enabled SDK/protocol route），尚未消费 Phase 8.1 stream capability；Phase 10 HTTP streaming 已把 Chat/Messages `stream:true` 接入公开 runtime；Phase 11 legacy OpenAI Images execution + HTTP 已实施：registry/composition/transport 已接线；Phase 12.1 typed quota domain 已实施但未接线：typed state 与 legacy `quota.Port` state 分离，Runner、StreamDriver 和 runtime 仍使用 legacy Port，Phase 12.2 必须迁移消费者并删除它；不提供 usage charging、数据库或 durable storage；Responses 执行仍待后续
 - 适用范围：TokenMP v3 `services/executor`
 - 契约来源：`packages/contracts/openapi/executor/v1.yaml`
 - 关联测试方案：`testing-strategy.md`
@@ -177,7 +177,7 @@ services/executor/
 │   ├── sdk/                    # shared completion/stream ports；OpenAI Chat non-stream + internal stream adapter 已实施
 │   ├── protocol/               # normalize/render per protocol
 │   ├── streaming/              # 已实施 protocol-neutral Bridge/state/timer；OpenAI adapter owns strict SSE parsing
-│   ├── quota/                  # quota port + mock
+│   ├── quota/                  # legacy Port + typed Repository domain/test implementations（Phase 12.2 migrates consumers and deletes legacy Port）
 │   ├── runtime/                # circuit/quarantine + in-memory state
 │   ├── requestlog/             # request/attempt/event port + mock
 │   └── testkit/                # upstream fixtures 和 assertions
@@ -520,6 +520,8 @@ reserved → released
 
 `reservation_id` 是跨 Repository/服务边界的幂等键。相同 reservation 的同一终态重复请求返回当前成功终态；相反终态竞争返回稳定冲突错误，不执行第二次结算。调用成功但响应丢失时允许使用相同 reservation id 重试。Mock 和未来持久化实现必须通过同一 Repository contract suite。
 
+Phase 12.1 已实现独立 typed `quota.Repository`：本地校验的 `res_` ID、bounded/redacted metadata、仅 `BasisNone` estimate、typed terminal settlement 与 `Lookup`，并由 `DomainInMemory` 与 `TypedMock` 的 shared contract/race/fuzz suite 验证 exact semantic replay 和 conflict。它不是 runtime backend：typed implementation state 有意与 legacy `quota.Port` 分离，legacy Port 仍供 Runner、StreamDriver 和 runtime 使用。Phase 12.2 必须迁移这些消费者并删除 legacy Port；在此之前不实现 usage charging、数据库或 durable storage。
+
 结算默认语义：commit 前失败或取消时 release；commit 后有确认 usage 时 finalize；commit 后没有确认 usage 时 release，同时记录 `unresolved_upstream_cost` 供未来对账，不猜测用户扣费。任何并发取消、超时、重试和清理路径都必须保证唯一 terminal transition。
 
 Request/Attempt/Event 日志至少记录：
@@ -558,7 +560,8 @@ Request/Attempt/Event 日志至少记录：
 | 9 | `feat/executor-sdk-anthropic-streaming` | **已实施并由 Phase 10 runtime 消费**：Anthropic Messages StreamClient secure opening、bounded parser/state、signature canonical payload-only、native error first-wins。 |
 | 10 | `feat/executor-http-streaming` | **已实施**：Chat/Messages `stream:true` runtime SSE；generated hybrid plain+strict dispatch、auth-before-capture、pre-commit JSON/post-commit no fallback、OpenAI `[DONE]`/Anthropic native framing、StreamDriver+SDK registry composition；无 HTTP atomicity/wire proof，Responses 仍 501；Images legacy non-stream 已执行。 |
 | 11 | `feat/executor-images` | **已实施（completion-only non-stream runtime）**：official legacy OpenAI Images Generate 已经 execution registry、composition、transport-neutral facade、Runner 与鉴权 `POST /v1/images/generations` 接线；facade 精确委托 Runner，Runner 一次 quota reservation 并按冻结策略 retry。SDK/transport 共用 `internal/imagecontract`，default wire/renderer `url`，wire/单项/aggregate 16 MiB/10 MiB/12 MiB，严格 URL/streaming base64/usage/extensions/revised-prompt；所有终态 `Cache-Control: no-store`。不支持 GPT Image 特有参数或 usage quota，也不进入 stream registry。 |
-| 12 | `feat/executor-quota` | 完整配额策略和 Repository contract suite |
+| 12.1 | `feat/executor-quota-policy` | **已实施（typed domain only）**：`quota.Repository`、locally validated `res_` ID、bounded/redacted metadata、仅 `BasisNone` estimate、typed terminal settlement/`Lookup`，及 `DomainInMemory`/`TypedMock` shared contract、race、fuzz coverage。typed state 与 legacy `quota.Port` 有意分离；Runner、StreamDriver 和 runtime 尚使用 legacy Port。无 usage charging、数据库或 durable storage。 |
+| 12.2 | 独立变更 | 迁移 Runner、StreamDriver 和 runtime consumers 到 typed Repository，并删除 legacy `quota.Port` 及其独立 state；该迁移完成前不得声称 typed domain 已接线。 |
 | 13 | `feat/executor-request-logging` | Request/Attempt/Event 日志 |
 | 14 | `build/executor-ci-docker` | Docker、CI 和集成验证 |
 | 15 | 独立决策 | PostgreSQL/Redis/internal HTTP repositories |

@@ -5,7 +5,7 @@
 - 架构来源：`architecture.md`
 - API 契约：`packages/contracts/openapi/executor/v1.yaml`
 
-Foundation、compiler/snapshot、routing、non-stream pipeline、SDK adapters、composition 和 process tests 均已实施。Phase 10 tests 进一步覆盖 Chat/Messages `stream:true` hybrid dispatch、auth-before-capture、pre-commit JSON error、post-commit no fallback、flushing SSE framing（OpenAI `[DONE]` / Anthropic native events）、stream/streamfacade race packages 与 empty-config route/process JSON 404。Phase 11 Images tests 覆盖 shared `internal/imagecontract` SDK/transport parity、default wire/renderer `url`、strict URL/streaming base64/usage/extensions/revised prompt、16 MiB/10 MiB/12 MiB caps、invalid request zero execution、format mismatch、no-store terminal responses、completion-only registry/composition/transport runtime wiring、race 与本地 fuzz；facade 精确委托 Runner，Runner 一次 quota reservation 并按冻结策略 retry。仍不覆盖 HTTP atomicity、wire proof、跨进程 exactly-once 或 live provider E2E；不支持 GPT Image 特有参数或 usage quota。
+Foundation、compiler/snapshot、routing、non-stream pipeline、SDK adapters、composition 和 process tests 均已实施。Phase 10 tests 进一步覆盖 Chat/Messages `stream:true` hybrid dispatch、auth-before-capture、pre-commit JSON error、post-commit no fallback、flushing SSE framing（OpenAI `[DONE]` / Anthropic native events）、stream/streamfacade race packages 与 empty-config route/process JSON 404。Phase 11 Images tests 覆盖 shared `internal/imagecontract` SDK/transport parity、default wire/renderer `url`、strict URL/streaming base64/usage/extensions/revised prompt、16 MiB/10 MiB/12 MiB caps、invalid request zero execution、format mismatch、no-store terminal responses、completion-only registry/composition/transport runtime wiring、race 与本地 fuzz；facade 精确委托 Runner，Runner 一次 quota reservation 并按冻结策略 retry。Phase 12.1 typed quota tests 覆盖 `Repository`、`DomainInMemory` 和 `TypedMock` 的 shared contract、race 与本地 fuzz：locally validated `res_` ID、bounded/redacted metadata、仅 `BasisNone` estimate、exact replay/conflict、typed terminal settlement、`Lookup`、post-commit fault 与 defensive copies。typed state 有意不与仍被 Runner、StreamDriver、runtime 消费的 legacy `quota.Port` state 共享；Phase 12.2 必须迁移消费者并删除 legacy Port。仍不覆盖 HTTP atomicity、wire proof、跨进程 exactly-once 或 live provider E2E；不支持 GPT Image 特有参数或 usage quota，也没有 usage charging、数据库或 durable storage。
 
 durable idempotency/replay、remote quota/credential resolver、`Retry-After` parsing、live provider E2E、持续 fuzz、性能与 Docker 仍是后续设计。
 
@@ -661,7 +661,13 @@ Phase 9 streaming tests 已实施：
 | finalize 临时失败 | 幂等重试，不允许再 release |
 | cleanup 重复执行 | 无重复终态 |
 
-### 14.2 Request log lifecycle
+### 14.2 Phase 12.1 typed quota domain
+
+`internal/quota.Repository` 的 shared suite 对 `DomainInMemory` 和 `TypedMock` 运行相同断言：reserve/lookup 的 defensive ownership、exact reserve and terminal replay、divergent input or opposite terminal `ErrConflict`、invalid or pre-cancelled input zero-write、lock-wait cancellation、post-commit fault preserving committed state、mock override/call-copy isolation、redacted formatting，以及并发 reserve。`FuzzDomainInMemoryRejectsMalformedReservationWithoutWrite` 检查 malformed reservation 不写入状态。
+
+这些测试不证明 runtime quota 行为：typed state 与 legacy `quota.Port` 分离；Runner、StreamDriver 和 runtime consumer migration/deletion of legacy Port 是 Phase 12.2 的必需范围。Phase 12.1 无 usage charging、数据库或 durable storage。
+
+### 14.3 Request log lifecycle
 
 - 每个请求只有一个 terminal update；
 - 每个上游调用有独立 attempt；
@@ -704,7 +710,7 @@ go test -race ./...
 
 ### 16.1 Fuzz targets
 
-已实施 fuzz target 为 `internal/adapter/compiler_test.go` 的 `FuzzCompile`（变化 Provider Base URL 和有限 DSL JSON pointer）、`internal/routing/selector_test.go` 的 `FuzzParseSelector`（grammar/canonical round-trip）、`internal/adapter/engine_test.go` 的 `FuzzEngineApply` 与 malformed-rule fuzz target（strict JSON、runtime rule defense、无 panic/partial result）、`internal/sdk/anthropicadapter` 的 `FuzzDecodeMessageParams` 和 `FuzzValidateMessageResponse`（Anthropic non-stream 请求/成功响应 validator，拒绝非法输入且不 panic），`internal/sdk/openaiadapter` 的 `FuzzDecodeImageParams`、`FuzzValidateImageResponse` 与 `FuzzCappedReadCloser`（Phase 11 Images strict request/response 与 wire-cap reader，无 panic），以及 `internal/configsource/configsource_test.go` 的 `FuzzScanSecrets`、`FuzzScanSecretsNestedContainerState` 与 `FuzzParseConfigSentinels`（secret 扫描 lexical+semantic 双通道、嵌套容器状态机与解析 sentinel 无 panic/无泄露）。除常规 `go test` 对 seed 的执行外，尚未配置持续 fuzz；短时 fuzz 可由本地按需运行。
+已实施 fuzz target 为 `internal/adapter/compiler_test.go` 的 `FuzzCompile`（变化 Provider Base URL 和有限 DSL JSON pointer）、`internal/routing/selector_test.go` 的 `FuzzParseSelector`（grammar/canonical round-trip）、`internal/adapter/engine_test.go` 的 `FuzzEngineApply` 与 malformed-rule fuzz target（strict JSON、runtime rule defense、无 panic/partial result）、`internal/sdk/anthropicadapter` 的 `FuzzDecodeMessageParams` 和 `FuzzValidateMessageResponse`（Anthropic non-stream 请求/成功响应 validator，拒绝非法输入且不 panic），`internal/sdk/openaiadapter` 的 `FuzzDecodeImageParams`、`FuzzValidateImageResponse` 与 `FuzzCappedReadCloser`（Phase 11 Images strict request/response 与 wire-cap reader，无 panic），`internal/configsource/configsource_test.go` 的 `FuzzScanSecrets`、`FuzzScanSecretsNestedContainerState` 与 `FuzzParseConfigSentinels`（secret 扫描 lexical+semantic 双通道、嵌套容器状态机与解析 sentinel 无 panic/无泄露），以及 `internal/quota/repository_fuzz_test.go` 的 `FuzzDomainInMemoryRejectsMalformedReservationWithoutWrite`（Phase 12.1 typed reservation malformed input 不写入）。除常规 `go test` 对 seed 的执行外，尚未配置持续 fuzz；短时 fuzz 可由本地按需运行。
 
 以下 target 仍是后续设计，尚未实现：
 
@@ -848,7 +854,7 @@ go test -race -count=1 ./test/integration/...
 | Streaming | **Phase 10 已实施（runtime Chat/Messages SSE）**：hybrid plain+strict dispatch、auth-before-capture、pre-commit JSON/post-commit no fallback、flushing native SSE sink、OpenAI `[DONE]`、Anthropic native event framing、StreamDriver 与 exact SDK stream registry composition；transport/stream/streamfacade/composition/process race coverage。无 HTTP atomicity、wire proof、跨进程 exactly-once 或 public/provider E2E；Responses 仍 501；Images legacy non-stream 已执行。 |
 | Anthropic streaming | **已实施并接入 runtime**：native SSE + thinking signature，HTTP SSE transport/composition/runtime 已用于 Messages `stream:true` |
 | Responses | lifecycle events + failed/incomplete + reasoning summary |
-| Quota | exactly-once terminal property + race tests |
+| Quota | **Phase 12.1 typed domain 已实施，未接线**：`Repository`、`DomainInMemory`、`TypedMock` shared contract/race/fuzz tests 覆盖 typed reservation exact replay/conflict、terminal settlement、cancellation/fault/ownership/redaction；typed state 与 legacy `quota.Port` 分离，Runner/StreamDriver/runtime migration + legacy Port deletion 必须在 Phase 12.2 完成。无 usage charging、DB 或 durable storage。 |
 | Logging | single terminal + redaction tests |
 | CI/Docker | full local-equivalent suite + image build |
 
