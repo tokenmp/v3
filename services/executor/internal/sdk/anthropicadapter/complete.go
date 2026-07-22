@@ -191,7 +191,20 @@ func classifyError(err error, response *http.Response) *sdk.ClassifiedError {
 	if status == 0 {
 		return sdk.NewClassifiedError(sdk.ErrTransport, 0, "", "", "")
 	}
-	return sdk.NewClassifiedError(kindForHTTPStatus(status), status, requestID, code, typ)
+	kind := kindForHTTPStatus(status)
+	// Parse Retry-After only for retryable statuses (429, 5xx, including 529).
+	if isRetryableHTTPStatus(status) && response != nil {
+		if ra, ok := sdk.ParseRetryAfter(response.Header); ok {
+			return sdk.NewClassifiedErrorWithRetryAfter(kind, status, requestID, code, typ, ra, true)
+		}
+	}
+	return sdk.NewClassifiedError(kind, status, requestID, code, typ)
+}
+
+// isRetryableHTTPStatus reports whether the HTTP status is retryable and
+// therefore Retry-After header parsing is applicable.
+func isRetryableHTTPStatus(status int) bool {
+	return status == http.StatusTooManyRequests || (status >= 500 && status < 600)
 }
 
 func kindForHTTPStatus(status int) error {

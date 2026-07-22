@@ -7,7 +7,7 @@
 
 Foundation、compiler/snapshot、routing、non-stream pipeline、SDK adapters、composition 和 process tests 均已实施。Phase 10 tests 进一步覆盖 Chat/Messages `stream:true` hybrid dispatch、auth-before-capture、pre-commit JSON error、post-commit no fallback、flushing SSE framing（OpenAI `[DONE]` / Anthropic native events）、stream/streamfacade race packages 与 empty-config route/process JSON 404。Phase 11 Images tests 覆盖 shared `internal/imagecontract` SDK/transport parity、default wire/renderer `url`、strict URL/streaming base64/usage/extensions/revised prompt、16 MiB/10 MiB/12 MiB caps、invalid request zero execution、format mismatch、no-store terminal responses、completion-only registry/composition/transport runtime wiring、race 与本地 fuzz；facade 精确委托 Runner，Runner 一次 quota reservation 并按冻结策略 retry。Phase 12 typed quota tests 覆盖 `Repository`、`DomainInMemory` 和 `TypedMock` 的 shared contract、race 与本地 fuzz：locally validated `res_` ID、bounded/redacted metadata、仅 `BasisNone` estimate、exact replay/conflict、typed terminal settlement、`Lookup`、post-commit fault 与 defensive copies。legacy `quota.Port` 已删除；`Repository`/`DomainInMemory`/`TypedMock` 是唯一实现。仍不覆盖 HTTP atomicity、wire proof、跨进程 exactly-once 或 live provider E2E；不支持 GPT Image 特有参数或 usage quota，也没有 usage charging、数据库或 durable storage。
 
-durable idempotency/replay、remote quota/credential resolver、`Retry-After` parsing、live provider E2E、持续 fuzz、性能与 Docker 仍是后续设计。
+durable idempotency/replay、remote quota/credential resolver、live provider E2E、持续 fuzz、性能与 Docker 仍是后续设计。Phase 15 Retry-After parsing tests 已实施。
 
 ## Phase 10 HTTP streaming（已实施测试范围）
 
@@ -599,7 +599,7 @@ protocol renderer 与 `SafeStrictOptions` 已实施模块内 component tests 覆
 - Responses request/response；
 - Responses HTTP transport/composition/runtime execution（Chat/Messages `stream:true` 与 legacy Images completion-only non-stream 均已实施）；
 - GPT Image 特有参数与 usage quota。
-- durable idempotency/replay、remote quota/credential resolver、`Retry-After` parsing；
+- durable idempotency/replay、remote quota/credential resolver；`Retry-After` parsing 已由 Phase 15 实施；
 - public/provider E2E streaming、HTTP atomicity 或 wire-attempt proof；下一阶段为 HTTP SSE transport，并在 composition 为 OpenAI 与 Anthropic 注册 StreamClient。
 
 ### 13.2 Anthropic SDK（Messages non-stream 与 internal streaming 已实施）
@@ -621,7 +621,7 @@ Phase 9 streaming tests 已实施：
 - signature 仅在 canonical payload，绝不进入 `Meta`/log/普通格式化；native error payload 为空，safe classification first-wins，后续 official SDK decoder error 不覆盖；
 - `FuzzAnthropicSSEParser` 为本地 fuzz smoke；CI 既有 `./internal/sdk/...` race package 自动覆盖，不新增 package pattern。
 
-仍待后续：public/provider E2E、HTTP atomicity/wire-attempt proof，以及 durable idempotency/replay、remote quota/credential resolver、`Retry-After` parsing。
+仍待后续：public/provider E2E、HTTP atomicity/wire-attempt proof，以及 durable idempotency/replay、remote quota/credential resolver。`Retry-After` parsing 已由 Phase 15 实施。
 
 ### 13.3 Generic HTTP escape hatch
 
@@ -705,7 +705,62 @@ legacy `quota.Port` 已删除；`Repository`/`DomainInMemory`/`TypedMock` 是唯
 
 Transport `executorv1api` adapter tests 覆盖 `ListModels`：注入 `CatalogProvider` 时返回 catalog；未注入时回退 501；`ErrNoSnapshot`→500；`ErrUnauthenticated`→401。
 
-### 14.5 Request log lifecycle
+### 14.5 Phase 15 Retry-After parsing tests
+
+`sdk.ParseRetryAfter` 单元测试覆盖：
+
+| 维度 | 已覆盖断言 |
+|---|---|
+| Delta-seconds | 0、小值、cap 内、exact cap、超 cap clamp、巨大值 clamp、负数 clamp 至 0 |
+| HTTP-date | 未来日期（cap 内）、远未来日期（clamp 至 `HardMaxRetryAfter`）、过去日期（返回 false） |
+| 无效/缺失 | 空、非数字非日期、小数、含空白、含尾部垃圾、nil header 均返回 `(0, false)` |
+
+`NewClassifiedErrorWithRetryAfter` / `ClassifiedError.RetryAfter()` 单元测试覆盖：
+
+| 维度 | 已覆盖断言 |
+|---|---|
+| 正常 | cap 内 duration 正确设置与读取 |
+| 超 cap | clamp 至 `HardMaxRetryAfter` |
+| 负数 | clamp 至 0，`hasRetryAfter` 仍为 true |
+| `hasRetryAfter=false` | `RetryAfter()` 返回 `(0, false)` |
+| 向后兼容 | `NewClassifiedError` 无 RetryAfter；nil receiver 安全 |
+| Clone | `CloneClassifiedError` 保留 RetryAfter；plain error clone 无 RetryAfter；nil clone 为 nil |
+| `HardMaxRetryAfter` 值 | 断言为 5 分钟 |
+
+OpenAI adapter `retry_after_test.go` 覆盖：
+
+| 维度 | 已覆盖断言 |
+|---|---|
+| 429 + RA | delta-seconds 正确解析 |
+| 429 无 RA | `RetryAfter()` 返回 false |
+| 429 无效 RA | `RetryAfter()` 返回 false |
+| 503 + RA | delta-seconds 正确解析 |
+| 503 RA 超 cap | clamp 至 `HardMaxRetryAfter` |
+| 401/403/404 + RA header | 不解析，`RetryAfter()` 返回 false |
+| Images 503 + RA | 正确解析 |
+| Responses 429 + RA | 正确解析 |
+
+Anthropic adapter `retry_after_test.go` 覆盖：
+
+| 维度 | 已覆盖断言 |
+|---|---|
+| 429 + RA | delta-seconds 正确解析 |
+| 429 无 RA | `RetryAfter()` 返回 false |
+| 429 无效 RA | `RetryAfter()` 返回 false |
+| 529 overloaded + RA | 正确解析 |
+| 503 + RA | 正确解析 |
+| 401/403/404 + RA header | 不解析，`RetryAfter()` 返回 false |
+
+Retry State `retry_after_test.go` 覆盖：
+
+| 维度 | 已覆盖断言 |
+|---|---|
+| 超 `HardMaxRetryAfter` clamp | delay clamp 至 `HardMaxRetryAfter` |
+| RA > Backoff | 使用 RA |
+| RA < Backoff | 使用 Backoff |
+| RA 超 `MaxTotalDuration` | 停止重试（`StopMaxTotalDuration`） |
+
+### 14.6 Request log lifecycle
 
 - 每个请求只有一个 terminal update；
 - 每个上游调用有独立 attempt；
@@ -883,9 +938,9 @@ go test -race -count=1 ./test/integration/...
 | Routing | **已实施（纯 Go）**：strict selector、candidate scope、deterministic ordering、revision/generation pinning、legacy credential synthesis、四维 fail-closed quarantine 与 private Plan universe；不表示 RetryDecider、attempt budget 或 runtime pipeline |
 | Quarantine bridge | **已实施（经 composition 接入 runtime facade）**：`internal/quarantinebridge` 把 runtime quarantine port/state 适配为 routing quarantine reader（每维度独立带前缀 runtime target，跨维度重复 ID 不冲突）与 fail-closed 错误处理（not-found→`routing.ErrNotFound`、context 取消归一为裸 sentinel、其余失败（含 nil/typed-nil port）→`routing.ErrQuarantineUnavailable`）；与 `./internal/routing/...` 是独立 package，须单独加入 CI race 包列表；经 `internal/composition` 接入 runtime facade，本身不拥有写入能力 |
 | Adapter engine | **已实施（经 Runner/composition 接入 runtime）**：strict JSON、全部有限 DSL actions、literal-only header/query、继续拒绝 `ValueRef`、model-bounded thinking、safe response mapping（AND/OR、compiled order/fixed default）、atomic/mutation/race/fuzz coverage |
-| Provider SDK adapters | **已实施（经 Runner/composition 接入 runtime）**：OpenAI v3.44.0 Chat 与 Anthropic v1.58.0 Messages non-stream；Anthropic `WithoutEnvironmentDefaults`、HTTPS target/path prefix、固定 version/唯一 `x-api-key`、strict OpenAPI request+response validator、thinking authority、tools/vision、529 mapping、TLS/fuzz；module-local credential env 经 composition 提供 strict vault-ref → `EXECUTOR_CREDENTIAL_*` per-attempt opaque-secret lookup；两者经内部 Runner 与 composition 接入 runtime routing（chat/messages 执行）；Responses 与 public/provider streaming driver、transport/composition stream 接线、remote credential resolver/runtime secret injection、durable idempotency/replay、remote resolver 与 `Retry-After` parsing 仍待后续；legacy Images completion-only non-stream 已接入 runtime |
+| Provider SDK adapters | **已实施（经 Runner/composition 接入 runtime）**：OpenAI v3.44.0 Chat 与 Anthropic v1.58.0 Messages non-stream；Anthropic `WithoutEnvironmentDefaults`、HTTPS target/path prefix、固定 version/唯一 `x-api-key`、strict OpenAPI request+response validator、thinking authority、tools/vision、529 mapping、TLS/fuzz；module-local credential env 经 composition 提供 strict vault-ref → `EXECUTOR_CREDENTIAL_*` per-attempt opaque-secret lookup；两者经内部 Runner 与 composition 接入 runtime routing（chat/messages 执行）；Responses 与 public/provider streaming driver、transport/composition stream 接线、remote credential resolver/runtime secret injection、durable idempotency/replay、remote resolver 仍待后续；`Retry-After` parsing 已由 Phase 15 实施；legacy Images completion-only non-stream 已接入 runtime |
 | Retry | **已实施（模块内纯 Go，经 Runner/composition 接入 runtime）**：retry State 单元、invariant 与 race tests；R01–R16 的 state-layer 适用项、property budget invariant。R17–R20 中公开 runtime/stream/logging 的其余接线仍待后续 |
-| Non-stream pipeline | **已实施（经 composition 接入 runtime）**：Mock/InMemory/fake tests 覆盖 owner-bound Plan、pure Prepare/per-attempt credential resolve、Engine、registry/auth compatibility、frozen retry policy、per-attempt timeout、one Reserve/safe terminalizer、mapped failure 和 safe events；不证明 wire attempt 或跨进程 exactly-once，durable idempotency/replay、remote resolver 和 `Retry-After` parsing 仍待后续 |
+| Non-stream pipeline | **已实施（经 composition 接入 runtime）**：Mock/InMemory/fake tests 覆盖 owner-bound Plan、pure Prepare/per-attempt credential resolve、Engine、registry/auth compatibility、frozen retry policy、per-attempt timeout、one Reserve/safe terminalizer、mapped failure 和 safe events；不证明 wire attempt 或跨进程 exactly-once，durable idempotency/replay、remote resolver 仍待后续；`Retry-After` parsing 已由 Phase 15 实施 |
 | Transport-neutral non-stream facade | **已实施（经 composition 接入 runtime）**：`internal/nonstream` owns the transport-neutral request/result/executor/principal boundary; `internal/nonstreamfacade` pins the current snapshot, protocol-filters an owner-bound Plan, defensively revalidates the authenticated principal, issues a CSPRNG validated reservation ID, and calls the implemented Runner exactly once; `internal/authcontext` owns the private request identity channel; `internal/requestid` owns the `res_` grammar and crypto-random source. All four are independent CI race packages; wired into `main` and public routes via `internal/composition` |
 | Non-stream HTTP transport | **已实施（经 composition 接入 runtime）**：`adapter_integration_test.go` 将 DI `NewNonStream` adapter 接入 generated `NewStrictHandler` + `CaptureRawBody`，以 kin-openapi 校验每条 non-stream path 响应；`body_test.go`、`normalizer_test.go`、`renderer_test.go`、`strictoptions_test.go`、`requestid_test.go` 覆盖 raw-body 捕获、strict normalizer、protocol renderer、`SafeStrictOptions` 与 trusted request-id；identity/runtime config/facade/reservation 与公开路由现经 `internal/composition` 接入，并由 composition-level route conformance test 覆盖 |
 | Config source（phase 7.7 前置） | **已实施（经 composition 接入 runtime）**：`internal/configsource` 的 `LoadFile`/`CompileAndPublishInitial`/`ScanSecrets` 测试覆盖 fixture 加载、TOCTOU/identity、1 MiB 上限、结构走查、top-level object、unknown field、trailing data、UTF-8、context cancel、sentinel 不泄露且 non-wrapping、secret 扫描 lexical+semantic 双通道与 fuzz smoke、initial generation=1 bootstrap、meta isolation、stale/nil store/compile 失败/revision trim/pre-canceled ctx 与原子并发；经 `internal/composition` 启动接入（initial generation=1 bootstrap），未实现热重载 loop。credential env 已实施：模块内 `internal/credentialenv` 只接受严格的 `vault://` credential ref → `EXECUTOR_CREDENTIAL_*` 环境变量名 JSON allowlist；每个 attempt 重新读取映射环境变量以观察 rotation，并仅以 opaque secret 交给调用方。`ValidateCompiled` 在启动预检中要求 enabled authenticated route 的 enabled credential refs 与可用 mapping 精确一致。mapping JSON 与 secret environment variables 均不得提交；该能力现经 `internal/composition` 接入 `main` 与公开 routes。identity env 已实施为模块内能力（经 composition 接入 runtime、未做 Auth JWT） |
@@ -893,6 +948,7 @@ go test -race -count=1 ./test/integration/...
 | Streaming | **Phase 10 已实施（runtime Chat/Messages SSE）**：hybrid plain+strict dispatch、auth-before-capture、pre-commit JSON/post-commit no fallback、flushing native SSE sink、OpenAI `[DONE]`、Anthropic native event framing、StreamDriver 与 exact SDK stream registry composition；transport/stream/streamfacade/composition/process race coverage。无 HTTP atomicity、wire proof、跨进程 exactly-once 或 public/provider E2E；Responses non-stream+stream 已 runtime 启用；Images legacy non-stream 已执行。 |
 | Anthropic streaming | **已实施并接入 runtime**：native SSE + thinking signature，HTTP SSE transport/composition/runtime 已用于 Messages `stream:true` |
 | Responses | **Phase 14 已实施（`internal/responsecontract`）**：`ValidateRequest` strict allowlist 强制 stateless-only（拒绝 `previous_response_id`/`conversation`/`store`/`background`/`include`/`moderation`/`prompt`/`truncation`/`service_tier`），校验 model/input/instructions/reasoning/tools/temperature/top_p/metadata/text/max_output_tokens；`ValidateResponse` bounded 结构验证（16 MiB wire cap、output ≤ 1024 items、content parts ≤ 256、usage ≤ 1e6 且一致、extension values ≤ 64 KiB）；request accept/reject、response accept/reject、stateful field rejection、usage boundary、fuzz coverage |
+| Retry-After | **Phase 15 已实施**：`sdk.ParseRetryAfter` delta-seconds/HTTP-date/invalid/nil 单元测试；`NewClassifiedErrorWithRetryAfter`/`RetryAfter()`/`CloneClassifiedError` clamp/向后兼容/nil 单元测试；OpenAI adapter 429/503/401/403/404/RA-over-cap/Images/Responses TLS `httptest` 测试；Anthropic adapter 429/529/503/401/403/404 TLS `httptest` 测试；retry State `RecordFailure` RA clamp/RA-vs-backoff/RA-vs-MaxTotalDuration 测试 |
 | Quota | **Phase 12 typed domain 已实施并接线**：`Repository`、`DomainInMemory`、`TypedMock` shared contract/race/fuzz tests 覆盖 typed reservation exact replay/conflict、terminal settlement、cancellation/fault/ownership/redaction；legacy `Port` 已删除；Runner 使用 `AccountingConfirmedUsage`（`sdk.Completion.Known=true`+`Valid()` 时携带 `ConfirmedUsage`）或 `AccountingUnpricedSuccess`，StreamDriver 使用 `AccountingConfirmedUsage`（`UsageKnown` 时携带 `ConfirmedUsage`）或 `AccountingUnpricedSuccess`。Phase 12.3 usage extraction tests 覆盖 `sdk.Usage.Valid()`、OpenAI/Anthropic adapter 提取逻辑、Images `Known=false`、Runner `runnerFinalizeOutcome` 映射与 integration。无 usage charging、DB 或 durable storage。 |
 | Logging | single terminal + redaction tests |
 | CI/Docker | full local-equivalent suite + image build |

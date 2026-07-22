@@ -235,6 +235,11 @@ func (s *State) RecordFailure(ctx context.Context, attempt Attempt, failure Fail
 	if failure.RetryAfter != nil && *failure.RetryAfter > delay {
 		delay = *failure.RetryAfter
 	}
+	// Clamp delay to the global hard cap so no Retry-After value can impose an
+	// unbounded delay on the retry loop.
+	if delay > sdk.HardMaxRetryAfter {
+		delay = sdk.HardMaxRetryAfter
+	}
 	// Equal deadlines are deliberately rejected: there must be time left for
 	// the next attempt, not merely enough time to wake at the deadline.
 	if deadline, hasDeadline := ctx.Deadline(); hasDeadline && !now.Add(delay).Before(deadline) {

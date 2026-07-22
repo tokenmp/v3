@@ -16,7 +16,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"strconv"
 	"sync"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -221,6 +224,51 @@ var (
 	ErrUpstream     = errors.New("upstream error")
 )
 
+// HardMaxRetryAfter is the absolute upper bound on any Retry-After value
+// (delta-seconds or HTTP-date) parsed from an upstream response header. Values
+// exceeding this cap are clamped so a misbehaving upstream cannot impose an
+// unbounded delay on the retry loop.
+const HardMaxRetryAfter = 5 * time.Minute
+
+// ParseRetryAfter parses the Retry-After header per RFC 7231 §7.1.3. It first
+// tries delta-seconds (non-negative integer); if that fails, it tries HTTP-date
+// (RFC 1123) and computes time.Until. The result is clamped to
+// [0, HardMaxRetryAfter]. Returns (duration, true) on success, (0, false) if
+// the header is absent or unparseable. It is a pure, stateless function.
+func ParseRetryAfter(header http.Header) (time.Duration, bool) {
+	v := header.Get("Retry-After")
+	if v == "" {
+		return 0, false
+	}
+	// Try delta-seconds first. Use int64 to avoid platform-dependent int overflow.
+	if secs, err := strconv.ParseInt(v, 10, 64); err == nil {
+		if secs < 0 {
+			secs = 0
+		}
+		// If seconds would overflow a time.Duration, clamp directly.
+		if secs > int64(HardMaxRetryAfter/time.Second) {
+			return HardMaxRetryAfter, true
+		}
+		d := time.Duration(secs) * time.Second
+		if d > HardMaxRetryAfter {
+			d = HardMaxRetryAfter
+		}
+		return d, true
+	}
+	// Try HTTP-date (RFC 1123).
+	if t, err := time.Parse(time.RFC1123, v); err == nil {
+		remaining := time.Until(t)
+		if remaining <= 0 {
+			return 0, false
+		}
+		if remaining > HardMaxRetryAfter {
+			remaining = HardMaxRetryAfter
+		}
+		return remaining, true
+	}
+	return 0, false
+}
+
 // ClassifiedError carries only safe, sanitized upstream metadata: a fixed
 // category, HTTP status, provider request ID, and the upstream error code and
 // type. Its fields are private so callers cannot attach a response, request,
@@ -229,12 +277,14 @@ var (
 // code, type, URL, or secret; Code() and Type() expose the sanitized upstream
 // code/type identifiers ([A-Za-z0-9_-]) for retry/response mapping.
 type ClassifiedError struct {
-	kind       error
-	causeClass error
-	status     int
-	requestID  string
-	code       string
-	typ        string
+	kind          error
+	causeClass    error
+	status        int
+	requestID     string
+	code          string
+	typ           string
+	retryAfter    time.Duration
+	hasRetryAfter bool
 }
 
 // NewClassifiedError returns a classified error. Unknown kinds are reduced to
@@ -351,6 +401,36 @@ func (e *ClassifiedError) Type() string {
 	return e.typ
 }
 
+// RetryAfter reports the parsed Retry-After delay, if one was recorded.
+// Returns (duration, true) when a valid Retry-After was parsed from the
+// upstream response header for a retryable status; (0, false) otherwise.
+func (e *ClassifiedError) RetryAfter() (time.Duration, bool) {
+	if e == nil || !e.hasRetryAfter {
+		return 0, false
+	}
+	return e.retryAfter, true
+}
+
+// NewClassifiedErrorWithRetryAfter returns a classified error with an optional
+// Retry-After delay parsed from an upstream header. The duration is clamped to
+// [0, HardMaxRetryAfter] internally. This is used by provider adapters only for
+// retryable HTTP statuses (429, 5xx). Non-retryable statuses must use
+// NewClassifiedError (which preserves the existing no-RetryAfter behaviour).
+func NewClassifiedErrorWithRetryAfter(kind error, status int, requestID, code, typ string, retryAfter time.Duration, hasRetryAfter bool) *ClassifiedError {
+	ce := NewClassifiedError(kind, status, requestID, code, typ)
+	if hasRetryAfter {
+		if retryAfter < 0 {
+			retryAfter = 0
+		}
+		if retryAfter > HardMaxRetryAfter {
+			retryAfter = HardMaxRetryAfter
+		}
+		ce.retryAfter = retryAfter
+		ce.hasRetryAfter = true
+	}
+	return ce
+}
+
 // CloneClassifiedError returns an independent copy containing only the safe
 // classification fields. It deliberately does not preserve arbitrary wrapped
 // errors because ClassifiedError never owns one.
@@ -379,7 +459,8 @@ func CloneClassifiedError(value *ClassifiedError) *ClassifiedError {
 	case errors.Is(value, ErrUnavailable):
 		kind = ErrUnavailable
 	}
-	return NewClassifiedError(kind, value.Status(), value.RequestID(), value.Code(), value.Type())
+	ra, hasRA := value.RetryAfter()
+	return NewClassifiedErrorWithRetryAfter(kind, value.Status(), value.RequestID(), value.Code(), value.Type(), ra, hasRA)
 }
 
 // ToUpstreamResponse maps the classified error into an [adapter.UpstreamResponse]

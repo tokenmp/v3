@@ -236,7 +236,11 @@ func (d *StreamDriver) Run(ctx context.Context, in StreamInput) (StreamResult, e
 }
 
 func (d *StreamDriver) retryPrecommit(ctx context.Context, terminalizer *Terminalizer, state *retry.State, attempt retry.Attempt, policy adapter.CompiledRetry, prepared routing.PreparedAttempt, classified *sdk.ClassifiedError, in StreamInput, attemptNo int) (StreamResult, routing.Candidate, bool, error) {
-	decision, err := state.RecordFailure(ctx, attempt, retry.Failure{Classified: classified}, policy)
+	var retryAfter *time.Duration
+	if ra, ok := classified.RetryAfter(); ok {
+		retryAfter = &ra
+	}
+	decision, err := state.RecordFailure(ctx, attempt, retry.Failure{Classified: classified, RetryAfter: retryAfter}, policy)
 	if err != nil {
 		_ = state.Cancel()
 		resultErr := d.releaseFailure(ctx, terminalizer, parentError(ctx, ErrBudgetExhausted))

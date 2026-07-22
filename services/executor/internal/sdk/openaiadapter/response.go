@@ -150,7 +150,14 @@ func (c *Client) streamResponse(ctx context.Context, call sdk.StreamCall) (sdk.S
 			return sdk.StreamOpen{}, classifyContextError(err)
 		}
 		if response != nil && (response.StatusCode < 200 || response.StatusCode >= 300) {
-			return sdk.StreamOpen{}, sdk.NewClassifiedError(kindForHTTPStatus(response.StatusCode), response.StatusCode, response.Header.Get("x-request-id"), "", "")
+			kind := kindForHTTPStatus(response.StatusCode)
+			reqID := response.Header.Get("x-request-id")
+			if isRetryableHTTPStatus(response.StatusCode) {
+				if ra, ok := sdk.ParseRetryAfter(response.Header); ok {
+					return sdk.StreamOpen{}, sdk.NewClassifiedErrorWithRetryAfter(kind, response.StatusCode, reqID, "", "", ra, true)
+				}
+			}
+			return sdk.StreamOpen{}, sdk.NewClassifiedError(kind, response.StatusCode, reqID, "", "")
 		}
 		if stream != nil && stream.Err() != nil {
 			return sdk.StreamOpen{}, classifyStreamOpenError(stream.Err(), response)
