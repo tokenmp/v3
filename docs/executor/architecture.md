@@ -520,9 +520,25 @@ reserved → released
 
 `reservation_id` 是跨 Repository/服务边界的幂等键。相同 reservation 的同一终态重复请求返回当前成功终态；相反终态竞争返回稳定冲突错误，不执行第二次结算。调用成功但响应丢失时允许使用相同 reservation id 重试。Mock 和未来持久化实现必须通过同一 Repository contract suite。
 
-Phase 12 typed quota domain 已完成：`quota.Repository` 是唯一 quota 端口，legacy `Port`/`InMemory`/`Mock` 已删除。Runner 使用 `AccountingUnpricedSuccess` finalize；StreamDriver 使用 `AccountingConfirmedUsage`（当 `streaming.UsageKnown` 为 true 时携带 `ConfirmedUsage` token 计数）或 `AccountingUnpricedSuccess`。两者经 `QuotaIdentity`（subject/key_id/protocol）传递认证身份。`DomainInMemory` 与 `TypedMock` 的 shared contract/race/fuzz suite 验证 exact semantic replay 和 conflict。不提供 usage charging、数据库或 durable storage。
+Phase 12 typed quota domain 已完成：`quota.Repository` 是唯一 quota 端口，legacy `Port`/`InMemory`/`Mock` 已删除。Runner 使用 `AccountingConfirmedUsage`（当 `sdk.Completion.Known=true` 且 `Usage.Valid()` 时携带 `ConfirmedUsage` token 计数）或 `AccountingUnpricedSuccess` finalize；StreamDriver 使用 `AccountingConfirmedUsage`（当 `streaming.UsageKnown` 为 true 时携带 `ConfirmedUsage` token 计数）或 `AccountingUnpricedSuccess`。两者经 `QuotaIdentity`（subject/key_id/protocol）传递认证身份。`DomainInMemory` 与 `TypedMock` 的 shared contract/race/fuzz suite 验证 exact semantic replay 和 conflict。不提供 usage charging、数据库或 durable storage。
 
 结算默认语义：commit 前失败或取消时 release；commit 后有确认 usage 时 finalize；commit 后没有确认 usage 时 release，同时记录 `unresolved_upstream_cost` 供未来对账，不猜测用户扣费。任何并发取消、超时、重试和清理路径都必须保证唯一 terminal transition。
+
+### Phase 12.3 Non-stream usage normalization
+
+Non-stream 路径现与 stream 路径共享同一 confirmed-usage → `AccountingConfirmedUsage` 终态语义：
+
+1. **`sdk.Usage`**：bounded token 计数结构（`PromptTokens`/`CompletionTokens`/`TotalTokens`，均为 `uint64`）。`Valid()` 校验每个计数器 ≤ `maxSDKUsageTokens`（1e6，与 `streaming.MaxTotalHardCap` 对齐）且 `PromptTokens+CompletionTokens==TotalTokens`。`maxSDKUsageTokens` 阻止故障 provider 将 accounting record 变为无界值。
+
+2. **Adapter 提取逻辑**（在 `Complete` 返回前执行）：
+   - OpenAI Chat：`extractOpenAIChatUsage` 从 `RawJSON` 解析 `usage.{prompt_tokens,completion_tokens,total_tokens}`，三字段必须全部存在、非负、一致（`prompt+completion==total`）且 ≤ 1e6，否则 `Known=false`。Extra fields（如 `completion_tokens_details`）被忽略。
+   - Anthropic Messages：`extractAnthropicMessagesUsage` 从 `RawJSON` 解析 `usage.{input_tokens,output_tokens}`，计算 `total=input+output`（含 overflow 检查），cache 字段忽略；非负且 ≤ 1e6 时 `Known=true`，否则 `Known=false`。
+   - Images：不提取 usage，`Known` 恒为 `false`。
+
+3. **Runner 映射**：`runnerFinalizeOutcome(completion)` 判断 `Known && Valid()`：
+   - true → `AccountingConfirmedUsage` + `ConfirmedUsage{InputTokens,OutputTokens,TotalTokens}`
+   - false → `AccountingUnpricedSuccess`（零值 `ConfirmedUsage`）
+   此映射与 StreamDriver 的 `confirmedUsage` 对称：stream 路径以 `streaming.UsageKnown` 判断，non-stream 路径以 `sdk.Completion.Known` 判断，两者最终写入同一 `quota.ConfirmedUsage` 结构。
 
 Request/Attempt/Event 日志至少记录：
 
@@ -562,6 +578,7 @@ Request/Attempt/Event 日志至少记录：
 | 11 | `feat/executor-images` | **已实施（completion-only non-stream runtime）**：official legacy OpenAI Images Generate 已经 execution registry、composition、transport-neutral facade、Runner 与鉴权 `POST /v1/images/generations` 接线；facade 精确委托 Runner，Runner 一次 quota reservation 并按冻结策略 retry。SDK/transport 共用 `internal/imagecontract`，default wire/renderer `url`，wire/单项/aggregate 16 MiB/10 MiB/12 MiB，严格 URL/streaming base64/usage/extensions/revised-prompt；所有终态 `Cache-Control: no-store`。不支持 GPT Image 特有参数或 usage quota，也不进入 stream registry。 |
 | 12.1 | `feat/executor-quota-policy` | **已实施（typed domain only）**：`quota.Repository`、locally validated `res_` ID、bounded/redacted metadata、仅 `BasisNone` estimate、typed terminal settlement/`Lookup`，及 `DomainInMemory`/`TypedMock` shared contract、race、fuzz coverage。typed state 与 legacy `quota.Port` 有意分离；Runner、StreamDriver 和 runtime 尚使用 legacy Port。无 usage charging、数据库或 durable storage。 |
 | 12.2 | 独立变更 | **已实施**：迁移 Runner、StreamDriver 和 runtime consumers 到 typed Repository，并删除 legacy `quota.Port` 及其独立 state。Runner 使用 `AccountingUnpricedSuccess`；StreamDriver 使用 `AccountingConfirmedUsage`（`streaming.UsageKnown` 时携带 `ConfirmedUsage`）或 `AccountingUnpricedSuccess`。两者经 `QuotaIdentity` 传递认证身份。 |
+| 12.3 | 独立变更 | **已实施**：non-stream usage normalization。`sdk.Completion` 新增 `Usage`/`Known` 字段；`sdk.Usage` 为 bounded token 计数（`Valid()` 校验 ≤ 1e6 且一致）。OpenAI Chat 与 Anthropic Messages adapter 在 `Complete` 返回前从 `RawJSON` 提取 usage，不合格时 `Known=false`；Images adapter 不提取。Runner 经 `runnerFinalizeOutcome` 映射：`Known=true`+`Valid()` 时以 `AccountingConfirmedUsage` finalize，否则回退 `AccountingUnpricedSuccess`。此路径与 StreamDriver 的 `confirmedUsage` 对称，non-stream 与 stream 共享同一 quota 终态语义。 |
 | 13 | `feat/executor-request-logging` | Request/Attempt/Event 日志 |
 | 14 | `build/executor-ci-docker` | Docker、CI 和集成验证 |
 | 15 | 独立决策 | PostgreSQL/Redis/internal HTTP repositories |

@@ -306,7 +306,7 @@ func (r *Runner) Run(ctx context.Context, in Input) (Result, error) {
 			_ = state.RecordSuccess(ctx, attempt)
 			_ = state.Commit()
 			cleanupCtx, cleanupCancel := r.cleanupContext(ctx)
-			ferr := terminalizer.Finalize(cleanupCtx, quota.FinalizeOutcome{Disposition: quota.AccountingUnpricedSuccess, Outcome: quota.OutcomeCompleted})
+			ferr := terminalizer.Finalize(cleanupCtx, runnerFinalizeOutcome(completion))
 			cleanupCancel()
 			if ferr != nil {
 				// Terminal state is unknown. Do not Release, log success, or return a
@@ -392,6 +392,27 @@ func sdkAuthCompatible(kind adapter.SDKKind, auth adapter.AuthKind) bool {
 	default:
 		return true
 	}
+}
+
+// runnerFinalizeOutcome maps a non-streaming Completion into the appropriate
+// quota FinalizeOutcome. When the adapter extracted known and valid usage
+// counters, the disposition is AccountingConfirmedUsage with the confirmed
+// token counts. Otherwise, the disposition falls back to
+// AccountingUnpricedSuccess so the runner never records incorrect or
+// speculative usage.
+func runnerFinalizeOutcome(completion sdk.Completion) quota.FinalizeOutcome {
+	if completion.Known && completion.Usage.Valid() {
+		return quota.FinalizeOutcome{
+			Disposition: quota.AccountingConfirmedUsage,
+			Outcome:     quota.OutcomeCompleted,
+			Usage: quota.ConfirmedUsage{
+				InputTokens:  completion.Usage.PromptTokens,
+				OutputTokens: completion.Usage.CompletionTokens,
+				TotalTokens:  completion.Usage.TotalTokens,
+			},
+		}
+	}
+	return quota.FinalizeOutcome{Disposition: quota.AccountingUnpricedSuccess, Outcome: quota.OutcomeCompleted}
 }
 
 // cleanupContext returns an independent context whose lifetime is bounded by

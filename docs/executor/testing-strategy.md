@@ -665,9 +665,22 @@ Phase 9 streaming tests 已实施：
 
 `internal/quota.Repository` 的 shared suite 对 `DomainInMemory` 和 `TypedMock` 运行相同断言：reserve/lookup 的 defensive ownership、exact reserve and terminal replay、divergent input or opposite terminal `ErrConflict`、invalid or pre-cancelled input zero-write、lock-wait cancellation、post-commit fault preserving committed state、mock override/call-copy isolation、redacted formatting，以及并发 reserve。`FuzzDomainInMemoryRejectsMalformedReservationWithoutWrite` 检查 malformed reservation 不写入状态。
 
-legacy `quota.Port` 已删除；`Repository`/`DomainInMemory`/`TypedMock` 是唯一实现。Runner 使用 `AccountingUnpricedSuccess` finalize；StreamDriver 使用 `AccountingConfirmedUsage`（当 `streaming.UsageKnown` 为 true 时携带 `ConfirmedUsage` token 计数）或 `AccountingUnpricedSuccess`。无 usage charging、数据库或 durable storage。
+legacy `quota.Port` 已删除；`Repository`/`DomainInMemory`/`TypedMock` 是唯一实现。Runner 使用 `AccountingConfirmedUsage`（当 `sdk.Completion.Known=true` 且 `Usage.Valid()` 时携带 `ConfirmedUsage` token 计数）或 `AccountingUnpricedSuccess` finalize；StreamDriver 使用 `AccountingConfirmedUsage`（当 `streaming.UsageKnown` 为 true 时携带 `ConfirmedUsage` token 计数）或 `AccountingUnpricedSuccess`。无 usage charging、数据库或 durable storage。
 
-### 14.3 Request log lifecycle
+### 14.3 Phase 12.3 Non-stream usage extraction tests
+
+`sdk.Usage`/`Known` 提取逻辑由 adapter-level 和 Runner-level 测试覆盖：
+
+| 维度 | 已覆盖断言 |
+|---|---|
+| `sdk.Usage.Valid()` | 每个计数器 ≤ 1e6、`prompt+completion==total`；不一致/超限返回 `false` |
+| OpenAI Chat `extractOpenAIChatUsage` | 三字段存在且一致→`Known=true`；缺失/负数/不一致/超限→`Known=false`；空/nil `RawJSON`→`Known=false` |
+| Anthropic Messages `extractAnthropicMessagesUsage` | `input_tokens`+`output_tokens` 存在且非负→计算 `total`→`Known=true`；缺失/负数/overflow/超限→`Known=false`；cache 字段忽略 |
+| Images `Complete` | `Known` 恒为 `false`，`Usage` 为零值；即使响应含 `usage` 字段也不提取 |
+| Runner `runnerFinalizeOutcome` | `Known=true`+`Valid()`→`AccountingConfirmedUsage`+`ConfirmedUsage`；`Known=false`→`AccountingUnpricedSuccess`；`Known=true`+`Valid()=false`（不一致计数）→`AccountingUnpricedSuccess`；零值 usage+`Known=true`→`AccountingConfirmedUsage`+零值 `ConfirmedUsage` |
+| Runner integration | `TestRunnerConfirmedUsageFinalizesWithAccountingConfirmedUsage`：mock client 返回 `Known=true` usage，断言 finalize disposition 与 `ConfirmedUsage` 计数；`TestRunnerUnknownUsageFinalizesWithAccountingUnpricedSuccess`：默认 client `Known=false`，断言 `AccountingUnpricedSuccess`；`TestRunnerKnownButInvalidUsageFallsBackToUnpricedSuccess`：`Known=true`+不一致计数，断言回退 |
+
+### 14.4 Request log lifecycle
 
 - 每个请求只有一个 terminal update；
 - 每个上游调用有独立 attempt；
@@ -854,7 +867,7 @@ go test -race -count=1 ./test/integration/...
 | Streaming | **Phase 10 已实施（runtime Chat/Messages SSE）**：hybrid plain+strict dispatch、auth-before-capture、pre-commit JSON/post-commit no fallback、flushing native SSE sink、OpenAI `[DONE]`、Anthropic native event framing、StreamDriver 与 exact SDK stream registry composition；transport/stream/streamfacade/composition/process race coverage。无 HTTP atomicity、wire proof、跨进程 exactly-once 或 public/provider E2E；Responses 仍 501；Images legacy non-stream 已执行。 |
 | Anthropic streaming | **已实施并接入 runtime**：native SSE + thinking signature，HTTP SSE transport/composition/runtime 已用于 Messages `stream:true` |
 | Responses | lifecycle events + failed/incomplete + reasoning summary |
-| Quota | **Phase 12 typed domain 已实施并接线**：`Repository`、`DomainInMemory`、`TypedMock` shared contract/race/fuzz tests 覆盖 typed reservation exact replay/conflict、terminal settlement、cancellation/fault/ownership/redaction；legacy `Port` 已删除；Runner 使用 `AccountingUnpricedSuccess`，StreamDriver 使用 `AccountingConfirmedUsage`（`UsageKnown` 时携带 `ConfirmedUsage`）或 `AccountingUnpricedSuccess`。无 usage charging、DB 或 durable storage。 |
+| Quota | **Phase 12 typed domain 已实施并接线**：`Repository`、`DomainInMemory`、`TypedMock` shared contract/race/fuzz tests 覆盖 typed reservation exact replay/conflict、terminal settlement、cancellation/fault/ownership/redaction；legacy `Port` 已删除；Runner 使用 `AccountingConfirmedUsage`（`sdk.Completion.Known=true`+`Valid()` 时携带 `ConfirmedUsage`）或 `AccountingUnpricedSuccess`，StreamDriver 使用 `AccountingConfirmedUsage`（`UsageKnown` 时携带 `ConfirmedUsage`）或 `AccountingUnpricedSuccess`。Phase 12.3 usage extraction tests 覆盖 `sdk.Usage.Valid()`、OpenAI/Anthropic adapter 提取逻辑、Images `Known=false`、Runner `runnerFinalizeOutcome` 映射与 integration。无 usage charging、DB 或 durable storage。 |
 | Logging | single terminal + redaction tests |
 | CI/Docker | full local-equivalent suite + image build |
 

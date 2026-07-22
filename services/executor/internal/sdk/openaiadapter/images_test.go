@@ -241,3 +241,25 @@ func TestCappedReadCloser(t *testing.T) {
 type ioNopCloser struct{ *bytes.Reader }
 
 func (ioNopCloser) Close() error { return nil }
+
+func TestCompleteImagesKnownFalse(t *testing.T) {
+	// Images completion must never report known usage: the imagecontract
+	// validator does not extract token counters, and the Images response
+	// usage field (if present) is not billing-relevant in the same way.
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("x-request-id", "req_img")
+		_, _ = w.Write([]byte(`{"created":1,"data":[{"b64_json":"aGVsbG8="}],"usage":{"input_tokens":1,"output_tokens":2,"total_tokens":3}}`))
+	}))
+	defer ts.Close()
+	result, err := newTestClient(t, ts, nil).Complete(context.Background(), imageCall(ts.URL, "key", `{"model":"m","prompt":"draw","response_format":"b64_json"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Known {
+		t.Fatal("Images completion Known=true, want false")
+	}
+	if result.Usage != (sdk.Usage{}) {
+		t.Fatalf("Images usage = %+v, want zero", result.Usage)
+	}
+}

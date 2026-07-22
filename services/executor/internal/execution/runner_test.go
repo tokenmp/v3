@@ -1513,3 +1513,160 @@ func TestRunnerResultAndErrorSurfacesDoNotLeak(t *testing.T) {
 		}
 	}
 }
+
+func TestRunnerConfirmedUsageFinalizesWithAccountingConfirmedUsage(t *testing.T) {
+	// When the adapter extracts known and valid usage, the Runner finalizes
+	// with AccountingConfirmedUsage and the confirmed token counts.
+	client := &runnerTestClient{completeFn: func(context.Context, sdk.Call) (sdk.Completion, error) {
+		return sdk.Completion{
+			RawJSON:   json.RawMessage(`{"id":"chatcmpl-1","choices":[],"usage":{"prompt_tokens":10,"completion_tokens":20,"total_tokens":30}}`),
+			Status:    200,
+			RequestID: "req_ok",
+			Usage:     sdk.Usage{PromptTokens: 10, CompletionTokens: 20, TotalTokens: 30},
+			Known:     true,
+		}, nil
+	}}
+	log := requestlog.NewInMemoryExecution()
+	port := quota.NewTypedMock()
+	var gotFinalize quota.FinalizeRequest
+	port.SetFinalizeReservationFn(func(_ context.Context, in quota.FinalizeRequest) (quota.Reservation, error) {
+		gotFinalize = in
+		return port.DomainInMemory.FinalizeReservation(context.Background(), in)
+	})
+	registry := NewSDKRegistry()
+	_ = registry.Register(adapter.SDKKindOpenAI, adapter.ProtocolOpenAIChat, client)
+	clock := &fakeClock{now: time.Date(2026, 7, 21, 12, 0, 0, 0, time.UTC)}
+	runner := &Runner{Quota: port, SDKRegistry: registry, Logger: log, Clock: clock, Sleeper: &recordingSleeper{clock: clock}}
+	resolver, plan := runnerFixture(t)
+
+	result, err := runner.Run(context.Background(), runnerInput(resolver, plan))
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	if result.Completion.Usage != (sdk.Usage{PromptTokens: 10, CompletionTokens: 20, TotalTokens: 30}) || !result.Completion.Known {
+		t.Fatalf("Completion usage = %+v, known=%v", result.Completion.Usage, result.Completion.Known)
+	}
+	if gotFinalize.Outcome.Disposition != quota.AccountingConfirmedUsage {
+		t.Fatalf("disposition = %q, want %q", gotFinalize.Outcome.Disposition, quota.AccountingConfirmedUsage)
+	}
+	if gotFinalize.Outcome.Usage != (quota.ConfirmedUsage{InputTokens: 10, OutputTokens: 20, TotalTokens: 30}) {
+		t.Fatalf("usage = %+v, want {10 20 30}", gotFinalize.Outcome.Usage)
+	}
+}
+
+func TestRunnerUnknownUsageFinalizesWithAccountingUnpricedSuccess(t *testing.T) {
+	// When the adapter does not extract known usage (Known=false), the Runner
+	// falls back to AccountingUnpricedSuccess, preserving the current behavior.
+	client := &runnerTestClient{}
+	log := requestlog.NewInMemoryExecution()
+	port := quota.NewTypedMock()
+	var gotFinalize quota.FinalizeRequest
+	port.SetFinalizeReservationFn(func(_ context.Context, in quota.FinalizeRequest) (quota.Reservation, error) {
+		gotFinalize = in
+		return port.DomainInMemory.FinalizeReservation(context.Background(), in)
+	})
+	registry := NewSDKRegistry()
+	_ = registry.Register(adapter.SDKKindOpenAI, adapter.ProtocolOpenAIChat, client)
+	clock := &fakeClock{now: time.Date(2026, 7, 21, 12, 0, 0, 0, time.UTC)}
+	runner := &Runner{Quota: port, SDKRegistry: registry, Logger: log, Clock: clock, Sleeper: &recordingSleeper{clock: clock}}
+	resolver, plan := runnerFixture(t)
+
+	result, err := runner.Run(context.Background(), runnerInput(resolver, plan))
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	if result.Completion.Known {
+		t.Fatalf("Completion.Known = true, want false for default test client")
+	}
+	if gotFinalize.Outcome.Disposition != quota.AccountingUnpricedSuccess {
+		t.Fatalf("disposition = %q, want %q", gotFinalize.Outcome.Disposition, quota.AccountingUnpricedSuccess)
+	}
+	if gotFinalize.Outcome.Usage != (quota.ConfirmedUsage{}) {
+		t.Fatalf("usage = %+v, want zero", gotFinalize.Outcome.Usage)
+	}
+}
+
+func TestRunnerKnownButInvalidUsageFallsBackToUnpricedSuccess(t *testing.T) {
+	// When Known=true but Valid()=false (inconsistent counters), the Runner
+	// must not record incorrect usage and falls back to unpriced success.
+	client := &runnerTestClient{completeFn: func(context.Context, sdk.Call) (sdk.Completion, error) {
+		return sdk.Completion{
+			RawJSON:   json.RawMessage(`{}`),
+			Status:    200,
+			RequestID: "req_ok",
+			Usage:     sdk.Usage{PromptTokens: 10, CompletionTokens: 20, TotalTokens: 99}, // inconsistent
+			Known:     true,
+		}, nil
+	}}
+	log := requestlog.NewInMemoryExecution()
+	port := quota.NewTypedMock()
+	var gotFinalize quota.FinalizeRequest
+	port.SetFinalizeReservationFn(func(_ context.Context, in quota.FinalizeRequest) (quota.Reservation, error) {
+		gotFinalize = in
+		return port.DomainInMemory.FinalizeReservation(context.Background(), in)
+	})
+	registry := NewSDKRegistry()
+	_ = registry.Register(adapter.SDKKindOpenAI, adapter.ProtocolOpenAIChat, client)
+	clock := &fakeClock{now: time.Date(2026, 7, 21, 12, 0, 0, 0, time.UTC)}
+	runner := &Runner{Quota: port, SDKRegistry: registry, Logger: log, Clock: clock, Sleeper: &recordingSleeper{clock: clock}}
+	resolver, plan := runnerFixture(t)
+
+	result, err := runner.Run(context.Background(), runnerInput(resolver, plan))
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	if gotFinalize.Outcome.Disposition != quota.AccountingUnpricedSuccess {
+		t.Fatalf("disposition = %q, want %q for invalid usage", gotFinalize.Outcome.Disposition, quota.AccountingUnpricedSuccess)
+	}
+	if gotFinalize.Outcome.Usage != (quota.ConfirmedUsage{}) {
+		t.Fatalf("usage = %+v, want zero for invalid usage", gotFinalize.Outcome.Usage)
+	}
+	_ = result
+}
+
+func TestRunnerFinalizeOutcomeMapping(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		completion  sdk.Completion
+		disposition quota.AccountingDisposition
+		usage       quota.ConfirmedUsage
+	}{
+		{
+			name:        "known valid usage",
+			completion:  sdk.Completion{Usage: sdk.Usage{PromptTokens: 10, CompletionTokens: 20, TotalTokens: 30}, Known: true},
+			disposition: quota.AccountingConfirmedUsage,
+			usage:       quota.ConfirmedUsage{InputTokens: 10, OutputTokens: 20, TotalTokens: 30},
+		},
+		{
+			name:        "unknown usage",
+			completion:  sdk.Completion{Known: false},
+			disposition: quota.AccountingUnpricedSuccess,
+			usage:       quota.ConfirmedUsage{},
+		},
+		{
+			name:        "known but invalid usage",
+			completion:  sdk.Completion{Usage: sdk.Usage{PromptTokens: 10, CompletionTokens: 20, TotalTokens: 99}, Known: true},
+			disposition: quota.AccountingUnpricedSuccess,
+			usage:       quota.ConfirmedUsage{},
+		},
+		{
+			name:        "known zero usage",
+			completion:  sdk.Completion{Usage: sdk.Usage{}, Known: true},
+			disposition: quota.AccountingConfirmedUsage,
+			usage:       quota.ConfirmedUsage{},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			outcome := runnerFinalizeOutcome(tc.completion)
+			if outcome.Disposition != tc.disposition {
+				t.Fatalf("disposition = %q, want %q", outcome.Disposition, tc.disposition)
+			}
+			if outcome.Outcome != quota.OutcomeCompleted {
+				t.Fatalf("outcome = %q, want completed", outcome.Outcome)
+			}
+			if outcome.Usage != tc.usage {
+				t.Fatalf("usage = %+v, want %+v", outcome.Usage, tc.usage)
+			}
+		})
+	}
+}

@@ -103,6 +103,7 @@ func (c *Client) completeChat(ctx context.Context, call sdk.Call) (sdk.Completio
 		completion.Status = response.StatusCode
 		completion.RequestID = sdk.SafeRequestID(response.Header.Get("x-request-id"))
 	}
+	completion.Usage, completion.Known = extractOpenAIChatUsage(completion.RawJSON)
 	return completion, nil
 }
 
@@ -111,6 +112,48 @@ func classifyContextError(err error) error {
 		return sdk.NewClassifiedError(context.DeadlineExceeded, 0, "", "", "")
 	}
 	return err
+}
+
+// extractOpenAIChatUsage extracts usage counters from the raw OpenAI Chat
+// Completions response JSON. It performs strict validation: all three
+// counters must be present as non-negative integers, each ≤ 1e6, and
+// prompt+completion==total. Any missing, negative, inconsistent, or
+// out-of-bounds value results in Known=false so the runner falls back to
+// unpriced success. Extra fields (e.g. completion_tokens_details) are
+// silently ignored.
+func extractOpenAIChatUsage(raw json.RawMessage) (sdk.Usage, bool) {
+	if len(raw) == 0 {
+		return sdk.Usage{}, false
+	}
+	var wrapper struct {
+		Usage *struct {
+			PromptTokens     *int64 `json:"prompt_tokens"`
+			CompletionTokens *int64 `json:"completion_tokens"`
+			TotalTokens      *int64 `json:"total_tokens"`
+		} `json:"usage"`
+	}
+	if err := json.Unmarshal(raw, &wrapper); err != nil {
+		return sdk.Usage{}, false
+	}
+	if wrapper.Usage == nil {
+		return sdk.Usage{}, false
+	}
+	u := wrapper.Usage
+	if u.PromptTokens == nil || u.CompletionTokens == nil || u.TotalTokens == nil {
+		return sdk.Usage{}, false
+	}
+	if *u.PromptTokens < 0 || *u.CompletionTokens < 0 || *u.TotalTokens < 0 {
+		return sdk.Usage{}, false
+	}
+	usage := sdk.Usage{
+		PromptTokens:     uint64(*u.PromptTokens),
+		CompletionTokens: uint64(*u.CompletionTokens),
+		TotalTokens:      uint64(*u.TotalTokens),
+	}
+	if !usage.Valid() {
+		return sdk.Usage{}, false
+	}
+	return usage, true
 }
 
 func classifyError(err error, response *http.Response) *sdk.ClassifiedError {
