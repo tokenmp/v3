@@ -511,7 +511,7 @@ func CompileAndPublishInitial(ctx context.Context, store *snapshot.Store, path s
 	if err != nil {
 		return InitialSnapshotMeta{}, ErrConfigCompileFailed
 	}
-	frozen, err := snapshot.NewCompiledSnapshot(cfg.Revision, &compiled, 1)
+	frozen, err := snapshot.NewCompiledSnapshotWithTime(cfg.Revision, &compiled, 1, cfg.CreatedAt)
 	if err != nil {
 		return InitialSnapshotMeta{}, ErrConfigCompileFailed
 	}

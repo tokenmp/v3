@@ -142,7 +142,7 @@ func TestExecutorProcess(t *testing.T) {
 		}
 	})
 
-	t.Run("authenticated 501 route stays not-implemented", func(t *testing.T) {
+	t.Run("authenticated models returns 200 with empty list", func(t *testing.T) {
 		configPath := writeProcessConfig(t, minimalEmptyConfig)
 		address := freeAddress(t)
 		cmd := helperCommand(t, address, configPath, processIdentityMap)
@@ -152,12 +152,16 @@ func TestExecutorProcess(t *testing.T) {
 		t.Cleanup(func() { stopProcess(cmd) })
 
 		waitForHealthz(t, "http://"+address+"/healthz")
-		// /v1/models is an authenticated route the runtime does not execute:
-		// it must remain 501, not 404, proving the route is registered and the
-		// adapter short-circuits to not-implemented.
 		resp := processRequest(t, address, http.MethodGet, "/v1/models", "", "Bearer "+processAPIKey)
-		if resp.StatusCode != http.StatusNotImplemented {
-			t.Fatalf("status = %d, want 501; body=%s", resp.StatusCode, readBody(resp))
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body=%s", resp.StatusCode, readBody(resp))
+		}
+		body := readBody(resp)
+		if !strings.Contains(body, `"object":"list"`) {
+			t.Fatalf("body = %q, want list object", body)
+		}
+		if !strings.Contains(body, `"data":[]`) {
+			t.Fatalf("body = %q, want empty data array", body)
 		}
 	})
 

@@ -5,7 +5,10 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"reflect"
 
+	"github.com/tokenmp/v3/services/executor/internal/authcontext"
+	"github.com/tokenmp/v3/services/executor/internal/modelcatalog"
 	executorv1 "github.com/tokenmp/v3/services/executor/internal/contract/executorv1"
 )
 
@@ -30,9 +33,12 @@ func (e errSentinel) Error() string { return string(e) }
 // stream. A non-stream Adapter (returned by NewNonStream) executes
 // CreateChatCompletion and CreateMessage through an injected NonStreamExecutor
 // while ListModels, CreateResponse and CreateImage remain 501.
+// When a CatalogProvider is injected (via Options.Catalog), ListModels returns
+// the snapshot-backed model catalog instead of 501.
 type Adapter struct {
 	foundation bool
 	nonStream  NonStreamExecutor
+	catalog    modelcatalog.CatalogProvider
 	requestIDs RequestIDSource
 }
 
@@ -49,6 +55,9 @@ type Options struct {
 	// typed-nil value fails closed: no execution is attempted and a safe
 	// internal error is rendered.
 	Executor NonStreamExecutor
+	// Catalog provides the snapshot-backed model catalog. When nil or
+	// typed-nil, ListModels returns 501.
+	Catalog modelcatalog.CatalogProvider
 	// RequestIDs supplies the trusted, service-generated request identifier.
 	// When nil, an opaque locally-generated identifier is used. The source is
 	// invoked at most once per request.
@@ -60,7 +69,7 @@ type Options struct {
 // and CreateResponse remain protocol-native 501. A nil or typed-nil Executor
 // fails closed to a safe internal error.
 func NewNonStream(opts Options) *Adapter {
-	return &Adapter{nonStream: opts.Executor, requestIDs: opts.RequestIDs}
+	return &Adapter{nonStream: opts.Executor, catalog: opts.Catalog, requestIDs: opts.RequestIDs}
 }
 
 // ExecutorGetHealthz reports the process liveness without accessing external resources.
@@ -84,9 +93,34 @@ func (*Adapter) ExecutorHeadHealthz(context.Context, executorv1.ExecutorHeadHeal
 	}, nil
 }
 
-// ListModels returns an OpenAI-compatible indication that model APIs are not implemented.
-func (*Adapter) ListModels(context.Context, executorv1.ListModelsRequestObject) (executorv1.ListModelsResponseObject, error) {
-	return executorv1.ListModels501JSONResponse{OpenAINotImplementedJSONResponse: openAINotImplemented()}, nil
+// ListModels returns the snapshot-backed model catalog when a CatalogProvider
+// is wired, or a protocol-native 501 otherwise. It reads the authenticated
+// identity from the request context and maps the catalog result to the
+// generated contract types.
+func (a *Adapter) ListModels(ctx context.Context, _ executorv1.ListModelsRequestObject) (executorv1.ListModelsResponseObject, error) {
+	if a.foundation || isNilCatalog(a.catalog) {
+		return executorv1.ListModels501JSONResponse{OpenAINotImplementedJSONResponse: openAINotImplemented()}, nil
+	}
+
+	// Extract the authenticated identity from the context set by AuthMiddleware.
+	id, ok := authcontext.IdentityFromContext(ctx)
+	if !ok || id.Status != statusActive || (id.Role != roleService && id.Role != roleAdmin) {
+		return executorv1.ListModels401JSONResponse{OpenAIUnauthorizedJSONResponse: openAIUnauthorized()}, nil
+	}
+
+	principal := modelcatalog.Principal{
+		Subject: id.Subject,
+		KeyID:   id.KeyID,
+		Role:    string(id.Role),
+		Status:  string(id.Status),
+	}
+
+	result, err := a.catalog.ListModels(ctx, modelcatalog.CatalogRequest{Principal: principal})
+	if err != nil {
+		return renderCatalogError(err), nil
+	}
+
+	return renderCatalogResult(result), nil
 }
 
 // CreateChatCompletion either returns the Foundation 501 response, fails closed
@@ -214,4 +248,99 @@ func anthropicNotImplemented() executorv1.AnthropicNotImplementedJSONResponse {
 	response.Error.Message = notImplementedMessage
 	response.Error.Type = executorv1.AnthropicErrorResponseErrorTypeApiError
 	return executorv1.AnthropicNotImplementedJSONResponse(response)
+}
+
+// Catalog rendering helpers.
+
+const (
+	statusActive  = "active"
+	roleService   = "service"
+	roleAdmin     = "admin"
+	catalogOwnedBy = "tokenmp"
+)
+
+func isNilCatalog(c modelcatalog.CatalogProvider) bool {
+	if c == nil {
+		return true
+	}
+	v := reflect.ValueOf(c)
+	switch v.Kind() {
+	case reflect.Ptr, reflect.Interface, reflect.Slice, reflect.Map, reflect.Chan, reflect.Func:
+		return v.IsNil()
+	}
+	return false
+}
+
+func openAIUnauthorized() executorv1.OpenAIUnauthorizedJSONResponse {
+	status := http.StatusUnauthorized
+	code := "INVALID_API_KEY"
+	response := executorv1.OpenAIErrorResponse{Status: &status}
+	response.Error.Message = "Invalid API key provided."
+	response.Error.Type = executorv1.OpenAIErrorResponseErrorTypeAuthenticationError
+	response.Error.Code = &code
+	return executorv1.OpenAIUnauthorizedJSONResponse(response)
+}
+
+func renderCatalogError(err error) executorv1.ListModelsResponseObject {
+	if errors.Is(err, modelcatalog.ErrUnauthenticated) {
+		return executorv1.ListModels401JSONResponse{OpenAIUnauthorizedJSONResponse: openAIUnauthorized()}
+	}
+	// ErrNoSnapshot, ErrMisconfigured, ErrQuarantineUnavailable all map to 500.
+	return executorv1.ListModels500JSONResponse{OpenAIServerErrorJSONResponse: openAIServerError()}
+}
+
+func openAIServerError() executorv1.OpenAIServerErrorJSONResponse {
+	status := http.StatusInternalServerError
+	code := "INTERNAL_ERROR"
+	response := executorv1.OpenAIErrorResponse{Status: &status}
+	response.Error.Message = internalErrorMessage
+	response.Error.Type = executorv1.OpenAIErrorResponseErrorTypeApiError
+	response.Error.Code = &code
+	return executorv1.OpenAIServerErrorJSONResponse(response)
+}
+
+func renderCatalogResult(result modelcatalog.CatalogResult) executorv1.ListModelsResponseObject {
+	data := make([]executorv1.ModelObject, 0, len(result.Models))
+	for _, m := range result.Models {
+		entry := executorv1.ModelObject{
+			Id:      m.ID,
+			Object:  executorv1.Model,
+			OwnedBy: catalogOwnedBy,
+		}
+		if m.Created != 0 {
+			entry.Created = &m.Created
+		}
+		if len(m.Capabilities) > 0 {
+			caps := make([]executorv1.ModelObjectCapabilities, 0, len(m.Capabilities))
+			for _, c := range m.Capabilities {
+				caps = append(caps, executorv1.ModelObjectCapabilities(c))
+			}
+			entry.Capabilities = &caps
+		}
+		if m.Thinking != nil {
+			thinking := executorv1.ModelThinkingConfig{
+				Supported:      m.Thinking.Supported,
+				DefaultEffort:  executorv1.ModelThinkingConfigDefaultEffort(m.Thinking.DefaultEffort),
+				MaxEffort:      executorv1.ModelThinkingConfigMaxEffort(m.Thinking.MaxEffort),
+				EffortLevels:   make([]executorv1.ModelThinkingConfigEffortLevels, 0, len(m.Thinking.EffortLevels)),
+			}
+			for _, l := range m.Thinking.EffortLevels {
+				thinking.EffortLevels = append(thinking.EffortLevels, executorv1.ModelThinkingConfigEffortLevels(l))
+			}
+			if m.Thinking.MinBudgetTokens != nil {
+				v := *m.Thinking.MinBudgetTokens
+				thinking.MinBudgetTokens = &v
+			}
+			if m.Thinking.MaxBudgetTokens != nil {
+				v := *m.Thinking.MaxBudgetTokens
+				thinking.MaxBudgetTokens = &v
+			}
+			entry.Thinking = &thinking
+		}
+		data = append(data, entry)
+	}
+	return executorv1.ListModels200JSONResponse{
+		Data:   data,
+		Object: executorv1.List,
+	}
 }

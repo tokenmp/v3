@@ -27,6 +27,7 @@ import (
 	"github.com/tokenmp/v3/services/executor/internal/credentialenv"
 	"github.com/tokenmp/v3/services/executor/internal/execution"
 	"github.com/tokenmp/v3/services/executor/internal/identityenv"
+	"github.com/tokenmp/v3/services/executor/internal/modelcatalogfacade"
 	"github.com/tokenmp/v3/services/executor/internal/nonstreamfacade"
 	"github.com/tokenmp/v3/services/executor/internal/quarantinebridge"
 	"github.com/tokenmp/v3/services/executor/internal/quota"
@@ -158,8 +159,14 @@ func Build(ctx context.Context, cfg config.Config, lookupEnv func(string) (strin
 		Quarantine:  quarantineReader,
 	})
 
+	// ── Model catalog facade ──
+	catalogFacade := modelcatalogfacade.New(modelcatalogfacade.Options{
+		Store:       store,
+		Quarantine:  quarantineReader,
+	})
+
 	// ── Generated handler with strict non-stream + SSE stream dispatch ──
-	nonStreamAdapter := executorv1api.NewNonStream(executorv1api.Options{Executor: facade})
+	nonStreamAdapter := executorv1api.NewNonStream(executorv1api.Options{Executor: facade, Catalog: catalogFacade})
 	hybrid := executorv1api.NewHybrid(executorv1api.HybridOptions{Strict: nonStreamAdapter, StreamExecutor: streamFacade})
 	generated := executorv1.Handler(hybrid)
 
