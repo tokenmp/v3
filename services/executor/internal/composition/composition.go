@@ -22,6 +22,7 @@ import (
 
 	"github.com/tokenmp/v3/services/executor/internal/adapter"
 	"github.com/tokenmp/v3/services/executor/internal/config"
+	"github.com/tokenmp/v3/services/executor/internal/configreload"
 	"github.com/tokenmp/v3/services/executor/internal/configsource"
 	executorv1 "github.com/tokenmp/v3/services/executor/internal/contract/executorv1"
 	"github.com/tokenmp/v3/services/executor/internal/credentialenv"
@@ -75,6 +76,13 @@ var (
 	ErrSDKAdapter = errors.New("composition: sdk adapter unavailable")
 )
 
+// App holds the composed Executor runtime: the HTTP handler serving all
+// routes and an optional Reloader for hot configuration reload.
+type App struct {
+	Handler  http.Handler
+	Reloader *configreload.Reloader
+}
+
 // supportedSDKPairs is the exact runtime completion allowlist. Images is
 // completion-only; Chat and Messages additionally require stream capability.
 var supportedSDKPairs = map[execution.SDKClientKey]struct{}{
@@ -85,15 +93,16 @@ var supportedSDKPairs = map[execution.SDKClientKey]struct{}{
 }
 
 // Build assembles the Executor runtime composition root and returns the
-// http.Handler serving all seven generated routes: anonymous GET/HEAD
-// /healthz, authenticated /v1/models|/v1/responses|/v1/images/generations
-// (each 501), and authenticated Chat/Messages execution in non-stream or
-// SSE stream mode. lookupEnv is the process environment accessor
-// (typically os.LookupEnv); it is retained by the credential and identity
-// resolvers so per-attempt/per-request secret rotation is observed.
+// App containing the http.Handler serving all seven generated routes and
+// a Reloader for hot configuration reload. The handler covers: anonymous
+// GET/HEAD /healthz, authenticated /v1/models|/v1/responses|/v1/images/
+// generations (each 501), and authenticated Chat/Messages execution in
+// non-stream or SSE stream mode. lookupEnv is the process environment
+// accessor (typically os.LookupEnv); it is retained by the credential and
+// identity resolvers so per-attempt/per-request secret rotation is observed.
 //
 // Build performs no network I/O. All errors are fail-closed and non-leaking.
-func Build(ctx context.Context, cfg config.Config, lookupEnv func(string) (string, bool)) (http.Handler, error) {
+func Build(ctx context.Context, cfg config.Config, lookupEnv func(string) (string, bool)) (*App, error) {
 	// ── Snapshot store + initial bootstrap from the strict file source ──
 	store := &snapshot.Store{}
 	if _, err := configsource.CompileAndPublishInitial(ctx, store, cfg.ConfigFile); err != nil {
@@ -192,7 +201,31 @@ func Build(ctx context.Context, cfg config.Config, lookupEnv func(string) (strin
 	// anonymous. CaptureRawBody sits inside it so rejected requests never
 	// read or parse their body.
 	handler := executorv1api.AuthMiddleware(identitySource)(executorv1api.CaptureRawBody(generated))
-	return handler, nil
+	// ── Config reload validator ──
+	// The validator checks that a newly compiled snapshot passes the same
+	// startup gates: no unsupported enabled routes and credential mapping
+	// consistency. It runs BEFORE publication so a bad reload never replaces
+	// the current good snapshot.
+	validate := func(valCtx context.Context, cs *snapshot.CompiledSnapshot) error {
+		if cs == nil {
+			return ErrUnsupportedRoute
+		}
+		view := cs.Value()
+		if view == nil {
+			return ErrUnsupportedRoute
+		}
+		if err := rejectUnsupportedEnabledRoutes(*view, registry); err != nil {
+			return err
+		}
+		if err := credentialResolver.ValidateCompiled(*view); err != nil {
+			return ErrCredentialResolver
+		}
+		return nil
+	}
+
+	reloader := configreload.NewReloader(store, cfg.ConfigFile, validate, nil)
+
+	return &App{Handler: handler, Reloader: reloader}, nil
 }
 
 // rejectUnsupportedEnabledRoutes fails closed if any enabled route lacks the

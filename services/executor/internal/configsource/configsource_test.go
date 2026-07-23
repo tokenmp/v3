@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1638,4 +1639,186 @@ func mkfifoAvailable() bool {
 
 func mkfifo(path string) error {
 	return exec.Command("mkfifo", path).Run()
+}
+
+// ─── CompileAndPublishNext tests ─────────────────────────────────────
+
+func TestCompileAndPublishNextSuccess(t *testing.T) {
+	var store snapshot.Store
+	_, err := CompileAndPublishInitial(context.Background(), &store, fixturePath(t, "default"))
+	if err != nil {
+		t.Fatalf("initial bootstrap: %v", err)
+	}
+	if got := store.Generation(); got != 1 {
+		t.Fatalf("initial generation = %d, want 1", got)
+	}
+
+	// Write a config with a different revision to trigger reload.
+	raw := strictDecodeAndMarshal(t, readFixture(t, "default"), func(cfg *snapshot.ConfigSnapshot) {
+		cfg.Revision = "reloaded-v2"
+	})
+	path := writeTempConfig(t, raw)
+
+	meta, err := CompileAndPublishNext(context.Background(), &store, path)
+	if err != nil {
+		t.Fatalf("CompileAndPublishNext: %v", err)
+	}
+	if meta.Generation() != 2 {
+		t.Errorf("generation = %d, want 2", meta.Generation())
+	}
+	if meta.Revision() != "reloaded-v2" {
+		t.Errorf("revision = %q, want %q", meta.Revision(), "reloaded-v2")
+	}
+	if got := store.Generation(); got != 2 {
+		t.Errorf("store generation = %d, want 2", got)
+	}
+}
+
+func TestCompileAndPublishNextSameRevisionNoop(t *testing.T) {
+	var store snapshot.Store
+	initMeta, err := CompileAndPublishInitial(context.Background(), &store, fixturePath(t, "default"))
+	if err != nil {
+		t.Fatalf("initial bootstrap: %v", err)
+	}
+
+	// Reload the same file: revision unchanged, should be a no-op.
+	meta, err := CompileAndPublishNext(context.Background(), &store, fixturePath(t, "default"))
+	if err != nil {
+		t.Fatalf("CompileAndPublishNext same revision: %v", err)
+	}
+	if meta.Generation() != initMeta.Generation() {
+		t.Errorf("generation = %d, want %d (no-op)", meta.Generation(), initMeta.Generation())
+	}
+	if meta.Revision() != initMeta.Revision() {
+		t.Errorf("revision = %q, want %q (no-op)", meta.Revision(), initMeta.Revision())
+	}
+	if got := store.Generation(); got != 1 {
+		t.Errorf("store generation = %d, want 1 (no publish)", got)
+	}
+}
+
+func TestCompileAndPublishNextNoInitialSnapshot(t *testing.T) {
+	var store snapshot.Store
+	_, err := CompileAndPublishNext(context.Background(), &store, fixturePath(t, "default"))
+	if !errors.Is(err, ErrConfigNoInitialSnapshot) {
+		t.Fatalf("no initial snapshot err = %v, want ErrConfigNoInitialSnapshot", err)
+	}
+}
+
+func TestCompileAndPublishNextNilStore(t *testing.T) {
+	_, err := CompileAndPublishNext(context.Background(), nil, fixturePath(t, "default"))
+	if !errors.Is(err, ErrConfigPublishFailed) {
+		t.Fatalf("nil store err = %v, want ErrConfigPublishFailed", err)
+	}
+}
+
+func TestCompileAndPublishNextCompileFailure(t *testing.T) {
+	var store snapshot.Store
+	_, err := CompileAndPublishInitial(context.Background(), &store, fixturePath(t, "default"))
+	if err != nil {
+		t.Fatalf("initial bootstrap: %v", err)
+	}
+
+	// A snapshot whose route references a non-existent model fails the compiler.
+	malformed := strictDecodeAndMarshal(t, readFixture(t, "default"), func(cfg *snapshot.ConfigSnapshot) {
+		cfg.Routes[0].ModelID = "does-not-exist"
+		cfg.Revision = "malformed-reload"
+	})
+	path := writeTempConfig(t, malformed)
+
+	_, err = CompileAndPublishNext(context.Background(), &store, path)
+	if !errors.Is(err, ErrConfigCompileFailed) {
+		t.Errorf("compile failure err = %v, want ErrConfigCompileFailed", err)
+	}
+	// Old generation preserved.
+	if got := store.Generation(); got != 1 {
+		t.Errorf("store generation = %d, want 1 after failed reload", got)
+	}
+}
+
+func TestCompileAndPublishNextLoadFailure(t *testing.T) {
+	var store snapshot.Store
+	_, err := CompileAndPublishInitial(context.Background(), &store, fixturePath(t, "default"))
+	if err != nil {
+		t.Fatalf("initial bootstrap: %v", err)
+	}
+
+	missingPath := filepath.Join(t.TempDir(), "missing.json")
+	_, err = CompileAndPublishNext(context.Background(), &store, missingPath)
+	if !errors.Is(err, ErrConfigNotFound) {
+		t.Errorf("load failure err = %v, want ErrConfigNotFound", err)
+	}
+	if got := store.Generation(); got != 1 {
+		t.Errorf("store generation = %d, want 1 after load failure", got)
+	}
+}
+
+func TestCompileAndPublishNextPreCanceledCtx(t *testing.T) {
+	var store snapshot.Store
+	_, err := CompileAndPublishInitial(context.Background(), &store, fixturePath(t, "default"))
+	if err != nil {
+		t.Fatalf("initial bootstrap: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = CompileAndPublishNext(ctx, &store, fixturePath(t, "default"))
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("pre-canceled ctx err = %v, want context.Canceled", err)
+	}
+	if got := store.Generation(); got != 1 {
+		t.Errorf("store generation = %d, want 1 after canceled ctx", got)
+	}
+}
+
+func TestCompileAndPublishNextMultipleReloads(t *testing.T) {
+	var store snapshot.Store
+	_, err := CompileAndPublishInitial(context.Background(), &store, fixturePath(t, "default"))
+	if err != nil {
+		t.Fatalf("initial bootstrap: %v", err)
+	}
+
+	for i := 2; i <= 5; i++ {
+		raw := strictDecodeAndMarshal(t, readFixture(t, "default"), func(cfg *snapshot.ConfigSnapshot) {
+			cfg.Revision = fmt.Sprintf("revision-%d", i)
+		})
+		path := writeTempConfig(t, raw)
+		meta, err := CompileAndPublishNext(context.Background(), &store, path)
+		if err != nil {
+			t.Fatalf("reload %d: %v", i, err)
+		}
+		if meta.Generation() != uint64(i) {
+			t.Errorf("reload %d: generation = %d, want %d", i, meta.Generation(), i)
+		}
+		if meta.Revision() != fmt.Sprintf("revision-%d", i) {
+			t.Errorf("reload %d: revision = %q, want %q", i, meta.Revision(), fmt.Sprintf("revision-%d", i))
+		}
+	}
+	if got := store.Generation(); got != 5 {
+		t.Errorf("final store generation = %d, want 5", got)
+	}
+}
+
+func TestCompileAndPublishNextDoesNotLeakPath(t *testing.T) {
+	var store snapshot.Store
+	_, err := CompileAndPublishInitial(context.Background(), &store, fixturePath(t, "default"))
+	if err != nil {
+		t.Fatalf("initial bootstrap: %v", err)
+	}
+
+	leakMarker := "unique-reload-leak-marker-99999"
+	path := filepath.Join(t.TempDir(), leakMarker, "config.json")
+	_, err = CompileAndPublishNext(context.Background(), &store, path)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if strings.Contains(err.Error(), leakMarker) {
+		t.Errorf("error leaks path: %q", err.Error())
+	}
+}
+
+func TestCompileAndPublishNextSentinelNoUnwrap(t *testing.T) {
+	if errors.Unwrap(ErrConfigNoInitialSnapshot) != nil {
+		t.Errorf("ErrConfigNoInitialSnapshot unwrapped to %v, want nil", errors.Unwrap(ErrConfigNoInitialSnapshot))
+	}
 }

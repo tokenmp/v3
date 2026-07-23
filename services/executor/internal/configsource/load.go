@@ -435,6 +435,118 @@ func (s *structureStats) walkContainer(dec *json.Decoder, open json.Delim, depth
 	return res
 }
 
+// NextSnapshotMeta is the package-owned, safe metadata returned after a hot
+// reload publishes a new compiled snapshot. It exposes only non-sensitive
+// publication metadata (revision, generation, and structural counts). It
+// never exposes the compiled config or any pointer into Store-owned state.
+type NextSnapshotMeta struct {
+	revision   string
+	generation uint64
+	models     int
+	providers  int
+	routes     int
+	adapters   int
+}
+
+// Revision returns the immutable source revision of the published snapshot.
+func (m NextSnapshotMeta) Revision() string { return m.revision }
+
+// Generation returns the monotonic generation number assigned at publication.
+func (m NextSnapshotMeta) Generation() uint64 { return m.generation }
+
+// ModelCount returns the number of compiled models in the published snapshot.
+func (m NextSnapshotMeta) ModelCount() int { return m.models }
+
+// ProviderCount returns the number of compiled providers in the published
+// snapshot.
+func (m NextSnapshotMeta) ProviderCount() int { return m.providers }
+
+// RouteCount returns the number of compiled routes in the published snapshot.
+func (m NextSnapshotMeta) RouteCount() int { return m.routes }
+
+// AdapterCount returns the number of compiled adapters in the published
+// snapshot.
+func (m NextSnapshotMeta) AdapterCount() int { return m.adapters }
+
+// ErrConfigNoInitialSnapshot is returned when CompileAndPublishNext is called
+// on a store that has no initial snapshot (i.e. CompileAndPublishInitial has
+// not yet been called or succeeded).
+var ErrConfigNoInitialSnapshot = errors.New("config source: no initial snapshot")
+
+// CompileAndPublishNext loads a configuration file with LoadFile, compiles it
+// via the real snapshot compiler, and atomically publishes the resulting
+// compiled snapshot at the next monotonic generation of the provided Store.
+//
+// It requires that the store already holds an initial snapshot (i.e.
+// CompileAndPublishInitial has succeeded); otherwise it returns
+// ErrConfigNoInitialSnapshot.
+//
+// If the loaded revision matches the current snapshot's revision, the reload
+// is a no-op and returns the current generation metadata without publishing.
+//
+// On failure the old generation is preserved and a stable sentinel is
+// returned (ErrConfigCompileFailed or ErrConfigPublishFailed, propagated from
+// LoadFile, or ErrConfigNoInitialSnapshot). Context cancellation is honored
+// between stages.
+func CompileAndPublishNext(ctx context.Context, store *snapshot.Store, path string) (NextSnapshotMeta, error) {
+	if store == nil {
+		return NextSnapshotMeta{}, ErrConfigPublishFailed
+	}
+	current, err := store.Current()
+	if err != nil {
+		return NextSnapshotMeta{}, ErrConfigNoInitialSnapshot
+	}
+
+	cfg, err := LoadFile(ctx, path)
+	if err != nil {
+		return NextSnapshotMeta{}, err
+	}
+	cfg.Revision = strings.TrimSpace(cfg.Revision)
+
+	// Skip publish if revision is unchanged.
+	if cfg.Revision == current.Revision() {
+		view := current.Value()
+		if view != nil {
+			return NextSnapshotMeta{
+				revision:   current.Revision(),
+				generation: current.Generation(),
+				models:     len(view.Models),
+				providers:  len(view.Providers),
+				routes:     len(view.Routes),
+				adapters:   len(view.Adapters),
+			}, nil
+		}
+	}
+
+	if err := ctx.Err(); err != nil {
+		return NextSnapshotMeta{}, err
+	}
+
+	compiled, err := snapshot.Compile(cfg)
+	if err != nil {
+		return NextSnapshotMeta{}, ErrConfigCompileFailed
+	}
+	nextGeneration := store.Generation() + 1
+	frozen, err := snapshot.NewCompiledSnapshotWithTime(cfg.Revision, &compiled, nextGeneration, cfg.CreatedAt)
+	if err != nil {
+		return NextSnapshotMeta{}, ErrConfigCompileFailed
+	}
+	if err := ctx.Err(); err != nil {
+		return NextSnapshotMeta{}, err
+	}
+	if err := store.Publish(frozen); err != nil {
+		return NextSnapshotMeta{}, ErrConfigPublishFailed
+	}
+	return NextSnapshotMeta{
+		revision:   frozen.Revision(),
+		generation: frozen.Generation(),
+		models:     len(compiled.Models),
+		providers:  len(compiled.Providers),
+		routes:     len(compiled.Routes),
+		adapters:   len(compiled.Adapters),
+	}, nil
+}
+
 // InitialSnapshotMeta is the package-owned, safe metadata returned after
 // bootstrapping the initial compiled snapshot. It exposes only non-sensitive
 // publication metadata (revision, generation, and structural counts). It never

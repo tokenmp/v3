@@ -174,14 +174,14 @@ func buildWrappedHandler(t *testing.T) http.Handler {
 	t.Helper()
 	path := writeConfig(t, minimalEmptyConfig)
 	cfg := testConfig(path, "{}")
-	handler, err := Build(context.Background(), cfg, envLookup(healthyEnv(t, path)))
+	app, err := Build(context.Background(), cfg, envLookup(healthyEnv(t, path)))
 	if err != nil {
 		t.Fatalf("Build() error = %v", err)
 	}
-	if handler == nil {
-		t.Fatal("Build() returned nil handler")
+	if app == nil {
+		t.Fatal("Build() returned nil app")
 	}
-	return handler
+	return app.Handler
 }
 
 // dispatch sends one request through the wrapped handler. body is re-read via a
@@ -342,12 +342,12 @@ func buildJWTWrappedHandler(t *testing.T) (http.Handler, string) {
 		"EXECUTOR_CONFIG_FILE":             configPath,
 		"EXECUTOR_CREDENTIAL_REF_MAP_JSON": "{}",
 	}
-	handler, err := Build(context.Background(), cfg, envLookup(env))
+	app, err := Build(context.Background(), cfg, envLookup(env))
 	if err != nil {
 		t.Fatalf("Build() error = %v", err)
 	}
-	if handler == nil {
-		t.Fatal("Build() returned nil handler")
+	if app == nil {
+		t.Fatal("Build() returned nil app")
 	}
 
 	// Issue a valid JWT for testing.
@@ -366,7 +366,7 @@ func buildJWTWrappedHandler(t *testing.T) (http.Handler, string) {
 		TokenVersion: 1,
 	}
 	jwtToken := issueTestJWT(t, priv, claims)
-	return handler, jwtToken
+	return app.Handler, jwtToken
 }
 
 // TestRuntimeRouteConformanceWithJWT verifies the fully wrapped runtime handler
