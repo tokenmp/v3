@@ -345,7 +345,12 @@ func (r *Runner) Run(ctx context.Context, in Input) (Result, error) {
 			return Result{}, r.releaseFailure(ctx, terminalizer, ErrUnclassified)
 		}
 
-		decision, ferr := state.RecordFailure(ctx, attempt, retry.Failure{Classified: classified}, retryPolicy)
+		// Extract Retry-After from the classified error, if present.
+		var retryAfter *time.Duration
+		if ra, ok := classified.RetryAfter(); ok {
+			retryAfter = &ra
+		}
+		decision, ferr := state.RecordFailure(ctx, attempt, retry.Failure{Classified: classified, RetryAfter: retryAfter}, retryPolicy)
 		if ferr != nil {
 			_ = state.Cancel()
 			primary := error(ErrBudgetExhausted)

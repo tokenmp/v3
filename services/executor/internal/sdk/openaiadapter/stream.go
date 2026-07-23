@@ -99,7 +99,14 @@ func (c *Client) Stream(ctx context.Context, call sdk.StreamCall) (sdk.StreamOpe
 			return sdk.StreamOpen{}, classifyContextError(err)
 		}
 		if response != nil && (response.StatusCode < 200 || response.StatusCode >= 300) {
-			return sdk.StreamOpen{}, sdk.NewClassifiedError(kindForHTTPStatus(response.StatusCode), response.StatusCode, response.Header.Get("x-request-id"), "", "")
+			kind := kindForHTTPStatus(response.StatusCode)
+			reqID := response.Header.Get("x-request-id")
+			if isRetryableHTTPStatus(response.StatusCode) {
+				if ra, ok := sdk.ParseRetryAfter(response.Header); ok {
+					return sdk.StreamOpen{}, sdk.NewClassifiedErrorWithRetryAfter(kind, response.StatusCode, reqID, "", "", ra, true)
+				}
+			}
+			return sdk.StreamOpen{}, sdk.NewClassifiedError(kind, response.StatusCode, reqID, "", "")
 		}
 		if stream != nil && stream.Err() != nil {
 			return sdk.StreamOpen{}, classifyStreamOpenError(stream.Err(), response)
@@ -127,7 +134,15 @@ func classifyStreamOpenError(err error, response *http.Response) *sdk.Classified
 		return classifyError(err, response)
 	}
 	if response != nil {
-		return sdk.NewClassifiedError(sdk.ErrProtocol, response.StatusCode, response.Header.Get("x-request-id"), "", "")
+		status := response.StatusCode
+		requestID := response.Header.Get("x-request-id")
+		kind := kindForHTTPStatus(status)
+		if isRetryableHTTPStatus(status) {
+			if ra, ok := sdk.ParseRetryAfter(response.Header); ok {
+				return sdk.NewClassifiedErrorWithRetryAfter(kind, status, requestID, "", "", ra, true)
+			}
+		}
+		return sdk.NewClassifiedError(sdk.ErrProtocol, status, requestID, "", "")
 	}
 	return sdk.NewClassifiedError(sdk.ErrTransport, 0, "", "", "")
 }
