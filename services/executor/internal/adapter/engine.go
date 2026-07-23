@@ -131,11 +131,12 @@ type UpstreamResponse struct {
 // MappedResponse is the sanitized protocol-neutral result selected by a
 // compiled response rule or the fail-closed default mapping.
 type MappedResponse struct {
-	HTTPStatus int
-	ErrorCode  string
-	ErrorType  string
-	Message    string
-	MatchedID  string
+	HTTPStatus        int
+	ErrorCode         string
+	ErrorType         string
+	Message           string
+	MatchedID         string
+	RetryAfterSeconds int // 0 = do not set Retry-After header
 }
 
 // Apply evaluates a compiled adapter's finite request DSL against a single

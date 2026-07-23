@@ -385,6 +385,7 @@ func (r *Runner) Run(ctx context.Context, in Input) (Result, error) {
 				r.logReleased(ctx, in, prepared, attemptNo, releaseReasonVal)
 				return Result{}, errors.Join(classified, terminalizationError("release"))
 			}
+			applyRetryAfter(&mapped, classified)
 			r.logReleased(ctx, in, prepared, attemptNo, releaseReasonVal)
 			return Result{Failure: &mapped}, nil
 		}
@@ -403,6 +404,33 @@ func (r *Runner) Run(ctx context.Context, in Input) (Result, error) {
 // sdkAuthCompatible constrains official SDKs to their sole credential channel.
 // Generic SDK kinds deliberately remain registry-governed until a concrete
 // implementation declares its own compatibility contract.
+// applyRetryAfter transfers the Retry-After duration from a classified error
+// into the mapped response. It clamps seconds to [1, HardMaxRetryAfter] and
+// only sets RetryAfterSeconds for rate-limit (429) or overloaded (529) HTTP
+// statuses. Durations below 1 second are not set. Executor-internal errors
+// (budget, quota, misconfigured) never carry Retry-After.
+func applyRetryAfter(mapped *adapter.MappedResponse, classified *sdk.ClassifiedError) {
+	if mapped == nil || classified == nil {
+		return
+	}
+	if mapped.HTTPStatus != 429 && mapped.HTTPStatus != 529 {
+		return
+	}
+	ra, ok := classified.RetryAfter()
+	if !ok {
+		return
+	}
+	secs := int(ra.Seconds())
+	if secs < 1 {
+		return
+	}
+	maxSecs := int(sdk.HardMaxRetryAfter.Seconds())
+	if secs > maxSecs {
+		secs = maxSecs
+	}
+	mapped.RetryAfterSeconds = secs
+}
+
 func sdkAuthCompatible(kind adapter.SDKKind, auth adapter.AuthKind) bool {
 	switch kind {
 	case adapter.SDKKindOpenAI:

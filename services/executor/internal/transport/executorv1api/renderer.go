@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"unicode/utf8"
 
 	"github.com/tokenmp/v3/services/executor/internal/adapter"
@@ -479,15 +480,33 @@ func nonEmptyString(value any) bool { text, ok := value.(string); return ok && t
 
 func chatFailure(failure adapter.MappedResponse) executorv1.CreateChatCompletionResponseObject {
 	status, code, typ, message := safeFailure(failure, false)
-	return chatError(status, code, typ, message)
+	return chatErrorWithRetryAfter(status, code, typ, message, retryAfterForMappedStatus(status, failure.RetryAfterSeconds))
 }
 func imageFailure(failure adapter.MappedResponse) executorv1.CreateImageResponseObject {
 	status, code, typ, message := safeFailure(failure, false)
-	return imageError(status, code, typ, message)
+	return imageErrorWithRetryAfter(status, code, typ, message, retryAfterForMappedStatus(status, failure.RetryAfterSeconds))
 }
 func messageFailure(failure adapter.MappedResponse, requestID string) executorv1.CreateMessageResponseObject {
 	status, code, typ, message := safeFailure(failure, true)
-	return messageError(status, code, typ, message, requestID)
+	return messageErrorWithRetryAfter(status, code, typ, message, requestID, retryAfterForMappedStatus(status, failure.RetryAfterSeconds))
+}
+
+// retryAfterForMappedStatus returns a non-nil *int for 429/529 mapped HTTP
+// statuses that carry a positive RetryAfterSeconds. The status is the
+// mapped (safe) status from safeFailure, not the raw upstream status.
+// Local executor errors never set RetryAfterSeconds, so their retryAfter is
+// always nil. Only rate-limit (429) and overloaded (529) mapped statuses are
+// eligible; other statuses are ignored even if RetryAfterSeconds is set.
+// Values are defensively clamped to [1, 300] (HardMaxRetryAfter seconds).
+func retryAfterForMappedStatus(mappedStatus int, retryAfterSeconds int) *int {
+	if retryAfterSeconds < 1 || (mappedStatus != 429 && mappedStatus != 529) {
+		return nil
+	}
+	v := retryAfterSeconds
+	if v > 300 {
+		v = 300
+	}
+	return &v
 }
 
 func safeFailure(failure adapter.MappedResponse, anthropic bool) (int, string, string, string) {
@@ -590,38 +609,59 @@ func anthropicType(status int, value string) string {
 func chatError(status int, code, typ, message string) executorv1.CreateChatCompletionResponseObject {
 	return chatProtocolError{status: status, body: openAIError(status, code, typ, message)}
 }
+func chatErrorWithRetryAfter(status int, code, typ, message string, retryAfter *int) executorv1.CreateChatCompletionResponseObject {
+	return chatProtocolError{status: status, body: openAIError(status, code, typ, message), retryAfter: retryAfter}
+}
 func imageError(status int, code, typ, message string) executorv1.CreateImageResponseObject {
 	return imageProtocolError{status: status, body: openAIError(status, code, typ, message)}
+}
+func imageErrorWithRetryAfter(status int, code, typ, message string, retryAfter *int) executorv1.CreateImageResponseObject {
+	return imageProtocolError{status: status, body: openAIError(status, code, typ, message), retryAfter: retryAfter}
 }
 func messageError(status int, code, typ, message, requestID string) executorv1.CreateMessageResponseObject {
 	return messageProtocolError{status: status, body: anthropicError(code, typ, message, requestID)}
 }
+func messageErrorWithRetryAfter(status int, code, typ, message, requestID string, retryAfter *int) executorv1.CreateMessageResponseObject {
+	return messageProtocolError{status: status, body: anthropicError(code, typ, message, requestID), retryAfter: retryAfter}
+}
 
 type chatProtocolError struct {
-	status int
-	body   executorv1.OpenAIErrorResponse
+	status     int
+	body       executorv1.OpenAIErrorResponse
+	retryAfter *int
 }
 
 func (r chatProtocolError) VisitCreateChatCompletionResponse(w http.ResponseWriter) error {
+	if r.retryAfter != nil {
+		w.Header().Set("Retry-After", strconv.Itoa(*r.retryAfter))
+	}
 	return writeJSON(w, r.status, r.body)
 }
 
 type imageProtocolError struct {
-	status int
-	body   executorv1.OpenAIErrorResponse
+	status     int
+	body       executorv1.OpenAIErrorResponse
+	retryAfter *int
 }
 
 func (r imageProtocolError) VisitCreateImageResponse(w http.ResponseWriter) error {
 	w.Header().Set("Cache-Control", "no-store")
+	if r.retryAfter != nil {
+		w.Header().Set("Retry-After", strconv.Itoa(*r.retryAfter))
+	}
 	return writeJSON(w, r.status, r.body)
 }
 
 type messageProtocolError struct {
-	status int
-	body   executorv1.AnthropicErrorResponse
+	status     int
+	body       executorv1.AnthropicErrorResponse
+	retryAfter *int
 }
 
 func (r messageProtocolError) VisitCreateMessageResponse(w http.ResponseWriter) error {
+	if r.retryAfter != nil {
+		w.Header().Set("Retry-After", strconv.Itoa(*r.retryAfter))
+	}
 	return writeJSON(w, r.status, r.body)
 }
 func writeJSON(w http.ResponseWriter, status int, body any) error {
@@ -720,19 +760,26 @@ func validResponseUsage(v any) bool {
 
 func responseFailure(failure adapter.MappedResponse) executorv1.CreateResponseResponseObject {
 	status, code, typ, message := safeFailure(failure, false)
-	return responseError(status, code, typ, message)
+	return responseErrorWithRetryAfter(status, code, typ, message, retryAfterForMappedStatus(status, failure.RetryAfterSeconds))
 }
 
 func responseError(status int, code, typ, message string) executorv1.CreateResponseResponseObject {
 	return responseProtocolError{status: status, body: openAIError(status, code, typ, message)}
 }
+func responseErrorWithRetryAfter(status int, code, typ, message string, retryAfter *int) executorv1.CreateResponseResponseObject {
+	return responseProtocolError{status: status, body: openAIError(status, code, typ, message), retryAfter: retryAfter}
+}
 
 type responseProtocolError struct {
-	status int
-	body   executorv1.OpenAIErrorResponse
+	status     int
+	body       executorv1.OpenAIErrorResponse
+	retryAfter *int
 }
 
 func (r responseProtocolError) VisitCreateResponseResponse(w http.ResponseWriter) error {
+	if r.retryAfter != nil {
+		w.Header().Set("Retry-After", strconv.Itoa(*r.retryAfter))
+	}
 	return writeJSON(w, r.status, r.body)
 }
 

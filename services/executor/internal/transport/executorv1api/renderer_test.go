@@ -346,3 +346,293 @@ func TestRenderImageEnforcesFormatAndSharedResponseBoundary(t *testing.T) {
 		})
 	}
 }
+
+func TestRetryAfterHeaderOnRateLimitErrors(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name           string
+		failure        adapter.MappedResponse
+		wantRetryAfter string // empty means header must be absent
+		chatStatus     int
+		messageStatus  int
+	}{
+		{
+			name:           "chat 429 with Retry-After",
+			failure:        adapter.MappedResponse{HTTPStatus: 429, ErrorCode: "RATE_LIMITED", ErrorType: "rate_limit_error", Message: "Slow down.", RetryAfterSeconds: 30},
+			wantRetryAfter: "30",
+			chatStatus:     429,
+			messageStatus:  429,
+		},
+		{
+			name:           "429 without Retry-After",
+			failure:        adapter.MappedResponse{HTTPStatus: 429, ErrorCode: "RATE_LIMITED", ErrorType: "rate_limit_error", Message: "Slow down."},
+			wantRetryAfter: "",
+			chatStatus:     429,
+			messageStatus:  429,
+		},
+		{
+			name:           "529 with Retry-After",
+			failure:        adapter.MappedResponse{HTTPStatus: 529, ErrorCode: "OVERLOADED", ErrorType: "overloaded_error", Message: "Overloaded.", RetryAfterSeconds: 60},
+			wantRetryAfter: "60",
+			chatStatus:     502, // chat maps 529 → 502
+			messageStatus:  529, // anthropic keeps 529
+		},
+		{
+			name:           "529 without Retry-After",
+			failure:        adapter.MappedResponse{HTTPStatus: 529, ErrorCode: "OVERLOADED", ErrorType: "overloaded_error", Message: "Overloaded."},
+			wantRetryAfter: "",
+			chatStatus:     502,
+			messageStatus:  529,
+		},
+		{
+			name:           "non-rate-limit status no Retry-After even if field set",
+			failure:        adapter.MappedResponse{HTTPStatus: 500, ErrorCode: "INTERNAL", ErrorType: "api_error", Message: "Error.", RetryAfterSeconds: 10},
+			wantRetryAfter: "",
+			chatStatus:     500,
+			messageStatus:  500,
+		},
+		{
+			name:           "less than 1 second not set",
+			failure:        adapter.MappedResponse{HTTPStatus: 429, ErrorCode: "RATE_LIMITED", ErrorType: "rate_limit_error", Message: "Slow.", RetryAfterSeconds: 0},
+			wantRetryAfter: "",
+			chatStatus:     429,
+			messageStatus:  429,
+		},
+		{
+			name:           "clamp to 300",
+			failure:        adapter.MappedResponse{HTTPStatus: 429, ErrorCode: "RATE_LIMITED", ErrorType: "rate_limit_error", Message: "Slow.", RetryAfterSeconds: 500},
+			wantRetryAfter: "300",
+			chatStatus:     429,
+			messageStatus:  429,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := execution.Result{Failure: &tc.failure}
+
+			// Chat path
+			chat := httptest.NewRecorder()
+			if err := RenderChatCompletion(result).VisitCreateChatCompletionResponse(chat); err != nil {
+				t.Fatal(err)
+			}
+			if chat.Code != tc.chatStatus {
+				t.Errorf("chat status = %d, want %d", chat.Code, tc.chatStatus)
+			}
+			// 429 retains Retry-After on chat path; 529 maps to 502 so no Retry-After
+			chatExpectedRA := tc.wantRetryAfter
+			if tc.failure.HTTPStatus == 529 && tc.wantRetryAfter != "" {
+				// chat maps 529 → 502, so 502 should not have Retry-After
+				chatExpectedRA = ""
+			}
+			if got := chat.Header().Get("Retry-After"); got != chatExpectedRA {
+				t.Errorf("chat Retry-After = %q, want %q", got, chatExpectedRA)
+			}
+
+			// Message path (Anthropic)
+			message := httptest.NewRecorder()
+			if err := RenderMessageWithRequestID(result, "req_test").VisitCreateMessageResponse(message); err != nil {
+				t.Fatal(err)
+			}
+			if message.Code != tc.messageStatus {
+				t.Errorf("message status = %d, want %d", message.Code, tc.messageStatus)
+			}
+			if got := message.Header().Get("Retry-After"); got != tc.wantRetryAfter {
+				t.Errorf("message Retry-After = %q, want %q", got, tc.wantRetryAfter)
+			}
+		})
+	}
+}
+
+func TestRetryAfterNotSetOnLocalErrors(t *testing.T) {
+	t.Parallel()
+	localErrors := []struct {
+		name string
+		err  error
+	}{
+		{"invalid request", ErrInvalidRequest},
+		{"unauthorized", ErrUnauthorized},
+		{"model not found", ErrModelNotFound},
+		{"streaming unsupported", ErrStreamingUnsupported},
+	}
+	for _, tc := range localErrors {
+		t.Run(tc.name+" chat", func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			resp := RenderChatError(tc.err)
+			if resp == nil {
+				t.Fatal("nil response")
+			}
+			if err := resp.VisitCreateChatCompletionResponse(rec); err != nil {
+				t.Fatal(err)
+			}
+			if ra := rec.Header().Get("Retry-After"); ra != "" {
+				t.Errorf("local error must not set Retry-After, got %q", ra)
+			}
+		})
+		t.Run(tc.name+" message", func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			resp := RenderMessageErrorWithRequestID(tc.err, "req_test")
+			if resp == nil {
+				t.Fatal("nil response")
+			}
+			if err := resp.VisitCreateMessageResponse(rec); err != nil {
+				t.Fatal(err)
+			}
+			if ra := rec.Header().Get("Retry-After"); ra != "" {
+				t.Errorf("local error must not set Retry-After, got %q", ra)
+			}
+		})
+	}
+}
+
+func TestRetryAfterOnImageAndResponseFailures(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name           string
+		failure        adapter.MappedResponse
+		wantRetryAfter string
+	}{
+		{
+			name:           "image 429 with RA",
+			failure:        adapter.MappedResponse{HTTPStatus: 429, ErrorCode: "RATE_LIMITED", ErrorType: "rate_limit_error", Message: "Slow.", RetryAfterSeconds: 30},
+			wantRetryAfter: "30",
+		},
+		{
+			name:           "image 429 without RA",
+			failure:        adapter.MappedResponse{HTTPStatus: 429, ErrorCode: "RATE_LIMITED", ErrorType: "rate_limit_error", Message: "Slow."},
+			wantRetryAfter: "",
+		},
+		{
+			name:           "response 429 with RA",
+			failure:        adapter.MappedResponse{HTTPStatus: 429, ErrorCode: "RATE_LIMITED", ErrorType: "rate_limit_error", Message: "Slow.", RetryAfterSeconds: 45},
+			wantRetryAfter: "45",
+		},
+		{
+			name:           "response 500 with RA field set ignored",
+			failure:        adapter.MappedResponse{HTTPStatus: 500, ErrorCode: "INTERNAL", ErrorType: "api_error", Message: "Error.", RetryAfterSeconds: 10},
+			wantRetryAfter: "",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := execution.Result{Failure: &tc.failure}
+
+			image := httptest.NewRecorder()
+			if err := RenderImage(result, "url").VisitCreateImageResponse(image); err != nil {
+				t.Fatal(err)
+			}
+			if got := image.Header().Get("Retry-After"); got != tc.wantRetryAfter {
+				t.Errorf("image Retry-After = %q, want %q", got, tc.wantRetryAfter)
+			}
+
+			response := httptest.NewRecorder()
+			if err := RenderResponse(result).VisitCreateResponseResponse(response); err != nil {
+				t.Fatal(err)
+			}
+			if got := response.Header().Get("Retry-After"); got != tc.wantRetryAfter {
+				t.Errorf("response Retry-After = %q, want %q", got, tc.wantRetryAfter)
+			}
+		})
+	}
+}
+
+func TestRetryAfterNotSetOnImageLocalErrors(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{"invalid request", ErrInvalidRequest},
+		{"unauthorized", ErrUnauthorized},
+		{"model not found", ErrModelNotFound},
+	} {
+		t.Run(tc.name+" image", func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			resp := RenderImageError(tc.err)
+			if resp == nil {
+				t.Fatal("nil response")
+			}
+			if err := resp.VisitCreateImageResponse(rec); err != nil {
+				t.Fatal(err)
+			}
+			if ra := rec.Header().Get("Retry-After"); ra != "" {
+				t.Errorf("local image error must not set Retry-After, got %q", ra)
+			}
+		})
+		t.Run(tc.name+" response", func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			resp := RenderResponseError(tc.err)
+			if resp == nil {
+				t.Fatal("nil response")
+			}
+			if err := resp.VisitCreateResponseResponse(rec); err != nil {
+				t.Fatal(err)
+			}
+			if ra := rec.Header().Get("Retry-After"); ra != "" {
+				t.Errorf("local response error must not set Retry-After, got %q", ra)
+			}
+		})
+	}
+}
+
+func TestRetryAfterOnStreamPrecommitFailure(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name           string
+		failure        adapter.MappedResponse
+		wantRetryAfter string
+	}{
+		{
+			name:           "chat stream 429 with RA",
+			failure:        adapter.MappedResponse{HTTPStatus: 429, ErrorCode: "RATE_LIMITED", ErrorType: "rate_limit_error", Message: "Slow.", RetryAfterSeconds: 20},
+			wantRetryAfter: "20",
+		},
+		{
+			name:           "message stream 529 with RA",
+			failure:        adapter.MappedResponse{HTTPStatus: 529, ErrorCode: "OVERLOADED", ErrorType: "overloaded_error", Message: "Overloaded.", RetryAfterSeconds: 90},
+			wantRetryAfter: "90",
+		},
+		{
+			name:           "chat stream 429 without RA",
+			failure:        adapter.MappedResponse{HTTPStatus: 429, ErrorCode: "RATE_LIMITED", ErrorType: "rate_limit_error", Message: "Slow."},
+			wantRetryAfter: "",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			streamResult := StreamResult{Failure: &tc.failure}
+
+			if strings.Contains(tc.name, "chat") {
+				rec := httptest.NewRecorder()
+				resp := RenderChatStreamResult(streamResult)
+				if err := resp.VisitCreateChatCompletionResponse(rec); err != nil {
+					t.Fatal(err)
+				}
+				if got := rec.Header().Get("Retry-After"); got != tc.wantRetryAfter {
+					t.Errorf("chat stream Retry-After = %q, want %q", got, tc.wantRetryAfter)
+				}
+			}
+			if strings.Contains(tc.name, "message") {
+				rec := httptest.NewRecorder()
+				resp := RenderMessageStreamResult(streamResult, "req_test")
+				if err := resp.VisitCreateMessageResponse(rec); err != nil {
+					t.Fatal(err)
+				}
+				if got := rec.Header().Get("Retry-After"); got != tc.wantRetryAfter {
+					t.Errorf("message stream Retry-After = %q, want %q", got, tc.wantRetryAfter)
+				}
+			}
+		})
+	}
+}
+
+func TestRetryAfterOnResponseStreamFailure(t *testing.T) {
+	t.Parallel()
+	failure := adapter.MappedResponse{HTTPStatus: 429, ErrorCode: "RATE_LIMITED", ErrorType: "rate_limit_error", Message: "Slow.", RetryAfterSeconds: 25}
+	streamResult := StreamResult{Failure: &failure}
+
+	rec := httptest.NewRecorder()
+	resp := RenderResponseStreamResult(streamResult)
+	if err := resp.VisitCreateResponseResponse(rec); err != nil {
+		t.Fatal(err)
+	}
+	if got := rec.Header().Get("Retry-After"); got != "25" {
+		t.Errorf("response stream Retry-After = %q, want %q", got, "25")
+	}
+}

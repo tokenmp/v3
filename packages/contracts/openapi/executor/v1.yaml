@@ -468,6 +468,11 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/AnthropicErrorResponse'
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+            description: Seconds to wait before retrying.
           example:
             type: error
             error:
