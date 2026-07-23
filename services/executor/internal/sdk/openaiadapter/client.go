@@ -81,7 +81,7 @@ func parseBaseURL(base string) (*url.URL, error) {
 		return nil, errors.New("openaiadapter: base URL is required")
 	}
 	u, err := url.Parse(base)
-	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
 		return nil, errors.New("openaiadapter: invalid base URL")
 	}
 	return u, nil

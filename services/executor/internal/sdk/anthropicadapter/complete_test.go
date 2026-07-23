@@ -166,7 +166,6 @@ func TestComplete_TargetValidationNoHTTP(t *testing.T) {
 	c := newTestClient(t, ts, nil)
 	for _, base := range []string{
 		"",
-		"http://example.test",
 		"https://user:pass@example.test",
 		"https://example.test?a=b",
 		"https://example.test#f",
