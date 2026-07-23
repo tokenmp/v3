@@ -260,28 +260,38 @@ func TestFacadeModelNotFoundReturnsTransport404Sentinel(t *testing.T) {
 	}
 }
 
-func TestFacadeProtocolFilterOpenAIChatExcludesAnthropicRoute(t *testing.T) {
+func TestFacadeProtocolFilterOpenAIChatResolvesCrossProtocolAnthropicRoute(t *testing.T) {
 	t.Parallel()
 	runner := &recordingRunner{onceGate: true}
 	f, _ := newFacade(t, runner)
-	// The anthropic model is not a chat route; a chat request for it must be
-	// model-not-found, proving the protocol filter excludes cross-protocol.
+	// The anthropic model has only an anthropic_messages route; a chat request
+	// for it now resolves cross-protocol so the Runner can perform conversion.
 	_, err := f.Execute(context.Background(), chatRequest("anthropic-model", "req-1"))
-	if !errors.Is(err, nonstream.ErrModelNotFound) {
-		t.Fatalf("err = %v, want ErrModelNotFound", err)
+	if err != nil {
+		t.Fatalf("err = %v, want nil (cross-protocol resolution)", err)
 	}
-	if runner.callCount() != 0 {
-		t.Fatalf("runner called %d times, want 0", runner.callCount())
+	if runner.callCount() != 1 {
+		t.Fatalf("runner called %d times, want 1", runner.callCount())
+	}
+	// Verify the resolved plan's route protocol differs from the request protocol.
+	input := runner.lastInput()
+	if input.QuotaIdentity.Protocol != "openai_chat" {
+		t.Fatalf("request protocol = %q, want openai_chat", input.QuotaIdentity.Protocol)
 	}
 }
 
-func TestFacadeProtocolFilterAnthropicExcludesChatRoute(t *testing.T) {
+func TestFacadeProtocolFilterAnthropicResolvesCrossProtocolChatRoute(t *testing.T) {
 	t.Parallel()
 	runner := &recordingRunner{onceGate: true}
 	f, _ := newFacade(t, runner)
+	// The chat model has only an openai_chat route; an anthropic messages request
+	// for it now resolves cross-protocol so the Runner can perform conversion.
 	_, err := f.Execute(context.Background(), messageRequest("chat-model", "req-1"))
-	if !errors.Is(err, nonstream.ErrModelNotFound) {
-		t.Fatalf("err = %v, want ErrModelNotFound", err)
+	if err != nil {
+		t.Fatalf("err = %v, want nil (cross-protocol resolution)", err)
+	}
+	if runner.callCount() != 1 {
+		t.Fatalf("runner called %d times, want 1", runner.callCount())
 	}
 }
 
@@ -638,5 +648,57 @@ func TestFacadeAnthropicMessageRequestRoutesToAnthropicProtocol(t *testing.T) {
 	}
 	if prepared.Target.Protocol != adapter.ProtocolAnthropic {
 		t.Fatalf("protocol = %q, want anthropic_messages", prepared.Target.Protocol)
+	}
+}
+
+func TestFacadeCrossProtocolResolvesWhenSameProtocolNotFound(t *testing.T) {
+	t.Parallel()
+	runner := &recordingRunner{onceGate: true}
+	f, _ := newFacade(t, runner)
+	// The anthropic model has only an anthropic_messages route. A chat request
+	// for it should resolve cross-protocol (not return ErrModelNotFound).
+	_, err := f.Execute(context.Background(), chatRequest("anthropic-model", "req-cross-1"))
+	if err != nil {
+		t.Fatalf("err = %v, want nil (cross-protocol resolution)", err)
+	}
+	if runner.callCount() != 1 {
+		t.Fatalf("runner called %d times, want 1", runner.callCount())
+	}
+	input := runner.lastInput()
+	// The request protocol should be openai_chat (the inbound protocol)
+	if input.QuotaIdentity.Protocol != "openai_chat" {
+		t.Fatalf("request protocol = %q, want openai_chat", input.QuotaIdentity.Protocol)
+	}
+	// The resolved plan should have an anthropic_messages route
+	if len(input.Plan.Candidates) == 0 {
+		t.Fatal("no candidates in plan")
+	}
+	if input.Plan.Candidates[0].Protocol != adapter.ProtocolAnthropic {
+		t.Fatalf("route protocol = %q, want anthropic_messages", input.Plan.Candidates[0].Protocol)
+	}
+}
+
+func TestFacadeCrossProtocolReverseResolvesWhenSameProtocolNotFound(t *testing.T) {
+	t.Parallel()
+	runner := &recordingRunner{onceGate: true}
+	f, _ := newFacade(t, runner)
+	// The chat model has only an openai_chat route. An anthropic messages request
+	// for it should resolve cross-protocol.
+	_, err := f.Execute(context.Background(), messageRequest("chat-model", "req-cross-rev-1"))
+	if err != nil {
+		t.Fatalf("err = %v, want nil (cross-protocol resolution)", err)
+	}
+	if runner.callCount() != 1 {
+		t.Fatalf("runner called %d times, want 1", runner.callCount())
+	}
+	input := runner.lastInput()
+	if input.QuotaIdentity.Protocol != "anthropic_messages" {
+		t.Fatalf("request protocol = %q, want anthropic_messages", input.QuotaIdentity.Protocol)
+	}
+	if len(input.Plan.Candidates) == 0 {
+		t.Fatal("no candidates in plan")
+	}
+	if input.Plan.Candidates[0].Protocol != adapter.ProtocolOpenAIChat {
+		t.Fatalf("route protocol = %q, want openai_chat", input.Plan.Candidates[0].Protocol)
 	}
 }

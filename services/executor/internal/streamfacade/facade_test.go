@@ -249,28 +249,33 @@ func TestFacadeModelNotFoundReturnsTransport404Sentinel(t *testing.T) {
 	}
 }
 
-func TestFacadeProtocolFilterOpenAIChatExcludesAnthropicRoute(t *testing.T) {
+func TestFacadeProtocolFilterOpenAIChatResolvesCrossProtocolAnthropicRoute(t *testing.T) {
 	t.Parallel()
 	driver := &recordingDriver{onceGate: true}
 	f, _ := newFacade(t, driver)
-	// The anthropic model is not a chat route; a chat request for it must be
-	// model-not-found, proving the protocol filter excludes cross-protocol.
+	// The anthropic model has only an anthropic_messages route; a chat request
+	// for it now resolves cross-protocol so the Driver can perform conversion.
 	_, err := f.Execute(context.Background(), chatStreamRequest("anthropic-model", "req-1"))
-	if !errors.Is(err, stream.ErrModelNotFound) {
-		t.Fatalf("err = %v, want ErrModelNotFound", err)
+	if err != nil {
+		t.Fatalf("err = %v, want nil (cross-protocol resolution)", err)
 	}
-	if driver.callCount() != 0 {
-		t.Fatalf("driver called %d times, want 0", driver.callCount())
+	if driver.callCount() != 1 {
+		t.Fatalf("driver called %d times, want 1", driver.callCount())
 	}
 }
 
-func TestFacadeProtocolFilterAnthropicExcludesChatRoute(t *testing.T) {
+func TestFacadeProtocolFilterAnthropicResolvesCrossProtocolChatRoute(t *testing.T) {
 	t.Parallel()
 	driver := &recordingDriver{onceGate: true}
 	f, _ := newFacade(t, driver)
+	// The chat model has only an openai_chat route; an anthropic messages request
+	// for it now resolves cross-protocol so the Driver can perform conversion.
 	_, err := f.Execute(context.Background(), messageStreamRequest("chat-model", "req-1"))
-	if !errors.Is(err, stream.ErrModelNotFound) {
-		t.Fatalf("err = %v, want ErrModelNotFound", err)
+	if err != nil {
+		t.Fatalf("err = %v, want nil (cross-protocol resolution)", err)
+	}
+	if driver.callCount() != 1 {
+		t.Fatalf("driver called %d times, want 1", driver.callCount())
 	}
 }
 
@@ -659,5 +664,55 @@ func TestFacadeConcurrentRequestsEachCallDriverOnce(t *testing.T) {
 	}
 	if got := driver.callCount(); got != requests {
 		t.Fatalf("driver calls = %d, want %d", got, requests)
+	}
+}
+
+func TestFacadeCrossProtocolResolvesWhenSameProtocolNotFound(t *testing.T) {
+	t.Parallel()
+	driver := &recordingDriver{onceGate: true}
+	f, _ := newFacade(t, driver)
+	// The anthropic model has only an anthropic_messages route. A chat stream
+	// request for it should resolve cross-protocol.
+	_, err := f.Execute(context.Background(), chatStreamRequest("anthropic-model", "req-cross-1"))
+	if err != nil {
+		t.Fatalf("err = %v, want nil (cross-protocol resolution)", err)
+	}
+	if driver.callCount() != 1 {
+		t.Fatalf("driver called %d times, want 1", driver.callCount())
+	}
+	input := driver.lastInput()
+	if input.QuotaIdentity.Protocol != "openai_chat" {
+		t.Fatalf("request protocol = %q, want openai_chat", input.QuotaIdentity.Protocol)
+	}
+	if len(input.Plan.Candidates) == 0 {
+		t.Fatal("no candidates in plan")
+	}
+	if input.Plan.Candidates[0].Protocol != adapter.ProtocolAnthropic {
+		t.Fatalf("route protocol = %q, want anthropic_messages", input.Plan.Candidates[0].Protocol)
+	}
+}
+
+func TestFacadeCrossProtocolReverseResolvesWhenSameProtocolNotFound(t *testing.T) {
+	t.Parallel()
+	driver := &recordingDriver{onceGate: true}
+	f, _ := newFacade(t, driver)
+	// The chat model has only an openai_chat route. An anthropic messages stream
+	// request for it should resolve cross-protocol.
+	_, err := f.Execute(context.Background(), messageStreamRequest("chat-model", "req-cross-rev-1"))
+	if err != nil {
+		t.Fatalf("err = %v, want nil (cross-protocol resolution)", err)
+	}
+	if driver.callCount() != 1 {
+		t.Fatalf("driver called %d times, want 1", driver.callCount())
+	}
+	input := driver.lastInput()
+	if input.QuotaIdentity.Protocol != "anthropic_messages" {
+		t.Fatalf("request protocol = %q, want anthropic_messages", input.QuotaIdentity.Protocol)
+	}
+	if len(input.Plan.Candidates) == 0 {
+		t.Fatal("no candidates in plan")
+	}
+	if input.Plan.Candidates[0].Protocol != adapter.ProtocolOpenAIChat {
+		t.Fatalf("route protocol = %q, want openai_chat", input.Plan.Candidates[0].Protocol)
 	}
 }
