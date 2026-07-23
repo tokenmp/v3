@@ -5,7 +5,7 @@
 ## 模块职责
 
 - 负责：transport-neutral streaming execution boundary —— streaming state machine、first-token commit gate、TTFT/stream-idle/stream-lifetime timer control、pre-commit lifecycle buffer、strictly increasing non-zero source `Event.Sequence`、bounded safe Event metadata、monotonic bounded usage、safe terminal `Outcome`；post-commit `EventNativeError` 直接产生安全 `ReasonUpstreamError` outcome，不调用 Sink。
-- 不负责：SSE framing/解析、protocol-aware semantic detection（OpenAI/Anthropic/Responses delta 解码）、downstream rendering、`internal/sdk` semantic stream（Phase 8.1 shared port/OpenAI adapter 已实施，但尚未接本包 payload）、`internal/execution` attempt/retry/quota orchestration、`internal/transport`/`internal/composition` runtime 接入、credential/URL/routing detail。当前无模块内 runtime consumer，`stream:true` 仍不可用。任何 raw bytes / protocol field / downstream renderer interface / credential 均不进入本包。
+- 不负责：SSE framing/解析、protocol-aware semantic detection（OpenAI/Anthropic/Responses delta 解码）、downstream rendering、`internal/sdk` semantic stream（Phase 8.1 shared port/OpenAI adapter 已实施，Phase 10 已将 stream capability 接入 runtime）、`internal/execution` attempt/retry/quota orchestration、`internal/transport`/`internal/composition` runtime 接入、credential/URL/routing detail。Phase 10 已将本包经 composition 接入 runtime，Chat/Messages `stream:true` 已启用。任何 raw bytes / protocol field / downstream renderer interface / credential 均不进入本包。
 - 所有者：`services/executor/internal/streaming/{types.go,state.go,clock.go,bridge.go,*_test.go}`。
 
 ## 对外能力与返回契约
@@ -84,5 +84,5 @@ gofmt -l internal/streaming/ && go vet ./internal/streaming/
 ## 文档维护触发器
 
 - 公开导出（`Source`/`Sink`/`Bridge`/`Outcome`/`Event`/`State`/`Reason`/`Timeouts`）、返回结构、错误语义或副作用变化。
-- 依赖或消费者功能变化（OpenAI semantic stream adapter 已实施但尚未接本包；attempt/retry/quota、transport 与 composition 接入均为 future PR）。
+- 依赖或消费者功能变化（Phase 10 已将 stream capability 接入 runtime；attempt/retry/quota、transport 与 composition 接线已实施）。
 - 验证命令（race/fuzz）变化。
