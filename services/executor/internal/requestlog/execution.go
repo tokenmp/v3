@@ -5,7 +5,34 @@ import (
 	"time"
 )
 
-// ExecutionEvent is the safe, attempt-level execution record supplied to an
+// Kind constants for ExecutionEvent.Kind.
+const (
+	KindAttempt   = "attempt"
+	KindReserved  = "reserved"
+	KindFinalized = "finalized"
+	KindReleased  = "released"
+	KindCommitted = "committed"
+)
+
+// ExecutionUsage carries bounded token counters extracted from a provider
+// response. All fields are safe public metadata; no secret, URL, or body
+// material is present.
+type ExecutionUsage struct {
+	InputTokens  uint64
+	OutputTokens uint64
+	TotalTokens  uint64
+}
+
+// ExecutionSettlement carries the safe, public outcome of a quota terminal
+// action. Disposition and Outcome mirror the quota domain's safe string
+// constants; Reason is the release reason string when applicable.
+type ExecutionSettlement struct {
+	Disposition string
+	Outcome     string
+	Reason      string
+}
+
+// ExecutionEvent is the safe, lifecycle execution record supplied to an
 // ExecutionPort. It intentionally has no request body, URL, header,
 // credential reference, or secret field.
 //
@@ -26,6 +53,25 @@ type ExecutionEvent struct {
 	Code          string
 	Type          string
 	Timestamp     time.Time
+
+	// Subject is the authenticated identity subject (non-secret).
+	Subject string
+	// KeyID is the authenticated identity key identifier (non-secret).
+	KeyID string
+	// Latency is the wall-clock duration of the attempt. It is non-zero only
+	// for Kind=attempt events.
+	Latency time.Duration
+	// Usage carries bounded token counters when available.
+	Usage ExecutionUsage
+	// UsageKnown reports whether Usage was explicitly confirmed by the
+	// provider response.
+	UsageKnown bool
+	// Committed reports whether the stream bridge committed before the event
+	// was recorded. Relevant only for streaming events.
+	Committed bool
+	// Settlement carries the safe terminal outcome for Kind=finalized and
+	// Kind=released events.
+	Settlement ExecutionSettlement
 }
 
 // ExecutionCandidate contains only safe, stable candidate identifiers. It
@@ -38,7 +84,16 @@ type ExecutionCandidate struct {
 	AdapterID    string
 }
 
-// ExecutionPort records safe, attempt-level execution events.
+// ExecutionFilter is the optional query filter for QueryEvents.
+type ExecutionFilter struct {
+	RequestID     string
+	ReservationID string
+	Kind          string
+}
+
+// ExecutionPort records safe, lifecycle execution events and supports
+// querying recorded events by filter.
 type ExecutionPort interface {
 	RecordExecution(ctx context.Context, event ExecutionEvent) error
+	QueryEvents(ctx context.Context, filter ExecutionFilter) ([]ExecutionEvent, error)
 }

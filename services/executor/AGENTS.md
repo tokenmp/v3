@@ -15,6 +15,8 @@
 
 - Phase 15 Retry-After parsing（已实施并接线）：`sdk.ParseRetryAfter` 按 RFC 7231 §7.1.3 解析上游 `Retry-After` header（delta-seconds 优先，fallback HTTP-date RFC 1123），结果 clamp 至 `[0, sdk.HardMaxRetryAfter]`（5 分钟硬上限）。`ClassifiedError` 新增 `RetryAfter() (time.Duration, bool)` 与 `NewClassifiedErrorWithRetryAfter`（仅 retryable status 429/5xx 使用，非 retryable status 保持 `NewClassifiedError` 无 RetryAfter）；`CloneClassifiedError` 保留 RetryAfter。OpenAI Chat/Responses/Stream 与 Anthropic Messages/Stream adapter 的 classify 函数对 retryable status 解析 `Retry-After` header 并注入 `ClassifiedError`；non-retryable status 即使 header 存在也不解析。Runner 与 StreamDriver 从 `ClassifiedError.RetryAfter()` 提取 `*time.Duration` 传入 `retry.Failure.RetryAfter`；retry State 的 `RecordFailure` 以 `max(backoff, RetryAfter)` 计算 delay，并额外 clamp 至 `sdk.HardMaxRetryAfter`，防止恶意上游施加无界延迟。retry respects provider Retry-After。模块规则：`services/executor/internal/sdk/AGENTS.md`。
 
+- Phase 16 request log lifecycle（已实施并接线）：`internal/requestlog` 定义安全无密钥的 `ExecutionPort`（`RecordExecution`/`QueryEvents`）、`ExecutionEvent`（五种 Kind：`attempt`/`reserved`/`finalized`/`released`/`committed`）、`ExecutionCandidate`/`ExecutionUsage`/`ExecutionSettlement` 与 `ExecutionFilter`（RequestID/ReservationID/Kind 可选 AND 组合）；`InMemoryExecution` 为并发安全 FIFO 环形缓冲（默认容量 10000，满时淘汰最旧事件，defensive copy）；`ExecutionMock` 为可配置测试替身（`RecordFn`/`QueryFn`/`RecordErr` 注入，defensive copy）。全部公开类型不含 body/URL/header/credential/secret 字段（反射+渲染测试覆盖）。`InMemoryExecution` 与 `ExecutionMock` 共享 `ExecutionContractTests` 契约套件。经 `internal/composition` 接入 runtime。CI race gate 已覆盖 `./internal/requestlog/...`。模块规则：`services/executor/internal/requestlog/AGENTS.md`。
+
 - 所有者：TokenMP。
 
 ## 必读文档
@@ -27,6 +29,7 @@
 - Models catalog manifests：`internal/modelcatalog/AGENTS.md`、`internal/modelcatalogfacade/AGENTS.md`（进入 models catalog 模块必读；Phase 13 已实施）
 - Responses contract manifest：`internal/responsecontract/AGENTS.md`（进入 Responses contract 模块必读；Phase 14 已实施）
 - SDK Retry-After manifest：`internal/sdk/AGENTS.md`（Phase 15 Retry-After parsing 已实施）
+- Request log lifecycle manifest：`internal/requestlog/AGENTS.md`（Phase 16 已实施）
 
 模块文档仅引用仓库中实际存在的文件。
 

@@ -760,7 +760,20 @@ Retry State `retry_after_test.go` 覆盖：
 | RA < Backoff | 使用 Backoff |
 | RA 超 `MaxTotalDuration` | 停止重试（`StopMaxTotalDuration`） |
 
-### 14.6 Request log lifecycle
+### 14.6 Phase 16 Request log lifecycle tests
+
+`internal/requestlog` 测试覆盖：
+
+| 维度 | 已覆盖断言 |
+|---|---|
+| 安全表面 | 反射检查 `ExecutionEvent`/`ExecutionCandidate`/`ExecutionUsage`/`ExecutionSettlement` 字段名不含 `body`/`url`/`header`/`ref`/`secret`；`fmt` 渲染不泄露 `secret`/`api-key`/`authorization`/`https://`/`request body` |
+| 顺序与防御性拷贝 | `Events()`/`QueryEvents()` 返回记录顺序；修改返回 slice 不影响内部存储 |
+| Fault injection | `SetFaultHook` 错误不删除已记录事件；清除后正常 |
+| 并发 | 并发 `RecordExecution`+`Events`；并发 `RecordExecution`+`QueryEvents` |
+| 环形缓冲 | FIFO 淘汰（容量 5 写入 10 保留后 5）；精确容量写入；非正容量 panic |
+| QueryEvents | 零值 filter 返回全部；按 RequestID/ReservationID/Kind 单独过滤；组合 filter AND 语义；无匹配返回空；返回防御性拷贝 |
+| ExecutionMock | 共享 `ExecutionContractTests` 契约套件；`RecordFn`/`RecordErr`/`QueryFn`/`QueryFn` 错误注入；`QueryFn` 结果防御性拷贝；并发 `RecordExecution`+`QueryEvents` |
+| 契约 | `InMemoryExecution` 与 `ExecutionMock` 均运行 `ExecutionContractTests`（初始空、单事件、顺序、防御性拷贝、Kind 过滤、并发记录） |
 
 - 每个请求只有一个 terminal update；
 - 每个上游调用有独立 attempt；
@@ -950,7 +963,7 @@ go test -race -count=1 ./test/integration/...
 | Responses | **Phase 14 已实施（`internal/responsecontract`）**：`ValidateRequest` strict allowlist 强制 stateless-only（拒绝 `previous_response_id`/`conversation`/`store`/`background`/`include`/`moderation`/`prompt`/`truncation`/`service_tier`），校验 model/input/instructions/reasoning/tools/temperature/top_p/metadata/text/max_output_tokens；`ValidateResponse` bounded 结构验证（16 MiB wire cap、output ≤ 1024 items、content parts ≤ 256、usage ≤ 1e6 且一致、extension values ≤ 64 KiB）；request accept/reject、response accept/reject、stateful field rejection、usage boundary、fuzz coverage |
 | Retry-After | **Phase 15 已实施**：`sdk.ParseRetryAfter` delta-seconds/HTTP-date/invalid/nil 单元测试；`NewClassifiedErrorWithRetryAfter`/`RetryAfter()`/`CloneClassifiedError` clamp/向后兼容/nil 单元测试；OpenAI adapter 429/503/401/403/404/RA-over-cap/Images/Responses TLS `httptest` 测试；Anthropic adapter 429/529/503/401/403/404 TLS `httptest` 测试；retry State `RecordFailure` RA clamp/RA-vs-backoff/RA-vs-MaxTotalDuration 测试 |
 | Quota | **Phase 12 typed domain 已实施并接线**：`Repository`、`DomainInMemory`、`TypedMock` shared contract/race/fuzz tests 覆盖 typed reservation exact replay/conflict、terminal settlement、cancellation/fault/ownership/redaction；legacy `Port` 已删除；Runner 使用 `AccountingConfirmedUsage`（`sdk.Completion.Known=true`+`Valid()` 时携带 `ConfirmedUsage`）或 `AccountingUnpricedSuccess`，StreamDriver 使用 `AccountingConfirmedUsage`（`UsageKnown` 时携带 `ConfirmedUsage`）或 `AccountingUnpricedSuccess`。Phase 12.3 usage extraction tests 覆盖 `sdk.Usage.Valid()`、OpenAI/Anthropic adapter 提取逻辑、Images `Known=false`、Runner `runnerFinalizeOutcome` 映射与 integration。无 usage charging、DB 或 durable storage。 |
-| Logging | single terminal + redaction tests |
+| Logging | **Phase 16 已实施（`internal/requestlog`）**：`ExecutionPort`/`InMemoryExecution`/`ExecutionMock` 安全表面（反射+渲染）、顺序与防御性拷贝、fault injection、并发、环形缓冲 FIFO 淘汰、QueryEvents 过滤、Mock 注入与契约套件 |
 | CI/Docker | full local-equivalent suite + image build |
 
 ## 21. Definition of Done

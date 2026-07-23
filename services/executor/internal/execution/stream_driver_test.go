@@ -76,6 +76,9 @@ type typedNilLogger struct{}
 func (*typedNilLogger) RecordExecution(context.Context, requestlog.ExecutionEvent) error {
 	panic("must not call")
 }
+func (*typedNilLogger) QueryEvents(context.Context, requestlog.ExecutionFilter) ([]requestlog.ExecutionEvent, error) {
+	panic("must not call")
+}
 
 type typedNilDriverClock struct{}
 
@@ -287,8 +290,18 @@ func TestStreamDriverPostCommitConfirmedUsageFinalizesAndLogsFailure(t *testing.
 		t.Fatalf("quota calls = %+v", calls)
 	}
 	events := log.Events(context.Background())
-	if len(events) != 1 || events[0].Status != "failed" || events[0].Code != "stream_error" || events[0].Type != "protocol" {
-		t.Fatalf("log events = %+v", events)
+	// Lifecycle: reserved + attempt(failed,committed) + finalized
+	if len(events) != 3 {
+		t.Fatalf("log events = %d, want 3", len(events))
+	}
+	if events[0].Kind != requestlog.KindReserved {
+		t.Fatalf("events[0].Kind = %q, want reserved", events[0].Kind)
+	}
+	if events[1].Kind != requestlog.KindAttempt || events[1].Status != "failed" || events[1].Code != "stream_error" || events[1].Type != "protocol" || !events[1].Committed {
+		t.Fatalf("events[1] = %+v, want failed committed attempt", events[1])
+	}
+	if events[2].Kind != requestlog.KindFinalized {
+		t.Fatalf("events[2].Kind = %q, want finalized", events[2].Kind)
 	}
 }
 
@@ -354,5 +367,50 @@ func TestStreamDriverParentCancelWins(t *testing.T) {
 	calls := port.TypedCalls()
 	if len(calls) != 2 || calls[1].Method != "ReleaseReservation" {
 		t.Fatalf("quota calls = %+v", calls)
+	}
+}
+
+func TestStreamDriverLifecycleEventSequenceSuccess(t *testing.T) {
+	resolver, plan := runnerFixture(t)
+	client := &driverStreamClient{open: func(context.Context, sdk.StreamCall) (sdk.StreamOpen, error) {
+		return sdk.StreamOpen{Source: &driverSource{events: []sdk.StreamEvent{streamEvent(1, streaming.EventSemantic), streamUsage(2), streamFinish(3)}}}, nil
+	}}
+	driver, _ := streamDriver(t, client)
+	log := driver.Logger.(*requestlog.InMemoryExecution)
+
+	result, err := driver.Run(context.Background(), streamDriverInput(resolver, plan, &driverSink{}))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.Outcome.State != streaming.StateCompleted {
+		t.Fatalf("Outcome = %+v", result.Outcome)
+	}
+
+	events := log.Events(context.Background())
+	// Expected: reserved → attempt(success) → committed → finalized
+	if len(events) < 3 {
+		t.Fatalf("events = %d, want >= 3", len(events))
+	}
+	if events[0].Kind != requestlog.KindReserved {
+		t.Fatalf("events[0].Kind = %q, want reserved", events[0].Kind)
+	}
+	if events[0].Subject != "subject" || events[0].KeyID != "key-1" {
+		t.Fatalf("reserved event Subject/KeyID = %q/%q", events[0].Subject, events[0].KeyID)
+	}
+	// Find committed and finalized events
+	var foundCommitted, foundFinalized bool
+	for _, e := range events[1:] {
+		switch e.Kind {
+		case requestlog.KindCommitted:
+			foundCommitted = true
+		case requestlog.KindFinalized:
+			foundFinalized = true
+		}
+	}
+	if !foundCommitted {
+		t.Error("no committed event found")
+	}
+	if !foundFinalized {
+		t.Error("no finalized event found")
 	}
 }
