@@ -276,8 +276,11 @@ components:
       type: http
       scheme: bearer
       description: |
-        TokenMP API key passed as Bearer token. Compatible with OpenAI SDK format.
-        Example: `Authorization: Bearer tm-xxxxxxxxxxxx`
+        JWT access token (EdDSA/Ed25519) or TokenMP API key passed as Bearer token.
+        Compatible with OpenAI SDK format.
+        JWT tokens are issued by the Auth service and verified locally by the Executor.
+        Example: `Authorization: Bearer eyJhbGciOiJFZERTQSIs...` (JWT)
+        Example: `Authorization: Bearer tm-xxxxxxxxxxxx` (API key)
 
   headers:
     CacheControlNoStore:

@@ -11,8 +11,12 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/getkin/kin-openapi/openapi3"
+	jwtv5 "github.com/golang-jwt/jwt/v5"
+
+	"github.com/tokenmp/v3/services/executor/internal/jwtverifier"
 )
 
 // This file exercises the fully wrapped runtime handler produced by Build —
@@ -320,6 +324,88 @@ func TestRuntimeUnknownV1PathIsAuthProtected(t *testing.T) {
 		rec := dispatch(t, handler, http.MethodGet, "/unknown", "", "")
 		if rec.Code != http.StatusNotFound {
 			t.Fatalf("status = %d, want 404; body=%q", rec.Code, rec.Body.String())
+		}
+	})
+}
+
+// buildJWTWrappedHandler builds the fully wrapped runtime handler with JWT
+// as the primary identity source (no identityenv fallback). It returns the
+// handler and a valid JWT token for authenticated requests.
+func buildJWTWrappedHandler(t *testing.T) (http.Handler, string) {
+	t.Helper()
+	priv, pub := generateEd25519KeyPair(t)
+	pubKeyFile := writeEd25519PublicKeyPEM(t, pub)
+	configPath := writeConfig(t, minimalEmptyConfig)
+
+	cfg := testConfigWithJWT(configPath, "{}", pubKeyFile, "tokenmp-auth", "tokenmp-web")
+	env := map[string]string{
+		"EXECUTOR_CONFIG_FILE":             configPath,
+		"EXECUTOR_CREDENTIAL_REF_MAP_JSON": "{}",
+	}
+	handler, err := Build(context.Background(), cfg, envLookup(env))
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	if handler == nil {
+		t.Fatal("Build() returned nil handler")
+	}
+
+	// Issue a valid JWT for testing.
+	now := time.Now()
+	claims := &jwtverifier.Claims{
+		RegisteredClaims: jwtv5.RegisteredClaims{
+			Issuer:    "tokenmp-auth",
+			Subject:   "jwt-conformance-user",
+			Audience:  jwtv5.ClaimStrings{"tokenmp-web"},
+			ExpiresAt: jwtv5.NewNumericDate(now.Add(15 * time.Minute)),
+			NotBefore: jwtv5.NewNumericDate(now),
+			IssuedAt:  jwtv5.NewNumericDate(now),
+			ID:        "jti-conformance",
+		},
+		Role:         "user",
+		TokenVersion: 1,
+	}
+	jwtToken := issueTestJWT(t, priv, claims)
+	return handler, jwtToken
+}
+
+// TestRuntimeRouteConformanceWithJWT verifies the fully wrapped runtime handler
+// with JWT as the identity source. It checks that valid JWT Bearer tokens are
+// accepted, expired/invalid tokens are rejected, and /healthz stays anonymous.
+func TestRuntimeRouteConformanceWithJWT(t *testing.T) {
+	t.Parallel()
+
+	handler, jwtToken := buildJWTWrappedHandler(t)
+
+	t.Run("valid JWT Bearer models 200", func(t *testing.T) {
+		t.Parallel()
+		rec := dispatch(t, handler, http.MethodGet, "/v1/models", "", "Bearer "+jwtToken)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("no Authorization returns 401", func(t *testing.T) {
+		t.Parallel()
+		rec := dispatch(t, handler, http.MethodGet, "/v1/models", "", "")
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want 401", rec.Code)
+		}
+	})
+
+	t.Run("invalid JWT returns 401", func(t *testing.T) {
+		t.Parallel()
+		rec := dispatch(t, handler, http.MethodGet, "/v1/models", "", "Bearer invalid-jwt-token")
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want 401; body=%s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("healthz remains anonymous", func(t *testing.T) {
+		t.Parallel()
+		rec := dispatch(t, handler, http.MethodGet, "/healthz", "", "")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", rec.Code)
 		}
 	})
 }

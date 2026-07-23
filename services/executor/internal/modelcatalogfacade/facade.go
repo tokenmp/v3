@@ -174,7 +174,8 @@ func nowTime(clock routing.Clock) time.Time {
 }
 
 // validPrincipal reports whether p is a trusted, active service/admin caller
-// with non-empty bounded printable subject and keyID. It is defense-in-depth.
+// with non-empty bounded printable subject. KeyID may be empty (JWT sources
+// carry no kid) or non-empty and bounded printable. It is defense-in-depth.
 func validPrincipal(p modelcatalog.Principal) bool {
 	if p.Status != modelcatalog.StatusActive {
 		return false
@@ -182,7 +183,15 @@ func validPrincipal(p modelcatalog.Principal) bool {
 	if p.Role != modelcatalog.RoleService && p.Role != modelcatalog.RoleAdmin {
 		return false
 	}
-	return validSafeToken(p.Subject, maxSubjectBytes) && validSafeToken(p.KeyID, maxKeyIDBytes)
+	if !validSafeToken(p.Subject, maxSubjectBytes) {
+		return false
+	}
+	// KeyID is optional: JWT sources carry no kid. When present it must be
+	// bounded and printable.
+	if p.KeyID != "" && !validSafeToken(p.KeyID, maxKeyIDBytes) {
+		return false
+	}
+	return true
 }
 
 // validSafeToken reports whether v is non-empty, bounded, UTF-8 valid, and

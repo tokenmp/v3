@@ -6,6 +6,7 @@ require (
 	github.com/anthropics/anthropic-sdk-go v1.58.0
 	github.com/getkin/kin-openapi v0.142.0
 	github.com/go-chi/chi/v5 v5.3.1
+	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/oapi-codegen/runtime v1.6.0
 	github.com/openai/openai-go/v3 v3.44.0
 )
