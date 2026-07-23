@@ -770,6 +770,14 @@ func TestBuildMetricsEndpoint(t *testing.T) {
 		t.Fatalf("Build() error = %v", err)
 	}
 
+	// Trigger one request through the metrics middleware so the request counter
+	// has at least one labeled series before scraping /metrics. Prometheus
+	// CounterVecs only emit a series after the first observation, and the
+	// /metrics scrape itself is counted after the response is gathered.
+	healthReq := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8081/healthz", nil)
+	healthRec := httptest.NewRecorder()
+	app.Handler.ServeHTTP(healthRec, healthReq)
+
 	t.Run("anonymous GET /metrics returns 200", func(t *testing.T) {
 		t.Parallel()
 		req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8081/metrics", nil)
