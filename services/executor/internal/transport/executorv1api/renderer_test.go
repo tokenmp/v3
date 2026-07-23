@@ -636,3 +636,92 @@ func TestRetryAfterOnResponseStreamFailure(t *testing.T) {
 		t.Errorf("response stream Retry-After = %q, want %q", got, "25")
 	}
 }
+
+func TestValidChatMessageToolCallsNull(t *testing.T) {
+	t.Parallel()
+
+	// MiMo-style response: tool_calls key present with null value.
+	// Per OpenAI spec, tool_calls:null is equivalent to omitting the key.
+	mimoRaw := `{"id":"chatcmpl_mimo","object":"chat.completion","created":1,"model":"mimo","choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"hello","tool_calls":null}}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`
+
+	t.Run("tool_calls null (MiMo regression)", func(t *testing.T) {
+		t.Parallel()
+		rec := httptest.NewRecorder()
+		result := execution.Result{Completion: sdk.Completion{Status: http.StatusOK, RawJSON: json.RawMessage(mimoRaw)}}
+		if err := RenderChatCompletion(result).VisitCreateChatCompletionResponse(rec); err != nil {
+			t.Fatal(err)
+		}
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
+		}
+		if rec.Body.String() != mimoRaw {
+			t.Fatalf("body mismatch: got %q", rec.Body.String())
+		}
+	})
+
+	// Standard OpenAI: no tool_calls key at all.
+	t.Run("no tool_calls key", func(t *testing.T) {
+		t.Parallel()
+		rec := httptest.NewRecorder()
+		result := execution.Result{Completion: sdk.Completion{Status: http.StatusOK, RawJSON: json.RawMessage(validChatRaw)}}
+		if err := RenderChatCompletion(result).VisitCreateChatCompletionResponse(rec); err != nil {
+			t.Fatal(err)
+		}
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", rec.Code)
+		}
+	})
+
+	// Non-empty tool_calls array must still pass strict validation.
+	t.Run("valid non-empty tool_calls", func(t *testing.T) {
+		t.Parallel()
+		raw := `{"id":"chatcmpl_tc","object":"chat.completion","created":1,"model":"m","choices":[{"index":0,"finish_reason":"tool_calls","message":{"role":"assistant","content":"","tool_calls":[{"id":"call_1","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"SF\"}"}}]}}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`
+		rec := httptest.NewRecorder()
+		result := execution.Result{Completion: sdk.Completion{Status: http.StatusOK, RawJSON: json.RawMessage(raw)}}
+		if err := RenderChatCompletion(result).VisitCreateChatCompletionResponse(rec); err != nil {
+			t.Fatal(err)
+		}
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	// Invalid tool_calls type must be rejected.
+	t.Run("tool_calls is string", func(t *testing.T) {
+		t.Parallel()
+		raw := `{"id":"chatcmpl_bad","object":"chat.completion","created":1,"model":"m","choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"hi","tool_calls":"invalid"}}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`
+		rec := httptest.NewRecorder()
+		result := execution.Result{Completion: sdk.Completion{Status: http.StatusOK, RawJSON: json.RawMessage(raw)}}
+		if err := RenderChatCompletion(result).VisitCreateChatCompletionResponse(rec); err != nil {
+			t.Fatal(err)
+		}
+		assertOpenAIError(t, rec, http.StatusInternalServerError, internalErrorCode, "api_error", internalErrorMessage)
+	})
+
+	t.Run("tool_calls is number", func(t *testing.T) {
+		t.Parallel()
+		raw := `{"id":"chatcmpl_bad2","object":"chat.completion","created":1,"model":"m","choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"hi","tool_calls":42}}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`
+		rec := httptest.NewRecorder()
+		result := execution.Result{Completion: sdk.Completion{Status: http.StatusOK, RawJSON: json.RawMessage(raw)}}
+		if err := RenderChatCompletion(result).VisitCreateChatCompletionResponse(rec); err != nil {
+			t.Fatal(err)
+		}
+		assertOpenAIError(t, rec, http.StatusInternalServerError, internalErrorCode, "api_error", internalErrorMessage)
+	})
+
+	// Empty array tool_calls: validChatToolCalls([]any{}) returns true,
+	// so the message passes. This is consistent — an empty array is
+	// structurally valid even if semantically unusual.
+	t.Run("tool_calls empty array", func(t *testing.T) {
+		t.Parallel()
+		raw := `{"id":"chatcmpl_empty","object":"chat.completion","created":1,"model":"m","choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"done","tool_calls":[]}}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`
+		rec := httptest.NewRecorder()
+		result := execution.Result{Completion: sdk.Completion{Status: http.StatusOK, RawJSON: json.RawMessage(raw)}}
+		if err := RenderChatCompletion(result).VisitCreateChatCompletionResponse(rec); err != nil {
+			t.Fatal(err)
+		}
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
+		}
+	})
+}
