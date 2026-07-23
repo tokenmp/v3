@@ -1,9 +1,11 @@
 package openaiadapter
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 	"sync"
@@ -242,10 +244,189 @@ func extractOpenAIResponseUsage(raw json.RawMessage) (sdk.Usage, bool) {
 	return usage, true
 }
 
+// Known Responses streaming event type prefixes. The type field is required
+// and must match one of these patterns for the chunk to be accepted.
+var responseEventTypes = map[string]streaming.EventKind{
+	// Terminal success.
+	"response.completed": streaming.EventFinish,
+	// Terminal failure.
+	"response.failed":     streaming.EventNativeError,
+	"response.incomplete": streaming.EventNativeError,
+	"error":               streaming.EventNativeError,
+	// Semantic content deltas.
+	"response.output_text.delta":             streaming.EventSemantic,
+	"response.output_text.done":              streaming.EventLifecycle,
+	"response.reasoning_text.delta":          streaming.EventSemantic,
+	"response.reasoning_text.done":           streaming.EventLifecycle,
+	"response.reasoning_summary_text.delta":  streaming.EventSemantic,
+	"response.reasoning_summary_text.done":   streaming.EventLifecycle,
+	"response.refusal.delta":                 streaming.EventSemantic,
+	"response.refusal.done":                  streaming.EventLifecycle,
+	"response.audio.delta":                   streaming.EventSemantic,
+	"response.audio.done":                    streaming.EventLifecycle,
+	"response.audio.transcript.delta":        streaming.EventSemantic,
+	"response.audio.transcript.done":         streaming.EventLifecycle,
+	"response.function_call_arguments.delta": streaming.EventSemantic,
+	"response.function_call_arguments.done":  streaming.EventLifecycle,
+	"response.mcp_call_arguments.delta":      streaming.EventSemantic,
+	"response.mcp_call_arguments.done":       streaming.EventLifecycle,
+	"response.custom_tool_call_input.delta":  streaming.EventSemantic,
+	"response.custom_tool_call_input.done":   streaming.EventLifecycle,
+	// Lifecycle events (no semantic content, no idle-timer reset).
+	"response.created":                             streaming.EventLifecycle,
+	"response.in_progress":                         streaming.EventLifecycle,
+	"response.queued":                              streaming.EventLifecycle,
+	"response.output_item.added":                   streaming.EventLifecycle,
+	"response.output_item.done":                    streaming.EventLifecycle,
+	"response.content_part.added":                  streaming.EventLifecycle,
+	"response.content_part.done":                   streaming.EventLifecycle,
+	"response.file_search_call.in_progress":        streaming.EventLifecycle,
+	"response.file_search_call.searching":          streaming.EventLifecycle,
+	"response.file_search_call.completed":          streaming.EventLifecycle,
+	"response.web_search_call.in_progress":         streaming.EventLifecycle,
+	"response.web_search_call.searching":           streaming.EventLifecycle,
+	"response.web_search_call.completed":           streaming.EventLifecycle,
+	"response.image_generation_call.in_progress":   streaming.EventLifecycle,
+	"response.image_generation_call.generating":    streaming.EventLifecycle,
+	"response.image_generation_call.completed":     streaming.EventLifecycle,
+	"response.image_generation_call.partial_image": streaming.EventLifecycle,
+	"response.code_interpreter_call.in_progress":   streaming.EventLifecycle,
+	"response.code_interpreter_call.interpreting":  streaming.EventLifecycle,
+	"response.code_interpreter_call.completed":     streaming.EventLifecycle,
+	"response.code_interpreter_call_code.delta":    streaming.EventSemantic,
+	"response.code_interpreter_call_code.done":     streaming.EventLifecycle,
+	"response.mcp_call.in_progress":                streaming.EventLifecycle,
+	"response.mcp_call.completed":                  streaming.EventLifecycle,
+	"response.mcp_call.failed":                     streaming.EventNativeError,
+	"response.mcp_list_tools.in_progress":          streaming.EventLifecycle,
+	"response.mcp_list_tools.completed":            streaming.EventLifecycle,
+	"response.mcp_list_tools.failed":               streaming.EventNativeError,
+	"response.reasoning_summary_part.added":        streaming.EventLifecycle,
+	"response.reasoning_summary_part.done":         streaming.EventLifecycle,
+	"response.output_text.annotation.added":        streaming.EventLifecycle,
+}
+
+// parseResponseChunk validates one OpenAI Responses SSE JSON payload and
+// returns an owned canonical JSON representation. Unlike parseChunk (which
+// validates chat.completion.chunk structure), this parser accepts the
+// Responses streaming event format: a top-level object with a required "type"
+// field naming the event variant, optional "response" object, and other
+// variant-specific fields. Errors carry no provider data.
+func parseResponseChunk(raw []byte) (streaming.Event, json.RawMessage, error) {
+	if len(raw) == 0 || len(raw) > maxChunkBytes || !utf8.Valid(raw) {
+		return streaming.Event{}, nil, errChunkProtocol
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	nodes := 0
+	if err := walkJSON(dec, 0, &nodes); err != nil {
+		return streaming.Event{}, nil, errChunkProtocol
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return streaming.Event{}, nil, errChunkProtocol
+	}
+	var value any
+	dec = json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	if err := dec.Decode(&value); err != nil {
+		return streaming.Event{}, nil, errChunkProtocol
+	}
+	root, ok := value.(map[string]any)
+	if !ok {
+		return streaming.Event{}, nil, errChunkProtocol
+	}
+
+	// In-band error ("error" type or top-level error key) is terminal.
+	if _, hasErr := root["error"]; hasErr {
+		return streaming.Event{Kind: streaming.EventNativeError, EventType: "error"}, nil, nil
+	}
+
+	// type is required and must be a known Responses event type.
+	typeVal, ok := root["type"]
+	if !ok {
+		return streaming.Event{}, nil, errChunkProtocol
+	}
+	typeStr, ok := typeVal.(string)
+	if !ok || len(typeStr) == 0 || len(typeStr) > maxStringBytes {
+		return streaming.Event{}, nil, errChunkProtocol
+	}
+
+	kind, known := responseEventTypes[typeStr]
+	if !known {
+		return streaming.Event{}, nil, errChunkProtocol
+	}
+
+	ev := streaming.Event{Kind: kind, EventType: typeStr}
+
+	// Extract usage from response.completed events.
+	if typeStr == "response.completed" {
+		if resp, ok := root["response"]; ok && resp != nil {
+			if respMap, ok := resp.(map[string]any); ok {
+				if usageVal, ok := respMap["usage"]; ok && usageVal != nil {
+					usage, hasUsage, err := parseResponseStreamUsage(usageVal)
+					if err == nil && hasUsage {
+						ev.Usage = &usage
+					}
+				}
+				// Extract status for finish classification.
+				if statusVal, ok := respMap["status"]; ok {
+					if statusStr, ok := statusVal.(string); ok {
+						ev.FinishReason = statusStr
+					}
+				}
+			}
+		}
+	}
+
+	// For error-type events, extract safe code if present.
+	if kind == streaming.EventNativeError {
+		if codeVal, ok := root["code"]; ok {
+			if codeStr, ok := codeVal.(string); ok && len(codeStr) <= maxStringBytes {
+				ev.EventType = typeStr // preserve the event type for classification
+			}
+		}
+	}
+
+	canonical, err := json.Marshal(value)
+	if err != nil {
+		return streaming.Event{}, nil, errChunkProtocol
+	}
+	return ev, ownedRaw(canonical), nil
+}
+
+// parseResponseStreamUsage extracts usage counters from a Responses stream
+// event's response.usage object. The field names differ from chat completions
+// (input_tokens/output_tokens/total_tokens).
+func parseResponseStreamUsage(v any) (streaming.Usage, bool, error) {
+	if v == nil {
+		return streaming.Usage{}, false, nil
+	}
+	m, ok := v.(map[string]any)
+	if !ok {
+		return streaming.Usage{}, false, errChunkProtocol
+	}
+	u := streaming.Usage{}
+	for _, x := range []struct {
+		k string
+		p *int64
+	}{{"input_tokens", &u.PromptTokens}, {"output_tokens", &u.CompletionTokens}, {"total_tokens", &u.TotalTokens}} {
+		value, yes := m[x.k]
+		if !yes {
+			return u, false, nil
+		}
+		n, ok := integer(value)
+		if !ok || n < 0 || n > streaming.MaxTotalHardCap {
+			return u, false, nil
+		}
+		*x.p = n
+	}
+	return u, true, nil
+}
+
 // responseChunkSource adapts the SDK's Responses stream into the
-// sdk.StreamSource interface, parsing each chunk through the existing
-// parseChunk validator (reused from Chat Completions streaming since the
-// SSE framing and structural bounds are the same).
+// sdk.StreamSource interface, parsing each chunk through a dedicated
+// Responses-specific validator (not the Chat Completions parseChunk,
+// since Responses events have a completely different structure).
 type responseChunkSource struct {
 	stream   *ssestream.Stream[responses.ResponseStreamEventUnion]
 	cancel   context.CancelFunc
@@ -315,7 +496,7 @@ func (s *responseChunkSource) Next(ctx context.Context) (sdk.StreamEvent, error)
 			s.setTerminal(err)
 			return sdk.StreamEvent{}, err
 		}
-		ev, data, err := parseChunk([]byte(s.stream.Current().RawJSON()))
+		ev, data, err := parseResponseChunk([]byte(s.stream.Current().RawJSON()))
 		if err != nil {
 			safe := sdk.NewClassifiedError(sdk.ErrProtocol, 0, "", "", "")
 			s.setTerminal(safe)
