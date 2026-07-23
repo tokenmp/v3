@@ -320,7 +320,7 @@ func TestComplete_ClassifiesMalformedSuccessfulResponseAsProtocol(t *testing.T) 
 func TestComplete_StrictSuccessfulResponseValidationDoesNotLeakBody(t *testing.T) {
 	for _, body := range []string{
 		`{"id":"msg_01","type":"message","role":"assistant","content":[],"model":"upstream-model","stop_reason":"refusal","usage":{"input_tokens":1,"output_tokens":1}}`,
-		`{"id":"msg_01","type":"message","role":"assistant","content":[],"model":"upstream-model","stop_reason":null,"usage":{"input_tokens":1,"output_tokens":1},"unexpected":"remote-secret"}`,
+		`{"id":"msg_01","type":"message","role":"assistant","content":[{"type":"text","text":"ok","extra":"remote-secret"}],"model":"upstream-model","stop_reason":null,"usage":{"input_tokens":1,"output_tokens":1}}`,
 		`{"id":"msg_01","id":"remote-secret","type":"message","role":"assistant","content":[],"model":"upstream-model","stop_reason":null,"usage":{"input_tokens":1,"output_tokens":1}}`,
 	} {
 		t.Run(body, func(t *testing.T) {

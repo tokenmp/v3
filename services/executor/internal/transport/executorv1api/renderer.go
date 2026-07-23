@@ -301,7 +301,7 @@ func validChatMessage(value any) bool {
 	if !ok || (role != "system" && role != "user" && role != "assistant" && role != "tool") || !validChatContent(message["content"]) {
 		return false
 	}
-	if calls, exists := message["tool_calls"]; exists && !validChatToolCalls(calls) {
+	if calls, exists := message["tool_calls"]; exists && calls != nil && !validChatToolCalls(calls) {
 		return false
 	}
 	return true

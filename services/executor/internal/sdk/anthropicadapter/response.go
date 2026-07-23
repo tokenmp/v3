@@ -10,11 +10,6 @@ import (
 
 var errInvalidMessageResponse = errors.New("anthropicadapter: response failed strict message validation")
 
-var (
-	messageResponseFields = fields("id", "type", "role", "content", "model", "stop_reason", "stop_sequence", "usage")
-	messageUsageFields    = fields("input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
-)
-
 // validateMessageResponse verifies the raw, successful Messages API response
 // before it crosses the SDK boundary. The SDK's response unions deliberately
 // accept fields added by Anthropic; this adapter instead accepts exactly the
@@ -35,8 +30,7 @@ func validateMessageResponse(raw []byte) error {
 }
 
 func validMessageResponse(root map[string]any) bool {
-	if !only(root, messageResponseFields) ||
-		!requiredString(root, "id") ||
+	if !requiredString(root, "id") ||
 		root["type"] != "message" ||
 		root["role"] != "assistant" ||
 		!requiredString(root, "model") ||
@@ -58,7 +52,7 @@ func validMessageResponse(root map[string]any) bool {
 
 func validResponseUsage(value any) bool {
 	usage, ok := value.(map[string]any)
-	if !ok || !only(usage, messageUsageFields) || !requiredInteger(usage, "input_tokens") || !requiredInteger(usage, "output_tokens") {
+	if !ok || !requiredInteger(usage, "input_tokens") || !requiredInteger(usage, "output_tokens") {
 		return false
 	}
 	for _, name := range []string{"cache_creation_input_tokens", "cache_read_input_tokens"} {

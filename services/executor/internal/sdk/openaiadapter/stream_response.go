@@ -131,22 +131,28 @@ func walkJSON(d *json.Decoder, depth int, nodes *int) error {
 func forbiddenKey(k string) bool { return k == "__proto__" || k == "prototype" || k == "constructor" }
 
 func validateRoot(r map[string]any) error {
-	if !nonEmptyString(r["id"]) || !exactString(r["object"], "chat.completion.chunk") || !nonNegativeInt(r["created"]) || !nonEmptyString(r["model"]) {
+	if !nonEmptyString(r["id"]) || !exactString(r["object"], "chat.completion.chunk") || !nonEmptyString(r["model"]) {
 		return errChunkProtocol
+	}
+	// created is optional in non-terminal chunks (e.g. astron/GLM omits it).
+	if v, exists := r["created"]; exists {
+		if !nonNegativeInt(v) {
+			return errChunkProtocol
+		}
 	}
 	choices, ok := r["choices"].([]any)
 	if !ok {
 		return errChunkProtocol
 	}
-	usage, usagePresent, err := parseUsage(r["usage"])
+	usage, _, err := parseUsage(r["usage"])
 	if err != nil {
 		return errChunkProtocol
 	}
 	_ = usage
 	if len(choices) == 0 {
-		if !usagePresent {
-			return errChunkProtocol
-		}
+		// Empty choices: usage is optional (MiniMax/astron may omit it in
+		// non-terminal chunks). Only reject if usage is present but invalid,
+		// which parseUsage already handles above.
 		return nil
 	}
 	if len(choices) != 1 {
@@ -161,9 +167,13 @@ func validateRoot(r map[string]any) error {
 	} else if err := validateDelta(delta); err != nil {
 		return err
 	}
-	finish, exists := choice["finish_reason"]
-	if !exists || (finish != nil && !supportedFinish(finish)) {
-		return errChunkProtocol
+	// finish_reason is optional in non-terminal chunks (e.g. MiniMax, astron
+	// omit it in intermediate chunks). If present, it must be a supported
+	// value or null.
+	if finish, exists := choice["finish_reason"]; exists {
+		if finish != nil && !supportedFinish(finish) {
+			return errChunkProtocol
+		}
 	}
 	if logprobs, exists := choice["logprobs"]; exists && logprobs != nil {
 		if err := boundedStructure(logprobs, 0); err != nil {
@@ -258,7 +268,10 @@ func classifyRoot(r map[string]any) (streaming.Event, error) {
 	}
 	choices := r["choices"].([]any)
 	if len(choices) == 0 {
-		return streaming.Event{Kind: streaming.EventUsage, EventType: "chat.completion.chunk", Usage: &usage}, nil
+		if hasUsage {
+			return streaming.Event{Kind: streaming.EventUsage, EventType: "chat.completion.chunk", Usage: &usage}, nil
+		}
+		return streaming.Event{Kind: streaming.EventLifecycle, EventType: "chat.completion.chunk"}, nil
 	}
 	c := choices[0].(map[string]any)
 	d := c["delta"].(map[string]any)
@@ -303,7 +316,11 @@ func classifyRoot(r map[string]any) (streaming.Event, error) {
 		return streaming.Event{Kind: streaming.EventSemantic, EventType: "chat.completion.chunk"}, nil
 	}
 	if finish != "" {
-		return streaming.Event{Kind: streaming.EventFinish, EventType: "chat.completion.chunk", FinishReason: finish}, nil
+		ev := streaming.Event{Kind: streaming.EventFinish, EventType: "chat.completion.chunk", FinishReason: finish}
+		if hasUsage {
+			ev.Usage = &usage
+		}
+		return ev, nil
 	}
 	if hasUsage {
 		return streaming.Event{Kind: streaming.EventUsage, EventType: "chat.completion.chunk", Usage: &usage}, nil
