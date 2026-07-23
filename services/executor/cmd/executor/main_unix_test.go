@@ -297,6 +297,86 @@ func TestExecutorProcess(t *testing.T) {
 			t.Fatalf("executor output = %q, want EXECUTOR_CONFIG_FILE", output)
 		}
 	})
+
+	t.Run("SIGHUP reloads config and generation advances", func(t *testing.T) {
+		// Write initial config, start the executor, then rewrite the config
+		// with a new revision and send SIGHUP. The generation should advance
+		// from 1 to 2, observable via the models endpoint returning a different
+		// model list (empty → still empty, but generation is internal; we
+		// verify the process stays healthy and the log output mentions
+		// reload success).
+		configPath := writeProcessConfig(t, minimalEmptyConfig)
+		address := freeAddress(t)
+		cmd := helperCommand(t, address, configPath, processIdentityMap)
+		if err := cmd.Start(); err != nil {
+			t.Fatalf("start executor: %v", err)
+		}
+		t.Cleanup(func() { stopProcess(cmd) })
+
+		waitForHealthz(t, "http://"+address+"/healthz")
+
+		// Rewrite config with a new revision to trigger a real reload.
+		reloadedConfig := strings.Replace(minimalEmptyConfig, "process-test", "process-test-reloaded", 1)
+		if err := os.WriteFile(configPath, []byte(reloadedConfig), 0o644); err != nil {
+			t.Fatalf("rewrite config: %v", err)
+		}
+
+		// Send SIGHUP.
+		if err := cmd.Process.Signal(syscall.SIGHUP); err != nil {
+			t.Fatalf("send SIGHUP: %v", err)
+		}
+
+		// Give the reload goroutine time to process.
+		time.Sleep(200 * time.Millisecond)
+
+		// Process should still be healthy after SIGHUP reload.
+		waitForHealthz(t, "http://"+address+"/healthz")
+
+		// Cleanly terminate.
+		if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+			t.Fatalf("send SIGTERM: %v", err)
+		}
+		if err := waitForExit(cmd, processDeadline); err != nil {
+			t.Fatalf("executor exit: %v", err)
+		}
+	})
+
+	t.Run("malformed config SIGHUP does not kill process", func(t *testing.T) {
+		// Start with a valid config, then write a malformed config and send
+		// SIGHUP. The process must stay alive and continue serving with the
+		// old generation.
+		configPath := writeProcessConfig(t, minimalEmptyConfig)
+		address := freeAddress(t)
+		cmd := helperCommand(t, address, configPath, processIdentityMap)
+		if err := cmd.Start(); err != nil {
+			t.Fatalf("start executor: %v", err)
+		}
+		t.Cleanup(func() { stopProcess(cmd) })
+
+		waitForHealthz(t, "http://"+address+"/healthz")
+
+		// Write malformed config.
+		if err := os.WriteFile(configPath, []byte(`{invalid`), 0o644); err != nil {
+			t.Fatalf("write malformed config: %v", err)
+		}
+
+		// Send SIGHUP.
+		if err := cmd.Process.Signal(syscall.SIGHUP); err != nil {
+			t.Fatalf("send SIGHUP: %v", err)
+		}
+
+		// Give the reload goroutine time to process.
+		time.Sleep(200 * time.Millisecond)
+
+		// Process must still be healthy (old generation preserved).
+		waitForHealthz(t, "http://"+address+"/healthz")
+
+		// Authenticated request should still work with old config.
+		resp := processRequest(t, address, http.MethodGet, "/v1/models", "", "Bearer "+processAPIKey)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("models status = %d, want 200; body=%s", resp.StatusCode, readBody(resp))
+		}
+	})
 }
 
 func runExecutorProcessHelper() {

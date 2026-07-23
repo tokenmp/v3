@@ -40,6 +40,9 @@ const (
 	EnvJWTIssuer = "EXECUTOR_JWT_ISSUER"
 	// EnvJWTAudience is the expected JWT audience claim.
 	EnvJWTAudience = "EXECUTOR_JWT_AUDIENCE"
+	// EnvConfigReloadInterval is the optional stat-based file change polling
+	// interval. When unset or zero, only SIGHUP triggers reloads.
+	EnvConfigReloadInterval = "EXECUTOR_CONFIG_RELOAD_INTERVAL"
 )
 
 // Config is the validated runtime configuration for Executor.
@@ -63,6 +66,12 @@ type Config struct {
 	JWTIssuer string
 	// JWTAudience is the expected JWT audience. Defaults to "tokenmp-web".
 	JWTAudience string
+	// ConfigReloadInterval controls the stat-based file change polling
+	// interval. When zero (default), stat-based polling is disabled and
+	// only SIGHUP triggers reloads. When positive, the polling goroutine
+	// stats the config file and triggers a reload when mtime or size
+	// changes.
+	ConfigReloadInterval time.Duration
 }
 
 // Load reads Executor configuration from lookupEnv. An unset value uses its
@@ -134,6 +143,17 @@ func Load(lookupEnv func(string) (string, bool)) (Config, error) {
 		if _, err = requireNonEmpty(lookupEnv, EnvIdentityMapJSON); err != nil {
 			return Config{}, err
 		}
+	}
+
+	// EXECUTOR_CONFIG_RELOAD_INTERVAL is optional. Zero (default) disables
+	// stat-based polling; only SIGHUP triggers reloads. A positive duration
+	// enables mtime+size polling.
+	if value, ok := lookupEnv(EnvConfigReloadInterval); ok && strings.TrimSpace(value) != "" {
+		interval, err := time.ParseDuration(value)
+		if err != nil || interval < 0 {
+			return Config{}, fmt.Errorf("%s must be a valid non-negative duration", EnvConfigReloadInterval)
+		}
+		config.ConfigReloadInterval = interval
 	}
 
 	return config, nil

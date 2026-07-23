@@ -140,19 +140,19 @@ func TestBuildReturnsHandlerForEmptyConfig(t *testing.T) {
 
 	path := writeConfig(t, minimalEmptyConfig)
 	cfg := testConfig(path, "{}")
-	handler, err := Build(context.Background(), cfg, envLookup(healthyEnv(t, path)))
+	app, err := Build(context.Background(), cfg, envLookup(healthyEnv(t, path)))
 	if err != nil {
 		t.Fatalf("Build() error = %v", err)
 	}
-	if handler == nil {
-		t.Fatal("Build() handler = nil")
+	if app == nil {
+		t.Fatal("Build() app = nil")
 	}
 
 	t.Run("healthz is anonymous 200", func(t *testing.T) {
 		t.Parallel()
 		req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8081/healthz", nil)
 		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, req)
+		app.Handler.ServeHTTP(rec, req)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("status = %d, want 200", rec.Code)
 		}
@@ -169,7 +169,7 @@ func TestBuildReturnsHandlerForEmptyConfig(t *testing.T) {
 		t.Parallel()
 		req := httptest.NewRequest(http.MethodHead, "http://127.0.0.1:8081/healthz", nil)
 		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, req)
+		app.Handler.ServeHTTP(rec, req)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("status = %d, want 200", rec.Code)
 		}
@@ -183,7 +183,7 @@ func TestBuildUnauthorizedV1ReturnsProtocolNative401(t *testing.T) {
 	t.Parallel()
 
 	path := writeConfig(t, minimalEmptyConfig)
-	handler, err := Build(context.Background(), testConfig(path, "{}"), envLookup(healthyEnv(t, path)))
+	app, err := Build(context.Background(), testConfig(path, "{}"), envLookup(healthyEnv(t, path)))
 	if err != nil {
 		t.Fatalf("Build() error = %v", err)
 	}
@@ -194,7 +194,7 @@ func TestBuildUnauthorizedV1ReturnsProtocolNative401(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:8081/v1/chat/completions", strings.NewReader(`{"model":"x","messages":[],"stream":false}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
+	app.Handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", rec.Code)
 	}
@@ -206,7 +206,7 @@ func TestBuildUnauthorizedV1ReturnsProtocolNative401(t *testing.T) {
 	msgReq := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:8081/v1/messages", strings.NewReader(`{"model":"x","max_tokens":1,"messages":[],"stream":false}`))
 	msgReq.Header.Set("Content-Type", "application/json")
 	msgRec := httptest.NewRecorder()
-	handler.ServeHTTP(msgRec, msgReq)
+	app.Handler.ServeHTTP(msgRec, msgReq)
 	if msgRec.Code != http.StatusUnauthorized {
 		t.Fatalf("messages status = %d, want 401", msgRec.Code)
 	}
@@ -219,7 +219,7 @@ func TestBuildAuthenticatedChatMissingModelReturns404(t *testing.T) {
 	t.Parallel()
 
 	path := writeConfig(t, minimalEmptyConfig)
-	handler, err := Build(context.Background(), testConfig(path, "{}"), envLookup(healthyEnv(t, path)))
+	app, err := Build(context.Background(), testConfig(path, "{}"), envLookup(healthyEnv(t, path)))
 	if err != nil {
 		t.Fatalf("Build() error = %v", err)
 	}
@@ -249,7 +249,7 @@ func TestBuildAuthenticatedChatMissingModelReturns404(t *testing.T) {
 			req.Header.Set("Content-Type", "application/json")
 			req.Header.Set("Authorization", "Bearer "+testAPIKey)
 			rec := httptest.NewRecorder()
-			handler.ServeHTTP(rec, req)
+			app.Handler.ServeHTTP(rec, req)
 			if rec.Code != http.StatusNotFound {
 				t.Fatalf("status = %d, want 404; body=%s", rec.Code, rec.Body.String())
 			}
@@ -264,7 +264,7 @@ func TestBuildModelsReturns200AndResponsesExecutes(t *testing.T) {
 	t.Parallel()
 
 	path := writeConfig(t, minimalEmptyConfig)
-	handler, err := Build(context.Background(), testConfig(path, "{}"), envLookup(healthyEnv(t, path)))
+	app, err := Build(context.Background(), testConfig(path, "{}"), envLookup(healthyEnv(t, path)))
 	if err != nil {
 		t.Fatalf("Build() error = %v", err)
 	}
@@ -275,7 +275,7 @@ func TestBuildModelsReturns200AndResponsesExecutes(t *testing.T) {
 		t.Parallel()
 		req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8081/v1/models", nil)
 		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, req)
+		app.Handler.ServeHTTP(rec, req)
 		if rec.Code != http.StatusUnauthorized {
 			t.Fatalf("status = %d, want 401", rec.Code)
 		}
@@ -286,7 +286,7 @@ func TestBuildModelsReturns200AndResponsesExecutes(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8081/v1/models", nil)
 		req.Header.Set("Authorization", "Bearer "+testAPIKey)
 		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, req)
+		app.Handler.ServeHTTP(rec, req)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 		}
@@ -312,7 +312,7 @@ func TestBuildModelsReturns200AndResponsesExecutes(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:8081/v1/responses", strings.NewReader(`{"model":"x","input":"hi"}`))
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, req)
+		app.Handler.ServeHTTP(rec, req)
 		if rec.Code != http.StatusUnauthorized {
 			t.Fatalf("status = %d, want 401", rec.Code)
 		}
@@ -324,7 +324,7 @@ func TestBuildModelsReturns200AndResponsesExecutes(t *testing.T) {
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+testAPIKey)
 		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, req)
+		app.Handler.ServeHTTP(rec, req)
 		if rec.Code != http.StatusNotFound {
 			t.Fatalf("status = %d, want 404; body=%s", rec.Code, rec.Body.String())
 		}
@@ -536,12 +536,12 @@ func TestBuildWithJWTSource(t *testing.T) {
 		"EXECUTOR_CONFIG_FILE":             configPath,
 		"EXECUTOR_CREDENTIAL_REF_MAP_JSON": "{}",
 	}
-	handler, err := Build(context.Background(), cfg, envLookup(env))
+	app, err := Build(context.Background(), cfg, envLookup(env))
 	if err != nil {
 		t.Fatalf("Build() error = %v", err)
 	}
-	if handler == nil {
-		t.Fatal("Build() handler = nil")
+	if app == nil {
+		t.Fatal("Build() app = nil")
 	}
 
 	// Issue a valid JWT and use it as Bearer token.
@@ -566,7 +566,7 @@ func TestBuildWithJWTSource(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8081/v1/models", nil)
 		req.Header.Set("Authorization", "Bearer "+jwtToken)
 		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, req)
+		app.Handler.ServeHTTP(rec, req)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 		}
@@ -578,7 +578,7 @@ func TestBuildWithJWTSource(t *testing.T) {
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+jwtToken)
 		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, req)
+		app.Handler.ServeHTTP(rec, req)
 		if rec.Code != http.StatusNotFound {
 			t.Fatalf("status = %d, want 404; body=%s", rec.Code, rec.Body.String())
 		}
@@ -603,7 +603,7 @@ func TestBuildWithJWTSource(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8081/v1/models", nil)
 		req.Header.Set("Authorization", "Bearer "+expiredToken)
 		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, req)
+		app.Handler.ServeHTTP(rec, req)
 		if rec.Code != http.StatusUnauthorized {
 			t.Fatalf("status = %d, want 401; body=%s", rec.Code, rec.Body.String())
 		}
@@ -614,7 +614,7 @@ func TestBuildWithJWTSource(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8081/v1/models", nil)
 		req.Header.Set("Authorization", "Bearer invalid-token")
 		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, req)
+		app.Handler.ServeHTTP(rec, req)
 		if rec.Code != http.StatusUnauthorized {
 			t.Fatalf("status = %d, want 401; body=%s", rec.Code, rec.Body.String())
 		}
@@ -624,7 +624,7 @@ func TestBuildWithJWTSource(t *testing.T) {
 		t.Parallel()
 		req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8081/v1/models", nil)
 		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, req)
+		app.Handler.ServeHTTP(rec, req)
 		if rec.Code != http.StatusUnauthorized {
 			t.Fatalf("status = %d, want 401", rec.Code)
 		}
@@ -634,7 +634,7 @@ func TestBuildWithJWTSource(t *testing.T) {
 		t.Parallel()
 		req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8081/healthz", nil)
 		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, req)
+		app.Handler.ServeHTTP(rec, req)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("status = %d, want 200", rec.Code)
 		}
@@ -686,7 +686,7 @@ func TestBuildFallsBackToIdentityEnvWhenNoJWT(t *testing.T) {
 	configPath := writeConfig(t, minimalEmptyConfig)
 	env := healthyEnv(t, configPath)
 	cfg := testConfig(configPath, "{}")
-	handler, err := Build(context.Background(), cfg, envLookup(env))
+	app, err := Build(context.Background(), cfg, envLookup(env))
 	if err != nil {
 		t.Fatalf("Build() error = %v", err)
 	}
@@ -695,7 +695,7 @@ func TestBuildFallsBackToIdentityEnvWhenNoJWT(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8081/v1/models", nil)
 	req.Header.Set("Authorization", "Bearer "+testAPIKey)
 	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
+	app.Handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
@@ -716,7 +716,7 @@ func TestBuildJWTPrioritizedOverIdentityEnv(t *testing.T) {
 		"EXECUTOR_IDENTITY_MAP_JSON":       testIdentityMap,
 		"EXECUTOR_API_KEY_TEST":            testAPIKey,
 	}
-	handler, err := Build(context.Background(), cfg, envLookup(env))
+	app, err := Build(context.Background(), cfg, envLookup(env))
 	if err != nil {
 		t.Fatalf("Build() error = %v", err)
 	}
@@ -741,7 +741,7 @@ func TestBuildJWTPrioritizedOverIdentityEnv(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8081/v1/models", nil)
 	req.Header.Set("Authorization", "Bearer "+jwtToken)
 	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
+	app.Handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("JWT auth status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
@@ -750,7 +750,7 @@ func TestBuildJWTPrioritizedOverIdentityEnv(t *testing.T) {
 	apiReq := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8081/v1/models", nil)
 	apiReq.Header.Set("Authorization", "Bearer "+testAPIKey)
 	apiRec := httptest.NewRecorder()
-	handler.ServeHTTP(apiRec, apiReq)
+	app.Handler.ServeHTTP(apiRec, apiReq)
 	if apiRec.Code != http.StatusUnauthorized {
 		t.Fatalf("API key auth status = %d, want 401 (JWT source active, API key not in JWT source)", apiRec.Code)
 	}

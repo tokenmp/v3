@@ -286,3 +286,108 @@ func TestLoadJWTConfiguration(t *testing.T) {
 		}
 	})
 }
+
+func TestLoadConfigReloadInterval(t *testing.T) {
+	t.Parallel()
+
+	t.Run("unset defaults to zero", func(t *testing.T) {
+		t.Parallel()
+		env := map[string]string{
+			"EXECUTOR_CONFIG_FILE":             "/tmp/executor.json",
+			"EXECUTOR_CREDENTIAL_REF_MAP_JSON": "{}",
+			"EXECUTOR_IDENTITY_MAP_JSON":       "{}",
+		}
+		got, err := Load(func(key string) (string, bool) { v, ok := env[key]; return v, ok })
+		if err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+		if got.ConfigReloadInterval != 0 {
+			t.Errorf("ConfigReloadInterval = %v, want 0", got.ConfigReloadInterval)
+		}
+	})
+
+	t.Run("positive duration accepted", func(t *testing.T) {
+		t.Parallel()
+		env := map[string]string{
+			"EXECUTOR_CONFIG_FILE":             "/tmp/executor.json",
+			"EXECUTOR_CREDENTIAL_REF_MAP_JSON": "{}",
+			"EXECUTOR_IDENTITY_MAP_JSON":       "{}",
+			"EXECUTOR_CONFIG_RELOAD_INTERVAL":  "30s",
+		}
+		got, err := Load(func(key string) (string, bool) { v, ok := env[key]; return v, ok })
+		if err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+		if got.ConfigReloadInterval != 30*time.Second {
+			t.Errorf("ConfigReloadInterval = %v, want 30s", got.ConfigReloadInterval)
+		}
+	})
+
+	t.Run("zero duration accepted", func(t *testing.T) {
+		t.Parallel()
+		env := map[string]string{
+			"EXECUTOR_CONFIG_FILE":             "/tmp/executor.json",
+			"EXECUTOR_CREDENTIAL_REF_MAP_JSON": "{}",
+			"EXECUTOR_IDENTITY_MAP_JSON":       "{}",
+			"EXECUTOR_CONFIG_RELOAD_INTERVAL":  "0s",
+		}
+		got, err := Load(func(key string) (string, bool) { v, ok := env[key]; return v, ok })
+		if err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+		if got.ConfigReloadInterval != 0 {
+			t.Errorf("ConfigReloadInterval = %v, want 0", got.ConfigReloadInterval)
+		}
+	})
+
+	t.Run("invalid duration rejected", func(t *testing.T) {
+		t.Parallel()
+		env := map[string]string{
+			"EXECUTOR_CONFIG_FILE":             "/tmp/executor.json",
+			"EXECUTOR_CREDENTIAL_REF_MAP_JSON": "{}",
+			"EXECUTOR_IDENTITY_MAP_JSON":       "{}",
+			"EXECUTOR_CONFIG_RELOAD_INTERVAL":  "not-a-duration",
+		}
+		_, err := Load(func(key string) (string, bool) { v, ok := env[key]; return v, ok })
+		if err == nil {
+			t.Fatal("Load() error = nil, want error")
+		}
+		if !strings.Contains(err.Error(), "EXECUTOR_CONFIG_RELOAD_INTERVAL") {
+			t.Errorf("error = %q, want it to name EXECUTOR_CONFIG_RELOAD_INTERVAL", err.Error())
+		}
+	})
+
+	t.Run("negative duration rejected", func(t *testing.T) {
+		t.Parallel()
+		env := map[string]string{
+			"EXECUTOR_CONFIG_FILE":             "/tmp/executor.json",
+			"EXECUTOR_CREDENTIAL_REF_MAP_JSON": "{}",
+			"EXECUTOR_IDENTITY_MAP_JSON":       "{}",
+			"EXECUTOR_CONFIG_RELOAD_INTERVAL":  "-5s",
+		}
+		_, err := Load(func(key string) (string, bool) { v, ok := env[key]; return v, ok })
+		if err == nil {
+			t.Fatal("Load() error = nil, want error")
+		}
+		if !strings.Contains(err.Error(), "EXECUTOR_CONFIG_RELOAD_INTERVAL") {
+			t.Errorf("error = %q, want it to name EXECUTOR_CONFIG_RELOAD_INTERVAL", err.Error())
+		}
+	})
+
+	t.Run("empty string uses default zero", func(t *testing.T) {
+		t.Parallel()
+		env := map[string]string{
+			"EXECUTOR_CONFIG_FILE":             "/tmp/executor.json",
+			"EXECUTOR_CREDENTIAL_REF_MAP_JSON": "{}",
+			"EXECUTOR_IDENTITY_MAP_JSON":       "{}",
+			"EXECUTOR_CONFIG_RELOAD_INTERVAL":  "",
+		}
+		got, err := Load(func(key string) (string, bool) { v, ok := env[key]; return v, ok })
+		if err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+		if got.ConfigReloadInterval != 0 {
+			t.Errorf("ConfigReloadInterval = %v, want 0", got.ConfigReloadInterval)
+		}
+	})
+}

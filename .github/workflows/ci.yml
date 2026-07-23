@@ -190,7 +190,7 @@ jobs:
       # with a missing model, and fail-before-listen on invalid composition/config.
       - name: go test -race (Executor compiler/snapshot/routing/pipeline/adapter SDK/config source/credential env/identity env/quarantine bridge/stream driver/response contract/composition/config/app/process)
         working-directory: services/executor
-        run: go test -race -count=1 ./internal/adapter/... ./internal/snapshot/... ./internal/routing/... ./internal/execution/... ./internal/requestlog/... ./internal/quota/... ./internal/sdk/... ./internal/configsource/... ./internal/credentialenv/... ./internal/identityenv/... ./internal/jwtverifier/... ./internal/quarantinebridge/... ./internal/imagecontract/... ./internal/nonstream/... ./internal/nonstreamfacade/... ./internal/authcontext/... ./internal/requestid/... ./internal/stream/... ./internal/streamfacade/... ./internal/streaming/... ./internal/responsecontract/... ./internal/composition/... ./internal/config/... ./internal/app/... ./cmd/executor/...
+        run: go test -race -count=1 ./internal/adapter/... ./internal/snapshot/... ./internal/routing/... ./internal/execution/... ./internal/requestlog/... ./internal/quota/... ./internal/sdk/... ./internal/configsource/... ./internal/configreload/... ./internal/credentialenv/... ./internal/identityenv/... ./internal/jwtverifier/... ./internal/quarantinebridge/... ./internal/imagecontract/... ./internal/nonstream/... ./internal/nonstreamfacade/... ./internal/authcontext/... ./internal/requestid/... ./internal/stream/... ./internal/streamfacade/... ./internal/streaming/... ./internal/responsecontract/... ./internal/composition/... ./internal/config/... ./internal/app/... ./cmd/executor/...
 
       - name: Install golang-migrate CLI
         env:
