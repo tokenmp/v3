@@ -25,6 +25,8 @@ func TestLoadDefaults(t *testing.T) {
 		IdleTimeout:          60 * time.Second,
 		ConfigFile:           "/tmp/executor.json",
 		CredentialRefMapJSON: "{}",
+		JWTIssuer:            "tokenmp-auth",
+		JWTAudience:          "tokenmp-web",
 	}
 	if got != want {
 		t.Errorf("Load() = %+v, want %+v", got, want)
@@ -91,6 +93,9 @@ func TestLoadOverrides(t *testing.T) {
 		"EXECUTOR_CONFIG_FILE":             "/etc/executor/config.json",
 		"EXECUTOR_CREDENTIAL_REF_MAP_JSON": `{"vault://p/c/default":"EXECUTOR_CREDENTIAL_P"}`,
 		"EXECUTOR_IDENTITY_MAP_JSON":       `{"a":{"subject":"s","key_id":"k","role":"service","status":"active","api_key_env":"EXECUTOR_API_KEY_A"}}`,
+		"EXECUTOR_JWT_PUBLIC_KEY_FILE":     "/etc/executor/jwt.pem",
+		"EXECUTOR_JWT_ISSUER":              "custom-issuer",
+		"EXECUTOR_JWT_AUDIENCE":            "custom-audience",
 	}
 	got, err := Load(func(key string) (string, bool) { value, ok := env[key]; return value, ok })
 	if err != nil {
@@ -103,6 +108,9 @@ func TestLoadOverrides(t *testing.T) {
 		IdleTimeout:          time.Minute,
 		ConfigFile:           "/etc/executor/config.json",
 		CredentialRefMapJSON: `{"vault://p/c/default":"EXECUTOR_CREDENTIAL_P"}`,
+		JWTPublicKeyFile:     "/etc/executor/jwt.pem",
+		JWTIssuer:            "custom-issuer",
+		JWTAudience:          "custom-audience",
 	}
 	if got != want {
 		t.Errorf("Load() = %+v, want %+v", got, want)
@@ -177,4 +185,104 @@ func TestLoadRequiresCompositionEnv(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestLoadJWTConfiguration(t *testing.T) {
+	t.Parallel()
+
+	t.Run("JWT defaults when not set", func(t *testing.T) {
+		t.Parallel()
+		env := map[string]string{
+			"EXECUTOR_CONFIG_FILE":             "/tmp/executor.json",
+			"EXECUTOR_CREDENTIAL_REF_MAP_JSON": "{}",
+			"EXECUTOR_IDENTITY_MAP_JSON":       "{}",
+		}
+		got, err := Load(func(key string) (string, bool) { v, ok := env[key]; return v, ok })
+		if err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+		if got.JWTPublicKeyFile != "" {
+			t.Errorf("JWTPublicKeyFile = %q, want empty", got.JWTPublicKeyFile)
+		}
+		if got.JWTIssuer != "tokenmp-auth" {
+			t.Errorf("JWTIssuer = %q, want %q", got.JWTIssuer, "tokenmp-auth")
+		}
+		if got.JWTAudience != "tokenmp-web" {
+			t.Errorf("JWTAudience = %q, want %q", got.JWTAudience, "tokenmp-web")
+		}
+	})
+
+	t.Run("JWT public key file set makes identity map optional", func(t *testing.T) {
+		t.Parallel()
+		env := map[string]string{
+			"EXECUTOR_CONFIG_FILE":             "/tmp/executor.json",
+			"EXECUTOR_CREDENTIAL_REF_MAP_JSON": "{}",
+			"EXECUTOR_JWT_PUBLIC_KEY_FILE":     "/etc/jwt.pem",
+		}
+		// No EXECUTOR_IDENTITY_MAP_JSON — should succeed because JWT is configured.
+		got, err := Load(func(key string) (string, bool) { v, ok := env[key]; return v, ok })
+		if err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+		if got.JWTPublicKeyFile != "/etc/jwt.pem" {
+			t.Errorf("JWTPublicKeyFile = %q, want /etc/jwt.pem", got.JWTPublicKeyFile)
+		}
+	})
+
+	t.Run("JWT issuer and audience override", func(t *testing.T) {
+		t.Parallel()
+		env := map[string]string{
+			"EXECUTOR_CONFIG_FILE":             "/tmp/executor.json",
+			"EXECUTOR_CREDENTIAL_REF_MAP_JSON": "{}",
+			"EXECUTOR_IDENTITY_MAP_JSON":       "{}",
+			"EXECUTOR_JWT_ISSUER":              "my-issuer",
+			"EXECUTOR_JWT_AUDIENCE":            "my-audience",
+		}
+		got, err := Load(func(key string) (string, bool) { v, ok := env[key]; return v, ok })
+		if err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+		if got.JWTIssuer != "my-issuer" {
+			t.Errorf("JWTIssuer = %q, want my-issuer", got.JWTIssuer)
+		}
+		if got.JWTAudience != "my-audience" {
+			t.Errorf("JWTAudience = %q, want my-audience", got.JWTAudience)
+		}
+	})
+
+	t.Run("JWT issuer whitespace uses default", func(t *testing.T) {
+		t.Parallel()
+		env := map[string]string{
+			"EXECUTOR_CONFIG_FILE":             "/tmp/executor.json",
+			"EXECUTOR_CREDENTIAL_REF_MAP_JSON": "{}",
+			"EXECUTOR_IDENTITY_MAP_JSON":       "{}",
+			"EXECUTOR_JWT_ISSUER":              "  ",
+			"EXECUTOR_JWT_AUDIENCE":            "\t",
+		}
+		got, err := Load(func(key string) (string, bool) { v, ok := env[key]; return v, ok })
+		if err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+		if got.JWTIssuer != "tokenmp-auth" {
+			t.Errorf("JWTIssuer = %q, want default tokenmp-auth", got.JWTIssuer)
+		}
+		if got.JWTAudience != "tokenmp-web" {
+			t.Errorf("JWTAudience = %q, want default tokenmp-web", got.JWTAudience)
+		}
+	})
+
+	t.Run("no JWT and no identity map fails", func(t *testing.T) {
+		t.Parallel()
+		env := map[string]string{
+			"EXECUTOR_CONFIG_FILE":             "/tmp/executor.json",
+			"EXECUTOR_CREDENTIAL_REF_MAP_JSON": "{}",
+		}
+		_, err := Load(func(key string) (string, bool) { v, ok := env[key]; return v, ok })
+		if err == nil {
+			t.Fatal("Load() error = nil, want error")
+		}
+		if !strings.Contains(err.Error(), "EXECUTOR_IDENTITY_MAP_JSON") {
+			t.Errorf("error = %q, want it to name EXECUTOR_IDENTITY_MAP_JSON", err.Error())
+		}
+	})
 }

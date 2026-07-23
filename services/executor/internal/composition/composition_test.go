@@ -2,7 +2,11 @@ package composition
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -10,10 +14,14 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	jwtv5 "github.com/golang-jwt/jwt/v5"
 
 	"github.com/tokenmp/v3/services/executor/internal/adapter"
 	"github.com/tokenmp/v3/services/executor/internal/config"
 	"github.com/tokenmp/v3/services/executor/internal/execution"
+	"github.com/tokenmp/v3/services/executor/internal/jwtverifier"
 )
 
 // minimalEmptyConfig is a secret-free config that compiles to no business
@@ -462,5 +470,288 @@ func testConfig(configPath, credentialRefMapJSON string) config.Config {
 	return config.Config{
 		ConfigFile:           configPath,
 		CredentialRefMapJSON: credentialRefMapJSON,
+	}
+}
+
+// testConfigWithJWT builds a config.Config with JWT fields set.
+func testConfigWithJWT(configPath, credentialRefMapJSON, jwtPublicKeyFile, jwtIssuer, jwtAudience string) config.Config {
+	return config.Config{
+		ConfigFile:           configPath,
+		CredentialRefMapJSON: credentialRefMapJSON,
+		JWTPublicKeyFile:     jwtPublicKeyFile,
+		JWTIssuer:            jwtIssuer,
+		JWTAudience:          jwtAudience,
+	}
+}
+
+// generateEd25519KeyPair creates a test key pair.
+func generateEd25519KeyPair(t *testing.T) (ed25519.PrivateKey, ed25519.PublicKey) {
+	t.Helper()
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key pair: %v", err)
+	}
+	return priv, pub
+}
+
+// writeEd25519PublicKeyPEM writes the public key as PKIX PEM.
+func writeEd25519PublicKeyPEM(t *testing.T, pub ed25519.PublicKey) string {
+	t.Helper()
+	der, err := x509.MarshalPKIXPublicKey(pub)
+	if err != nil {
+		t.Fatalf("marshal public key: %v", err)
+	}
+	block := &pem.Block{Type: "PUBLIC KEY", Bytes: der}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "jwt_public.pem")
+	if err := os.WriteFile(path, pem.EncodeToMemory(block), 0o644); err != nil {
+		t.Fatalf("write public key: %v", err)
+	}
+	return path
+}
+
+// issueTestJWT signs a JWT with the given private key and claims.
+func issueTestJWT(t *testing.T, priv ed25519.PrivateKey, claims *jwtverifier.Claims) string {
+	t.Helper()
+	token := jwtv5.NewWithClaims(jwtv5.SigningMethodEdDSA, claims)
+	signed, err := token.SignedString(priv)
+	if err != nil {
+		t.Fatalf("sign token: %v", err)
+	}
+	return signed
+}
+
+// ─── JWT composition tests ───────────────────────────────────────────
+
+func TestBuildWithJWTSource(t *testing.T) {
+	t.Parallel()
+
+	priv, pub := generateEd25519KeyPair(t)
+	pubKeyFile := writeEd25519PublicKeyPEM(t, pub)
+	configPath := writeConfig(t, minimalEmptyConfig)
+
+	cfg := testConfigWithJWT(configPath, "{}", pubKeyFile, "tokenmp-auth", "tokenmp-web")
+	// No EXECUTOR_IDENTITY_MAP_JSON needed when JWT is configured.
+	env := map[string]string{
+		"EXECUTOR_CONFIG_FILE":             configPath,
+		"EXECUTOR_CREDENTIAL_REF_MAP_JSON": "{}",
+	}
+	handler, err := Build(context.Background(), cfg, envLookup(env))
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	if handler == nil {
+		t.Fatal("Build() handler = nil")
+	}
+
+	// Issue a valid JWT and use it as Bearer token.
+	now := time.Now()
+	claims := &jwtverifier.Claims{
+		RegisteredClaims: jwtv5.RegisteredClaims{
+			Issuer:    "tokenmp-auth",
+			Subject:   "user-42",
+			Audience:  jwtv5.ClaimStrings{"tokenmp-web"},
+			ExpiresAt: jwtv5.NewNumericDate(now.Add(15 * time.Minute)),
+			NotBefore: jwtv5.NewNumericDate(now),
+			IssuedAt:  jwtv5.NewNumericDate(now),
+			ID:        "jti-test-1",
+		},
+		Role:         "user",
+		TokenVersion: 1,
+	}
+	jwtToken := issueTestJWT(t, priv, claims)
+
+	t.Run("JWT Bearer authenticated models 200", func(t *testing.T) {
+		t.Parallel()
+		req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8081/v1/models", nil)
+		req.Header.Set("Authorization", "Bearer "+jwtToken)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("JWT Bearer authenticated chat missing model 404", func(t *testing.T) {
+		t.Parallel()
+		req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:8081/v1/chat/completions", strings.NewReader(`{"model":"missing","messages":[{"role":"user","content":"hi"}],"stream":false}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+jwtToken)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("status = %d, want 404; body=%s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("expired JWT Bearer returns 401", func(t *testing.T) {
+		t.Parallel()
+		expiredClaims := &jwtverifier.Claims{
+			RegisteredClaims: jwtv5.RegisteredClaims{
+				Issuer:    "tokenmp-auth",
+				Subject:   "user-42",
+				Audience:  jwtv5.ClaimStrings{"tokenmp-web"},
+				ExpiresAt: jwtv5.NewNumericDate(now.Add(-1 * time.Hour)),
+				NotBefore: jwtv5.NewNumericDate(now.Add(-2 * time.Hour)),
+				IssuedAt:  jwtv5.NewNumericDate(now.Add(-2 * time.Hour)),
+				ID:        "jti-expired",
+			},
+			Role:         "user",
+			TokenVersion: 1,
+		}
+		expiredToken := issueTestJWT(t, priv, expiredClaims)
+		req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8081/v1/models", nil)
+		req.Header.Set("Authorization", "Bearer "+expiredToken)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want 401; body=%s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("invalid JWT Bearer returns 401", func(t *testing.T) {
+		t.Parallel()
+		req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8081/v1/models", nil)
+		req.Header.Set("Authorization", "Bearer invalid-token")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want 401; body=%s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("no Authorization returns 401", func(t *testing.T) {
+		t.Parallel()
+		req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8081/v1/models", nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want 401", rec.Code)
+		}
+	})
+
+	t.Run("healthz remains anonymous", func(t *testing.T) {
+		t.Parallel()
+		req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8081/healthz", nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", rec.Code)
+		}
+	})
+}
+
+func TestBuildJWTSourceRejectsMissingPublicKeyFile(t *testing.T) {
+	t.Parallel()
+
+	configPath := writeConfig(t, minimalEmptyConfig)
+	missingKeyFile := filepath.Join(t.TempDir(), "missing.pem")
+
+	cfg := testConfigWithJWT(configPath, "{}", missingKeyFile, "tokenmp-auth", "tokenmp-web")
+	env := map[string]string{
+		"EXECUTOR_CONFIG_FILE":             configPath,
+		"EXECUTOR_CREDENTIAL_REF_MAP_JSON": "{}",
+	}
+	_, err := Build(context.Background(), cfg, envLookup(env))
+	if !errors.Is(err, ErrJWTVerifier) {
+		t.Fatalf("Build() error = %v, want ErrJWTVerifier", err)
+	}
+}
+
+func TestBuildJWTSourceRejectsMalformedPublicKeyFile(t *testing.T) {
+	t.Parallel()
+
+	configPath := writeConfig(t, minimalEmptyConfig)
+	dir := t.TempDir()
+	badKeyFile := filepath.Join(dir, "bad.pem")
+	if err := os.WriteFile(badKeyFile, []byte("not a pem"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	cfg := testConfigWithJWT(configPath, "{}", badKeyFile, "tokenmp-auth", "tokenmp-web")
+	env := map[string]string{
+		"EXECUTOR_CONFIG_FILE":             configPath,
+		"EXECUTOR_CREDENTIAL_REF_MAP_JSON": "{}",
+	}
+	_, err := Build(context.Background(), cfg, envLookup(env))
+	if !errors.Is(err, ErrJWTVerifier) {
+		t.Fatalf("Build() error = %v, want ErrJWTVerifier", err)
+	}
+}
+
+func TestBuildFallsBackToIdentityEnvWhenNoJWT(t *testing.T) {
+	t.Parallel()
+
+	// Without JWT configured, identityenv is required and used.
+	configPath := writeConfig(t, minimalEmptyConfig)
+	env := healthyEnv(t, configPath)
+	cfg := testConfig(configPath, "{}")
+	handler, err := Build(context.Background(), cfg, envLookup(env))
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+
+	// API key auth still works.
+	req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8081/v1/models", nil)
+	req.Header.Set("Authorization", "Bearer "+testAPIKey)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestBuildJWTPrioritizedOverIdentityEnv(t *testing.T) {
+	t.Parallel()
+
+	priv, pub := generateEd25519KeyPair(t)
+	pubKeyFile := writeEd25519PublicKeyPEM(t, pub)
+	configPath := writeConfig(t, minimalEmptyConfig)
+
+	// Both JWT and identityenv are configured; JWT should be used.
+	cfg := testConfigWithJWT(configPath, "{}", pubKeyFile, "tokenmp-auth", "tokenmp-web")
+	env := map[string]string{
+		"EXECUTOR_CONFIG_FILE":             configPath,
+		"EXECUTOR_CREDENTIAL_REF_MAP_JSON": "{}",
+		"EXECUTOR_IDENTITY_MAP_JSON":       testIdentityMap,
+		"EXECUTOR_API_KEY_TEST":            testAPIKey,
+	}
+	handler, err := Build(context.Background(), cfg, envLookup(env))
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+
+	// JWT token should work.
+	now := time.Now()
+	claims := &jwtverifier.Claims{
+		RegisteredClaims: jwtv5.RegisteredClaims{
+			Issuer:    "tokenmp-auth",
+			Subject:   "jwt-user",
+			Audience:  jwtv5.ClaimStrings{"tokenmp-web"},
+			ExpiresAt: jwtv5.NewNumericDate(now.Add(15 * time.Minute)),
+			NotBefore: jwtv5.NewNumericDate(now),
+			IssuedAt:  jwtv5.NewNumericDate(now),
+			ID:        "jti-priority",
+		},
+		Role:         "user",
+		TokenVersion: 1,
+	}
+	jwtToken := issueTestJWT(t, priv, claims)
+
+	req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8081/v1/models", nil)
+	req.Header.Set("Authorization", "Bearer "+jwtToken)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("JWT auth status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+
+	// API key should NOT work when JWT source is active (different source).
+	apiReq := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8081/v1/models", nil)
+	apiReq.Header.Set("Authorization", "Bearer "+testAPIKey)
+	apiRec := httptest.NewRecorder()
+	handler.ServeHTTP(apiRec, apiReq)
+	if apiRec.Code != http.StatusUnauthorized {
+		t.Fatalf("API key auth status = %d, want 401 (JWT source active, API key not in JWT source)", apiRec.Code)
 	}
 }

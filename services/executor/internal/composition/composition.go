@@ -26,7 +26,9 @@ import (
 	executorv1 "github.com/tokenmp/v3/services/executor/internal/contract/executorv1"
 	"github.com/tokenmp/v3/services/executor/internal/credentialenv"
 	"github.com/tokenmp/v3/services/executor/internal/execution"
+	"github.com/tokenmp/v3/services/executor/internal/identity"
 	"github.com/tokenmp/v3/services/executor/internal/identityenv"
+	"github.com/tokenmp/v3/services/executor/internal/jwtverifier"
 	"github.com/tokenmp/v3/services/executor/internal/modelcatalogfacade"
 	"github.com/tokenmp/v3/services/executor/internal/nonstreamfacade"
 	"github.com/tokenmp/v3/services/executor/internal/quarantinebridge"
@@ -60,6 +62,9 @@ var (
 	// ErrIdentityResolver means the identity environment source could not be
 	// constructed.
 	ErrIdentityResolver = errors.New("composition: identity resolver unavailable")
+	// ErrJWTVerifier means the JWT identity source could not be constructed
+	// (e.g. missing or malformed public key file).
+	ErrJWTVerifier = errors.New("composition: jwt verifier unavailable")
 	// ErrUnsupportedRoute means an enabled route declares an SDK/protocol pair
 	// for which no official non-stream adapter is registered. Only OpenAI Chat
 	// (openai/openai_chat) and Anthropic Messages (anthropic/anthropic_messages)
@@ -124,10 +129,21 @@ func Build(ctx context.Context, cfg config.Config, lookupEnv func(string) (strin
 		return nil, ErrCredentialResolver
 	}
 
-	// ── Identity environment resolver (re-reads the map env internally) ──
-	identitySource, err := identityenv.NewFromEnv(ctx, lookupEnv)
-	if err != nil {
-		return nil, ErrIdentityResolver
+	// ── Identity source: JWT (primary) or identityenv (fallback) ──
+	var identitySource identity.Port
+	if cfg.JWTPublicKeyFile != "" {
+		jwtSrc, err := jwtverifier.NewSource(cfg.JWTPublicKeyFile, cfg.JWTIssuer, cfg.JWTAudience)
+		if err != nil {
+			return nil, ErrJWTVerifier
+		}
+		identitySource = jwtSrc
+	} else {
+		// identityenv fallback: re-reads the map env internally.
+		envSrc, err := identityenv.NewFromEnv(ctx, lookupEnv)
+		if err != nil {
+			return nil, ErrIdentityResolver
+		}
+		identitySource = envSrc
 	}
 
 	// ── Runtime + quarantine + quota + execution log (in-memory) ──

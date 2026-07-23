@@ -826,6 +826,52 @@ Transport renderer `renderer_test.go` 覆盖：
 | Response 500 + RA field | 无 `Retry-After` header |
 | 本地错误（invalid request/unauthorized/model not found/streaming unsupported） | Chat/Message/Image 路径均无 `Retry-After` header |
 
+### 14.8 Phase 19 JWT 验证 tests
+
+`internal/jwtverifier` 测试覆盖：
+
+| 维度 | 已覆盖断言 |
+|---|---|
+| 有效 round-trip | 签发→验证→Claims 字段正确 |
+| 过期 token | `ErrTokenExpired` |
+| nbf 未来 | `ErrTokenNotValidYet` |
+| 签名篡改 | 验证失败 |
+| 错误公钥 | 验证失败 |
+| 错误 iss | 验证失败 |
+| 错误 aud | 验证失败 |
+| alg=none | 验证失败（`WithValidMethods(["EdDSA"])` + keyfunc 断言） |
+| 缺失 sub | 验证失败 |
+| 缺失 jti | 验证失败 |
+| 缺失 role | 验证失败 |
+| token_version=0 | 验证失败 |
+| role 映射 | `"user"→RoleService`、`"admin"→RoleAdmin` |
+| 未知 role | `ErrUnknownKey` |
+| 空 token | 验证失败 |
+| 并发 Verify | 无 data race |
+| fuzz | 无 panic/无泄露 |
+| 公钥文件加载 | 正常加载 |
+| 公钥文件缺失 | `ErrPublicKeyReadFailed` |
+| 公钥文件格式错误 | `ErrPublicKeyParseFailed` |
+| RSA 误用 | `ErrPublicKeyParseFailed` |
+| Source `String()` | 返回 `jwtverifier.Source([REDACTED])`，不泄露 issuer/audience |
+| context 取消 | 尊重取消 |
+
+Composition 测试覆盖：
+
+| 维度 | 已覆盖断言 |
+|---|---|
+| JWT source 优先 | `JWTPublicKeyFile` 非空时使用 JWT source |
+| identityenv fallback | `JWTPublicKeyFile` 为空时使用 identityenv |
+| JWT 启动 fail-fast | 公钥文件缺失/格式错误 → `ErrJWTVerifier` |
+| JWT 时 identityenv optional | `EXECUTOR_IDENTITY_MAP_JSON` 不再必填 |
+
+Facade `validPrincipal` 更新：
+
+| 维度 | 已覆盖断言 |
+|---|---|
+| 空 KeyID 接受 | JWT source 的 Principal（KeyID=""）通过校验 |
+| 非空 KeyID 仍校验 | identityenv source 的 Principal（KeyID 非空）仍受 bounded printable 校验 |
+
 ## 15. Concurrency 与 Race 测试
 
 使用：
@@ -998,7 +1044,7 @@ go test -race -count=1 ./test/integration/...
 | Non-stream pipeline | **已实施（经 composition 接入 runtime）**：Mock/InMemory/fake tests 覆盖 owner-bound Plan、pure Prepare/per-attempt credential resolve、Engine、registry/auth compatibility、frozen retry policy、per-attempt timeout、one Reserve/safe terminalizer、mapped failure 和 safe events；不证明 wire attempt 或跨进程 exactly-once，durable idempotency/replay、remote resolver 仍待后续；`Retry-After` parsing 已由 Phase 15 实施，outbound `Retry-After` header 已由 Phase 17 实施 |
 | Transport-neutral non-stream facade | **已实施（经 composition 接入 runtime）**：`internal/nonstream` owns the transport-neutral request/result/executor/principal boundary; `internal/nonstreamfacade` pins the current snapshot, protocol-filters an owner-bound Plan, defensively revalidates the authenticated principal, issues a CSPRNG validated reservation ID, and calls the implemented Runner exactly once; `internal/authcontext` owns the private request identity channel; `internal/requestid` owns the `res_` grammar and crypto-random source. All four are independent CI race packages; wired into `main` and public routes via `internal/composition` |
 | Non-stream HTTP transport | **已实施（经 composition 接入 runtime）**：`adapter_integration_test.go` 将 DI `NewNonStream` adapter 接入 generated `NewStrictHandler` + `CaptureRawBody`，以 kin-openapi 校验每条 non-stream path 响应；`body_test.go`、`normalizer_test.go`、`renderer_test.go`、`strictoptions_test.go`、`requestid_test.go` 覆盖 raw-body 捕获、strict normalizer、protocol renderer、`SafeStrictOptions` 与 trusted request-id；identity/runtime config/facade/reservation 与公开路由现经 `internal/composition` 接入，并由 composition-level route conformance test 覆盖 |
-| Config source（phase 7.7 前置） | **已实施（经 composition 接入 runtime）**：`internal/configsource` 的 `LoadFile`/`CompileAndPublishInitial`/`ScanSecrets` 测试覆盖 fixture 加载、TOCTOU/identity、1 MiB 上限、结构走查、top-level object、unknown field、trailing data、UTF-8、context cancel、sentinel 不泄露且 non-wrapping、secret 扫描 lexical+semantic 双通道与 fuzz smoke、initial generation=1 bootstrap、meta isolation、stale/nil store/compile 失败/revision trim/pre-canceled ctx 与原子并发；经 `internal/composition` 启动接入（initial generation=1 bootstrap），未实现热重载 loop。credential env 已实施：模块内 `internal/credentialenv` 只接受严格的 `vault://` credential ref → `EXECUTOR_CREDENTIAL_*` 环境变量名 JSON allowlist；每个 attempt 重新读取映射环境变量以观察 rotation，并仅以 opaque secret 交给调用方。`ValidateCompiled` 在启动预检中要求 enabled authenticated route 的 enabled credential refs 与可用 mapping 精确一致。mapping JSON 与 secret environment variables 均不得提交；该能力现经 `internal/composition` 接入 `main` 与公开 routes。identity env 已实施为模块内能力（经 composition 接入 runtime、未做 Auth JWT） |
+| Config source（phase 7.7 前置） | **已实施（经 composition 接入 runtime）**：`internal/configsource` 的 `LoadFile`/`CompileAndPublishInitial`/`ScanSecrets` 测试覆盖 fixture 加载、TOCTOU/identity、1 MiB 上限、结构走查、top-level object、unknown field、trailing data、UTF-8、context cancel、sentinel 不泄露且 non-wrapping、secret 扫描 lexical+semantic 双通道与 fuzz smoke、initial generation=1 bootstrap、meta isolation、stale/nil store/compile 失败/revision trim/pre-canceled ctx 与原子并发；经 `internal/composition` 启动接入（initial generation=1 bootstrap），未实现热重载 loop。credential env 已实施：模块内 `internal/credentialenv` 只接受严格的 `vault://` credential ref → `EXECUTOR_CREDENTIAL_*` 环境变量名 JSON allowlist；每个 attempt 重新读取映射环境变量以观察 rotation，并仅以 opaque secret 交给调用方。`ValidateCompiled` 在启动预检中要求 enabled authenticated route 的 enabled credential refs 与可用 mapping 精确一致。mapping JSON 与 secret environment variables 均不得提交；该能力现经 `internal/composition` 接入 `main` 与公开 routes。identity env 已实施为模块内能力（经 composition 接入 runtime）。Phase 19 JWT 验证已实施：`internal/jwtverifier` 提供 Ed25519 (EdDSA) 本地 JWT 验证，实现 `identity.Port`；JWT source 优先于 identityenv fallback |
 | Models catalog（Phase 13） | **已实施（经 composition 接入 runtime）**：`internal/modelcatalog` 单元测试覆盖 `MapCapabilities`（5 个公开映射、3 个省略映射、排序、空/nil）、`MapThinking`（unsupported→nil、supported 含/不含 budget、零 budget 省略、单 effort level）与 `effortLevels`（全范围/子范围/单 level/invalid 回退）；`internal/modelcatalogfacade` 测试覆盖正常 listing（enabled model、排序、capabilities、created）、quarantine（active 排除/expired 包含/read error fail-closed）、route 过滤（disabled route model 不出现）、Principal 校验（空/非法→`ErrUnauthenticated`）、依赖校验（nil store/quarantine→`ErrMisconfigured`、空 store→`ErrNoSnapshot`）、空配置、Thinking 映射与 20 并发 race；transport adapter tests 覆盖 `ListModels`：注入 `CatalogProvider` 返回 catalog、未注入回退 501、`ErrNoSnapshot`→500、`ErrUnauthenticated`→401 |
 | Streaming | **Phase 10 已实施（runtime Chat/Messages SSE）**：hybrid plain+strict dispatch、auth-before-capture、pre-commit JSON/post-commit no fallback、flushing native SSE sink、OpenAI `[DONE]`、Anthropic native event framing、StreamDriver 与 exact SDK stream registry composition；transport/stream/streamfacade/composition/process race coverage。无 HTTP atomicity、wire proof、跨进程 exactly-once 或 public/provider E2E；Responses non-stream+stream 已 runtime 启用；Images legacy non-stream 已执行。 |
 | Anthropic streaming | **已实施并接入 runtime**：native SSE + thinking signature，HTTP SSE transport/composition/runtime 已用于 Messages `stream:true` |
@@ -1007,6 +1053,7 @@ go test -race -count=1 ./test/integration/...
 | Outbound Retry-After | **Phase 17 已实施**：`execution.applyRetryAfter` 429/529/500/sub-second/clamp/nil 单元测试；`adapter.Engine.MapResponse` 不设置 RetryAfterSeconds 单元测试；transport renderer chat/message/image/response 429/529 Retry-After header + 本地错误不设置 header 测试 |
 | Quota | **Phase 12 typed domain 已实施并接线**：`Repository`、`DomainInMemory`、`TypedMock` shared contract/race/fuzz tests 覆盖 typed reservation exact replay/conflict、terminal settlement、cancellation/fault/ownership/redaction；legacy `Port` 已删除；Runner 使用 `AccountingConfirmedUsage`（`sdk.Completion.Known=true`+`Valid()` 时携带 `ConfirmedUsage`）或 `AccountingUnpricedSuccess`，StreamDriver 使用 `AccountingConfirmedUsage`（`UsageKnown` 时携带 `ConfirmedUsage`）或 `AccountingUnpricedSuccess`。Phase 12.3 usage extraction tests 覆盖 `sdk.Usage.Valid()`、OpenAI/Anthropic adapter 提取逻辑、Images `Known=false`、Runner `runnerFinalizeOutcome` 映射与 integration。无 usage charging、DB 或 durable storage。 |
 | Logging | **Phase 16 已实施（`internal/requestlog`）**：`ExecutionPort`/`InMemoryExecution`/`ExecutionMock` 安全表面（反射+渲染）、顺序与防御性拷贝、fault injection、并发、环形缓冲 FIFO 淘汰、QueryEvents 过滤、Mock 注入与契约套件 |
+| JWT 验证 | **Phase 19 已实施（`internal/jwtverifier`）**：Ed25519/EdDSA 本地验证、Claims 校验（iss/aud/exp/nbf/sub/jti/role/token_version>=1）、role 映射、alg confusion 防御、sentinel errors 不泄露、Source `String()` redacted、并发 Verify、fuzz、公钥文件加载/缺失/格式错误/RSA 误用、context 取消；composition JWT 优先/identityenv fallback/fail-fast；facade `validPrincipal` 空 KeyID 接受 |
 | CI/Docker | full local-equivalent suite + image build |
 
 ## 21. Definition of Done

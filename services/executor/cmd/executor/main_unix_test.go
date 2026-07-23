@@ -3,6 +3,10 @@
 package main
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/x509"
+	"encoding/pem"
 	"errors"
 	"io"
 	"net"
@@ -66,6 +70,55 @@ func TestExecutorProcess(t *testing.T) {
 		}
 		if err := waitForExit(cmd, processDeadline); err != nil {
 			t.Fatalf("executor exit: %v", err)
+		}
+	})
+
+	t.Run("JWT configuration starts normally", func(t *testing.T) {
+		// Generate an Ed25519 key pair and write the public key PEM.
+		configPath := writeProcessConfig(t, minimalEmptyConfig)
+		_, pubKeyPEM := generateProcessKeyPair(t)
+		pubKeyFile := filepath.Join(t.TempDir(), "jwt_public.pem")
+		if err := os.WriteFile(pubKeyFile, []byte(pubKeyPEM), 0o644); err != nil {
+			t.Fatalf("write public key: %v", err)
+		}
+
+		address := freeAddress(t)
+		cmd := helperCommandJWT(t, address, configPath, pubKeyFile)
+		if err := cmd.Start(); err != nil {
+			t.Fatalf("start executor: %v", err)
+		}
+		t.Cleanup(func() { stopProcess(cmd) })
+
+		waitForHealthz(t, "http://"+address+"/healthz")
+		// JWT-only config: API key auth should fail (no identityenv).
+		resp := processRequest(t, address, http.MethodGet, "/v1/models", "", "Bearer "+processAPIKey)
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("API key auth status = %d, want 401 (JWT source active)", resp.StatusCode)
+		}
+	})
+
+	t.Run("JWT missing public key file fails before listen", func(t *testing.T) {
+		configPath := writeProcessConfig(t, minimalEmptyConfig)
+		missingKeyFile := filepath.Join(t.TempDir(), "missing.pem")
+
+		probe, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatalf("reserve probe address: %v", err)
+		}
+		address := probe.Addr().String()
+		t.Cleanup(func() { _ = probe.Close() })
+
+		cmd := helperCommandJWT(t, address, configPath, missingKeyFile)
+		output, err := cmd.CombinedOutput()
+		if err == nil {
+			t.Fatal("executor exit error = nil, want non-zero exit")
+		}
+		out := string(output)
+		if !strings.Contains(out, "build composition") {
+			t.Fatalf("executor output = %q, want build composition failure", out)
+		}
+		if strings.Contains(out, "listen on") {
+			t.Fatalf("executor reached net.Listen; output = %q", out)
 		}
 	})
 
@@ -366,4 +419,43 @@ func stopProcess(cmd *exec.Cmd) {
 	}
 	_ = cmd.Process.Kill()
 	_ = cmd.Wait()
+}
+
+// generateProcessKeyPair creates an Ed25519 key pair for process tests.
+// It returns the private key PEM and public key PEM strings.
+func generateProcessKeyPair(t *testing.T) (string, string) {
+	t.Helper()
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key pair: %v", err)
+	}
+	privDER, err := x509.MarshalPKCS8PrivateKey(priv)
+	if err != nil {
+		t.Fatalf("marshal private key: %v", err)
+	}
+	pubDER, err := x509.MarshalPKIXPublicKey(pub)
+	if err != nil {
+		t.Fatalf("marshal public key: %v", err)
+	}
+	privPEM := string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: privDER}))
+	pubPEM := string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pubDER}))
+	return privPEM, pubPEM
+}
+
+// helperCommandJWT creates an executor subprocess configured with JWT as the
+// identity source (no EXECUTOR_IDENTITY_MAP_JSON needed).
+func helperCommandJWT(t *testing.T, address, configPath, pubKeyFile string) *exec.Cmd {
+	t.Helper()
+	cmd := exec.Command(os.Args[0], "-test.run=^TestExecutorProcess$")
+	cmd.Env = append(os.Environ(),
+		helperEnv+"=1",
+		"EXECUTOR_HTTP_ADDR="+address,
+		"EXECUTOR_SHUTDOWN_TIMEOUT=1s",
+		"EXECUTOR_CONFIG_FILE="+configPath,
+		"EXECUTOR_CREDENTIAL_REF_MAP_JSON={}",
+		"EXECUTOR_JWT_PUBLIC_KEY_FILE="+pubKeyFile,
+		"EXECUTOR_JWT_ISSUER=tokenmp-auth",
+		"EXECUTOR_JWT_AUDIENCE=tokenmp-web",
+	)
+	return cmd
 }

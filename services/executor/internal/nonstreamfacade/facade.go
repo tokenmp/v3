@@ -304,7 +304,8 @@ func nonStreamProtocol(p adapter.Protocol) bool {
 }
 
 // validPrincipal reports whether p is a trusted, active service/admin caller
-// with non-empty bounded printable subject and keyID. It is defense-in-depth:
+// with non-empty bounded printable subject. KeyID may be empty (JWT sources
+// carry no kid) or non-empty and bounded printable. It is defense-in-depth:
 // the transport auth boundary already checks these, but the facade revalidates
 // so a miswired boundary can never drive an authenticated execution. The
 // bounds and printable range mirror identityenv's safe surface.
@@ -315,7 +316,15 @@ func validPrincipal(p nonstream.Principal) bool {
 	if p.Role != nonstream.RoleService && p.Role != nonstream.RoleAdmin {
 		return false
 	}
-	return validSafeToken(p.Subject, maxSubjectBytes) && validSafeToken(p.KeyID, maxKeyIDBytes)
+	if !validSafeToken(p.Subject, maxSubjectBytes) {
+		return false
+	}
+	// KeyID is optional: JWT sources carry no kid. When present it must be
+	// bounded and printable.
+	if p.KeyID != "" && !validSafeToken(p.KeyID, maxKeyIDBytes) {
+		return false
+	}
+	return true
 }
 
 // validSafeToken reports whether v is non-empty, bounded, UTF-8 valid, and
