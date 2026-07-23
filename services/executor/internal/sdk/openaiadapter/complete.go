@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/openai/openai-go/v3"
@@ -83,7 +85,17 @@ func (c *Client) completeChat(ctx context.Context, call sdk.Call) (sdk.Completio
 
 	client := openai.NewClient(callOpts...)
 	var response *http.Response
+	fmt.Fprintf(os.Stderr, "DEBUG body=%s upstreamModel=%s baseURL=%s\n", call.Request.Body, call.Target.UpstreamModel, baseURL)
 	res, err := client.Chat.Completions.New(ctx, params, option.WithResponseInto(&response))
+	rawlen := 0
+	if res != nil {
+		rawlen = len(res.RawJSON())
+	}
+	status := 0
+	if response != nil {
+		status = response.StatusCode
+	}
+	fmt.Fprintf(os.Stderr, "DEBUG err=%v status=%d rawlen=%d\n", err, status, rawlen)
 	if err != nil {
 		// Cancellation remains the original context sentinel so callers can stop
 		// control flow without treating it as an upstream failure. A deadline is
@@ -95,11 +107,13 @@ func (c *Client) completeChat(ctx context.Context, call sdk.Call) (sdk.Completio
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return sdk.Completion{}, sdk.NewClassifiedError(context.DeadlineExceeded, 0, "", "", "")
 		}
+		fmt.Fprintf(os.Stderr, "DEBUG body=%s upstreamModel=%s baseURL=%s\n", call.Request.Body, call.Target.UpstreamModel, baseURL)
 		return sdk.Completion{}, classifyError(err, response)
 	}
 	if err := ctx.Err(); err != nil {
 		return sdk.Completion{}, classifyContextError(err)
 	}
+	fmt.Fprintf(os.Stderr, "DEBUG rawjson=%s\n", res.RawJSON())
 	completion := sdk.Completion{RawJSON: json.RawMessage(res.RawJSON())}
 	if response != nil {
 		completion.Status = response.StatusCode

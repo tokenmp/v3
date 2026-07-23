@@ -1,0 +1,6 @@
+# oapi-codegen v2.8.0 configuration for API v1 HTTP models.
+# Used by: packages/contracts/go/generate-api.sh
+# Output: services/api/internal/contract/apiv1/models.gen.go
+package: apiv1
+generate:
+  models: true

@@ -1,0 +1,10 @@
+# oapi-codegen v2.8.0 configuration for API v1 Chi and strict server code.
+# Used by: packages/contracts/go/generate-api.sh
+# Output: services/api/internal/contract/apiv1/server.gen.go
+# skip-prune preserves references to models generated into the same package.
+package: apiv1
+generate:
+  chi-server: true
+  strict-server: true
+output-options:
+  skip-prune: true
