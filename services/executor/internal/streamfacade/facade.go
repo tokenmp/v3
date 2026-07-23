@@ -232,24 +232,41 @@ func (f *Facade) Execute(ctx context.Context, req stream.Request) (stream.Result
 	if err != nil {
 		return stream.Result{}, stream.ErrInvalidRequest
 	}
-	// Apply the protocol filter so a chat completion request can never resolve
-	// an anthropic_messages route and vice versa. The Plan remains owner-bound
+	// Apply the protocol filter: when the request protocol matches a route
+	// protocol, only same-protocol routes are resolved. When no same-protocol
+	// route exists, cross-protocol routes are resolved by ModelID so the
+	// Driver can perform protocol conversion. The Plan remains owner-bound
 	// by this resolver, preserving the Driver's ValidatePlan contract.
+	//
+	// First try same-protocol resolution. If that yields candidates, use them
+	// (no conversion needed). Otherwise, resolve without protocol filter to
+	// allow cross-protocol routes.
 	selector.Protocol = req.Protocol
 
 	plan, err := resolver.Resolve(ctx, selector)
-	if err != nil {
-		if errors.Is(err, routing.ErrNotFound) {
-			return stream.Result{}, stream.ErrModelNotFound
-		}
-		// Quarantine-unavailable, snapshot-invalid, or context cancellation.
-		// Context cancellation is returned unchanged so the transport makes no
-		// write; every other routing failure fails closed to a safe internal
-		// error carrying no routing detail.
+	if err != nil && !errors.Is(err, routing.ErrNotFound) {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return stream.Result{}, err
 		}
 		return stream.Result{}, ErrRouting
+	}
+	if errors.Is(err, routing.ErrNotFound) {
+		// No same-protocol route found; try cross-protocol resolution by
+		// removing the protocol filter so routes with a different protocol
+		// can be resolved. The Driver will handle protocol conversion.
+		crossSelector := selector
+		crossSelector.Protocol = ""
+		var crossErr error
+		plan, crossErr = resolver.Resolve(ctx, crossSelector)
+		if crossErr != nil {
+			if errors.Is(crossErr, routing.ErrNotFound) {
+				return stream.Result{}, stream.ErrModelNotFound
+			}
+			if errors.Is(crossErr, context.Canceled) || errors.Is(crossErr, context.DeadlineExceeded) {
+				return stream.Result{}, crossErr
+			}
+			return stream.Result{}, ErrRouting
+		}
 	}
 
 	// Issue the per-request reservation identifier. The Driver owns the single

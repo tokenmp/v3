@@ -9,6 +9,7 @@ import (
 
 	"github.com/tokenmp/v3/services/executor/internal/adapter"
 	"github.com/tokenmp/v3/services/executor/internal/execution/retry"
+	"github.com/tokenmp/v3/services/executor/internal/protocolconvert"
 	"github.com/tokenmp/v3/services/executor/internal/quota"
 	"github.com/tokenmp/v3/services/executor/internal/requestid"
 	"github.com/tokenmp/v3/services/executor/internal/requestlog"
@@ -93,7 +94,7 @@ func (d *StreamDriver) Run(ctx context.Context, in StreamInput) (StreamResult, e
 		return StreamResult{}, err
 	}
 	firstPrepared := firstCall.preparedAttempt()
-	if !validStreamTimeouts(firstPrepared) || in.QuotaIdentity.Protocol != string(firstPrepared.Target.Protocol) {
+	if !validStreamTimeouts(firstPrepared) {
 		return StreamResult{}, ErrMisconfigured
 	}
 	policy := firstPrepared.Retry
@@ -124,12 +125,32 @@ func (d *StreamDriver) Run(ctx context.Context, in StreamInput) (StreamResult, e
 		attemptNo++
 		attemptCtx, cancelAttempt := context.WithTimeout(ctx, prepared.Timeout.Request)
 		attemptStart := d.now()
+
+		// Cross-protocol request conversion for streaming.
+		reqProtocol := adapter.Protocol(in.QuotaIdentity.Protocol)
+		targetProtocol := prepared.Target.Protocol
+		crossProtocol := reqProtocol != targetProtocol
+
 		attempt, acquired, began, opened, openErr := preparedCall.NewAttemptSession(state, policy, in.Credentials).ExecuteStream(attemptCtx, func(client sdk.StreamClient, call sdk.StreamCall) (sdk.StreamOpen, error) {
+			// Cross-protocol request conversion: replace the applied body with the
+			// converted body when the request protocol differs from the target.
+			if crossProtocol {
+				converted, convErr := protocolconvert.ConvertRequest(call.Request.Body, reqProtocol, targetProtocol)
+				if convErr != nil {
+					return sdk.StreamOpen{}, ErrProtocolConvert
+				}
+				call.Request.Body = converted
+			}
 			return client.Stream(attemptCtx, call)
 		})
 		latency := d.now().Sub(attemptStart)
 		if openErr != nil {
 			cancelAttempt()
+			// Cross-protocol request conversion failure is non-retryable.
+			if errors.Is(openErr, ErrProtocolConvert) {
+				_ = state.Cancel()
+				return StreamResult{}, d.releaseFailureWithLog(ctx, terminalizer, ErrProtocolConvert, in, prepared, attemptNo)
+			}
 			if !acquired {
 				return StreamResult{}, d.releaseFailureWithLog(ctx, terminalizer, parentError(ctx, openErr), in, prepared, attemptNo)
 			}
@@ -165,7 +186,7 @@ func (d *StreamDriver) Run(ctx context.Context, in StreamInput) (StreamResult, e
 			_ = state.Cancel()
 			return StreamResult{}, d.releaseFailureWithLog(ctx, terminalizer, ErrMisconfigured, in, prepared, attemptNo)
 		}
-		source, sink, err := newSDKPayloadSource(opened.Source, in.Sink)
+		source, sink, err := newSDKPayloadSource(opened.Source, newConvertingSink(in.Sink, targetProtocol, reqProtocol))
 		if err != nil {
 			// newSDKPayloadSource rejected an otherwise opened provider source.
 			// It is still ours to close; never expose provider cleanup details.

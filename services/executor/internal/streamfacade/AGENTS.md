@@ -4,7 +4,7 @@
 
 ## Responsibility
 
-- Composes one transport-neutral stream request: pin current snapshot, resolve a protocol-filtered owner-bound plan, defensively validate a trusted active Principal, issue a CSPRNG reservation ID, and call the injected StreamDriver exactly once.
+- Composes one transport-neutral stream request: pin current snapshot, resolve a protocol-filtered owner-bound plan (same-protocol preferred, cross-protocol fallback per Phase 22), defensively validate a trusted active Principal, issue a CSPRNG reservation ID, and call the injected StreamDriver exactly once.
 - Does not implement an HTTP/SSE sink, hybrid adapter, composition/runtime registration, provider execution, quota lifecycle, or routing policy. Phase 10 composition injects this facade into the HTTP adapter without changing that boundary.
 
 ## Rules

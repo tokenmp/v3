@@ -9,6 +9,7 @@ import (
 
 	"github.com/tokenmp/v3/services/executor/internal/adapter"
 	"github.com/tokenmp/v3/services/executor/internal/execution/retry"
+	"github.com/tokenmp/v3/services/executor/internal/protocolconvert"
 	"github.com/tokenmp/v3/services/executor/internal/quota"
 	"github.com/tokenmp/v3/services/executor/internal/requestid"
 	"github.com/tokenmp/v3/services/executor/internal/requestlog"
@@ -24,6 +25,11 @@ import (
 // generic execution sentinels below. RawJSON is only ever returned inside a
 // success Result and never reaches an error.
 var (
+	// ErrProtocolConvert means a cross-protocol request or response conversion
+	// failed. It is returned before any upstream call (request conversion) or
+	// after a successful upstream call (response conversion), and is never
+	// retryable. It carries no request body, response body, or conversion detail.
+	ErrProtocolConvert = errors.New("execution: protocol conversion failed")
 	// ErrMisconfigured means the Runner or Input was not usable. It is returned
 	// before any reservation or upstream call.
 	ErrMisconfigured = errors.New("execution: runner misconfigured")
@@ -217,7 +223,7 @@ func (r *Runner) Run(ctx context.Context, in Input) (Result, error) {
 		return Result{}, err
 	}
 	firstPrepared := firstCall.preparedAttempt()
-	if firstPrepared.Timeout.Request <= 0 || in.QuotaIdentity.Protocol != string(firstPrepared.Target.Protocol) {
+	if firstPrepared.Timeout.Request <= 0 {
 		return Result{}, ErrMisconfigured
 	}
 	retryPolicy := firstPrepared.Retry
@@ -254,6 +260,14 @@ func (r *Runner) Run(ctx context.Context, in Input) (Result, error) {
 			return Result{}, r.releaseFailureWithLog(ctx, terminalizer, ErrMisconfigured, in, prepared, attemptNo)
 		}
 
+		// Cross-protocol request conversion: when the inbound request protocol
+		// differs from the target route protocol, convert the applied request body
+		// to the target protocol before the SDK call. The conversion is a pure
+		// JSON-to-JSON transformation that never touches credentials or URLs.
+		reqProtocol := adapter.Protocol(in.QuotaIdentity.Protocol)
+		targetProtocol := prepared.Target.Protocol
+		crossProtocol := reqProtocol != targetProtocol
+
 		// The shared session resolves exactly once and immediately starts the
 		// retry attempt. It deliberately does not call an SDK; Complete remains
 		// owned here so streaming can use the same lifecycle with OpenStream.
@@ -261,6 +275,16 @@ func (r *Runner) Run(ctx context.Context, in Input) (Result, error) {
 		var callErr error
 		var attemptStart time.Time
 		attempt, credentialAcquired, began, err := preparedCall.NewAttemptSession(state, retryPolicy, in.Credentials).Execute(ctx, func(client sdk.Client, call sdk.Call) {
+			// Cross-protocol request conversion: replace the applied body with the
+			// converted body when the request protocol differs from the target.
+			if crossProtocol {
+				converted, convErr := protocolconvert.ConvertRequest(call.Request.Body, reqProtocol, targetProtocol)
+				if convErr != nil {
+					callErr = convErr
+					return
+				}
+				call.Request.Body = converted
+			}
 			// Each SDK invocation has the route's compiled request timeout, bounded
 			// by the caller context. Provider adapters classify deadline expiry as a
 			// safe timeout; always cancel promptly to release the timer.
@@ -272,6 +296,13 @@ func (r *Runner) Run(ctx context.Context, in Input) (Result, error) {
 		latency := time.Duration(0)
 		if !attemptStart.IsZero() {
 			latency = r.now().Sub(attemptStart)
+		}
+		// Cross-protocol request conversion failure is non-retryable: the request
+		// body is malformed or the conversion pair is unsupported. Release and
+		// return a safe sentinel that carries no request body or conversion detail.
+		if crossProtocol && callErr != nil && (errors.Is(callErr, protocolconvert.ErrUnsupportedConversion) || errors.Is(callErr, protocolconvert.ErrInvalidRequest)) {
+			_ = state.Cancel()
+			return Result{}, r.releaseFailureWithLog(ctx, terminalizer, ErrProtocolConvert, in, prepared, attemptNo)
 		}
 		if err != nil {
 			if !credentialAcquired {
@@ -302,6 +333,18 @@ func (r *Runner) Run(ctx context.Context, in Input) (Result, error) {
 			return Result{}, r.releaseFailureWithLog(ctx, terminalizer, parentErr, in, prepared, attemptNo)
 		}
 		if err == nil {
+			// Cross-protocol response conversion: when the target route protocol
+			// differs from the inbound request protocol, convert the upstream
+			// response body back to the request protocol. Conversion failure is
+			// non-retryable and surfaces as a safe sentinel (ErrProtocolConvert).
+			if crossProtocol {
+				converted, convErr := protocolconvert.ConvertResponse(completion.RawJSON, targetProtocol, reqProtocol)
+				if convErr != nil {
+					_ = state.Cancel()
+					return Result{}, r.releaseFailureWithLog(ctx, terminalizer, ErrProtocolConvert, in, prepared, attemptNo)
+				}
+				completion.RawJSON = converted
+			}
 			// Success is irreversible: RecordSuccess and Commit freeze the
 			// verdict before any terminal action. Finalize is attempted on a
 			// cleanup context detached from request cancellation and bounded by
