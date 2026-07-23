@@ -65,6 +65,17 @@ func TestExecutorProcess(t *testing.T) {
 		t.Cleanup(func() { stopProcess(cmd) })
 
 		waitForHealthz(t, "http://"+address+"/healthz")
+
+		// Verify /metrics is served.
+		metricsResp := processRequest(t, address, http.MethodGet, "/metrics", "", "")
+		if metricsResp.StatusCode != http.StatusOK {
+			t.Fatalf("GET /metrics status = %d, want 200", metricsResp.StatusCode)
+		}
+		metricsBody := readBody(metricsResp)
+		if !strings.Contains(metricsBody, "executor_config_generation") {
+			t.Fatalf("GET /metrics body missing executor_config_generation; body=%s", metricsBody)
+		}
+
 		if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
 			t.Fatalf("send SIGTERM: %v", err)
 		}

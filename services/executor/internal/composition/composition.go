@@ -30,6 +30,7 @@ import (
 	"github.com/tokenmp/v3/services/executor/internal/identity"
 	"github.com/tokenmp/v3/services/executor/internal/identityenv"
 	"github.com/tokenmp/v3/services/executor/internal/jwtverifier"
+	"github.com/tokenmp/v3/services/executor/internal/metrics"
 	"github.com/tokenmp/v3/services/executor/internal/modelcatalogfacade"
 	"github.com/tokenmp/v3/services/executor/internal/nonstreamfacade"
 	"github.com/tokenmp/v3/services/executor/internal/quarantinebridge"
@@ -42,6 +43,23 @@ import (
 	"github.com/tokenmp/v3/services/executor/internal/streamfacade"
 	"github.com/tokenmp/v3/services/executor/internal/transport/executorv1api"
 )
+
+// metricsMux routes /metrics to the metrics handler and everything else to
+// the main application handler. This avoids importing chi or modifying the
+// generated handler's mux.
+type metricsMux struct {
+	header         http.Handler
+	metricsPath    string
+	metricsHandler http.Handler
+}
+
+func (m *metricsMux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == m.metricsPath {
+		m.metricsHandler.ServeHTTP(w, r)
+		return
+	}
+	m.header.ServeHTTP(w, r)
+}
 
 // runtimeVersion is the process-local version string surfaced through the
 // runtime state port. It carries no deployment or secret meaning.
@@ -77,10 +95,13 @@ var (
 )
 
 // App holds the composed Executor runtime: the HTTP handler serving all
-// routes and an optional Reloader for hot configuration reload.
+// routes, an optional Reloader for hot configuration reload, and metrics
+// configuration.
 type App struct {
-	Handler  http.Handler
-	Reloader *configreload.Reloader
+	Handler        http.Handler
+	Reloader       *configreload.Reloader
+	MetricsEnabled bool
+	MetricsPath    string
 }
 
 // supportedSDKPairs is the exact runtime completion allowlist. Images is
@@ -200,7 +221,42 @@ func Build(ctx context.Context, cfg config.Config, lookupEnv func(string) (strin
 	// including unknown paths that will become 404, and keeps /healthz
 	// anonymous. CaptureRawBody sits inside it so rejected requests never
 	// read or parse their body.
-	handler := executorv1api.AuthMiddleware(identitySource)(executorv1api.CaptureRawBody(generated))
+	authed := executorv1api.AuthMiddleware(identitySource)(executorv1api.CaptureRawBody(generated))
+
+	// ── Metrics collector ──
+	var metricsHandler http.Handler
+	var metricsPath string
+
+	if cfg.MetricsEnabled {
+		mc := metrics.NewCollector(
+			store.Generation,
+			func() map[string]int {
+				states := quotaPort.CountByState()
+				result := make(map[string]int, len(states))
+				for k, v := range states {
+					result[string(k)] = v
+				}
+				return result
+			},
+			executionLog.EventCount,
+		)
+		metricsReg := mc.Registry()
+
+		// Metrics middleware wraps AuthMiddleware so 401s are also counted.
+		authed = mc.Middleware(authed)
+
+		metricsPath = cfg.MetricsPath
+		metricsHandler = metrics.Handler(metricsReg, false)
+	} else {
+		metricsPath = cfg.MetricsPath
+		metricsHandler = metrics.Handler(nil, true)
+	}
+
+	handler := &metricsMux{
+		header:         authed,
+		metricsPath:    metricsPath,
+		metricsHandler: metricsHandler,
+	}
 	// ── Config reload validator ──
 	// The validator checks that a newly compiled snapshot passes the same
 	// startup gates: no unsupported enabled routes and credential mapping
@@ -225,7 +281,7 @@ func Build(ctx context.Context, cfg config.Config, lookupEnv func(string) (strin
 
 	reloader := configreload.NewReloader(store, cfg.ConfigFile, validate, nil)
 
-	return &App{Handler: handler, Reloader: reloader}, nil
+	return &App{Handler: handler, Reloader: reloader, MetricsEnabled: cfg.MetricsEnabled, MetricsPath: cfg.MetricsPath}, nil
 }
 
 // rejectUnsupportedEnabledRoutes fails closed if any enabled route lacks the
