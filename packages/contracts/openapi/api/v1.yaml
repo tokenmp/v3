@@ -1,0 +1,706 @@
+openapi: 3.0.3
+info:
+  title: TokenMP v3 API Service
+  version: 0.1.0
+  description: |
+    TokenMP v3 API Service — user-facing business management endpoints.
+
+    Authentication uses Ed25519 (EdDSA) JWT access tokens issued by the Auth
+    Service, or opaque API keys managed by this service. Admin endpoints require
+    `role=admin` in the JWT claims.
+
+servers:
+  - url: http://127.0.0.1:3002
+    description: Local development
+
+security:
+  - BearerAuth: []
+  - ApiKeyAuth: []
+
+paths:
+  /healthz:
+    get:
+      operationId: apiGetHealthz
+      summary: Health endpoint
+      security: []
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    enum: [ok]
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: no-store
+    head:
+      operationId: apiHeadHealthz
+      summary: Health endpoint HEAD
+      security: []
+      responses:
+        "200":
+          description: Healthy
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+
+  # ── User API Keys ──
+
+  /api/v1/keys:
+    get:
+      operationId: listApiKeys
+      summary: List user's API keys
+      responses:
+        "200":
+          description: API key list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [keys]
+                properties:
+                  keys:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ApiKey"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      operationId: createApiKey
+      summary: Create a new API key
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  maxLength: 100
+                  description: Human-readable key name
+                expiresAt:
+                  type: string
+                  format: date-time
+                  description: Optional expiration time
+      responses:
+        "201":
+          description: API key created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [key]
+                properties:
+                  key:
+                    $ref: "#/components/schemas/ApiKeyCreated"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/keys/{keyId}:
+    parameters:
+      - $ref: "#/components/parameters/keyId"
+    get:
+      operationId: getApiKey
+      summary: Get API key details
+      responses:
+        "200":
+          description: API key details
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [key]
+                properties:
+                  key:
+                    $ref: "#/components/schemas/ApiKey"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      operationId: updateApiKey
+      summary: Update API key
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  maxLength: 100
+                status:
+                  type: string
+                  enum: [active, disabled]
+      responses:
+        "200":
+          description: API key updated
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [key]
+                properties:
+                  key:
+                    $ref: "#/components/schemas/ApiKey"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      operationId: deleteApiKey
+      summary: Delete API key (soft delete)
+      responses:
+        "204":
+          description: API key deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/keys/{keyId}/rotate:
+    parameters:
+      - $ref: "#/components/parameters/keyId"
+    post:
+      operationId: rotateApiKey
+      summary: Rotate API key (generate new secret, keep metadata)
+      responses:
+        "200":
+          description: API key rotated
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [key]
+                properties:
+                  key:
+                    $ref: "#/components/schemas/ApiKeyCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ── Public Plans ──
+
+  /api/v1/plans:
+    get:
+      operationId: listPlans
+      summary: List available plans
+      security: []
+      responses:
+        "200":
+          description: Plan list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [plans]
+                properties:
+                  plans:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Plan"
+
+  # ── User Balance ──
+
+  /api/v1/user/balance:
+    get:
+      operationId: getUserBalance
+      summary: Get user's current balance
+      responses:
+        "200":
+          description: User balance
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserBalance"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  # ── User Plans ──
+
+  /api/v1/user/plans:
+    get:
+      operationId: listUserPlans
+      summary: List user's active plan subscriptions
+      responses:
+        "200":
+          description: User plan list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [plans]
+                properties:
+                  plans:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/UserPlan"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  # ── Request Logs ──
+
+  /api/v1/request-logs:
+    get:
+      operationId: listRequestLogs
+      summary: List user's request logs
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: model
+          in: query
+          schema:
+            type: string
+          description: Filter by model ID
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [success, error, all]
+            default: all
+        - name: startDate
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: endDate
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: Request log list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [logs, total, page, pageSize]
+                properties:
+                  logs:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/RequestLog"
+                  total:
+                    type: integer
+                  page:
+                    type: integer
+                  pageSize:
+                    type: integer
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/request-logs/{requestId}:
+    parameters:
+      - name: requestId
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      operationId: getRequestLog
+      summary: Get request log details
+      responses:
+        "200":
+          description: Request log details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RequestLogDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/request-logs/stats:
+    get:
+      operationId: getRequestLogStats
+      summary: Get user's usage statistics
+      parameters:
+        - name: days
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 90
+            default: 7
+      responses:
+        "200":
+          description: Usage statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UsageStats"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  # ── User Settings ──
+
+  /api/v1/user/settings:
+    get:
+      operationId: getUserSettings
+      summary: Get user settings
+      responses:
+        "200":
+          description: User settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserSettings"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    patch:
+      operationId: updateUserSettings
+      summary: Update user settings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserSettingsUpdate"
+      responses:
+        "200":
+          description: Settings updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserSettings"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Ed25519 EdDSA JWT issued by Auth Service
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: Opaque API key managed by this service
+
+  parameters:
+    keyId:
+      name: keyId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Unauthorized:
+      description: Authentication required
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [message, type]
+          properties:
+            message:
+              type: string
+            type:
+              type: string
+            code:
+              type: string
+            param:
+              type: string
+
+    ApiKey:
+      type: object
+      required: [id, name, keyPrefix, keySuffix, status, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        keyPrefix:
+          type: string
+          description: First 12 chars of key for identification
+        keySuffix:
+          type: string
+          description: Last 8 chars of key for identification
+        status:
+          type: string
+          enum: [active, disabled]
+        lastUsedAt:
+          type: string
+          format: date-time
+          nullable: true
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    ApiKeyCreated:
+      type: object
+      required: [id, name, keyPrefix, keySuffix, secret, status, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        keyPrefix:
+          type: string
+        keySuffix:
+          type: string
+        secret:
+          type: string
+          description: Full API key secret — only returned on create/rotate
+        status:
+          type: string
+          enum: [active]
+        createdAt:
+          type: string
+          format: date-time
+
+    Plan:
+      type: object
+      required: [id, name, planType, price, durationDays, totalQuota, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        planType:
+          type: string
+          enum: [coding, token]
+        price:
+          type: number
+          format: double
+        durationDays:
+          type: integer
+        totalQuota:
+          type: string
+          description: Total quota as string (bigint)
+        allowedModels:
+          type: array
+          items:
+            type: string
+        status:
+          type: string
+          enum: [active, disabled]
+
+    UserBalance:
+      type: object
+      required: [codingRemaining, tokenRemaining]
+      properties:
+        codingRemaining:
+          type: string
+          description: Coding quota remaining (bigint string)
+        tokenRemaining:
+          type: string
+          description: Token quota remaining (bigint string)
+
+    UserPlan:
+      type: object
+      required: [id, planId, planType, totalQuota, remainingQuota, status, activatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        planId:
+          type: string
+          format: uuid
+        planType:
+          type: string
+        totalQuota:
+          type: string
+        remainingQuota:
+          type: string
+        priority:
+          type: integer
+          nullable: true
+        status:
+          type: string
+          enum: [active, expired, disabled]
+        activatedAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    RequestLog:
+      type: object
+      required: [requestId, model, status, createdAt]
+      properties:
+        requestId:
+          type: string
+        model:
+          type: string
+        status:
+          type: string
+          enum: [success, error]
+        inputTokens:
+          type: integer
+          nullable: true
+        outputTokens:
+          type: integer
+          nullable: true
+        cost:
+          type: string
+          description: Cost as string (bigint, in smallest unit)
+          nullable: true
+        durationMs:
+          type: integer
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    RequestLogDetail:
+      type: object
+      required: [requestId, model, status, createdAt]
+      properties:
+        requestId:
+          type: string
+        model:
+          type: string
+        provider:
+          type: string
+        status:
+          type: string
+          enum: [success, error]
+        errorMessage:
+          type: string
+          nullable: true
+        inputTokens:
+          type: integer
+          nullable: true
+        outputTokens:
+          type: integer
+          nullable: true
+        cost:
+          type: string
+          nullable: true
+        durationMs:
+          type: integer
+          nullable: true
+        attempts:
+          type: array
+          items:
+            type: object
+            properties:
+              attempt:
+                type: integer
+              provider:
+                type: string
+              model:
+                type: string
+              status:
+                type: string
+              durationMs:
+                type: integer
+              createdAt:
+                type: string
+                format: date-time
+        createdAt:
+          type: string
+          format: date-time
+
+    UsageStats:
+      type: object
+      required: [days, totalRequests, totalInputTokens, totalOutputTokens, totalCost]
+      properties:
+        days:
+          type: integer
+        totalRequests:
+          type: integer
+        totalInputTokens:
+          type: string
+        totalOutputTokens:
+          type: string
+        totalCost:
+          type: string
+        byModel:
+          type: array
+          items:
+            type: object
+            properties:
+              model:
+                type: string
+              requests:
+                type: integer
+              inputTokens:
+                type: string
+              outputTokens:
+                type: string
+              cost:
+                type: string
+
+    UserSettings:
+      type: object
+      required: [preferredBilling, fallbackEnabled]
+      properties:
+        preferredBilling:
+          type: string
+          enum: [coding, token]
+        fallbackEnabled:
+          type: boolean
+
+    UserSettingsUpdate:
+      type: object
+      properties:
+        preferredBilling:
+          type: string
+          enum: [coding, token]
+        fallbackEnabled:
+          type: boolean

@@ -30,3 +30,6 @@ coverage/
 *.swp
 *.swo
 *~
+
+# Local-only flowchart diagrams (not committed)
+docs/implemented-flows.md
