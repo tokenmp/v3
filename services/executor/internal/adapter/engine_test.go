@@ -1203,3 +1203,25 @@ func deepEqualJSON(a, b any) bool {
 		return a == b
 	}
 }
+
+func TestMapResponseDoesNotModifyRetryAfterSeconds(t *testing.T) {
+	t.Parallel()
+	// MapResponse never sets RetryAfterSeconds; it is always 0 in the output.
+	// The Retry-After value is transferred by applyRetryAfter in the execution layer.
+	for _, tc := range []struct {
+		name     string
+		adapter  CompiledAdapter
+		upstream UpstreamResponse
+	}{
+		{"empty adapter", CompiledAdapter{}, UpstreamResponse{HTTPStatus: 429, ErrorCode: "rate_limited", ErrorType: "rate_limit_error"}},
+		{"matching rule", CompiledAdapter{ResponseRules: []ResponseRule{{ID: "r1", Priority: 1, Match: ResponseMatch{HTTPStatuses: []int{429}}, Output: ResponseOutput{HTTPStatus: 429, ErrorCode: "RATE", ErrorType: "rate_limit_error", Message: "retry"}}}}, UpstreamResponse{HTTPStatus: 429}},
+		{"default fallback", CompiledAdapter{}, UpstreamResponse{HTTPStatus: 503}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := (Engine{}).MapResponse(tc.adapter, tc.upstream)
+			if got.RetryAfterSeconds != 0 {
+				t.Errorf("RetryAfterSeconds = %d, want 0 (MapResponse must not set it)", got.RetryAfterSeconds)
+			}
+		})
+	}
+}

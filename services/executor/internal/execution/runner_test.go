@@ -1803,6 +1803,73 @@ func TestRunnerLifecycleEventSequenceTerminalizationUnknown(t *testing.T) {
 	}
 }
 
+func TestApplyRetryAfter(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name           string
+		mapped         adapter.MappedResponse
+		classified     *sdk.ClassifiedError
+		wantRetryAfter int
+	}{
+		{
+			name:           "429 with Retry-After 30s",
+			mapped:         adapter.MappedResponse{HTTPStatus: 429},
+			classified:     sdk.NewClassifiedErrorWithRetryAfter(sdk.ErrRateLimited, 429, "req_1", "rate_limited", "rate_limit_error", 30*time.Second, true),
+			wantRetryAfter: 30,
+		},
+		{
+			name:           "529 with Retry-After 60s",
+			mapped:         adapter.MappedResponse{HTTPStatus: 529},
+			classified:     sdk.NewClassifiedErrorWithRetryAfter(sdk.ErrUnavailable, 529, "req_2", "overloaded", "overloaded_error", 60*time.Second, true),
+			wantRetryAfter: 60,
+		},
+		{
+			name:           "429 without Retry-After",
+			mapped:         adapter.MappedResponse{HTTPStatus: 429},
+			classified:     sdk.NewClassifiedError(sdk.ErrRateLimited, 429, "req_3", "rate_limited", "rate_limit_error"),
+			wantRetryAfter: 0,
+		},
+		{
+			name:           "500 with Retry-After ignored",
+			mapped:         adapter.MappedResponse{HTTPStatus: 500},
+			classified:     sdk.NewClassifiedErrorWithRetryAfter(sdk.ErrUpstream, 500, "req_4", "internal", "api_error", 10*time.Second, true),
+			wantRetryAfter: 0,
+		},
+		{
+			name:           "429 with sub-second Retry-After ignored",
+			mapped:         adapter.MappedResponse{HTTPStatus: 429},
+			classified:     sdk.NewClassifiedErrorWithRetryAfter(sdk.ErrRateLimited, 429, "req_5", "rate_limited", "rate_limit_error", 500*time.Millisecond, true),
+			wantRetryAfter: 0,
+		},
+		{
+			name:           "429 with Retry-After clamped to 300",
+			mapped:         adapter.MappedResponse{HTTPStatus: 429},
+			classified:     sdk.NewClassifiedErrorWithRetryAfter(sdk.ErrRateLimited, 429, "req_6", "rate_limited", "rate_limit_error", 600*time.Second, true),
+			wantRetryAfter: 300,
+		},
+		{
+			name:           "nil classified",
+			mapped:         adapter.MappedResponse{HTTPStatus: 429},
+			classified:     nil,
+			wantRetryAfter: 0,
+		},
+		{
+			name:           "nil mapped",
+			mapped:         adapter.MappedResponse{},
+			classified:     nil,
+			wantRetryAfter: 0,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mapped := tc.mapped
+			applyRetryAfter(&mapped, tc.classified)
+			if mapped.RetryAfterSeconds != tc.wantRetryAfter {
+				t.Errorf("RetryAfterSeconds = %d, want %d", mapped.RetryAfterSeconds, tc.wantRetryAfter)
+			}
+		})
+	}
+}
+
 func TestRunnerLifecycleEventConfirmedUsageInFinalized(t *testing.T) {
 	client := &runnerTestClient{completeFn: func(context.Context, sdk.Call) (sdk.Completion, error) {
 		return sdk.Completion{

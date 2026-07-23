@@ -268,6 +268,7 @@ func (d *StreamDriver) retryPrecommit(ctx context.Context, terminalizer *Termina
 		}
 		d.logFailure(ctx, in, prepared, attemptNo, latency, false, classified, decision)
 		d.logReleased(ctx, in, prepared, attemptNo, releaseReasonVal)
+		applyRetryAfter(&mapped, classified)
 		return StreamResult{Failure: &mapped}, routing.Candidate{}, true, nil
 	}
 	// A retry decision is an attempt observation, not a terminal outcome.

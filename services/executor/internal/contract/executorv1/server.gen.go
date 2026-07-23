@@ -339,7 +339,14 @@ type AnthropicNotFoundJSONResponse AnthropicErrorResponse
 
 type AnthropicNotImplementedJSONResponse AnthropicErrorResponse
 
-type AnthropicOverloadedJSONResponse AnthropicErrorResponse
+type AnthropicOverloadedResponseHeaders struct {
+	RetryAfter *int
+}
+type AnthropicOverloadedJSONResponse struct {
+	Body AnthropicErrorResponse
+
+	Headers AnthropicOverloadedResponseHeaders
+}
 
 type AnthropicPermissionDeniedJSONResponse AnthropicErrorResponse
 
@@ -945,10 +952,13 @@ type CreateMessage529JSONResponse struct {
 func (response CreateMessage529JSONResponse) VisitCreateMessageResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
 	w.WriteHeader(529)
 	_, err := buf.WriteTo(w)
 	return err
