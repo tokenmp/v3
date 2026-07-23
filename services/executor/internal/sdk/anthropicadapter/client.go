@@ -85,7 +85,7 @@ func parseBaseURL(base string) (*url.URL, error) {
 		return nil, errors.New("anthropicadapter: base URL is required")
 	}
 	u, err := url.Parse(base)
-	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || !safeBasePath(u) {
+	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || !safeBasePath(u) {
 		return nil, errors.New("anthropicadapter: invalid base URL")
 	}
 	if u.Path == "" {

@@ -140,7 +140,7 @@ func TestComplete_TargetValidationNoHTTP(t *testing.T) {
 	ts := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { n.Add(1) }))
 	defer ts.Close()
 	c := newTestClient(t, ts, nil)
-	for _, base := range []string{"", "http://example.test", "https://user:pass@example.test", "https://example.test?a=b", "https://example.test#f"} {
+	for _, base := range []string{"", "https://user:pass@example.test", "https://example.test?a=b", "https://example.test#f"} {
 		_, err := c.Complete(context.Background(), testCall(base, "key"))
 		if !errors.Is(err, ErrInvalidBaseURL) {
 			t.Fatalf("base %q: %v", base, err)

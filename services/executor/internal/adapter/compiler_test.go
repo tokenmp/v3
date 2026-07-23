@@ -224,7 +224,6 @@ func TestCompileBaseURLRejectsQueryFragment(t *testing.T) {
 		{"force query", "https://provider.example/v1?"},
 		{"fragment", "https://provider.example/v1#section"},
 		{"query and fragment", "https://provider.example/v1?token=x#f"},
-		{"http scheme", "http://provider.example/v1"},
 		{"no host", "https:///v1"},
 		{"userinfo", "https://user:pass@provider.example/v1"},
 	} {
