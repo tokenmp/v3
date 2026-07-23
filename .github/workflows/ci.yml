@@ -240,6 +240,14 @@ jobs:
       - name: docker build (build only, no run/push)
         run: docker build -f services/auth/Dockerfile -t tokenmp-v3-auth:${{ github.sha }} .
 
+      # Build the executor Docker image on the GitHub Runner to validate the
+      # Dockerfile end-to-end as part of CI. Build only: the image is not
+      # run, not pushed, not published to any registry, and not tagged into
+      # a long-lived cache. This step requires no local Docker on developer
+      # machines — the Ubuntu runner provides Docker out of the box.
+      - name: docker build executor (build only, no run/push)
+        run: docker build -f services/executor/Dockerfile -t tokenmp-v3-executor:${{ github.sha }} .
+
       - name: Migration cycle (up/down/up)
         working-directory: services/auth
         run: |
