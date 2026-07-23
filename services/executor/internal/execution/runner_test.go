@@ -232,11 +232,21 @@ func TestRunnerSuccessPreflightReserveFinalizeAndLogsOnce(t *testing.T) {
 		t.Fatalf("client Complete calls = %d, want 1", client.callCount())
 	}
 	events := log.Events(context.Background())
-	if len(events) != 1 || events[0].Status != "success" || events[0].Attempt != 1 {
-		t.Fatalf("events = %+v", events)
+	// Lifecycle: reserved + attempt(success) + finalized
+	if len(events) != 3 {
+		t.Fatalf("events = %d, want 3", len(events))
 	}
-	if events[0].Candidate.CredentialID != "cred-a" || events[0].Protocol != "openai_chat" || events[0].Revision != "runner-revision" || events[0].Generation != 7 {
-		t.Fatalf("event metadata = %+v", events[0])
+	if events[0].Kind != requestlog.KindReserved {
+		t.Fatalf("events[0].Kind = %q, want reserved", events[0].Kind)
+	}
+	if events[1].Kind != requestlog.KindAttempt || events[1].Status != "success" || events[1].Attempt != 1 {
+		t.Fatalf("events[1] = %+v, want attempt success", events[1])
+	}
+	if events[2].Kind != requestlog.KindFinalized {
+		t.Fatalf("events[2].Kind = %q, want finalized", events[2].Kind)
+	}
+	if events[1].Candidate.CredentialID != "cred-a" || events[1].Protocol != "openai_chat" || events[1].Revision != "runner-revision" || events[1].Generation != 7 {
+		t.Fatalf("event metadata = %+v", events[1])
 	}
 }
 
@@ -296,8 +306,18 @@ func TestRunnerParentCancellationAfterCompleteWinsOverSuccess(t *testing.T) {
 		t.Fatalf("quota calls = %+v, want Reserve+Release only", calls)
 	}
 	events := log.Events(context.Background())
-	if len(events) != 1 || events[0].Status != "failed" || events[0].RuleID != "" || events[0].Action != "" {
-		t.Fatalf("events = %+v, want one safe cancellation failure event", events)
+	// Lifecycle: reserved + attempt(failed) + released
+	if len(events) != 3 {
+		t.Fatalf("events = %d, want 3", len(events))
+	}
+	if events[0].Kind != requestlog.KindReserved {
+		t.Fatalf("events[0].Kind = %q, want reserved", events[0].Kind)
+	}
+	if events[1].Kind != requestlog.KindAttempt || events[1].Status != "failed" || events[1].RuleID != "" || events[1].Action != "" {
+		t.Fatalf("events[1] = %+v, want safe cancellation failure attempt event", events[1])
+	}
+	if events[2].Kind != requestlog.KindReleased {
+		t.Fatalf("events[2].Kind = %q, want released", events[2].Kind)
 	}
 }
 
@@ -385,14 +405,21 @@ func TestRunnerRetriesOnClassifiedFailureThenSucceeds(t *testing.T) {
 		t.Fatalf("quota calls = %+v", calls)
 	}
 	events := log.Events(context.Background())
-	if len(events) != 2 {
-		t.Fatalf("events = %d, want 2", len(events))
+	// Lifecycle: reserved + attempt(failed) + attempt(success) + finalized
+	if len(events) != 4 {
+		t.Fatalf("events = %d, want 4", len(events))
 	}
-	if events[0].Status != "failed" || events[0].Attempt != 1 || events[0].RuleID != "next-cred" || events[0].Action != "next_credential" {
-		t.Fatalf("failed event = %+v", events[0])
+	if events[0].Kind != requestlog.KindReserved {
+		t.Fatalf("events[0].Kind = %q, want reserved", events[0].Kind)
 	}
-	if events[1].Status != "success" || events[1].Attempt != 2 {
-		t.Fatalf("success event = %+v", events[1])
+	if events[1].Status != "failed" || events[1].Attempt != 1 || events[1].RuleID != "next-cred" || events[1].Action != "next_credential" {
+		t.Fatalf("failed event = %+v", events[1])
+	}
+	if events[2].Status != "success" || events[2].Attempt != 2 {
+		t.Fatalf("success event = %+v", events[2])
+	}
+	if events[3].Kind != requestlog.KindFinalized {
+		t.Fatalf("events[3].Kind = %q, want finalized", events[3].Kind)
 	}
 }
 
@@ -462,8 +489,8 @@ func TestRunnerParentDeadlineWinsOverCatchAllRetryAndPreservesReleaseUncertainty
 	if calls := client.callCount(); calls != 1 {
 		t.Fatalf("client Complete calls = %d, want 1; parent deadline retried", calls)
 	}
-	if events := log.Events(context.Background()); len(events) != 1 || events[0].Status != "failed" || events[0].RuleID != "" || events[0].Action != "" {
-		t.Fatalf("events = %+v, want one safe unmapped parent-deadline failure", events)
+	if events := log.Events(context.Background()); len(events) != 3 || events[0].Kind != requestlog.KindReserved || events[1].Kind != requestlog.KindAttempt || events[1].Status != "failed" || events[1].RuleID != "" || events[1].Action != "" || events[2].Kind != requestlog.KindReleased || events[2].Settlement.Reason != "unknown" {
+		t.Fatalf("events = %+v, want reserved + safe unmapped parent-deadline failure + released(unknown)", events)
 	}
 	if calls := quotaPort.TypedCalls(); len(calls) != 2 || calls[0].Method != "ReserveReservation" || calls[1].Method != "ReleaseReservation" {
 		t.Fatalf("quota calls = %+v, want Reserve+Release", calls)
@@ -502,8 +529,9 @@ func TestRunnerAttemptDeadlineRetriesByTimeoutErrorTypeThenSucceeds(t *testing.T
 		t.Fatalf("quota calls = %+v, want Reserve+Finalize", calls)
 	}
 	events := log.Events(context.Background())
-	if len(events) != 2 || events[0].Status != "failed" || events[0].RuleID != "timeout-type" || events[0].Action != "next_credential" || events[1].Status != "success" {
-		t.Fatalf("events = %+v, want timeout retry then success", events)
+	// Lifecycle: reserved + attempt(failed,timeout) + attempt(success) + finalized
+	if len(events) != 4 || events[0].Kind != requestlog.KindReserved || events[1].Status != "failed" || events[1].RuleID != "timeout-type" || events[1].Action != "next_credential" || events[2].Status != "success" || events[3].Kind != requestlog.KindFinalized {
+		t.Fatalf("events = %+v, want reserved + timeout retry + success + finalized", events)
 	}
 }
 
@@ -580,8 +608,8 @@ func TestRunnerAllAttemptsFailReleasesAfterReserve(t *testing.T) {
 	}
 	events := log.Events(context.Background())
 	for _, e := range events {
-		if e.Status != "failed" {
-			t.Fatalf("unexpected non-failure event: %+v", e)
+		if e.Kind == requestlog.KindAttempt && e.Status != "failed" {
+			t.Fatalf("unexpected non-failure attempt event: %+v", e)
 		}
 	}
 	if client.callCount() < 2 {
@@ -718,7 +746,7 @@ func TestRunnerNeverReleasesAfterFinalizeEvenIfFinalizeFails(t *testing.T) {
 	if calls := port.TypedCalls(); len(calls) != 2 || calls[0].Method != "ReserveReservation" || calls[1].Method != "FinalizeReservation" {
 		t.Fatalf("quota calls = %+v, want Reserve+Finalize only", calls)
 	}
-	if events := log.Events(context.Background()); len(events) != 0 {
+	if events := log.Events(context.Background()); len(events) != 2 || events[0].Kind != requestlog.KindReserved || events[1].Kind != requestlog.KindReleased || events[1].Settlement.Reason != "unknown" {
 		t.Fatalf("events = %+v, must not claim success when finalization is unknown", events)
 	}
 }
@@ -760,8 +788,8 @@ func TestRunnerLogsAreBestEffortAndNeverAlterVerdict(t *testing.T) {
 	if result.Completion.Status != 200 {
 		t.Fatalf("Completion = %+v", result.Completion)
 	}
-	if events := log.Events(context.Background()); len(events) != 1 {
-		t.Fatalf("event still recorded = %d, want 1", len(events))
+	if events := log.Events(context.Background()); len(events) != 3 {
+		t.Fatalf("event still recorded = %d, want 3 (reserved+attempt+finalized)", len(events))
 	}
 
 	// Failure path: the faulting logger records but the retry decision is
@@ -784,6 +812,7 @@ func TestRunnerLogsAreBestEffortAndNeverAlterVerdict(t *testing.T) {
 
 type deadlineObservingLogger struct {
 	called chan struct{}
+	once   sync.Once
 }
 
 func (l *deadlineObservingLogger) RecordExecution(ctx context.Context, _ requestlog.ExecutionEvent) error {
@@ -793,8 +822,12 @@ func (l *deadlineObservingLogger) RecordExecution(ctx context.Context, _ request
 	if _, ok := ctx.Deadline(); !ok {
 		return errors.New("logger context has no deadline")
 	}
-	close(l.called)
+	l.once.Do(func() { close(l.called) })
 	return nil
+}
+
+func (l *deadlineObservingLogger) QueryEvents(_ context.Context, _ requestlog.ExecutionFilter) ([]requestlog.ExecutionEvent, error) {
+	return nil, nil
 }
 
 func TestRunnerCanceledRequestLogsWithLiveBoundedContext(t *testing.T) {
@@ -837,7 +870,7 @@ func TestRunnerLogSurfaceNeverLeaksSecretOrReferenceOrBody(t *testing.T) {
 				t.Fatalf("event leaked %q: %s", marker, rendered)
 			}
 		}
-		if strings.Contains(event.Code, "/") {
+		if event.Kind == requestlog.KindAttempt && strings.Contains(event.Code, "/") {
 			t.Fatalf("event Code leaked unsafe characters: %q", event.Code)
 		}
 	}
@@ -1099,8 +1132,8 @@ func TestRunnerEachAttemptRerunsPrepareAndApplyAndClientLookup(t *testing.T) {
 	if calls := quotaPort.TypedCalls(); len(calls) != 2 || calls[0].Method != "ReserveReservation" || calls[1].Method != "FinalizeReservation" {
 		t.Fatalf("quota calls = %+v, want Reserve+Finalize", calls)
 	}
-	if events := log.Events(context.Background()); len(events) != 3 {
-		t.Fatalf("execution events = %d, want one per wire attempt", len(events))
+	if events := log.Events(context.Background()); len(events) != 5 {
+		t.Fatalf("execution events = %d, want 5 (reserved + 3 attempts + finalized)", len(events))
 	}
 	// Registry must still hold exactly one client, proving each lookup reused
 	// the registered instance rather than creating a new one.
@@ -1668,5 +1701,159 @@ func TestRunnerFinalizeOutcomeMapping(t *testing.T) {
 				t.Fatalf("usage = %+v, want %+v", outcome.Usage, tc.usage)
 			}
 		})
+	}
+}
+
+func TestRunnerLifecycleEventSequenceSuccess(t *testing.T) {
+	client := &runnerTestClient{}
+	log := requestlog.NewInMemoryExecution()
+	runner, _, _ := newRunner(t, client, log)
+	resolver, plan := runnerFixture(t)
+
+	result, err := runner.Run(context.Background(), runnerInput(resolver, plan))
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	if result.Completion.Status != 200 {
+		t.Fatalf("Completion = %+v", result.Completion)
+	}
+
+	events := log.Events(context.Background())
+	// Expected: reserved → attempt(success) → finalized
+	if len(events) != 3 {
+		t.Fatalf("events = %d, want 3", len(events))
+	}
+	if events[0].Kind != requestlog.KindReserved {
+		t.Fatalf("events[0].Kind = %q, want reserved", events[0].Kind)
+	}
+	if events[0].Subject != "subject" || events[0].KeyID != "key-1" {
+		t.Fatalf("reserved event Subject/KeyID = %q/%q", events[0].Subject, events[0].KeyID)
+	}
+	if events[1].Kind != requestlog.KindAttempt || events[1].Status != "success" {
+		t.Fatalf("events[1] = %+v, want attempt success", events[1])
+	}
+	if events[1].Subject != "subject" || events[1].KeyID != "key-1" {
+		t.Fatalf("attempt event Subject/KeyID = %q/%q", events[1].Subject, events[1].KeyID)
+	}
+	if events[2].Kind != requestlog.KindFinalized {
+		t.Fatalf("events[2].Kind = %q, want finalized", events[2].Kind)
+	}
+	if events[2].Settlement.Disposition != string(quota.AccountingUnpricedSuccess) || events[2].Settlement.Outcome != string(quota.OutcomeCompleted) {
+		t.Fatalf("finalized Settlement = %+v", events[2].Settlement)
+	}
+}
+
+func TestRunnerLifecycleEventSequenceFailure(t *testing.T) {
+	client := &runnerTestClient{completeFn: func(context.Context, sdk.Call) (sdk.Completion, error) {
+		return sdk.Completion{}, sdk.NewClassifiedError(sdk.ErrUnavailable, 503, "", "", "")
+	}}
+	log := requestlog.NewInMemoryExecution()
+	runner, _, _ := newRunner(t, client, log)
+	resolver, plan := runnerFixtureWithRule(t, adapter.RetryRule{ID: "stop", HTTPStatuses: []int{503}, Action: adapter.RetryNone}, nil)
+
+	result, err := runner.Run(context.Background(), runnerInput(resolver, plan))
+	if err != nil || result.Failure == nil {
+		t.Fatalf("Run result/error = %+v/%v", result, err)
+	}
+
+	events := log.Events(context.Background())
+	// Expected: reserved → attempt(failed) → released
+	if len(events) != 3 {
+		t.Fatalf("events = %d, want 3", len(events))
+	}
+	if events[0].Kind != requestlog.KindReserved {
+		t.Fatalf("events[0].Kind = %q, want reserved", events[0].Kind)
+	}
+	if events[1].Kind != requestlog.KindAttempt || events[1].Status != "failed" {
+		t.Fatalf("events[1] = %+v, want attempt failed", events[1])
+	}
+	if events[2].Kind != requestlog.KindReleased {
+		t.Fatalf("events[2].Kind = %q, want released", events[2].Kind)
+	}
+	if events[2].Settlement.Reason != string(quota.ReleaseFailed) {
+		t.Fatalf("released Settlement.Reason = %q, want %q", events[2].Settlement.Reason, quota.ReleaseFailed)
+	}
+}
+
+func TestRunnerLifecycleEventSequenceTerminalizationUnknown(t *testing.T) {
+	client := &runnerTestClient{}
+	port := quota.NewTypedMock()
+	port.SetTypedFaultHook(func(quota.Reservation) error { return errors.New("finalize lost") })
+	log := requestlog.NewInMemoryExecution()
+	registry := NewSDKRegistry()
+	_ = registry.Register(adapter.SDKKindOpenAI, adapter.ProtocolOpenAIChat, client)
+	runner := &Runner{Quota: port, SDKRegistry: registry, Logger: log, Clock: &fakeClock{}, Sleeper: &recordingSleeper{}}
+	resolver, plan := runnerFixture(t)
+
+	_, err := runner.Run(context.Background(), runnerInput(resolver, plan))
+	if !errors.Is(err, ErrTerminalization) {
+		t.Fatalf("Run error = %v, want ErrTerminalization", err)
+	}
+
+	events := log.Events(context.Background())
+	// Expected: reserved → released(unknown) — no attempt success, no finalized
+	if len(events) != 2 {
+		t.Fatalf("events = %d, want 2", len(events))
+	}
+	if events[0].Kind != requestlog.KindReserved {
+		t.Fatalf("events[0].Kind = %q, want reserved", events[0].Kind)
+	}
+	if events[1].Kind != requestlog.KindReleased || events[1].Settlement.Reason != "unknown" {
+		t.Fatalf("events[1] = %+v, want released(unknown)", events[1])
+	}
+}
+
+func TestRunnerLifecycleEventConfirmedUsageInFinalized(t *testing.T) {
+	client := &runnerTestClient{completeFn: func(context.Context, sdk.Call) (sdk.Completion, error) {
+		return sdk.Completion{
+			RawJSON:   json.RawMessage(`{}`),
+			Status:    200,
+			RequestID: "req_ok",
+			Usage:     sdk.Usage{PromptTokens: 10, CompletionTokens: 20, TotalTokens: 30},
+			Known:     true,
+		}, nil
+	}}
+	log := requestlog.NewInMemoryExecution()
+	runner, _, _ := newRunner(t, client, log)
+	resolver, plan := runnerFixture(t)
+
+	result, err := runner.Run(context.Background(), runnerInput(resolver, plan))
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	_ = result
+
+	events := log.Events(context.Background())
+	// Find the finalized event
+	var finalized *requestlog.ExecutionEvent
+	for i := range events {
+		if events[i].Kind == requestlog.KindFinalized {
+			finalized = &events[i]
+			break
+		}
+	}
+	if finalized == nil {
+		t.Fatal("no finalized event found")
+	}
+	if finalized.Settlement.Disposition != string(quota.AccountingConfirmedUsage) {
+		t.Fatalf("Disposition = %q, want %q", finalized.Settlement.Disposition, quota.AccountingConfirmedUsage)
+	}
+	if !finalized.UsageKnown || finalized.Usage != (requestlog.ExecutionUsage{InputTokens: 10, OutputTokens: 20, TotalTokens: 30}) {
+		t.Fatalf("finalized Usage = %+v, UsageKnown = %v", finalized.Usage, finalized.UsageKnown)
+	}
+
+	// Find the attempt success event
+	var attempt *requestlog.ExecutionEvent
+	for i := range events {
+		if events[i].Kind == requestlog.KindAttempt && events[i].Status == "success" {
+			attempt = &events[i]
+			break
+		}
+	}
+	if attempt == nil {
+		t.Fatal("no attempt success event found")
+	}
+	if !attempt.UsageKnown || attempt.Usage != (requestlog.ExecutionUsage{InputTokens: 10, OutputTokens: 20, TotalTokens: 30}) {
+		t.Fatalf("attempt Usage = %+v, UsageKnown = %v", attempt.Usage, attempt.UsageKnown)
 	}
 }

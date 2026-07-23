@@ -107,49 +107,53 @@ func (d *StreamDriver) Run(ctx context.Context, in StreamInput) (StreamResult, e
 	}
 	terminalizer := NewTerminalizer(d.Quota, quota.ReservationID(in.ReservationID))
 
+	d.logReserved(ctx, in, firstPrepared)
+
 	candidate := first
 	attemptNo := 0
 	for {
 		preparedCall, err := preparer.PreflightStream(ctx, candidate)
 		if err != nil {
-			return StreamResult{}, d.releaseFailure(ctx, terminalizer, parentError(ctx, err))
+			return StreamResult{}, d.releaseFailureWithLog(ctx, terminalizer, parentError(ctx, err), in, firstPrepared, 0)
 		}
 		prepared := preparedCall.preparedAttempt()
 		if !validStreamTimeouts(prepared) {
-			return StreamResult{}, d.releaseFailure(ctx, terminalizer, ErrMisconfigured)
+			return StreamResult{}, d.releaseFailureWithLog(ctx, terminalizer, ErrMisconfigured, in, prepared, attemptNo+1)
 		}
 
 		attemptNo++
 		attemptCtx, cancelAttempt := context.WithTimeout(ctx, prepared.Timeout.Request)
+		attemptStart := d.now()
 		attempt, acquired, began, opened, openErr := preparedCall.NewAttemptSession(state, policy, in.Credentials).ExecuteStream(attemptCtx, func(client sdk.StreamClient, call sdk.StreamCall) (sdk.StreamOpen, error) {
 			return client.Stream(attemptCtx, call)
 		})
+		latency := d.now().Sub(attemptStart)
 		if openErr != nil {
 			cancelAttempt()
 			if !acquired {
-				return StreamResult{}, d.releaseFailure(ctx, terminalizer, parentError(ctx, openErr))
+				return StreamResult{}, d.releaseFailureWithLog(ctx, terminalizer, parentError(ctx, openErr), in, prepared, attemptNo)
 			}
 			if !began {
-				return StreamResult{}, d.releaseFailure(ctx, terminalizer, parentError(ctx, ErrBudgetExhausted))
+				return StreamResult{}, d.releaseFailureWithLog(ctx, terminalizer, parentError(ctx, ErrBudgetExhausted), in, prepared, attemptNo)
 			}
 			if err := ctx.Err(); err != nil {
 				_ = state.Cancel()
-				return StreamResult{}, d.releaseFailure(ctx, terminalizer, err)
+				return StreamResult{}, d.releaseFailureWithLog(ctx, terminalizer, err, in, prepared, attemptNo)
 			}
 			if errors.Is(openErr, context.Canceled) {
 				_ = state.Cancel()
-				return StreamResult{}, d.releaseFailure(ctx, terminalizer, context.Canceled)
+				return StreamResult{}, d.releaseFailureWithLog(ctx, terminalizer, context.Canceled, in, prepared, attemptNo)
 			}
 			classified := classifyStreamError(openErr)
 			if classified == nil {
-				d.logFailure(ctx, in, prepared, attemptNo, nil, retry.Decision{})
+				d.logFailure(ctx, in, prepared, attemptNo, latency, false, nil, retry.Decision{})
 				_ = state.Cancel()
 				if errors.Is(openErr, ErrMisconfigured) {
-					return StreamResult{}, d.releaseFailure(ctx, terminalizer, ErrMisconfigured)
+					return StreamResult{}, d.releaseFailureWithLog(ctx, terminalizer, ErrMisconfigured, in, prepared, attemptNo)
 				}
-				return StreamResult{}, d.releaseFailure(ctx, terminalizer, ErrUnclassified)
+				return StreamResult{}, d.releaseFailureWithLog(ctx, terminalizer, ErrUnclassified, in, prepared, attemptNo)
 			}
-			if result, next, done, err := d.retryPrecommit(ctx, terminalizer, state, attempt, policy, prepared, classified, in, attemptNo); done {
+			if result, next, done, err := d.retryPrecommit(ctx, terminalizer, state, attempt, policy, prepared, classified, in, attemptNo, latency); done {
 				return result, err
 			} else {
 				candidate = next
@@ -159,7 +163,7 @@ func (d *StreamDriver) Run(ctx context.Context, in StreamInput) (StreamResult, e
 		if isNilInterface(opened.Source) {
 			cancelAttempt()
 			_ = state.Cancel()
-			return StreamResult{}, d.releaseFailure(ctx, terminalizer, ErrMisconfigured)
+			return StreamResult{}, d.releaseFailureWithLog(ctx, terminalizer, ErrMisconfigured, in, prepared, attemptNo)
 		}
 		source, sink, err := newSDKPayloadSource(opened.Source, in.Sink)
 		if err != nil {
@@ -172,7 +176,7 @@ func (d *StreamDriver) Run(ctx context.Context, in StreamInput) (StreamResult, e
 			if cleanupErr != nil {
 				primary = errors.Join(primary, cleanupErr)
 			}
-			return StreamResult{}, d.releaseFailure(ctx, terminalizer, primary)
+			return StreamResult{}, d.releaseFailureWithLog(ctx, terminalizer, primary, in, prepared, attemptNo)
 		}
 		bridge := streaming.Bridge{Source: source, Sink: sink, Timeouts: streamTimeouts(prepared)}
 		outcome, bridgeErr := bridge.Run(attemptCtx)
@@ -187,10 +191,11 @@ func (d *StreamDriver) Run(ctx context.Context, in StreamInput) (StreamResult, e
 			if parentErr := ctx.Err(); parentErr != nil {
 				_ = state.Cancel()
 				if err := d.settleCommitted(ctx, terminalizer, outcome); err != nil {
-					d.logFailure(ctx, in, prepared, attemptNo, source.LastClassified(), retry.Decision{})
+					d.logFailure(ctx, in, prepared, attemptNo, latency, true, source.LastClassified(), retry.Decision{})
 					return StreamResult{}, errors.Join(parentErr, terminalizationError("terminal"))
 				}
-				d.logFailure(ctx, in, prepared, attemptNo, source.LastClassified(), retry.Decision{})
+				d.logFailure(ctx, in, prepared, attemptNo, latency, true, source.LastClassified(), retry.Decision{})
+				d.logReleased(ctx, in, prepared, attemptNo, releaseReason(parentErr))
 				return StreamResult{}, parentErr
 			}
 			_ = state.Commit()
@@ -198,36 +203,40 @@ func (d *StreamDriver) Run(ctx context.Context, in StreamInput) (StreamResult, e
 				_ = state.RecordSuccess(ctx, attempt)
 			}
 			if err := d.settleCommitted(ctx, terminalizer, outcome); err != nil {
-				d.logFailure(ctx, in, prepared, attemptNo, source.LastClassified(), retry.Decision{})
+				d.logFailure(ctx, in, prepared, attemptNo, latency, true, source.LastClassified(), retry.Decision{})
+				d.logTerminalizationUnknown(ctx, in, prepared, attemptNo)
 				return StreamResult{}, terminalizationError("terminal")
 			}
 			if outcome.State == streaming.StateCompleted {
-				d.logSuccess(ctx, in, prepared, attemptNo)
+				d.logSuccess(ctx, in, prepared, attemptNo, latency, outcome)
+				d.logCommitted(ctx, in, prepared, attemptNo, outcome)
+				d.logFinalized(ctx, in, prepared, attemptNo, outcome)
 			} else {
-				d.logFailure(ctx, in, prepared, attemptNo, source.LastClassified(), retry.Decision{})
+				d.logFailure(ctx, in, prepared, attemptNo, latency, true, source.LastClassified(), retry.Decision{})
+				d.logFinalized(ctx, in, prepared, attemptNo, outcome)
 			}
 			return StreamResult{Outcome: outcome}, nil
 		}
 		if err := ctx.Err(); err != nil {
-			d.logFailure(ctx, in, prepared, attemptNo, source.LastClassified(), retry.Decision{})
+			d.logFailure(ctx, in, prepared, attemptNo, latency, false, source.LastClassified(), retry.Decision{})
 			_ = state.Cancel()
-			return StreamResult{}, d.releaseFailure(ctx, terminalizer, err)
+			return StreamResult{}, d.releaseFailureWithLog(ctx, terminalizer, err, in, prepared, attemptNo)
 		}
 		// Bridge reports any context cancellation as StateClientCancelled. A
 		// parent cancellation already won above; an attempt-only deadline remains
 		// a safe timeout classification and may use the frozen retry policy.
 		if bridgeErr == nil && outcome.State == streaming.StateClientCancelled && !errors.Is(attemptCtx.Err(), context.DeadlineExceeded) {
-			d.logFailure(ctx, in, prepared, attemptNo, source.LastClassified(), retry.Decision{})
+			d.logFailure(ctx, in, prepared, attemptNo, latency, false, source.LastClassified(), retry.Decision{})
 			_ = state.Cancel()
-			return StreamResult{}, d.releaseFailure(ctx, terminalizer, context.Canceled)
+			return StreamResult{}, d.releaseFailureWithLog(ctx, terminalizer, context.Canceled, in, prepared, attemptNo)
 		}
 		classified := classifyBridgeError(bridgeErr, source.LastClassified(), attemptCtx.Err())
 		if classified == nil {
-			d.logFailure(ctx, in, prepared, attemptNo, nil, retry.Decision{})
+			d.logFailure(ctx, in, prepared, attemptNo, latency, false, nil, retry.Decision{})
 			_ = state.Cancel()
-			return StreamResult{}, d.releaseFailure(ctx, terminalizer, ErrUnclassified)
+			return StreamResult{}, d.releaseFailureWithLog(ctx, terminalizer, ErrUnclassified, in, prepared, attemptNo)
 		}
-		if result, next, done, err := d.retryPrecommit(ctx, terminalizer, state, attempt, policy, prepared, classified, in, attemptNo); done {
+		if result, next, done, err := d.retryPrecommit(ctx, terminalizer, state, attempt, policy, prepared, classified, in, attemptNo, latency); done {
 			return result, err
 		} else {
 			candidate = next
@@ -235,7 +244,7 @@ func (d *StreamDriver) Run(ctx context.Context, in StreamInput) (StreamResult, e
 	}
 }
 
-func (d *StreamDriver) retryPrecommit(ctx context.Context, terminalizer *Terminalizer, state *retry.State, attempt retry.Attempt, policy adapter.CompiledRetry, prepared routing.PreparedAttempt, classified *sdk.ClassifiedError, in StreamInput, attemptNo int) (StreamResult, routing.Candidate, bool, error) {
+func (d *StreamDriver) retryPrecommit(ctx context.Context, terminalizer *Terminalizer, state *retry.State, attempt retry.Attempt, policy adapter.CompiledRetry, prepared routing.PreparedAttempt, classified *sdk.ClassifiedError, in StreamInput, attemptNo int, latency time.Duration) (StreamResult, routing.Candidate, bool, error) {
 	var retryAfter *time.Duration
 	if ra, ok := classified.RetryAfter(); ok {
 		retryAfter = &ra
@@ -243,27 +252,30 @@ func (d *StreamDriver) retryPrecommit(ctx context.Context, terminalizer *Termina
 	decision, err := state.RecordFailure(ctx, attempt, retry.Failure{Classified: classified, RetryAfter: retryAfter}, policy)
 	if err != nil {
 		_ = state.Cancel()
-		resultErr := d.releaseFailure(ctx, terminalizer, parentError(ctx, ErrBudgetExhausted))
+		resultErr := d.releaseFailureWithLog(ctx, terminalizer, parentError(ctx, ErrBudgetExhausted), in, prepared, attemptNo)
 		// This is terminal (or safely terminalization-unknown), so logging may
 		// record failure but never claims a confirmed successful outcome.
-		d.logFailure(ctx, in, prepared, attemptNo, classified, retry.Decision{})
+		d.logFailure(ctx, in, prepared, attemptNo, latency, false, classified, retry.Decision{})
 		return StreamResult{}, routing.Candidate{}, true, resultErr
 	}
 	if !decision.Retry() {
 		mapped := (adapter.Engine{}).MapResponse(prepared.Adapter, classified.ToUpstreamResponse())
-		if err := d.releaseCleanup(ctx, terminalizer); err != nil {
-			d.logFailure(ctx, in, prepared, attemptNo, classified, decision)
+		releaseReasonVal := releaseReason(classified)
+		if err := d.releaseCleanupReason(ctx, terminalizer, releaseReasonVal); err != nil {
+			d.logFailure(ctx, in, prepared, attemptNo, latency, false, classified, decision)
+			d.logTerminalizationUnknown(ctx, in, prepared, attemptNo)
 			return StreamResult{}, routing.Candidate{}, true, errors.Join(classified, terminalizationError("release"))
 		}
-		d.logFailure(ctx, in, prepared, attemptNo, classified, decision)
+		d.logFailure(ctx, in, prepared, attemptNo, latency, false, classified, decision)
+		d.logReleased(ctx, in, prepared, attemptNo, releaseReasonVal)
 		return StreamResult{Failure: &mapped}, routing.Candidate{}, true, nil
 	}
 	// A retry decision is an attempt observation, not a terminal outcome.
-	d.logFailure(ctx, in, prepared, attemptNo, classified, decision)
+	d.logFailure(ctx, in, prepared, attemptNo, latency, false, classified, decision)
 	if err := d.sleeper().Sleep(ctx, decision.Delay); err != nil {
 		_ = state.Cancel()
-		resultErr := d.releaseFailure(ctx, terminalizer, parentError(ctx, err))
-		d.logFailure(ctx, in, prepared, attemptNo, classified, retry.Decision{})
+		resultErr := d.releaseFailureWithLog(ctx, terminalizer, parentError(ctx, err), in, prepared, attemptNo)
+		d.logFailure(ctx, in, prepared, attemptNo, latency, false, classified, retry.Decision{})
 		return StreamResult{}, routing.Candidate{}, true, resultErr
 	}
 	return StreamResult{}, decision.Candidate, false, nil
@@ -370,6 +382,19 @@ func (d *StreamDriver) releaseFailure(ctx context.Context, t *Terminalizer, prim
 	}
 	return primary
 }
+
+// releaseFailureWithLog is like releaseFailure but also records a released or
+// terminalization-unknown lifecycle event.
+func (d *StreamDriver) releaseFailureWithLog(ctx context.Context, t *Terminalizer, primary error, in StreamInput, prepared routing.PreparedAttempt, attemptNo int) error {
+	reason := releaseReason(primary)
+	if err := d.releaseCleanupReason(ctx, t, reason); err != nil {
+		d.logTerminalizationUnknown(ctx, in, prepared, attemptNo)
+		return errors.Join(primary, terminalizationError("release"))
+	}
+	d.logReleased(ctx, in, prepared, attemptNo, reason)
+	return primary
+}
+
 func (d *StreamDriver) logContext(ctx context.Context) (context.Context, context.CancelFunc) {
 	timeout := d.LogTimeout
 	if timeout <= 0 {
@@ -385,29 +410,240 @@ func (d *StreamDriver) now() time.Time {
 	return time.Now()
 }
 
-func (d *StreamDriver) logEvent(ctx context.Context, in StreamInput, prepared routing.PreparedAttempt, attemptNo int, status string, classified *sdk.ClassifiedError, decision retry.Decision) {
+func (d *StreamDriver) baseEvent(in StreamInput, prepared routing.PreparedAttempt, attemptNo int) requestlog.ExecutionEvent {
+	return requestlog.ExecutionEvent{
+		RequestID:     in.RequestID,
+		ReservationID: in.ReservationID,
+		Revision:      prepared.Revision,
+		Generation:    prepared.Generation,
+		Attempt:       attemptNo,
+		Candidate: requestlog.ExecutionCandidate{
+			ModelID:      prepared.Candidate.ModelID,
+			ProviderID:   prepared.Candidate.ProviderID,
+			RouteID:      prepared.Candidate.RouteID,
+			CredentialID: prepared.Candidate.CredentialID,
+			AdapterID:    prepared.Candidate.AdapterID,
+		},
+		Protocol:  string(prepared.Target.Protocol),
+		Kind:      requestlog.KindAttempt,
+		Subject:   in.QuotaIdentity.Subject,
+		KeyID:     in.QuotaIdentity.KeyID,
+		Timestamp: d.now(),
+	}
+}
+
+func (d *StreamDriver) logReserved(ctx context.Context, in StreamInput, prepared routing.PreparedAttempt) {
 	if d == nil || isNilInterface(d.Logger) {
 		return
 	}
 	event := requestlog.ExecutionEvent{
-		RequestID: in.RequestID, ReservationID: in.ReservationID,
-		Revision: prepared.Revision, Generation: prepared.Generation, Attempt: attemptNo,
-		Candidate: requestlog.ExecutionCandidate{ModelID: prepared.Candidate.ModelID, ProviderID: prepared.Candidate.ProviderID, RouteID: prepared.Candidate.RouteID, CredentialID: prepared.Candidate.CredentialID, AdapterID: prepared.Candidate.AdapterID},
-		Protocol:  string(prepared.Target.Protocol), Kind: "attempt", Status: status,
-		RuleID: decision.RuleID, Action: string(decision.Action), Timestamp: d.now(),
-	}
-	if classified != nil {
-		event.Code, event.Type = classified.Code(), classified.Type()
+		RequestID:     in.RequestID,
+		ReservationID: in.ReservationID,
+		Revision:      prepared.Revision,
+		Generation:    prepared.Generation,
+		Candidate: requestlog.ExecutionCandidate{
+			ModelID:      prepared.Candidate.ModelID,
+			ProviderID:   prepared.Candidate.ProviderID,
+			RouteID:      prepared.Candidate.RouteID,
+			CredentialID: prepared.Candidate.CredentialID,
+			AdapterID:    prepared.Candidate.AdapterID,
+		},
+		Protocol:  string(prepared.Target.Protocol),
+		Kind:      requestlog.KindReserved,
+		Subject:   in.QuotaIdentity.Subject,
+		KeyID:     in.QuotaIdentity.KeyID,
+		Timestamp: d.now(),
 	}
 	logCtx, cancel := d.logContext(ctx)
 	defer cancel()
 	_ = d.Logger.RecordExecution(logCtx, event)
 }
-func (d *StreamDriver) logSuccess(ctx context.Context, in StreamInput, prepared routing.PreparedAttempt, attemptNo int) {
-	d.logEvent(ctx, in, prepared, attemptNo, "success", nil, retry.Decision{})
+
+func (d *StreamDriver) logSuccess(ctx context.Context, in StreamInput, prepared routing.PreparedAttempt, attemptNo int, latency time.Duration, outcome streaming.Outcome) {
+	if d == nil || isNilInterface(d.Logger) {
+		return
+	}
+	event := d.baseEvent(in, prepared, attemptNo)
+	event.Status = "success"
+	event.Latency = latency
+	event.Committed = true
+	if outcome.UsageKnown {
+		event.Usage = requestlog.ExecutionUsage{
+			InputTokens:  uint64(outcome.Usage.PromptTokens),
+			OutputTokens: uint64(outcome.Usage.CompletionTokens),
+			TotalTokens:  uint64(outcome.Usage.TotalTokens),
+		}
+		event.UsageKnown = true
+	}
+	logCtx, cancel := d.logContext(ctx)
+	defer cancel()
+	_ = d.Logger.RecordExecution(logCtx, event)
 }
-func (d *StreamDriver) logFailure(ctx context.Context, in StreamInput, prepared routing.PreparedAttempt, attemptNo int, classified *sdk.ClassifiedError, decision retry.Decision) {
-	d.logEvent(ctx, in, prepared, attemptNo, "failed", classified, decision)
+
+func (d *StreamDriver) logFailure(ctx context.Context, in StreamInput, prepared routing.PreparedAttempt, attemptNo int, latency time.Duration, committed bool, classified *sdk.ClassifiedError, decision retry.Decision) {
+	if d == nil || isNilInterface(d.Logger) {
+		return
+	}
+	event := d.baseEvent(in, prepared, attemptNo)
+	event.Status = "failed"
+	event.Latency = latency
+	event.Committed = committed
+	if classified != nil {
+		event.Code = classified.Code()
+		event.Type = classified.Type()
+	}
+	event.RuleID = decision.RuleID
+	event.Action = string(decision.Action)
+	logCtx, cancel := d.logContext(ctx)
+	defer cancel()
+	_ = d.Logger.RecordExecution(logCtx, event)
+}
+
+func (d *StreamDriver) logCommitted(ctx context.Context, in StreamInput, prepared routing.PreparedAttempt, attemptNo int, outcome streaming.Outcome) {
+	if d == nil || isNilInterface(d.Logger) {
+		return
+	}
+	event := requestlog.ExecutionEvent{
+		RequestID:     in.RequestID,
+		ReservationID: in.ReservationID,
+		Revision:      prepared.Revision,
+		Generation:    prepared.Generation,
+		Attempt:       attemptNo,
+		Candidate: requestlog.ExecutionCandidate{
+			ModelID:      prepared.Candidate.ModelID,
+			ProviderID:   prepared.Candidate.ProviderID,
+			RouteID:      prepared.Candidate.RouteID,
+			CredentialID: prepared.Candidate.CredentialID,
+			AdapterID:    prepared.Candidate.AdapterID,
+		},
+		Protocol:  string(prepared.Target.Protocol),
+		Kind:      requestlog.KindCommitted,
+		Subject:   in.QuotaIdentity.Subject,
+		KeyID:     in.QuotaIdentity.KeyID,
+		Timestamp: d.now(),
+		Committed: true,
+	}
+	if outcome.UsageKnown {
+		event.Usage = requestlog.ExecutionUsage{
+			InputTokens:  uint64(outcome.Usage.PromptTokens),
+			OutputTokens: uint64(outcome.Usage.CompletionTokens),
+			TotalTokens:  uint64(outcome.Usage.TotalTokens),
+		}
+		event.UsageKnown = true
+	}
+	logCtx, cancel := d.logContext(ctx)
+	defer cancel()
+	_ = d.Logger.RecordExecution(logCtx, event)
+}
+
+func (d *StreamDriver) logFinalized(ctx context.Context, in StreamInput, prepared routing.PreparedAttempt, attemptNo int, outcome streaming.Outcome) {
+	if d == nil || isNilInterface(d.Logger) {
+		return
+	}
+	disposition := string(quota.AccountingConfirmedUsage)
+	completionOutcome := string(quota.OutcomeAfterCommitError)
+	switch outcome.State {
+	case streaming.StateCompleted:
+		completionOutcome = string(quota.OutcomeCompleted)
+	case streaming.StateClientCancelled:
+		completionOutcome = string(quota.OutcomeClientCancelled)
+	}
+	event := requestlog.ExecutionEvent{
+		RequestID:     in.RequestID,
+		ReservationID: in.ReservationID,
+		Revision:      prepared.Revision,
+		Generation:    prepared.Generation,
+		Attempt:       attemptNo,
+		Candidate: requestlog.ExecutionCandidate{
+			ModelID:      prepared.Candidate.ModelID,
+			ProviderID:   prepared.Candidate.ProviderID,
+			RouteID:      prepared.Candidate.RouteID,
+			CredentialID: prepared.Candidate.CredentialID,
+			AdapterID:    prepared.Candidate.AdapterID,
+		},
+		Protocol:  string(prepared.Target.Protocol),
+		Kind:      requestlog.KindFinalized,
+		Subject:   in.QuotaIdentity.Subject,
+		KeyID:     in.QuotaIdentity.KeyID,
+		Timestamp: d.now(),
+		Settlement: requestlog.ExecutionSettlement{
+			Disposition: disposition,
+			Outcome:     completionOutcome,
+		},
+	}
+	if outcome.UsageKnown {
+		event.Usage = requestlog.ExecutionUsage{
+			InputTokens:  uint64(outcome.Usage.PromptTokens),
+			OutputTokens: uint64(outcome.Usage.CompletionTokens),
+			TotalTokens:  uint64(outcome.Usage.TotalTokens),
+		}
+		event.UsageKnown = true
+	}
+	logCtx, cancel := d.logContext(ctx)
+	defer cancel()
+	_ = d.Logger.RecordExecution(logCtx, event)
+}
+
+func (d *StreamDriver) logReleased(ctx context.Context, in StreamInput, prepared routing.PreparedAttempt, attemptNo int, reason quota.ReleaseReason) {
+	if d == nil || isNilInterface(d.Logger) {
+		return
+	}
+	event := requestlog.ExecutionEvent{
+		RequestID:     in.RequestID,
+		ReservationID: in.ReservationID,
+		Revision:      prepared.Revision,
+		Generation:    prepared.Generation,
+		Attempt:       attemptNo,
+		Candidate: requestlog.ExecutionCandidate{
+			ModelID:      prepared.Candidate.ModelID,
+			ProviderID:   prepared.Candidate.ProviderID,
+			RouteID:      prepared.Candidate.RouteID,
+			CredentialID: prepared.Candidate.CredentialID,
+			AdapterID:    prepared.Candidate.AdapterID,
+		},
+		Protocol:  string(prepared.Target.Protocol),
+		Kind:      requestlog.KindReleased,
+		Subject:   in.QuotaIdentity.Subject,
+		KeyID:     in.QuotaIdentity.KeyID,
+		Timestamp: d.now(),
+		Settlement: requestlog.ExecutionSettlement{
+			Reason: string(reason),
+		},
+	}
+	logCtx, cancel := d.logContext(ctx)
+	defer cancel()
+	_ = d.Logger.RecordExecution(logCtx, event)
+}
+
+func (d *StreamDriver) logTerminalizationUnknown(ctx context.Context, in StreamInput, prepared routing.PreparedAttempt, attemptNo int) {
+	if d == nil || isNilInterface(d.Logger) {
+		return
+	}
+	event := requestlog.ExecutionEvent{
+		RequestID:     in.RequestID,
+		ReservationID: in.ReservationID,
+		Revision:      prepared.Revision,
+		Generation:    prepared.Generation,
+		Attempt:       attemptNo,
+		Candidate: requestlog.ExecutionCandidate{
+			ModelID:      prepared.Candidate.ModelID,
+			ProviderID:   prepared.Candidate.ProviderID,
+			RouteID:      prepared.Candidate.RouteID,
+			CredentialID: prepared.Candidate.CredentialID,
+			AdapterID:    prepared.Candidate.AdapterID,
+		},
+		Protocol:  string(prepared.Target.Protocol),
+		Kind:      requestlog.KindReleased,
+		Subject:   in.QuotaIdentity.Subject,
+		KeyID:     in.QuotaIdentity.KeyID,
+		Timestamp: d.now(),
+		Settlement: requestlog.ExecutionSettlement{
+			Reason: "unknown",
+		},
+	}
+	logCtx, cancel := d.logContext(ctx)
+	defer cancel()
+	_ = d.Logger.RecordExecution(logCtx, event)
 }
 
 func (d *StreamDriver) sleeper() Sleeper {

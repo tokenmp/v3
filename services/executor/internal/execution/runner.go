@@ -234,6 +234,8 @@ func (r *Runner) Run(ctx context.Context, in Input) (Result, error) {
 	}
 	terminalizer := NewTerminalizer(r.Quota, quota.ReservationID(in.ReservationID))
 
+	r.logReserved(ctx, in, firstPrepared)
+
 	candidate := first
 	attemptNo := 0
 	for {
@@ -245,11 +247,11 @@ func (r *Runner) Run(ctx context.Context, in Input) (Result, error) {
 			if cerr := ctx.Err(); cerr != nil {
 				err = cerr
 			}
-			return Result{}, r.releaseFailure(ctx, terminalizer, err)
+			return Result{}, r.releaseFailureWithLog(ctx, terminalizer, err, in, firstPrepared, 0)
 		}
 		prepared := preparedCall.preparedAttempt()
 		if prepared.Timeout.Request <= 0 {
-			return Result{}, r.releaseFailure(ctx, terminalizer, ErrMisconfigured)
+			return Result{}, r.releaseFailureWithLog(ctx, terminalizer, ErrMisconfigured, in, prepared, attemptNo)
 		}
 
 		// The shared session resolves exactly once and immediately starts the
@@ -257,29 +259,35 @@ func (r *Runner) Run(ctx context.Context, in Input) (Result, error) {
 		// owned here so streaming can use the same lifecycle with OpenStream.
 		var completion sdk.Completion
 		var callErr error
+		var attemptStart time.Time
 		attempt, credentialAcquired, began, err := preparedCall.NewAttemptSession(state, retryPolicy, in.Credentials).Execute(ctx, func(client sdk.Client, call sdk.Call) {
 			// Each SDK invocation has the route's compiled request timeout, bounded
 			// by the caller context. Provider adapters classify deadline expiry as a
 			// safe timeout; always cancel promptly to release the timer.
 			attemptCtx, attemptCancel := context.WithTimeout(ctx, prepared.Timeout.Request)
+			attemptStart = r.now()
 			completion, callErr = client.Complete(attemptCtx, call)
 			attemptCancel()
 		})
+		latency := time.Duration(0)
+		if !attemptStart.IsZero() {
+			latency = r.now().Sub(attemptStart)
+		}
 		if err != nil {
 			if !credentialAcquired {
 				if cerr := ctx.Err(); cerr != nil {
 					err = cerr
 				}
-				return Result{}, r.releaseFailure(ctx, terminalizer, err)
+				return Result{}, r.releaseFailureWithLog(ctx, terminalizer, err, in, prepared, attemptNo)
 			}
 			if !began {
 				primary := error(ErrBudgetExhausted)
 				if cerr := ctx.Err(); cerr != nil {
 					primary = cerr
 				}
-				return Result{}, r.releaseFailure(ctx, terminalizer, primary)
+				return Result{}, r.releaseFailureWithLog(ctx, terminalizer, primary, in, prepared, attemptNo)
 			}
-			return Result{}, r.releaseFailure(ctx, terminalizer, err)
+			return Result{}, r.releaseFailureWithLog(ctx, terminalizer, err, in, prepared, attemptNo)
 		}
 		err = callErr
 
@@ -290,8 +298,8 @@ func (r *Runner) Run(ctx context.Context, in Input) (Result, error) {
 		// racing with a provider result cannot enter response mapping or retry.
 		if parentErr := ctx.Err(); parentErr != nil {
 			_ = state.Cancel()
-			r.logFailure(ctx, in, prepared, attemptNo, nil, adapter.MappedResponse{}, retry.Decision{})
-			return Result{}, r.releaseFailure(ctx, terminalizer, parentErr)
+			r.logFailure(ctx, in, prepared, attemptNo, latency, nil, adapter.MappedResponse{}, retry.Decision{})
+			return Result{}, r.releaseFailureWithLog(ctx, terminalizer, parentErr, in, prepared, attemptNo)
 		}
 		if err == nil {
 			// Success is irreversible: RecordSuccess and Commit freeze the
@@ -305,15 +313,18 @@ func (r *Runner) Run(ctx context.Context, in Input) (Result, error) {
 			// intentionally ignored and never changes the committed verdict.
 			_ = state.RecordSuccess(ctx, attempt)
 			_ = state.Commit()
+			finalizeOutcome := runnerFinalizeOutcome(completion)
 			cleanupCtx, cleanupCancel := r.cleanupContext(ctx)
-			ferr := terminalizer.Finalize(cleanupCtx, runnerFinalizeOutcome(completion))
+			ferr := terminalizer.Finalize(cleanupCtx, finalizeOutcome)
 			cleanupCancel()
 			if ferr != nil {
 				// Terminal state is unknown. Do not Release, log success, or return a
 				// Completion that callers could mistake for a confirmed outcome.
+				r.logTerminalizationUnknown(ctx, in, prepared, attemptNo)
 				return Result{}, terminalizationError("finalize")
 			}
-			r.logSuccess(ctx, in, prepared, attemptNo)
+			r.logSuccess(ctx, in, prepared, attemptNo, latency, completion)
+			r.logFinalized(ctx, in, prepared, attemptNo, finalizeOutcome)
 			return Result{Completion: completion}, nil
 		}
 
@@ -323,8 +334,8 @@ func (r *Runner) Run(ctx context.Context, in Input) (Result, error) {
 		// attempt context (or a provider timeout) and is safe to classify.
 		if errors.Is(err, context.Canceled) {
 			_ = state.Cancel()
-			r.logFailure(ctx, in, prepared, attemptNo, nil, adapter.MappedResponse{}, retry.Decision{})
-			return Result{}, r.releaseFailure(ctx, terminalizer, context.Canceled)
+			r.logFailure(ctx, in, prepared, attemptNo, latency, nil, adapter.MappedResponse{}, retry.Decision{})
+			return Result{}, r.releaseFailureWithLog(ctx, terminalizer, context.Canceled, in, prepared, attemptNo)
 		}
 
 		var classified *sdk.ClassifiedError
@@ -341,8 +352,8 @@ func (r *Runner) Run(ctx context.Context, in Input) (Result, error) {
 			// Unclassified failures are fail-closed: never retry, release, and
 			// return a generic sentinel so the raw error cannot leak.
 			_ = state.Cancel()
-			r.logFailure(ctx, in, prepared, attemptNo, nil, adapter.MappedResponse{}, retry.Decision{})
-			return Result{}, r.releaseFailure(ctx, terminalizer, ErrUnclassified)
+			r.logFailure(ctx, in, prepared, attemptNo, latency, nil, adapter.MappedResponse{}, retry.Decision{})
+			return Result{}, r.releaseFailureWithLog(ctx, terminalizer, ErrUnclassified, in, prepared, attemptNo)
 		}
 
 		// Extract Retry-After from the classified error, if present.
@@ -357,20 +368,24 @@ func (r *Runner) Run(ctx context.Context, in Input) (Result, error) {
 			if cerr := ctx.Err(); cerr != nil {
 				primary = cerr
 			}
-			return Result{}, r.releaseFailure(ctx, terminalizer, primary)
+			r.logFailure(ctx, in, prepared, attemptNo, latency, classified, (adapter.Engine{}).MapResponse(prepared.Adapter, classified.ToUpstreamResponse()), decision)
+			return Result{}, r.releaseFailureWithLog(ctx, terminalizer, primary, in, prepared, attemptNo)
 		}
 		// The attempt log is best-effort: a recording fault never changes the
 		// verdict or the retry decision already recorded by the State.
 		mapped := (adapter.Engine{}).MapResponse(prepared.Adapter, classified.ToUpstreamResponse())
-		r.logFailure(ctx, in, prepared, attemptNo, classified, mapped, decision)
+		r.logFailure(ctx, in, prepared, attemptNo, latency, classified, mapped, decision)
 
 		if !decision.Retry() {
 			// The mapped Failure is a confirmed terminal Result only after Release
 			// succeeds. If Release is unknown, retain the safe classified primary in
 			// the error but return no Result.
-			if err := r.releaseCleanup(ctx, terminalizer); err != nil {
+			releaseReasonVal := releaseReason(classified)
+			if err := r.releaseCleanupReason(ctx, terminalizer, releaseReasonVal); err != nil {
+				r.logReleased(ctx, in, prepared, attemptNo, releaseReasonVal)
 				return Result{}, errors.Join(classified, terminalizationError("release"))
 			}
+			r.logReleased(ctx, in, prepared, attemptNo, releaseReasonVal)
 			return Result{Failure: &mapped}, nil
 		}
 
@@ -379,7 +394,7 @@ func (r *Runner) Run(ctx context.Context, in Input) (Result, error) {
 			if cerr := ctx.Err(); cerr != nil {
 				err = cerr
 			}
-			return Result{}, r.releaseFailure(ctx, terminalizer, err)
+			return Result{}, r.releaseFailureWithLog(ctx, terminalizer, err, in, prepared, attemptNo)
 		}
 		candidate = decision.Candidate
 	}
@@ -469,10 +484,24 @@ func releaseReason(primary error) quota.ReleaseReason {
 
 // releaseFailure retains the safe primary verdict and adds a safe uncertainty
 // envelope when the one required post-reserve Release cannot be confirmed.
+// It does not log lifecycle events; callers that need released-event logging
+// should use releaseFailureWithLog instead.
 func (r *Runner) releaseFailure(ctx context.Context, terminalizer *Terminalizer, primary error) error {
 	if err := r.releaseCleanupReason(ctx, terminalizer, releaseReason(primary)); err != nil {
 		return errors.Join(primary, terminalizationError("release"))
 	}
+	return primary
+}
+
+// releaseFailureWithLog is like releaseFailure but also records a released or
+// terminalization-unknown lifecycle event.
+func (r *Runner) releaseFailureWithLog(ctx context.Context, terminalizer *Terminalizer, primary error, in Input, prepared routing.PreparedAttempt, attemptNo int) error {
+	reason := releaseReason(primary)
+	if err := r.releaseCleanupReason(ctx, terminalizer, reason); err != nil {
+		r.logTerminalizationUnknown(ctx, in, prepared, attemptNo)
+		return errors.Join(primary, terminalizationError("release"))
+	}
+	r.logReleased(ctx, in, prepared, attemptNo, reason)
 	return primary
 }
 
@@ -516,29 +545,68 @@ func (r *Runner) baseEvent(in Input, prepared routing.PreparedAttempt, attemptNo
 			AdapterID:    prepared.Candidate.AdapterID,
 		},
 		Protocol:  string(prepared.Target.Protocol),
-		Kind:      "attempt",
+		Kind:      requestlog.KindAttempt,
+		Subject:   in.QuotaIdentity.Subject,
+		KeyID:     in.QuotaIdentity.KeyID,
 		Timestamp: r.now(),
 	}
 }
 
-func (r *Runner) logSuccess(ctx context.Context, in Input, prepared routing.PreparedAttempt, attemptNo int) {
+func (r *Runner) logReserved(ctx context.Context, in Input, prepared routing.PreparedAttempt) {
+	if isNilInterface(r.Logger) {
+		return
+	}
+	event := requestlog.ExecutionEvent{
+		RequestID:     in.RequestID,
+		ReservationID: in.ReservationID,
+		Revision:      prepared.Revision,
+		Generation:    prepared.Generation,
+		Candidate: requestlog.ExecutionCandidate{
+			ModelID:      prepared.Candidate.ModelID,
+			ProviderID:   prepared.Candidate.ProviderID,
+			RouteID:      prepared.Candidate.RouteID,
+			CredentialID: prepared.Candidate.CredentialID,
+			AdapterID:    prepared.Candidate.AdapterID,
+		},
+		Protocol:  string(prepared.Target.Protocol),
+		Kind:      requestlog.KindReserved,
+		Subject:   in.QuotaIdentity.Subject,
+		KeyID:     in.QuotaIdentity.KeyID,
+		Timestamp: r.now(),
+	}
+	logCtx, cancel := r.logContext(ctx)
+	defer cancel()
+	_ = r.Logger.RecordExecution(logCtx, event)
+}
+
+func (r *Runner) logSuccess(ctx context.Context, in Input, prepared routing.PreparedAttempt, attemptNo int, latency time.Duration, completion sdk.Completion) {
 	if isNilInterface(r.Logger) {
 		return
 	}
 	event := r.baseEvent(in, prepared, attemptNo)
 	event.Status = "success"
+	event.Latency = latency
+	if completion.Known && completion.Usage.Valid() {
+		event.Usage = requestlog.ExecutionUsage{
+			InputTokens:  completion.Usage.PromptTokens,
+			OutputTokens: completion.Usage.CompletionTokens,
+			TotalTokens:  completion.Usage.TotalTokens,
+		}
+		event.UsageKnown = true
+	}
 	// Logs never alter the verdict: a recording error is intentionally ignored.
 	logCtx, cancel := r.logContext(ctx)
 	defer cancel()
 	_ = r.Logger.RecordExecution(logCtx, event)
 }
 
-func (r *Runner) logFailure(ctx context.Context, in Input, prepared routing.PreparedAttempt, attemptNo int, classified *sdk.ClassifiedError, mapped adapter.MappedResponse, decision retry.Decision) {
+func (r *Runner) logFailure(ctx context.Context, in Input, prepared routing.PreparedAttempt, attemptNo int, latency time.Duration, classified *sdk.ClassifiedError, mapped adapter.MappedResponse, decision retry.Decision) {
 	if isNilInterface(r.Logger) {
 		return
 	}
 	event := r.baseEvent(in, prepared, attemptNo)
 	event.Status = "failed"
+	event.Latency = latency
 	// Record adapter-mapped public error identifiers rather than raw upstream
 	// metadata. ExecutionEvent has no numeric-status field; its Status remains
 	// the attempt outcome, while Result.Failure carries mapped HTTPStatus.
@@ -549,6 +617,108 @@ func (r *Runner) logFailure(ctx context.Context, in Input, prepared routing.Prep
 	event.RuleID = decision.RuleID
 	event.Action = string(decision.Action)
 	// Logs never alter the verdict: a recording error is intentionally ignored.
+	logCtx, cancel := r.logContext(ctx)
+	defer cancel()
+	_ = r.Logger.RecordExecution(logCtx, event)
+}
+
+func (r *Runner) logFinalized(ctx context.Context, in Input, prepared routing.PreparedAttempt, attemptNo int, outcome quota.FinalizeOutcome) {
+	if isNilInterface(r.Logger) {
+		return
+	}
+	event := requestlog.ExecutionEvent{
+		RequestID:     in.RequestID,
+		ReservationID: in.ReservationID,
+		Revision:      prepared.Revision,
+		Generation:    prepared.Generation,
+		Attempt:       attemptNo,
+		Candidate: requestlog.ExecutionCandidate{
+			ModelID:      prepared.Candidate.ModelID,
+			ProviderID:   prepared.Candidate.ProviderID,
+			RouteID:      prepared.Candidate.RouteID,
+			CredentialID: prepared.Candidate.CredentialID,
+			AdapterID:    prepared.Candidate.AdapterID,
+		},
+		Protocol:  string(prepared.Target.Protocol),
+		Kind:      requestlog.KindFinalized,
+		Subject:   in.QuotaIdentity.Subject,
+		KeyID:     in.QuotaIdentity.KeyID,
+		Timestamp: r.now(),
+		Settlement: requestlog.ExecutionSettlement{
+			Disposition: string(outcome.Disposition),
+			Outcome:     string(outcome.Outcome),
+		},
+	}
+	if outcome.Usage != (quota.ConfirmedUsage{}) {
+		event.Usage = requestlog.ExecutionUsage{
+			InputTokens:  outcome.Usage.InputTokens,
+			OutputTokens: outcome.Usage.OutputTokens,
+			TotalTokens:  outcome.Usage.TotalTokens,
+		}
+		event.UsageKnown = true
+	}
+	logCtx, cancel := r.logContext(ctx)
+	defer cancel()
+	_ = r.Logger.RecordExecution(logCtx, event)
+}
+
+func (r *Runner) logReleased(ctx context.Context, in Input, prepared routing.PreparedAttempt, attemptNo int, reason quota.ReleaseReason) {
+	if isNilInterface(r.Logger) {
+		return
+	}
+	event := requestlog.ExecutionEvent{
+		RequestID:     in.RequestID,
+		ReservationID: in.ReservationID,
+		Revision:      prepared.Revision,
+		Generation:    prepared.Generation,
+		Attempt:       attemptNo,
+		Candidate: requestlog.ExecutionCandidate{
+			ModelID:      prepared.Candidate.ModelID,
+			ProviderID:   prepared.Candidate.ProviderID,
+			RouteID:      prepared.Candidate.RouteID,
+			CredentialID: prepared.Candidate.CredentialID,
+			AdapterID:    prepared.Candidate.AdapterID,
+		},
+		Protocol:  string(prepared.Target.Protocol),
+		Kind:      requestlog.KindReleased,
+		Subject:   in.QuotaIdentity.Subject,
+		KeyID:     in.QuotaIdentity.KeyID,
+		Timestamp: r.now(),
+		Settlement: requestlog.ExecutionSettlement{
+			Reason: string(reason),
+		},
+	}
+	logCtx, cancel := r.logContext(ctx)
+	defer cancel()
+	_ = r.Logger.RecordExecution(logCtx, event)
+}
+
+func (r *Runner) logTerminalizationUnknown(ctx context.Context, in Input, prepared routing.PreparedAttempt, attemptNo int) {
+	if isNilInterface(r.Logger) {
+		return
+	}
+	event := requestlog.ExecutionEvent{
+		RequestID:     in.RequestID,
+		ReservationID: in.ReservationID,
+		Revision:      prepared.Revision,
+		Generation:    prepared.Generation,
+		Attempt:       attemptNo,
+		Candidate: requestlog.ExecutionCandidate{
+			ModelID:      prepared.Candidate.ModelID,
+			ProviderID:   prepared.Candidate.ProviderID,
+			RouteID:      prepared.Candidate.RouteID,
+			CredentialID: prepared.Candidate.CredentialID,
+			AdapterID:    prepared.Candidate.AdapterID,
+		},
+		Protocol:  string(prepared.Target.Protocol),
+		Kind:      requestlog.KindReleased,
+		Subject:   in.QuotaIdentity.Subject,
+		KeyID:     in.QuotaIdentity.KeyID,
+		Timestamp: r.now(),
+		Settlement: requestlog.ExecutionSettlement{
+			Reason: "unknown",
+		},
+	}
 	logCtx, cancel := r.logContext(ctx)
 	defer cancel()
 	_ = r.Logger.RecordExecution(logCtx, event)
