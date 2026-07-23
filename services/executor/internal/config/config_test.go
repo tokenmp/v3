@@ -27,6 +27,8 @@ func TestLoadDefaults(t *testing.T) {
 		CredentialRefMapJSON: "{}",
 		JWTIssuer:            "tokenmp-auth",
 		JWTAudience:          "tokenmp-web",
+		MetricsEnabled:       true,
+		MetricsPath:          "/metrics",
 	}
 	if got != want {
 		t.Errorf("Load() = %+v, want %+v", got, want)
@@ -111,6 +113,8 @@ func TestLoadOverrides(t *testing.T) {
 		JWTPublicKeyFile:     "/etc/executor/jwt.pem",
 		JWTIssuer:            "custom-issuer",
 		JWTAudience:          "custom-audience",
+		MetricsEnabled:       true,
+		MetricsPath:          "/metrics",
 	}
 	if got != want {
 		t.Errorf("Load() = %+v, want %+v", got, want)
@@ -390,4 +394,118 @@ func TestLoadConfigReloadInterval(t *testing.T) {
 			t.Errorf("ConfigReloadInterval = %v, want 0", got.ConfigReloadInterval)
 		}
 	})
+}
+
+func TestLoadMetricsDefaults(t *testing.T) {
+	t.Parallel()
+	env := map[string]string{
+		"EXECUTOR_CONFIG_FILE":             "/tmp/executor.json",
+		"EXECUTOR_CREDENTIAL_REF_MAP_JSON": "{}",
+		"EXECUTOR_IDENTITY_MAP_JSON":       "{}",
+	}
+	got, err := Load(func(key string) (string, bool) { v, ok := env[key]; return v, ok })
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !got.MetricsEnabled {
+		t.Error("MetricsEnabled = false, want true (default)")
+	}
+	if got.MetricsPath != "/metrics" {
+		t.Errorf("MetricsPath = %q, want /metrics (default)", got.MetricsPath)
+	}
+}
+
+func TestLoadMetricsDisabled(t *testing.T) {
+	t.Parallel()
+	for _, value := range []string{"false", "0", "no", "off", "FALSE", "Off"} {
+		t.Run(value, func(t *testing.T) {
+			t.Parallel()
+			env := map[string]string{
+				"EXECUTOR_CONFIG_FILE":             "/tmp/executor.json",
+				"EXECUTOR_CREDENTIAL_REF_MAP_JSON": "{}",
+				"EXECUTOR_IDENTITY_MAP_JSON":       "{}",
+				"EXECUTOR_METRICS_ENABLED":         value,
+			}
+			got, err := Load(func(key string) (string, bool) { v, ok := env[key]; return v, ok })
+			if err != nil {
+				t.Fatalf("Load() error = %v", err)
+			}
+			if got.MetricsEnabled {
+				t.Errorf("MetricsEnabled = true for value %q, want false", value)
+			}
+		})
+	}
+}
+
+func TestLoadMetricsEnabledExplicit(t *testing.T) {
+	t.Parallel()
+	for _, value := range []string{"true", "1", "yes", "on"} {
+		t.Run(value, func(t *testing.T) {
+			t.Parallel()
+			env := map[string]string{
+				"EXECUTOR_CONFIG_FILE":             "/tmp/executor.json",
+				"EXECUTOR_CREDENTIAL_REF_MAP_JSON": "{}",
+				"EXECUTOR_IDENTITY_MAP_JSON":       "{}",
+				"EXECUTOR_METRICS_ENABLED":         value,
+			}
+			got, err := Load(func(key string) (string, bool) { v, ok := env[key]; return v, ok })
+			if err != nil {
+				t.Fatalf("Load() error = %v", err)
+			}
+			if !got.MetricsEnabled {
+				t.Errorf("MetricsEnabled = false for value %q, want true", value)
+			}
+		})
+	}
+}
+
+func TestLoadMetricsPathOverride(t *testing.T) {
+	t.Parallel()
+	env := map[string]string{
+		"EXECUTOR_CONFIG_FILE":             "/tmp/executor.json",
+		"EXECUTOR_CREDENTIAL_REF_MAP_JSON": "{}",
+		"EXECUTOR_IDENTITY_MAP_JSON":       "{}",
+		"EXECUTOR_METRICS_PATH":            "/custom/metrics",
+	}
+	got, err := Load(func(key string) (string, bool) { v, ok := env[key]; return v, ok })
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got.MetricsPath != "/custom/metrics" {
+		t.Errorf("MetricsPath = %q, want /custom/metrics", got.MetricsPath)
+	}
+}
+
+func TestLoadMetricsPathRejectsNoLeadingSlash(t *testing.T) {
+	t.Parallel()
+	env := map[string]string{
+		"EXECUTOR_CONFIG_FILE":             "/tmp/executor.json",
+		"EXECUTOR_CREDENTIAL_REF_MAP_JSON": "{}",
+		"EXECUTOR_IDENTITY_MAP_JSON":       "{}",
+		"EXECUTOR_METRICS_PATH":            "metrics",
+	}
+	_, err := Load(func(key string) (string, bool) { v, ok := env[key]; return v, ok })
+	if err == nil {
+		t.Fatal("Load() error = nil, want error for path without leading slash")
+	}
+	if !strings.Contains(err.Error(), "EXECUTOR_METRICS_PATH") {
+		t.Errorf("error = %q, want it to name EXECUTOR_METRICS_PATH", err.Error())
+	}
+}
+
+func TestLoadMetricsPathEmptyUsesDefault(t *testing.T) {
+	t.Parallel()
+	env := map[string]string{
+		"EXECUTOR_CONFIG_FILE":             "/tmp/executor.json",
+		"EXECUTOR_CREDENTIAL_REF_MAP_JSON": "{}",
+		"EXECUTOR_IDENTITY_MAP_JSON":       "{}",
+		"EXECUTOR_METRICS_PATH":            "",
+	}
+	got, err := Load(func(key string) (string, bool) { v, ok := env[key]; return v, ok })
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got.MetricsPath != "/metrics" {
+		t.Errorf("MetricsPath = %q, want /metrics (default for empty)", got.MetricsPath)
+	}
 }

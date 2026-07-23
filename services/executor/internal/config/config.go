@@ -14,6 +14,8 @@ const (
 	defaultIdleTimeout       = 60 * time.Second
 	defaultJWTIssuer         = "tokenmp-auth"
 	defaultJWTAudience       = "tokenmp-web"
+	defaultMetricsEnabled    = true
+	defaultMetricsPath       = "/metrics"
 )
 
 // Required environment variables. Each must be present and non-empty at load
@@ -43,6 +45,12 @@ const (
 	// EnvConfigReloadInterval is the optional stat-based file change polling
 	// interval. When unset or zero, only SIGHUP triggers reloads.
 	EnvConfigReloadInterval = "EXECUTOR_CONFIG_RELOAD_INTERVAL"
+	// EnvMetricsEnabled controls whether the /metrics endpoint is served.
+	// Defaults to true when unset or empty.
+	EnvMetricsEnabled = "EXECUTOR_METRICS_ENABLED"
+	// EnvMetricsPath is the URL path for the metrics endpoint.
+	// Defaults to /metrics when unset or empty.
+	EnvMetricsPath = "EXECUTOR_METRICS_PATH"
 )
 
 // Config is the validated runtime configuration for Executor.
@@ -72,6 +80,12 @@ type Config struct {
 	// stats the config file and triggers a reload when mtime or size
 	// changes.
 	ConfigReloadInterval time.Duration
+	// MetricsEnabled controls whether the /metrics Prometheus endpoint is
+	// served. Defaults to true.
+	MetricsEnabled bool
+	// MetricsPath is the URL path for the metrics endpoint. Must be
+	// non-empty and start with '/'. Defaults to /metrics.
+	MetricsPath string
 }
 
 // Load reads Executor configuration from lookupEnv. An unset value uses its
@@ -154,6 +168,26 @@ func Load(lookupEnv func(string) (string, bool)) (Config, error) {
 			return Config{}, fmt.Errorf("%s must be a valid non-negative duration", EnvConfigReloadInterval)
 		}
 		config.ConfigReloadInterval = interval
+	}
+
+	// Metrics configuration: optional. Defaults to enabled at /metrics.
+	config.MetricsEnabled = defaultMetricsEnabled
+	if value, ok := lookupEnv(EnvMetricsEnabled); ok && strings.TrimSpace(value) != "" {
+		switch strings.ToLower(strings.TrimSpace(value)) {
+		case "false", "0", "no", "off":
+			config.MetricsEnabled = false
+		default:
+			config.MetricsEnabled = true
+		}
+	}
+
+	config.MetricsPath = defaultMetricsPath
+	if value, ok := lookupEnv(EnvMetricsPath); ok && strings.TrimSpace(value) != "" {
+		path := strings.TrimSpace(value)
+		if path == "" || path[0] != '/' {
+			return Config{}, fmt.Errorf("%s must be non-empty and start with '/'", EnvMetricsPath)
+		}
+		config.MetricsPath = path
 	}
 
 	return config, nil

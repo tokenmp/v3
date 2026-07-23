@@ -535,3 +535,61 @@ func ExecutionContractTests(t *testing.T, newPort func() ExecutionPort) {
 		}
 	})
 }
+
+func TestInMemoryExecutionEventCount(t *testing.T) {
+	log := NewInMemoryExecution()
+
+	// Initially zero.
+	if got := log.EventCount(); got != 0 {
+		t.Fatalf("initial EventCount = %d, want 0", got)
+	}
+
+	// After recording events.
+	for i := 1; i <= 5; i++ {
+		_ = log.RecordExecution(context.Background(), executionEvent(i))
+		if got := log.EventCount(); got != i {
+			t.Errorf("EventCount after %d records = %d, want %d", i, got, i)
+		}
+	}
+
+	// After eviction.
+	smallLog := NewInMemoryExecutionWithCapacity(3)
+	for i := 1; i <= 5; i++ {
+		_ = smallLog.RecordExecution(context.Background(), executionEvent(i))
+	}
+	if got := smallLog.EventCount(); got != 3 {
+		t.Errorf("EventCount after eviction = %d, want 3 (capacity)", got)
+	}
+}
+
+func TestInMemoryExecutionEventCountConcurrent(t *testing.T) {
+	log := NewInMemoryExecution()
+	const records = 200
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < records; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			_ = log.RecordExecution(context.Background(), ExecutionEvent{Kind: KindAttempt})
+		}()
+	}
+	for range 4 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			for range 50 {
+				_ = log.EventCount()
+			}
+		}()
+	}
+
+	close(start)
+	wg.Wait()
+	if got := log.EventCount(); got != records {
+		t.Errorf("EventCount = %d, want %d", got, records)
+	}
+}

@@ -135,6 +135,120 @@ func RepositoryContractTests(t *testing.T, newRepository func() Repository) {
 	})
 }
 
+func TestDomainInMemoryCountByState(t *testing.T) {
+	repo := NewDomainInMemory()
+
+	// Initially empty.
+	counts := repo.CountByState()
+	if len(counts) != 0 {
+		t.Fatalf("initial CountByState = %v, want empty", counts)
+	}
+
+	// Reserve one.
+	in1 := typedReservation(typedID("state1"))
+	if _, err := repo.ReserveReservation(context.Background(), in1); err != nil {
+		t.Fatal(err)
+	}
+	counts = repo.CountByState()
+	if counts[ReservationReserved] != 1 {
+		t.Errorf("reserved = %d, want 1", counts[ReservationReserved])
+	}
+
+	// Reserve another.
+	in2 := typedReservation(typedID("state2"))
+	if _, err := repo.ReserveReservation(context.Background(), in2); err != nil {
+		t.Fatal(err)
+	}
+	counts = repo.CountByState()
+	if counts[ReservationReserved] != 2 {
+		t.Errorf("reserved = %d, want 2", counts[ReservationReserved])
+	}
+
+	// Finalize one.
+	if _, err := repo.FinalizeReservation(context.Background(), FinalizeRequest{ID: in1.ID, Outcome: FinalizeOutcome{Disposition: AccountingUnpricedSuccess}}); err != nil {
+		t.Fatal(err)
+	}
+	counts = repo.CountByState()
+	if counts[ReservationReserved] != 1 {
+		t.Errorf("reserved = %d, want 1", counts[ReservationReserved])
+	}
+	if counts[ReservationFinalized] != 1 {
+		t.Errorf("finalized = %d, want 1", counts[ReservationFinalized])
+	}
+
+	// Release the other.
+	if _, err := repo.ReleaseReservation(context.Background(), ReleaseRequest{ID: in2.ID, Reason: ReleaseCancelled}); err != nil {
+		t.Fatal(err)
+	}
+	counts = repo.CountByState()
+	if counts[ReservationReserved] != 0 {
+		t.Errorf("reserved = %d, want 0", counts[ReservationReserved])
+	}
+	if counts[ReservationFinalized] != 1 {
+		t.Errorf("finalized = %d, want 1", counts[ReservationFinalized])
+	}
+	if counts[ReservationReleased] != 1 {
+		t.Errorf("released = %d, want 1", counts[ReservationReleased])
+	}
+
+	// Total matches Count.
+	total := 0
+	for _, v := range counts {
+		total += v
+	}
+	if total != repo.Count() {
+		t.Errorf("CountByState total = %d, Count = %d", total, repo.Count())
+	}
+
+	// Returned map is independent.
+	counts[ReservationReserved] = 999
+	if repo.CountByState()[ReservationReserved] != 0 {
+		t.Error("mutating returned map affected internal state")
+	}
+}
+
+func TestDomainInMemoryCountByStateConcurrent(t *testing.T) {
+	repo := NewDomainInMemory()
+
+	var wg sync.WaitGroup
+	// Concurrent reserves, finalizes, releases, and CountByState reads.
+	for i := range 100 {
+		id := typedID(fmt.Sprintf("race%d", i))
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _ = repo.ReserveReservation(context.Background(), typedReservation(id))
+		}()
+	}
+	for range 50 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = repo.CountByState()
+		}()
+	}
+	// Finalize some.
+	for i := range 20 {
+		id := typedID(fmt.Sprintf("racefin%d", i))
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _ = repo.FinalizeReservation(context.Background(), FinalizeRequest{ID: id, Outcome: FinalizeOutcome{Disposition: AccountingUnpricedSuccess}})
+		}()
+	}
+	wg.Wait()
+
+	// Verify consistency: total by state matches Count.
+	counts := repo.CountByState()
+	total := 0
+	for _, v := range counts {
+		total += v
+	}
+	if total != repo.Count() {
+		t.Errorf("CountByState total = %d, Count = %d", total, repo.Count())
+	}
+}
+
 func TestDomainInMemoryRepositoryContract(t *testing.T) {
 	RepositoryContractTests(t, func() Repository { return NewDomainInMemory() })
 }

@@ -470,6 +470,8 @@ func testConfig(configPath, credentialRefMapJSON string) config.Config {
 	return config.Config{
 		ConfigFile:           configPath,
 		CredentialRefMapJSON: credentialRefMapJSON,
+		MetricsEnabled:       true,
+		MetricsPath:          "/metrics",
 	}
 }
 
@@ -481,6 +483,8 @@ func testConfigWithJWT(configPath, credentialRefMapJSON, jwtPublicKeyFile, jwtIs
 		JWTPublicKeyFile:     jwtPublicKeyFile,
 		JWTIssuer:            jwtIssuer,
 		JWTAudience:          jwtAudience,
+		MetricsEnabled:       true,
+		MetricsPath:          "/metrics",
 	}
 }
 
@@ -753,5 +757,108 @@ func TestBuildJWTPrioritizedOverIdentityEnv(t *testing.T) {
 	app.Handler.ServeHTTP(apiRec, apiReq)
 	if apiRec.Code != http.StatusUnauthorized {
 		t.Fatalf("API key auth status = %d, want 401 (JWT source active, API key not in JWT source)", apiRec.Code)
+	}
+}
+
+func TestBuildMetricsEndpoint(t *testing.T) {
+	t.Parallel()
+
+	path := writeConfig(t, minimalEmptyConfig)
+	cfg := testConfig(path, "{}")
+	app, err := Build(context.Background(), cfg, envLookup(healthyEnv(t, path)))
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+
+	t.Run("anonymous GET /metrics returns 200", func(t *testing.T) {
+		t.Parallel()
+		req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8081/metrics", nil)
+		rec := httptest.NewRecorder()
+		app.Handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+		}
+		body := rec.Body.String()
+		if !strings.Contains(body, "executor_config_generation") {
+			t.Error("metrics output missing executor_config_generation")
+		}
+		if !strings.Contains(body, "executor_http_requests_total") {
+			t.Error("metrics output missing executor_http_requests_total")
+		}
+	})
+
+	t.Run("POST /metrics returns 405", func(t *testing.T) {
+		t.Parallel()
+		req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:8081/metrics", nil)
+		rec := httptest.NewRecorder()
+		app.Handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusMethodNotAllowed {
+			t.Fatalf("status = %d, want 405", rec.Code)
+		}
+	})
+
+	t.Run("/metrics subpath returns 404", func(t *testing.T) {
+		t.Parallel()
+		req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8081/metrics/foo", nil)
+		rec := httptest.NewRecorder()
+		app.Handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("status = %d, want 404", rec.Code)
+		}
+	})
+}
+
+func TestBuildMetricsDisabled(t *testing.T) {
+	t.Parallel()
+
+	path := writeConfig(t, minimalEmptyConfig)
+	cfg := config.Config{
+		ConfigFile:           path,
+		CredentialRefMapJSON: "{}",
+		MetricsEnabled:       false,
+		MetricsPath:          "/metrics",
+	}
+	app, err := Build(context.Background(), cfg, envLookup(healthyEnv(t, path)))
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8081/metrics", nil)
+	rec := httptest.NewRecorder()
+	app.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404 (disabled)", rec.Code)
+	}
+}
+
+func TestBuildMetricsMiddlewareCounts401(t *testing.T) {
+	t.Parallel()
+
+	path := writeConfig(t, minimalEmptyConfig)
+	cfg := testConfig(path, "{}")
+	app, err := Build(context.Background(), cfg, envLookup(healthyEnv(t, path)))
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+
+	// Send an unauthenticated request to /v1/chat/completions.
+	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:8081/v1/chat/completions", strings.NewReader(`{"model":"x","messages":[],"stream":false}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	app.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rec.Code)
+	}
+
+	// Now GET /metrics and verify the 401 was counted.
+	metricsReq := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8081/metrics", nil)
+	metricsRec := httptest.NewRecorder()
+	app.Handler.ServeHTTP(metricsRec, metricsReq)
+	if metricsRec.Code != http.StatusOK {
+		t.Fatalf("metrics status = %d, want 200", metricsRec.Code)
+	}
+	body := metricsRec.Body.String()
+	if !strings.Contains(body, `executor_http_requests_total{method="post",route="chat_completions",status_class="4xx"}`) {
+		t.Errorf("metrics output missing 401 counter for chat_completions; body:\n%s", body)
 	}
 }

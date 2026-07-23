@@ -163,10 +163,23 @@ func sameSettlement(a, b TerminalSettlement) bool {
 	return a.Reason == nil || *a.Reason == *b.Reason
 }
 
+// Count returns the total number of reservations in the store.
 func (m *DomainInMemory) Count() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return len(m.records)
+}
+
+// CountByState returns a map of reservation state to count. The returned map
+// is independent from the in-memory store.
+func (m *DomainInMemory) CountByState() map[ReservationState]int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	result := make(map[ReservationState]int, 3)
+	for _, r := range m.records {
+		result[r.State]++
+	}
+	return result
 }
 
 func (m *DomainInMemory) String() string   { return "quota.DomainInMemory{redacted}" }

@@ -116,6 +116,15 @@ func (m *InMemoryExecution) QueryEvents(_ context.Context, filter ExecutionFilte
 	return result, nil
 }
 
+// EventCount returns the number of events currently in the ring buffer.
+// This is the count of events that have not been evicted; it does not include
+// previously evicted events.
+func (m *InMemoryExecution) EventCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.count
+}
+
 // snapshot returns a defensive copy of the ring buffer in insertion order.
 // Caller must hold m.mu.
 func (m *InMemoryExecution) snapshot() []ExecutionEvent {
