@@ -161,6 +161,48 @@ type Sink interface {
 	Flush(ctx context.Context) error
 }
 
+// TerminalMeta is the sanitized terminal metadata returned by an optional
+// EndOfStreamFinalizer. It carries ONLY safe metadata the Bridge folds into
+// the Outcome: a bounded Finish token and optional bounded Usage counters. It
+// carries NO raw bytes, NO protocol field, and NO downstream renderer — the
+// finalizer synthesizes and writes any protocol-native terminal output itself
+// before returning this metadata, so the streaming package never sees raw
+// bytes. Both fields are sanitized/bounded again by the Bridge intake.
+type TerminalMeta struct {
+	// Finish is the bounded safe finish reason synthesized for the terminal.
+	// It is reduced to the [A-Za-z0-9_.-] subset and bounded by the Bridge.
+	Finish string
+
+	// Usage is optional bounded usage counters produced by the synthesized
+	// terminal. It is merged monotonically into the accumulated stream usage
+	// and bounded by MaxTotal by the Bridge. Nil means no usage was synthesized.
+	Usage *Usage
+}
+
+// EndOfStreamFinalizer is an optional hook invoked by the Bridge exactly once
+// on a committed clean EOF (the upstream stream ended cleanly after commit
+// without an explicit EventFinish). It is the ONLY path by which a committed
+// clean EOF can become a completed stream: the finalizer synthesizes and
+// writes any protocol-native terminal output directly to the downstream (the
+// streaming package never sees raw bytes, a protocol field, or a downstream
+// renderer interface), then returns sanitized terminal metadata the Bridge
+// merges into the Outcome. A nil Finalizer preserves the legacy contract: a
+// committed EOF without finish is a truncated-stream failure
+// (ReasonStreamTruncated).
+//
+// It does not widen Sink: the Sink interface remains Commit/WriteEvent/Flush
+// and carries only Event metadata. The finalizer is a separate, optional
+// Bridge dependency; a Sink that does not support terminal synthesis simply
+// leaves the Bridge Finalizer nil.
+//
+// The finalizer MUST honor ctx. A context error is treated as client
+// cancellation; any other non-nil error is treated as a post-commit sink
+// failure (the synthesized output may be partially written; the Bridge does
+// not retry). It MUST be idempotent: the Bridge calls it at most once, but a
+// defensive implementation must not synthesize a second terminal if its own
+// state already records one.
+type EndOfStreamFinalizer func(ctx context.Context) (TerminalMeta, error)
+
 // Safe sentinel errors. Each is a non-wrapping errors.New value:
 // errors.Unwrap returns nil, and Error() returns a fixed string that never
 // echoes an upstream message, body, URL, credential, or routing detail.

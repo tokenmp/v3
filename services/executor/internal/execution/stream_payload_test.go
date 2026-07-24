@@ -3,12 +3,14 @@ package execution
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
 
+	"github.com/tokenmp/v3/services/executor/internal/adapter"
 	"github.com/tokenmp/v3/services/executor/internal/sdk"
 	"github.com/tokenmp/v3/services/executor/internal/streaming"
 )
@@ -85,11 +87,11 @@ func newPayloadAdapters(t *testing.T, events ...sdk.StreamEvent) (*sdkPayloadSou
 	t.Helper()
 	source := &payloadTestSource{events: events, err: streaming.ErrEndOfStream}
 	sink := &payloadTestSink{}
-	payloads, adapter, err := newSDKPayloadSource(source, sink)
+	payloads, adapterSink, err := newSDKPayloadSource(source, sink)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return payloads, adapter, sink
+	return payloads, adapterSink, sink
 }
 
 func TestSDKPayloadSourceLifecycleBoundsAndCopyIsolation(t *testing.T) {
@@ -290,5 +292,70 @@ func TestSDKPayloadSourceNativeErrorDoesNotConsumePendingPayload(t *testing.T) {
 	classified := source.LastClassified()
 	if classified == nil || !errors.Is(classified, sdk.ErrProtocol) || classified == event.Classified {
 		t.Fatalf("native classification = %#v, want owned event classification", classified)
+	}
+}
+
+// ── streamPayloadSink.finalizer delegation ──────────────────────────────────
+
+func TestStreamPayloadSinkFinalizerNilForSameProtocol(t *testing.T) {
+	t.Parallel()
+	// A same-protocol sink chain (inner returned directly by newConvertingSink)
+	// exposes no finalizer: the Bridge keeps the legacy committed-EOF contract.
+	inner := &payloadTestSink{}
+	conv := newConvertingSink(inner, adapter.ProtocolOpenAIChat, adapter.ProtocolOpenAIChat, nil)
+	if conv != inner {
+		t.Fatal("same-protocol must return inner sink directly")
+	}
+	_, sink, err := newSDKPayloadSource(&payloadTestSource{err: streaming.ErrEndOfStream}, conv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fn := sink.finalizer(); fn != nil {
+		t.Fatal("same-protocol finalizer must be nil")
+	}
+}
+
+func TestStreamPayloadSinkFinalizerDelegatesForCrossProtocol(t *testing.T) {
+	t.Parallel()
+	// A cross-protocol convertingSink exposes a finalizer; the streamPayloadSink
+	// delegates to it and the synthesized terminal is written through the
+	// chain to the inner transport sink.
+	inner := &payloadTestSink{}
+	conv := newConvertingSink(inner, adapter.ProtocolOpenAIChat, adapter.ProtocolAnthropic, nil)
+	_, sink, err := newSDKPayloadSource(&payloadTestSource{err: streaming.ErrEndOfStream}, conv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fn := sink.finalizer()
+	if fn == nil {
+		t.Fatal("cross-protocol finalizer must be non-nil")
+	}
+	// Seed an open Anthropic message by driving the converter via the
+	// convertingSink directly, exercising the same convert path production uses.
+	cs := conv.(*convertingSink)
+	cs.state.OAIStarted = true
+	cs.state.OAIMessageID = "m"
+	cs.state.OAIModel = "gpt-4"
+
+	meta, err := fn(context.Background())
+	if err != nil {
+		t.Fatalf("finalizer: %v", err)
+	}
+	if meta.Finish != "end_turn" {
+		t.Errorf("Finish = %q, want end_turn", meta.Finish)
+	}
+	// The inner transport sink received the synthesized message_stop.
+	var sawStop bool
+	for _, ev := range inner.writes {
+		var v struct {
+			Type string `json:"type"`
+		}
+		_ = json.Unmarshal(ev.Data, &v)
+		if v.Type == "message_stop" {
+			sawStop = true
+		}
+	}
+	if !sawStop {
+		t.Fatal("delegated finalizer did not write message_stop to inner sink")
 	}
 }

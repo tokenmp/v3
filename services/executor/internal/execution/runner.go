@@ -274,16 +274,18 @@ func (r *Runner) Run(ctx context.Context, in Input) (Result, error) {
 		var completion sdk.Completion
 		var callErr error
 		var attemptStart time.Time
+		var toolNameMap map[string]string
 		attempt, credentialAcquired, began, err := preparedCall.NewAttemptSession(state, retryPolicy, in.Credentials).Execute(ctx, func(client sdk.Client, call sdk.Call) {
 			// Cross-protocol request conversion: replace the applied body with the
 			// converted body when the request protocol differs from the target.
 			if crossProtocol {
-				converted, convErr := protocolconvert.ConvertRequest(call.Request.Body, reqProtocol, targetProtocol)
+				converted, nameMap, convErr := protocolconvert.ConvertRequestWithToolMap(call.Request.Body, reqProtocol, targetProtocol)
 				if convErr != nil {
 					callErr = convErr
 					return
 				}
 				call.Request.Body = converted
+				toolNameMap = nameMap
 			}
 			// Each SDK invocation has the route's compiled request timeout, bounded
 			// by the caller context. Provider adapters classify deadline expiry as a
@@ -344,6 +346,16 @@ func (r *Runner) Run(ctx context.Context, in Input) (Result, error) {
 					return Result{}, r.releaseFailureWithLog(ctx, terminalizer, ErrProtocolConvert, in, prepared, attemptNo)
 				}
 				completion.RawJSON = converted
+				// Restore original tool names in the response when the request was
+				// Anthropic→OpenAI (tool names were sanitized for OpenAI).
+				if len(toolNameMap) > 0 {
+					restored, restErr := protocolconvert.RestoreToolNamesResponse(completion.RawJSON, toolNameMap)
+					if restErr != nil {
+						_ = state.Cancel()
+						return Result{}, r.releaseFailureWithLog(ctx, terminalizer, ErrProtocolConvert, in, prepared, attemptNo)
+					}
+					completion.RawJSON = restored
+				}
 			}
 			// Success is irreversible: RecordSuccess and Commit freeze the
 			// verdict before any terminal action. Finalize is attempted on a

@@ -29,10 +29,12 @@ import (
 // validators reject.
 type convertingSink struct {
 	inner         ProtocolSink
-	fromProtocol  adapter.Protocol // target/upstream protocol
-	toProtocol    adapter.Protocol // request/inbound protocol
+	fromProtocol  adapter.Protocol  // target/upstream protocol
+	toProtocol    adapter.Protocol  // request/inbound protocol
+	toolNameMap   map[string]string // per-request tool name restoration map
 	state         protocolconvert.StreamState
 	convertFailed bool
+	finalized     bool              // exactly-once: terminal already emitted (converted finish or Finalize)
 	pending       []sdk.StreamEvent // buffered converted chunks awaiting delivery
 	nextSeq       uint64            // monotonic output Sequence counter
 }
@@ -40,7 +42,12 @@ type convertingSink struct {
 // newConvertingSink returns a sink that converts stream event payloads from
 // fromProtocol to toProtocol. When fromProtocol == toProtocol, it returns the
 // inner sink directly (zero overhead).
-func newConvertingSink(inner ProtocolSink, fromProtocol, toProtocol adapter.Protocol) ProtocolSink {
+//
+// The optional nameMap carries sanitized→original tool name mappings for
+// Anthropic→OpenAI conversion. It is per-request and scoped to the current
+// attempt. When non-nil, converted stream chunks have their tool names
+// restored to original values. A nil map is a no-op (zero overhead).
+func newConvertingSink(inner ProtocolSink, fromProtocol, toProtocol adapter.Protocol, nameMap map[string]string) ProtocolSink {
 	if fromProtocol == toProtocol {
 		return inner
 	}
@@ -48,7 +55,20 @@ func newConvertingSink(inner ProtocolSink, fromProtocol, toProtocol adapter.Prot
 		inner:        inner,
 		fromProtocol: fromProtocol,
 		toProtocol:   toProtocol,
+		toolNameMap:  nameMap,
 	}
+}
+
+// streamFinalizer is the optional terminal-synthesis capability a converting
+// ProtocolSink may implement. Finalize is invoked exactly once by the Bridge
+// on a committed clean EOF (via streamPayloadSink delegation) to synthesize
+// and write any protocol-native terminal output directly to the downstream,
+// then return sanitized terminal metadata. A plain same-protocol ProtocolSink
+// does not implement it, so its absence leaves the Bridge Finalizer nil and
+// preserves the legacy committed-EOF-is-truncated contract. It carries no
+// raw bytes across the boundary: the returned metadata is sanitized.
+type streamFinalizer interface {
+	Finalize(ctx context.Context) (streaming.TerminalMeta, error)
 }
 
 // Commit converts each event payload and delegates to the inner sink.
@@ -97,6 +117,66 @@ func (s *convertingSink) Flush(ctx context.Context) error {
 	return s.inner.Flush(ctx)
 }
 
+// Finalize synthesizes the protocol-native terminal stream event(s) for a
+// converted stream that ended cleanly without an explicit terminal, writes
+// them directly to the inner sink, flushes, and returns sanitized terminal
+// metadata. It is driven by the per-stream protocolconvert.StreamState
+// accumulated across convertEvent calls. It never returns raw bytes across
+// the boundary: the returned TerminalMeta carries only a bounded Finish token
+// and optional bounded Usage counters.
+//
+// It is exactly-once: the finalized flag is set before synthesis so a second
+// call (defensive or from a race) is a no-op returning empty metadata. A
+// converted terminal chunk (message_stop / chat.completion.chunk with
+// finish_reason) also sets the flag via convertEvent, so a Finalize after an
+// explicit finish correctly synthesizes nothing.
+//
+// Flush of any remaining pending converted chunks happens first so the
+// synthesized terminal is emitted after all converted content. A conversion
+// failure (already recorded) or a pending-flush/inner-write error is returned
+// as a non-context error; the streaming Bridge treats it as a post-commit
+// sink failure (no retry).
+func (s *convertingSink) Finalize(ctx context.Context) (streaming.TerminalMeta, error) {
+	if s.convertFailed {
+		return streaming.TerminalMeta{}, ErrProtocolConvert
+	}
+	if s.finalized {
+		return streaming.TerminalMeta{}, nil
+	}
+	// Flush any buffered converted chunks before the terminal so it is emitted
+	// after all converted content.
+	if err := s.flushPending(ctx); err != nil {
+		return streaming.TerminalMeta{}, err
+	}
+	payloads, err := protocolconvert.FinalizeStream(s.fromProtocol, s.toProtocol, &s.state)
+	if err != nil {
+		s.convertFailed = true
+		return streaming.TerminalMeta{}, ErrProtocolConvert
+	}
+	// Set exactly-once before writing so a write failure does not allow a
+	// retry to synthesize a second terminal. The synthesized output may be
+	// partially written; the Bridge does not retry (downstream uncertain).
+	s.finalized = true
+	var finish string
+	for _, payload := range payloads {
+		event := s.buildFinalEvent(payload)
+		if err := s.inner.WriteEvent(ctx, event); err != nil {
+			return streaming.TerminalMeta{}, err
+		}
+		if err := s.inner.Flush(ctx); err != nil {
+			return streaming.TerminalMeta{}, err
+		}
+		// The terminal payload carries the finish reason in the
+		// request-protocol shape; extract it directly from the synthesized
+		// bytes rather than re-deriving it from converter state, so the
+		// sanitized Finish token matches what the downstream actually received.
+		if fr := extractFinishReason(payload, s.toProtocol); fr != "" {
+			finish = fr
+		}
+	}
+	return s.terminalMetaFromState(finish), nil
+}
+
 func (s *convertingSink) flushPending(ctx context.Context) error {
 	for len(s.pending) > 0 {
 		event := s.pending[0]
@@ -123,6 +203,14 @@ func (s *convertingSink) convertEvents(events []sdk.StreamEvent) ([]sdk.StreamEv
 }
 
 func (s *convertingSink) convertEvent(event sdk.StreamEvent) (sdk.StreamEvent, error) {
+	// Exactly-once terminal guard: once a terminal has been emitted (a
+	// converted finish chunk or a prior Finalize), any subsequent chunk —
+	// including a late usage chunk arriving after an explicit finish — must
+	// do nothing and must NOT re-emit message_start or a second finish. It is
+	// dropped as a no-op lifecycle event carrying a fresh monotonic Sequence.
+	if s.finalized {
+		return s.dropChunk(event), nil
+	}
 	// NativeError events have no Data payload; pass through with monotonic Sequence.
 	if event.Classified != nil || len(event.Data) == 0 {
 		s.nextSeq++
@@ -150,8 +238,9 @@ func (s *convertingSink) convertEvent(event sdk.StreamEvent) (sdk.StreamEvent, e
 		return event, nil
 	}
 	// First chunk replaces the current event's Data and updates Meta.
-	event.Data = json.RawMessage(chunks[0])
-	event.Meta = updateMetaFromConverted(event.Meta, chunks[0], s.toProtocol)
+	restored := s.restoreChunkToolNames(chunks[0])
+	event.Data = json.RawMessage(restored)
+	event.Meta = updateMetaFromConverted(event.Meta, restored, s.toProtocol)
 	// Assign monotonic Sequence to the primary output event.
 	s.nextSeq++
 	event.Sequence = s.nextSeq
@@ -162,14 +251,112 @@ func (s *convertingSink) convertEvent(event sdk.StreamEvent) (sdk.StreamEvent, e
 	// Sequences.
 	for _, chunk := range chunks[1:] {
 		extra := event
-		extra.Data = json.RawMessage(chunk)
-		extra.Meta = updateMetaFromConverted(event.Meta, chunk, s.toProtocol)
+		restoredChunk := s.restoreChunkToolNames(chunk)
+		extra.Data = json.RawMessage(restoredChunk)
+		extra.Meta = updateMetaFromConverted(event.Meta, restoredChunk, s.toProtocol)
 		s.nextSeq++
 		extra.Sequence = s.nextSeq
 		extra.Meta.Sequence = s.nextSeq
 		s.pending = append(s.pending, extra)
 	}
+	// Detect a converted terminal (message_stop / chat.completion.chunk with
+	// finish_reason): the converter closes the converted message, so the
+	// per-stream state's started flag flips false. Set the exactly-once flag so
+	// any later chunk does nothing.
+	if s.terminalClosed() {
+		s.finalized = true
+	}
 	return event, nil
+}
+
+// terminalClosed reports whether the converter state has just closed the
+// converted message (a converted message_stop or a chat.completion.chunk with
+// finish_reason). After such a conversion, both protocolconvert's per-stream
+// StreamState started flags are false. A non-terminal conversion leaves them
+// true (or already-false-from-prior-terminal, covered by the finalized guard).
+func (s *convertingSink) terminalClosed() bool {
+	if s.toProtocol == adapter.ProtocolAnthropic {
+		return !s.state.OAIStarted
+	}
+	return !s.state.AntStarted
+}
+
+// dropChunk emits a no-op lifecycle placeholder for a chunk that arrives after
+// the terminal has already been emitted. It carries a fresh monotonic
+// Sequence and zero Data so the inner sink can skip it without affecting the
+// downstream protocol framing. It never re-runs the converter, so no second
+// terminal can be synthesized and accumulated usage cannot be mutated.
+func (s *convertingSink) dropChunk(event sdk.StreamEvent) sdk.StreamEvent {
+	s.nextSeq++
+	event.Sequence = s.nextSeq
+	event.Meta.Sequence = s.nextSeq
+	event.Meta.Kind = streaming.EventLifecycle
+	event.Meta.EventType = ""
+	event.Meta.FinishReason = ""
+	event.Meta.Progress = nil
+	event.Meta.Usage = nil
+	event.Data = nil
+	event.Classified = nil
+	return event
+}
+
+// restoreChunkToolNames applies the per-request tool name restoration map to
+// a converted stream chunk. It auto-detects the chunk format (OpenAI or
+// Anthropic) and restores original tool names in the appropriate fields.
+//
+// If s.toolNameMap is nil/empty, it returns chunk unchanged (zero overhead).
+func (s *convertingSink) restoreChunkToolNames(chunk []byte) []byte {
+	if len(s.toolNameMap) == 0 {
+		return chunk
+	}
+	restored, err := protocolconvert.RestoreToolNamesStreamChunk(chunk, s.toolNameMap)
+	if err != nil {
+		// Restoration failure is non-fatal; return the original chunk.
+		// The tool name will remain sanitized.
+		return chunk
+	}
+	return restored
+}
+
+// buildFinalEvent constructs the owned canonical StreamEvent for one
+// synthesized terminal payload, assigning a fresh monotonic Sequence and
+// deriving sanitized Meta (Kind/EventType/FinishReason) from the converted
+// JSON so the downstream framing is protocol-correct. It mirrors
+// updateMetaFromConverted but for synthesized (not converted-input) events.
+func (s *convertingSink) buildFinalEvent(payload []byte) sdk.StreamEvent {
+	meta := streaming.Event{}
+	meta = updateMetaFromConverted(meta, payload, s.toProtocol)
+	s.nextSeq++
+	meta.Sequence = s.nextSeq
+	return sdk.StreamEvent{
+		Sequence: s.nextSeq,
+		Meta:     meta,
+		Data:     append(json.RawMessage(nil), payload...),
+	}
+}
+
+// terminalMetaFromState returns the sanitized TerminalMeta for the last
+// synthesized terminal. The Finish token is the request-protocol finish reason
+// extracted from the synthesized bytes (passed in, already sanitized by
+// extractFinishReason's sanitizeMetaToken). The optional bounded Usage is
+// derived from the per-stream converter state's accumulated counters; the
+// Bridge merges it monotonically and clamps to MaxTotal at intake.
+func (s *convertingSink) terminalMetaFromState(finish string) streaming.TerminalMeta {
+	var usage *streaming.Usage
+	if s.toProtocol == adapter.ProtocolAnthropic {
+		usage = &streaming.Usage{
+			PromptTokens:     s.state.OAIUsage.PromptTokens,
+			CompletionTokens: s.state.OAIUsage.CompletionTokens,
+			TotalTokens:      s.state.OAIUsage.PromptTokens + s.state.OAIUsage.CompletionTokens,
+		}
+	} else {
+		usage = &streaming.Usage{
+			PromptTokens:     s.state.AntUsage.PromptTokens,
+			CompletionTokens: s.state.AntUsage.CompletionTokens,
+			TotalTokens:      s.state.AntUsage.PromptTokens + s.state.AntUsage.CompletionTokens,
+		}
+	}
+	return streaming.TerminalMeta{Finish: finish, Usage: usage}
 }
 
 // maxMetaTypeBytes bounds the extracted type/object field length to prevent
