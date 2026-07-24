@@ -139,6 +139,7 @@ jobs:
             services/config/go.sum
             services/logging/go.sum
             services/billing/go.sum
+            services/api/go.sum
 
       - name: Generated code freshness check (Auth)
         run: |
@@ -403,6 +404,33 @@ jobs:
         env:
           BILLING_REPO_TEST_DSN: postgres://tokenmp:tokenmp@localhost:5432/tokenmp_billing?sslmode=disable
         run: go test -race ./internal/repository/...
+
+      # ------------------------------------------------------------------
+      # Edge/BFF (api service): gofmt / vet / build / test. No DB needed.
+      # ------------------------------------------------------------------
+      - name: gofmt (api)
+        working-directory: services/api
+        run: |
+          out="$(gofmt -l .)"
+          if [ -n "$out" ]; then
+            echo "gofmt found unformatted files:" >&2
+            echo "$out" >&2
+            exit 1
+          fi
+
+      - name: go vet (api)
+        working-directory: services/api
+        run: go vet ./...
+
+      - name: go build (api)
+        working-directory: services/api
+        run: |
+          go build ./...
+          go build -o /tmp/api-bin ./cmd/api
+
+      - name: go test -race (api)
+        working-directory: services/api
+        run: go test -race ./...
 
       - name: Migration cycle (up/down/up)
         working-directory: services/auth
