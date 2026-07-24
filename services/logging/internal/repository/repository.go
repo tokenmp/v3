@@ -116,7 +116,49 @@ type Writer interface {
 	InsertEvent(ctx context.Context, event Event) error
 }
 
+// ListFilter is the query-side filter for paginated request log listings.
+// All fields are optional; a zero value returns the most recent logs across
+// all users. Statuses filters final_status via IN; an empty slice means no
+// status filter (success + all error categories).
+type ListFilter struct {
+	UserID    string
+	Model     string
+	Statuses  []string  // final_status enum values; empty = all
+	StartTime time.Time // zero = no lower bound
+	EndTime   time.Time // zero = no upper bound
+	Page      int       // 1-based, clamped to >=1
+	PageSize  int       // clamped to (0,100], default 20
+}
+
+// StatsFilter bounds a usage-stats aggregation query. Days is clamped to
+// (0,90] with a default of 7. StartTime/EndTime are derived from Days when
+// zero by the repository.
+type StatsFilter struct {
+	UserID    string
+	Days      int
+	StartTime time.Time
+	EndTime   time.Time
+}
+
+// ModelStat is one row of per-model aggregation.
+type ModelStat struct {
+	Model        string
+	Requests     int64
+	InputTokens  int64
+	OutputTokens int64
+}
+
+// Stats is the aggregated usage result for a user over a period.
+type Stats struct {
+	TotalRequests     int64
+	TotalInputTokens  int64
+	TotalOutputTokens int64
+	ByModel           []ModelStat
+}
+
 // Reader is the read contract for query-side consumers.
+//
+// GormRepository implements Reader; fakes in tests implement it too.
 type Reader interface {
 	// GetRequestLog returns the request-level summary for requestID.
 	// Returns ErrNotFound when no row matches.
@@ -125,6 +167,14 @@ type Reader interface {
 	ListAttempts(ctx context.Context, requestID string) ([]Attempt, error)
 	// ListEvents returns the timeline events for requestID ordered by time.
 	ListEvents(ctx context.Context, requestID string) ([]Event, error)
+	// ListRequestLogs returns a page of request-level summaries matching the
+	// filter, ordered newest-first, together with the total match count (for
+	// pagination). The count is computed over the same filter ignoring the
+	// page slice so callers can render total pages.
+	ListRequestLogs(ctx context.Context, filter ListFilter) (logs []RequestLog, total int, err error)
+	// GetStats aggregates usage over the filter period for the filter user.
+	// byModel is ordered by requests desc then model asc for a stable chart.
+	GetStats(ctx context.Context, filter StatsFilter) (Stats, error)
 }
 
 // Stable classified errors. They do not wrap the driver error so DSN/SQL
@@ -415,4 +465,177 @@ ORDER BY created_at ASC, id ASC`
 		return nil, ErrQueryFailed
 	}
 	return rows, nil
+}
+
+// logListColumns is the projection ListRequestLogs returns. It mirrors the
+// GetRequestLog SELECT so both read paths expose identical column shape.
+const logListColumns = `id, request_id, trace_id, user_id, client_key_id, model_name, resolved_model,
+       route_id, provider_id, credential_id, protocol, stream, final_status,
+       http_status, input_tokens, output_tokens, total_tokens, cache_tokens,
+       latency_ms, ttft_ms, error_code, error_type, upstream_http_status,
+       usage_status, thinking_mode, thinking_effort, thinking_effort_degraded,
+       reservation_id, billing_plan, created_at, completed_at`
+
+// applyListFilter returns the WHERE clause and bind args for a ListFilter on
+// request_logs. It is shared by ListRequestLogs (page slice) and the total
+// count query so both query exactly the same match set.
+func applyListFilter(filter ListFilter) (string, []any) {
+	var (
+		clauses []string
+		args    []any
+	)
+	if filter.UserID != "" {
+		clauses = append(clauses, "user_id = ?")
+		args = append(args, filter.UserID)
+	}
+	if filter.Model != "" {
+		clauses = append(clauses, "model_name = ?")
+		args = append(args, filter.Model)
+	}
+	// Statuses filters final_status via IN. An empty slice means no status
+	// filter so the listing spans success and all error categories.
+	if n := len(filter.Statuses); n > 0 {
+		placeholders := make([]string, 0, n)
+		for _, s := range filter.Statuses {
+			placeholders = append(placeholders, "?")
+			args = append(args, s)
+		}
+		clauses = append(clauses, "final_status IN ("+joinStrings(placeholders, ", ")+")")
+	}
+	if !filter.StartTime.IsZero() {
+		clauses = append(clauses, "created_at >= ?")
+		args = append(args, filter.StartTime)
+	}
+	if !filter.EndTime.IsZero() {
+		clauses = append(clauses, "created_at < ?")
+		args = append(args, filter.EndTime)
+	}
+	where := ""
+	if len(clauses) > 0 {
+		where = " WHERE " + joinStrings(clauses, " AND ")
+	}
+	return where, args
+}
+
+// ListRequestLogs returns one page of request-level summaries matching the
+// filter, newest-first, together with the total match count. page is 1-based
+// and clamped to >=1; pageSize is clamped to (0,100] with a default of 20.
+// A query error is ErrQueryFailed.
+func (r *GormRepository) ListRequestLogs(ctx context.Context, filter ListFilter) ([]RequestLog, int, error) {
+	if filter.Page < 1 {
+		filter.Page = 1
+	}
+	if filter.PageSize <= 0 {
+		filter.PageSize = 20
+	}
+	if filter.PageSize > 100 {
+		filter.PageSize = 100
+	}
+	where, args := applyListFilter(filter)
+
+	// Total count over the same filter (ignoring the page slice).
+	var total int
+	countQ := "SELECT COUNT(*) FROM request_logs" + where
+	if err := r.db.WithContext(ctx).Raw(countQ, args...).Scan(&total).Error; err != nil {
+		return nil, 0, ErrQueryFailed
+	}
+	if total == 0 {
+		return []RequestLog{}, 0, nil
+	}
+
+	offset := (filter.Page - 1) * filter.PageSize
+	listQ := "SELECT " + logListColumns + " FROM request_logs" + where +
+		" ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?"
+	listArgs := append(args, filter.PageSize, offset)
+	var rows []RequestLog
+	if err := r.db.WithContext(ctx).Raw(listQ, listArgs...).Scan(&rows).Error; err != nil {
+		return nil, 0, ErrQueryFailed
+	}
+	if rows == nil {
+		rows = []RequestLog{}
+	}
+	return rows, total, nil
+}
+
+// GetStats aggregates usage over the filter period. days is clamped to
+// (0,90] with a default of 7; when StartTime/EndTime are zero they are
+// derived from days relative to now (UTC) so the query bounds the window
+// deterministically. byModel is ordered by requests desc then model asc.
+func (r *GormRepository) GetStats(ctx context.Context, filter StatsFilter) (Stats, error) {
+	if filter.Days <= 0 {
+		filter.Days = 7
+	}
+	if filter.Days > 90 {
+		filter.Days = 90
+	}
+	if filter.EndTime.IsZero() {
+		filter.EndTime = time.Now().UTC()
+	}
+	if filter.StartTime.IsZero() {
+		filter.StartTime = filter.EndTime.AddDate(0, 0, -filter.Days)
+	}
+
+	var (
+		clauses []string
+		args    []any
+	)
+	if filter.UserID != "" {
+		clauses = append(clauses, "user_id = ?")
+		args = append(args, filter.UserID)
+	}
+	clauses = append(clauses, "created_at >= ?", "created_at < ?")
+	args = append(args, filter.StartTime, filter.EndTime)
+	where := " WHERE " + joinStrings(clauses, " AND ")
+
+	// Aggregate totals. NULL token counts are coalesced to 0.
+	totalsQ := `SELECT
+  COUNT(*) AS total_requests,
+  COALESCE(SUM(input_tokens), 0) AS total_input,
+  COALESCE(SUM(output_tokens), 0) AS total_output
+FROM request_logs` + where
+	var totalsRow struct {
+		TotalRequests int64
+		TotalInput    int64
+		TotalOutput   int64
+	}
+	if err := r.db.WithContext(ctx).Raw(totalsQ, args...).Scan(&totalsRow).Error; err != nil {
+		return Stats{}, ErrQueryFailed
+	}
+
+	// Per-model aggregation. Coalesce NULL model_name to '' so unnamed logs
+	// group under a stable bucket rather than disappearing.
+	byModelQ := `SELECT
+  COALESCE(NULLIF(model_name, ''), '(unknown)') AS model,
+  COUNT(*) AS requests,
+  COALESCE(SUM(input_tokens), 0) AS input_tokens,
+  COALESCE(SUM(output_tokens), 0) AS output_tokens
+FROM request_logs` + where + `
+GROUP BY model
+ORDER BY requests DESC, model ASC`
+	var modelRows []ModelStat
+	if err := r.db.WithContext(ctx).Raw(byModelQ, args...).Scan(&modelRows).Error; err != nil {
+		return Stats{}, ErrQueryFailed
+	}
+	if modelRows == nil {
+		modelRows = []ModelStat{}
+	}
+	return Stats{
+		TotalRequests:     totalsRow.TotalRequests,
+		TotalInputTokens:  totalsRow.TotalInput,
+		TotalOutputTokens: totalsRow.TotalOutput,
+		ByModel:           modelRows,
+	}, nil
+}
+
+// joinStrings concatenates ss with sep. It avoids importing strings here to
+// keep the repository dependency surface minimal.
+func joinStrings(ss []string, sep string) string {
+	if len(ss) == 0 {
+		return ""
+	}
+	out := ss[0]
+	for _, s := range ss[1:] {
+		out += sep + s
+	}
+	return out
 }

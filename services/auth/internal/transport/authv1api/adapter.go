@@ -161,6 +161,7 @@ type StrictAdapter struct {
 	svc       *auth.Service
 	pinger    Pinger
 	accessTTL int // seconds, for expires_in
+	keys      APIKeyStore
 }
 
 // NewStrictAdapter builds a StrictAdapter.
@@ -170,6 +171,14 @@ func NewStrictAdapter(svc *auth.Service, pinger Pinger, accessTTL time.Duration)
 		pinger:    pinger,
 		accessTTL: int(accessTTL.Seconds()),
 	}
+}
+
+// WithAPIKeyStore 注入 API 密钥管理持久化端口。返回新的 adapter 副本，
+// 便于在 NewServer 中链式装配。nil 表示未启用密钥端点（端点返回 500）。
+func (a *StrictAdapter) WithAPIKeyStore(store APIKeyStore) *StrictAdapter {
+	a2 := *a
+	a2.keys = store
+	return &a2
 }
 
 // ----- Health endpoints -----
@@ -447,9 +456,15 @@ func httpRequestFromCtx(ctx context.Context) (*http.Request, bool) {
 func bearerMiddleware(verifier *jwt.Verifier, store UserStore) authv1.StrictMiddlewareFunc {
 	return func(f authv1.StrictHandlerFunc, operationID string) authv1.StrictHandlerFunc {
 		authedOps := map[string]bool{
-			"LogoutAll":      true,
-			"Me":             true,
-			"ChangePassword": true,
+			"LogoutAll":        true,
+			"Me":               true,
+			"ChangePassword":   true,
+			"AuthListApiKeys":  true,
+			"AuthCreateApiKey": true,
+			"AuthGetApiKey":    true,
+			"AuthUpdateApiKey": true,
+			"AuthDeleteApiKey": true,
+			"AuthRotateApiKey": true,
 		}
 		return func(ctx context.Context, w http.ResponseWriter, r *http.Request, request any) (any, error) {
 			if !authedOps[operationID] {
@@ -548,6 +563,19 @@ func writeErrorJSON(w http.ResponseWriter, status int, code authv1.ErrorErrorCod
 
 const maxBodySize = 1 << 10 // 1 KiB
 
+// apiKeyPathPrefix 是密钥管理端点路径前缀。动态 keyId 路径需用前缀匹配。
+const apiKeyPathPrefix = "/api/v1/auth/keys"
+
+// isKeysCreateBody 当 POST /api/v1/auth/keys 时返回 true。
+func isKeysCreateBody(r *http.Request) bool {
+	return r.Method == http.MethodPost && r.URL.Path == apiKeyPathPrefix
+}
+
+// isKeysUpdateBody 当 PATCH /api/v1/auth/keys/{keyId} 时返回 true。
+func isKeysUpdateBody(r *http.Request) bool {
+	return r.Method == http.MethodPatch && strings.HasPrefix(r.URL.Path, apiKeyPathPrefix+"/")
+}
+
 // bodyPreDecodeMiddleware returns a Chi middleware that validates and
 // normalizes request bodies before the generated strict handler decodes them.
 //
@@ -578,6 +606,13 @@ func bodyPreDecodeMiddleware() func(http.Handler) http.Handler {
 			case "/api/v1/auth/logout":
 				normalizeLogoutBody(w, r, next)
 			default:
+				// 密钥创建/更新体同样需要 1 KiB 限制、DisallowUnknownFields
+				// 与 trailing 拒绝。其余路径交给生成处理。
+				if isKeysCreateBody(r) || isKeysUpdateBody(r) {
+					if err := validateKeysBody(w, r); err != nil {
+						return
+					}
+				}
 				next.ServeHTTP(w, r)
 			}
 		})
@@ -649,6 +684,58 @@ func validateStrictBody(w http.ResponseWriter, r *http.Request) error {
 
 	// Re-marshal to canonical JSON and replace r.Body so the generated
 	// strict handler's json.NewDecoder(r.Body).Decode(&body) succeeds.
+	canonical, err := json.Marshal(val)
+	if err != nil {
+		writeErrorJSON(w, http.StatusBadRequest, authv1.BadRequest, "request body is not valid JSON")
+		return err
+	}
+	r.Body = io.NopCloser(strings.NewReader(string(canonical)))
+	r.ContentLength = int64(len(canonical))
+	return nil
+}
+
+// validateKeysBody 对密钥创建/更新请求体执行与 validateStrictBody 相同的
+// 校验：1 KiB 限制、DisallowUnknownFields、trailing 拒绝，并按路径解码到
+// 对应生成类型后重序列化为规范 JSON。失败时写入 400 错误信封并返回错误。
+func validateKeysBody(w http.ResponseWriter, r *http.Request) error {
+	if r.Body == nil {
+		writeErrorJSON(w, http.StatusBadRequest, authv1.BadRequest, "request body is not valid JSON")
+		return errors.New("empty body")
+	}
+	limited := http.MaxBytesReader(w, r.Body, maxBodySize)
+	defer limited.Close()
+
+	dec := json.NewDecoder(limited)
+	dec.DisallowUnknownFields()
+
+	var val any
+	switch {
+	case isKeysCreateBody(r):
+		var v authv1.CreateApiKeyRequest
+		if err := dec.Decode(&v); err != nil {
+			writeErrorJSON(w, http.StatusBadRequest, authv1.BadRequest, "request body is not valid JSON")
+			return err
+		}
+		val = v
+	case isKeysUpdateBody(r):
+		var v authv1.UpdateApiKeyRequest
+		if err := dec.Decode(&v); err != nil {
+			writeErrorJSON(w, http.StatusBadRequest, authv1.BadRequest, "request body is not valid JSON")
+			return err
+		}
+		val = v
+	default:
+		if err := dec.Decode(&val); err != nil {
+			writeErrorJSON(w, http.StatusBadRequest, authv1.BadRequest, "request body is not valid JSON")
+			return err
+		}
+	}
+
+	if err := dec.Decode(&struct{}{}); err != io.EOF {
+		writeErrorJSON(w, http.StatusBadRequest, authv1.BadRequest, "request body is not valid JSON")
+		return errors.New("trailing content")
+	}
+
 	canonical, err := json.Marshal(val)
 	if err != nil {
 		writeErrorJSON(w, http.StatusBadRequest, authv1.BadRequest, "request body is not valid JSON")
@@ -743,7 +830,7 @@ func cacheControlNoStoreMiddleware() func(http.Handler) http.Handler {
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if contractPaths[r.URL.Path] {
+			if contractPaths[r.URL.Path] || strings.HasPrefix(r.URL.Path, "/api/v1/auth/keys") {
 				nw := &cacheControlWriter{ResponseWriter: w}
 				next.ServeHTTP(nw, r)
 				if !nw.headerWritten {
@@ -813,6 +900,7 @@ type ServerConfig struct {
 	UserStore   UserStore
 	AuthService *auth.Service
 	AccessTTL   time.Duration
+	APIKeyStore APIKeyStore
 }
 
 // NewServer builds a Chi HTTP server with generated routes, strict handler,
@@ -825,6 +913,9 @@ type ServerConfig struct {
 // json.NewDecoder(r.Body).Decode(&body) call.
 func NewServer(cfg ServerConfig) *Server {
 	adapter := NewStrictAdapter(cfg.AuthService, cfg.Pinger, cfg.AccessTTL)
+	if cfg.APIKeyStore != nil {
+		adapter = adapter.WithAPIKeyStore(cfg.APIKeyStore)
+	}
 
 	middlewares := []authv1.StrictMiddlewareFunc{}
 	if cfg.JWTVerifier != nil && cfg.UserStore != nil {

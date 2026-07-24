@@ -22,9 +22,14 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/tokenmp/v3/services/api/internal/billing"
 	"github.com/tokenmp/v3/services/api/internal/identity"
+	"github.com/tokenmp/v3/services/api/internal/keys"
+	"github.com/tokenmp/v3/services/api/internal/logging"
+	"github.com/tokenmp/v3/services/api/internal/panel"
 	"github.com/tokenmp/v3/services/api/internal/proxy"
 	"github.com/tokenmp/v3/services/api/internal/quota"
+	"github.com/tokenmp/v3/services/api/internal/settings"
 	"github.com/tokenmp/v3/services/api/internal/transport/healthz"
 )
 
@@ -33,15 +38,23 @@ type Deps struct {
 	Verifier identity.Verifier
 	Proxy    *proxy.Proxy
 	Quota    quota.Manager
-	Logger   *slog.Logger
+	Logging  *logging.Client
+	Billing  *billing.Client
+	Settings *settings.Store
+	// KeysHandler 注册 /api/v1/keys* 路由（鉴权但不走配额）；nil 时不注册。
+	KeysHandler *keys.Handler
+	Logger      *slog.Logger
 }
 
 // NewServer creates the API Service HTTP server with the full middleware
-// chain: healthz (anonymous), /v1 routes (identity → quota → proxy).
+// chain: healthz (anonymous), /api/v1/* panel business routes (identity),
+// and /v1/* executor proxy routes (identity → quota → proxy).
 func NewServer(deps Deps, readHeaderTimeout, idleTimeout time.Duration) *http.Server {
 	if deps.Logger == nil {
 		deps.Logger = slog.Default()
 	}
+	panelHandlers := panel.New(deps.Logging, deps.Billing, deps.Settings, deps.Logger)
+
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
@@ -51,7 +64,25 @@ func NewServer(deps Deps, readHeaderTimeout, idleTimeout time.Duration) *http.Se
 	// Anonymous health endpoint.
 	r.Handle("/healthz", healthz.NewHandler())
 
-	// Authenticated /v1 routes.
+	// Public plan listing (contract security: []).
+	r.Get("/api/v1/plans", panelHandlers.ListPlans)
+
+	// Authenticated panel business routes (no quota — these are reads/settings).
+	r.Group(func(r chi.Router) {
+		r.Use(identity.Middleware(deps.Verifier, deps.Logger))
+		if deps.KeysHandler != nil {
+			deps.KeysHandler.Routes(r)
+		}
+		r.Get("/api/v1/user/balance", panelHandlers.GetUserBalance)
+		r.Get("/api/v1/user/plans", panelHandlers.ListUserPlans)
+		r.Get("/api/v1/user/settings", panelHandlers.GetUserSettings)
+		r.Patch("/api/v1/user/settings", panelHandlers.UpdateUserSettings)
+		r.Get("/api/v1/request-logs", panelHandlers.ListRequestLogs)
+		r.Get("/api/v1/request-logs/stats", panelHandlers.GetRequestLogStats)
+		r.Get("/api/v1/request-logs/{requestId}", panelHandlers.GetRequestLog)
+	})
+
+	// Authenticated executor proxy routes (identity → quota → proxy).
 	r.Group(func(r chi.Router) {
 		r.Use(identity.Middleware(deps.Verifier, deps.Logger))
 		r.Use(quotaMiddleware(deps.Quota, deps.Logger))

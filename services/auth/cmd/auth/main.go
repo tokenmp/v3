@@ -90,11 +90,13 @@ func run() error {
 
 	userRepo := repository.NewUserRepository(db)
 	sessionRepo := repository.NewSessionRepository(db)
+	apiKeyRepo := repository.NewAPIKeyRepository(db)
 	txRunner := repository.NewTxRunner(db)
 
 	clock := realClock{}
 	authService := auth.NewService(userRepo, sessionRepo, txRunner, issuer, clock, cfg.AccessTokenTTL, cfg.RefreshTokenTTL)
 	userStore := authv1api.NewUserRepoAdapter(userRepo)
+	apiKeyStore := authv1api.NewAPIKeyRepoAdapter(apiKeyRepo)
 
 	pinger := database.PingerFromDB(db)
 	srv := authv1api.NewServer(authv1api.ServerConfig{
@@ -104,6 +106,7 @@ func run() error {
 		UserStore:   userStore,
 		AuthService: authService,
 		AccessTTL:   cfg.AccessTokenTTL,
+		APIKeyStore: apiKeyStore,
 	})
 
 	errCh := make(chan error, 1)

@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: TokenMP v3 Auth API
-  version: 0.2.0
+  version: 0.3.0
   description: |
     TokenMP v3 Auth API contract — the single source of truth for consumers
     of the Auth Service HTTP interface. This document describes the
@@ -11,6 +11,11 @@ info:
     Authentication uses Ed25519 (EdDSA) JWT access tokens. Refresh tokens are
     opaque base64url strings that rotate on each use; reuse of a revoked
     refresh token revokes the entire token family.
+
+    API key management endpoints (`/api/v1/auth/keys*`) let an authenticated
+    user create, list, inspect, modify, revoke and rotate opaque API
+    keys. The full key secret is returned exactly once on create/rotate; only
+    a one-way hash of the key is persisted.
 
     **Rate limiting is NOT implemented.** Consumers and operators must not
     assume the service is rate-limited. Rate limiting must be provided by a
@@ -463,6 +468,374 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /api/v1/auth/keys:
+    get:
+      summary: List API keys
+      description: |
+        Requires a Bearer access token. Returns all non-revoked API keys
+        belonging to the authenticated user, newest first. Disabled keys
+        remain visible for lifecycle management. Key secrets are never
+        returned; only `key_prefix` and `key_suffix` are exposed for
+        identification.
+      operationId: authListApiKeys
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: API key list.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [keys]
+                additionalProperties: false
+                properties:
+                  keys:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ApiKey'
+        '401':
+          description: Missing, invalid, expired or revoked access token.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      summary: Create an API key
+      description: |
+        Requires a Bearer access token. Generates a new opaque API key,
+        persists only a one-way hash of the key, and returns the full secret
+        exactly once in the response. The secret is never retrievable again.
+      operationId: authCreateApiKey
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateApiKeyRequest'
+      responses:
+        '201':
+          description: API key created. The `secret` is returned only this once.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [key]
+                additionalProperties: false
+                properties:
+                  key:
+                    $ref: '#/components/schemas/ApiKeyCreated'
+        '400':
+          description: Invalid request body.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Missing, invalid, expired or revoked access token.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/auth/keys/{keyId}:
+    parameters:
+      - $ref: '#/components/parameters/KeyId'
+    get:
+      summary: Get API key details
+      description: |
+        Requires a Bearer access token. Returns a single non-revoked API key
+        owned by the authenticated user. The secret is never returned.
+      operationId: authGetApiKey
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: API key details.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [key]
+                additionalProperties: false
+                properties:
+                  key:
+                    $ref: '#/components/schemas/ApiKey'
+        '401':
+          description: Missing, invalid, expired or revoked access token.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: API key not found or does not belong to the user.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    patch:
+      summary: Modify an API key
+      description: |
+        Requires a Bearer access token. Modifies the `name` and/or `status`
+        of a non-revoked API key owned by the authenticated user. The secret
+        is never returned.
+      operationId: authUpdateApiKey
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateApiKeyRequest'
+      responses:
+        '200':
+          description: API key modified.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [key]
+                additionalProperties: false
+                properties:
+                  key:
+                    $ref: '#/components/schemas/ApiKey'
+        '400':
+          description: Invalid request body.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Missing, invalid, expired or revoked access token.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: API key not found or does not belong to the user.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      summary: Revoke an API key
+      description: |
+        Requires a Bearer access token. Revokes a non-revoked API key
+        owned by the authenticated user by setting its status to `disabled`.
+        Idempotent: revoking an already-disabled key still returns 204. A
+        revoked key is treated as not found (404).
+      operationId: authDeleteApiKey
+      security:
+        - bearerAuth: []
+      responses:
+        '204':
+          description: API key revoked (or was already disabled.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+        '401':
+          description: Missing, invalid, expired or revoked access token.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: API key not found or does not belong to the user.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/auth/keys/{keyId}/rotate:
+    parameters:
+      - $ref: '#/components/parameters/KeyId'
+    post:
+      summary: Rotate an API key
+      description: |
+        Requires a Bearer access token. Generates a new secret for an
+        existing non-revoked API key owned by the authenticated user,
+        replaces the persisted hash, and re-activates the key (status becomes
+        `active`). Metadata (name, expiration) is preserved. The new secret
+        is returned exactly once.
+      operationId: authRotateApiKey
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: API key rotated. The new `secret` is returned only this once.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [key]
+                additionalProperties: false
+                properties:
+                  key:
+                    $ref: '#/components/schemas/ApiKeyCreated'
+        '401':
+          description: Missing, invalid, expired or revoked access token.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: API key not found or does not belong to the user.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 components:
   securitySchemes:
     bearerAuth:
@@ -472,6 +845,15 @@ components:
       description: |
         Ed25519 (EdDSA) access token in the Authorization header as
         `Bearer <token>`. Consumers need only the public key to verify.
+  parameters:
+    KeyId:
+      name: keyId
+      in: path
+      required: true
+      description: UUID of the API key.
+      schema:
+        type: string
+        format: uuid
   headers:
     CacheControlNoStore:
       description: Responses are never cached by intermediaries.
@@ -619,6 +1001,96 @@ components:
                 - invalid_email
                 - bad_request
                 - unauthorized
+                - not_found
                 - internal_error
             message:
               type: string
+    ApiKey:
+      type: object
+      required: [id, name, key_prefix, key_suffix, status, created_at]
+      additionalProperties: false
+      description: |
+        Public API key view. The full secret is never returned; only
+        `key_prefix` and `key_suffix` are exposed for identification.
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          maxLength: 128
+          description: Human-readable key name.
+        key_prefix:
+          type: string
+          description: First characters of the key for display.
+        key_suffix:
+          type: string
+          description: Last characters of the key for display.
+        status:
+          type: string
+          enum: [active, disabled]
+          description: Lifecycle status. `revoked` is never exposed to owners.
+        last_used_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Last successful verification, or null if never used.
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Optional expiration time, or null if the key never expires.
+        created_at:
+          type: string
+          format: date-time
+    ApiKeyCreated:
+      type: object
+      required: [id, name, key_prefix, key_suffix, secret, status, created_at]
+      additionalProperties: false
+      description: |
+        API key with its full secret. Returned only on create and rotate;
+        the secret is never retrievable again.
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          maxLength: 128
+        key_prefix:
+          type: string
+        key_suffix:
+          type: string
+        secret:
+          type: string
+          description: Full API key secret — only returned on create/rotate.
+        status:
+          type: string
+          enum: [active]
+        created_at:
+          type: string
+          format: date-time
+    CreateApiKeyRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          maxLength: 128
+          description: Optional human-readable key name.
+        expires_at:
+          type: string
+          format: date-time
+          description: Optional expiration time.
+    UpdateApiKeyRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          maxLength: 128
+          description: New human-readable key name.
+        status:
+          type: string
+          enum: [active, disabled]
+          description: New lifecycle status.

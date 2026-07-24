@@ -353,6 +353,69 @@ func (r *APIKeyRepository) UpdateLastUsed(ctx context.Context, id string) error 
 	return nil
 }
 
+// FindByIDForUser loads a non-revoked API key scoped to the owning user.
+// Revoked keys are deliberately invisible to their owner (they read as
+// not-found) so the management API cannot be used to probe soft-deleted
+// state. Both active and disabled keys are returned so the owner can manage
+// the full non-revoked lifecycle.
+func (r *APIKeyRepository) FindByIDForUser(ctx context.Context, id, userID string) (*models.APIKey, error) {
+	var key models.APIKey
+	if err := withTx(ctx, r.db).
+		Where("id = ? AND user_id = ? AND status <> ?", id, userID, "revoked").
+		First(&key).Error; err != nil {
+		return nil, classify(err)
+	}
+	return &key, nil
+}
+
+// UpdateFields updates mutable columns (name and/or status) of a non-revoked
+// key owned by the user. fields maps column name to the new value; only the
+// provided columns are changed. A missing or revoked key returns ErrNotFound.
+// "status" is validated by the caller (active|disabled) before this call.
+func (r *APIKeyRepository) UpdateFields(ctx context.Context, id, userID string, fields map[string]any) error {
+	if len(fields) == 0 {
+		// Nothing to update; still confirm the key exists for the owner so a
+		// no-op PATCH on a missing key returns 404 instead of 200.
+		_, err := r.FindByIDForUser(ctx, id, userID)
+		return err
+	}
+	res := withTx(ctx, r.db).
+		Model(&models.APIKey{}).
+		Where("id = ? AND user_id = ? AND status <> ?", id, userID, "revoked").
+		Updates(fields)
+	if res.Error != nil {
+		return classify(res.Error)
+	}
+	if res.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// Rotate replaces the credential material (hash, prefix, suffix) of a
+// non-revoked key owned by the user and re-activates it (status=active).
+// Metadata (name, expiration) is preserved. A missing or revoked key returns
+// ErrNotFound. The caller must generate the new secret and hash before
+// calling; this method never sees the full key string.
+func (r *APIKeyRepository) Rotate(ctx context.Context, id, userID string, hash []byte, prefix, suffix string) error {
+	res := withTx(ctx, r.db).
+		Model(&models.APIKey{}).
+		Where("id = ? AND user_id = ? AND status <> ?", id, userID, "revoked").
+		Updates(map[string]any{
+			"key_hash":   hash,
+			"key_prefix": prefix,
+			"key_suffix": suffix,
+			"status":     "active",
+		})
+	if res.Error != nil {
+		return classify(res.Error)
+	}
+	if res.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // TxRunner runs a function within a GORM transaction. The transaction handle
 // is stored in ctx so repository methods called inside fn bind to it.
 type TxRunner struct {

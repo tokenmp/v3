@@ -29,16 +29,20 @@ type Server struct {
 	userPlans repository.UserPlanReader
 	quota     repository.QuotaManager
 	ledger    repository.LedgerReader
+	balance   repository.BalanceReader
 	pinger    database.Pinger
 	logger    *slog.Logger
 }
 
 // New returns a billing Server. A nil logger falls back to slog.Default.
-func New(plans repository.PlanReader, userPlans repository.UserPlanReader, quota repository.QuotaManager, ledger repository.LedgerReader, pinger database.Pinger, logger *slog.Logger) *Server {
+// balance may be nil only in tests that do not exercise the balance route;
+// production wiring always supplies the GormRepository (which implements
+// BalanceReader). When nil, the balance endpoint returns 503.
+func New(plans repository.PlanReader, userPlans repository.UserPlanReader, quota repository.QuotaManager, ledger repository.LedgerReader, balance repository.BalanceReader, pinger database.Pinger, logger *slog.Logger) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Server{plans: plans, userPlans: userPlans, quota: quota, ledger: ledger, pinger: pinger, logger: logger}
+	return &Server{plans: plans, userPlans: userPlans, quota: quota, ledger: ledger, balance: balance, pinger: pinger, logger: logger}
 }
 
 // Router returns the configured chi router.
@@ -53,6 +57,7 @@ func (s *Server) Router() http.Handler {
 	r.Get("/v1/billing/plans", s.handleListPlans)
 	r.Get("/v1/billing/plans/{id}", s.handleGetPlan)
 	r.Get("/v1/billing/users/{user_id}/plan", s.handleGetUserPlan)
+	r.Get("/v1/billing/users/{user_id}/balance", s.handleGetBalance)
 	r.Post("/v1/billing/quota/reserve", s.handleReserve)
 	r.Post("/v1/billing/quota/finalize", s.handleFinalize)
 	r.Post("/v1/billing/quota/release", s.handleRelease)
@@ -246,6 +251,31 @@ func (s *Server) handleListLedger(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, struct {
 		Entries []repository.UsageLedgerEntry `json:"entries"`
 	}{Entries: entries})
+}
+
+// balanceResponse is the wire shape of GET /v1/billing/users/{user_id}/balance.
+// Quota amounts are decimal strings so downstream consumers preserve full
+// precision without floating-point loss.
+type balanceResponse struct {
+	CodingRemaining string `json:"coding_remaining"`
+	TokenRemaining  string `json:"token_remaining"`
+}
+
+func (s *Server) handleGetBalance(w http.ResponseWriter, r *http.Request) {
+	if s.balance == nil {
+		writeError(w, http.StatusServiceUnavailable, "balance_unavailable")
+		return
+	}
+	bal, err := s.balance.GetBalance(r.Context(), chi.URLParam(r, "user_id"))
+	if err != nil {
+		s.logger.Warn("balance query failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "balance_unavailable")
+		return
+	}
+	writeJSON(w, http.StatusOK, balanceResponse{
+		CodingRemaining: strconv.FormatInt(bal.CodingRemaining, 10),
+		TokenRemaining:  strconv.FormatInt(bal.TokenRemaining, 10),
+	})
 }
 
 func decodeBoundedJSON(w http.ResponseWriter, r *http.Request, dst any) bool {

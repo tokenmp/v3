@@ -47,7 +47,7 @@ func run() error {
 	defer func() { _ = database.Close(db) }()
 
 	repo := repository.New(db)
-	srv := server.New(repo, repo, repo, repo, database.PingerFromDB(db), logger)
+	srv := server.New(repo, repo, repo, repo, repo, database.PingerFromDB(db), logger)
 	httpSrv := &http.Server{
 		Addr: cfg.HTTPAddr, Handler: srv.Router(), ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 120 * time.Second,

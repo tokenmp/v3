@@ -18,6 +18,9 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -61,6 +64,8 @@ func (s *Server) Router() http.Handler {
 	r.Get("/healthz", s.handleHealthz)
 	r.Get("/readyz", s.handleReadyz)
 	r.Post("/v1/logs/ingest", s.handleIngest)
+	r.Get("/v1/logs", s.handleListLogs)
+	r.Get("/v1/logs/stats", s.handleStats)
 	r.Get("/v1/logs/{request_id}", s.handleGetLog)
 	return r
 }
@@ -205,6 +210,148 @@ func (s *Server) handleGetLog(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(logResponse{Log: log, Attempts: attempts, Events: events})
+}
+
+// listLogsResponse is the wire shape of GET /v1/logs: a page of request-level
+// summaries with the total match count and pagination echo.
+type listLogsResponse struct {
+	Logs     []repository.RequestLog `json:"logs"`
+	Total    int                     `json:"total"`
+	Page     int                     `json:"page"`
+	PageSize int                     `json:"page_size"`
+}
+
+// validFinalStatuses is the set of request_logs.final_status CHECK values. A
+// status filter value outside this set is dropped rather than failing the
+// whole query, so a caller passing an unknown status simply gets no filter.
+var validFinalStatuses = map[string]bool{
+	"success":         true,
+	"client_error":    true,
+	"upstream_error":  true,
+	"timeout":         true,
+	"transport_error": true,
+}
+
+func (s *Server) handleListLogs(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	filter := repository.ListFilter{
+		UserID:   q.Get("user_id"),
+		Model:    q.Get("model"),
+		Page:     parsePositiveInt(q.Get("page"), 1),
+		PageSize: parsePositiveInt(q.Get("page_size"), 20),
+	}
+	// status is a comma-separated list of final_status enum values. Unknown
+	// values are dropped; an empty list means "all statuses".
+	for _, st := range splitAndTrim(q.Get("status"), ",") {
+		if validFinalStatuses[st] {
+			filter.Statuses = append(filter.Statuses, st)
+		}
+	}
+	if raw := q.Get("start_date"); raw != "" {
+		t, err := time.Parse(time.RFC3339, raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_start_date")
+			return
+		}
+		filter.StartTime = t
+	}
+	if raw := q.Get("end_date"); raw != "" {
+		t, err := time.Parse(time.RFC3339, raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_end_date")
+			return
+		}
+		filter.EndTime = t
+	}
+	logs, total, err := s.reader.ListRequestLogs(r.Context(), filter)
+	if err != nil {
+		s.logger.Warn("log list query failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "query_failed")
+		return
+	}
+	if logs == nil {
+		logs = []repository.RequestLog{}
+	}
+	writeJSON(w, http.StatusOK, listLogsResponse{
+		Logs:     logs,
+		Total:    total,
+		Page:     filter.Page,
+		PageSize: filter.PageSize,
+	})
+}
+
+// statsResponse is the wire shape of GET /v1/logs/stats.
+type statsResponse struct {
+	Days              int                    `json:"days"`
+	TotalRequests     int64                  `json:"total_requests"`
+	TotalInputTokens  int64                  `json:"total_input_tokens"`
+	TotalOutputTokens int64                  `json:"total_output_tokens"`
+	ByModel           []repository.ModelStat `json:"by_model"`
+}
+
+func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	filter := repository.StatsFilter{
+		UserID: q.Get("user_id"),
+		Days:   parsePositiveInt(q.Get("days"), 7),
+	}
+	stats, err := s.reader.GetStats(r.Context(), filter)
+	if err != nil {
+		s.logger.Warn("stats query failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "query_failed")
+		return
+	}
+	if stats.ByModel == nil {
+		stats.ByModel = []repository.ModelStat{}
+	}
+	writeJSON(w, http.StatusOK, statsResponse{
+		Days:              filter.Days,
+		TotalRequests:     stats.TotalRequests,
+		TotalInputTokens:  stats.TotalInputTokens,
+		TotalOutputTokens: stats.TotalOutputTokens,
+		ByModel:           stats.ByModel,
+	})
+}
+
+// writeJSON encodes value as a JSON response with Cache-Control: no-store
+// already set by the middleware. An encode failure is logged server-side and
+// not surfaced to the client.
+func writeJSON(w http.ResponseWriter, status int, value any) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	if err := json.NewEncoder(w).Encode(value); err != nil {
+		slog.Default().Error("response encode failed", "error", err)
+	}
+}
+
+// parsePositiveInt parses a query int, falling back to def when missing or
+// non-positive. It never returns an error; invalid values use the default so
+// a malformed pagination param degrades gracefully instead of 400ing.
+func parsePositiveInt(raw string, def int) int {
+	if raw == "" {
+		return def
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 1 {
+		return def
+	}
+	return n
+}
+
+// splitAndTrim splits s on sep and trims whitespace from each part, dropping
+// empty parts. It returns nil when s is empty.
+func splitAndTrim(s, sep string) []string {
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, sep)
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if t := strings.TrimSpace(p); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
 }
 
 // writeError emits a protocol-native JSON error body with a stable code. It

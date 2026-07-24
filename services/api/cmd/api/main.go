@@ -15,10 +15,14 @@ import (
 	"syscall"
 
 	"github.com/tokenmp/v3/services/api/internal/app"
+	"github.com/tokenmp/v3/services/api/internal/billing"
 	"github.com/tokenmp/v3/services/api/internal/config"
 	"github.com/tokenmp/v3/services/api/internal/identity"
+	"github.com/tokenmp/v3/services/api/internal/keys"
+	"github.com/tokenmp/v3/services/api/internal/logging"
 	"github.com/tokenmp/v3/services/api/internal/proxy"
 	"github.com/tokenmp/v3/services/api/internal/quota"
+	"github.com/tokenmp/v3/services/api/internal/settings"
 )
 
 func main() {
@@ -45,11 +49,21 @@ func run() error {
 		return fmt.Errorf("proxy: %w", err)
 	}
 
+	// Auth URL 配置时启用密钥管理端点（代理到 Auth Service）；未配置时跳过。
+	var keysHandler *keys.Handler
+	if cfg.AuthURL != "" {
+		keysHandler = keys.NewHandler(keys.New(cfg.AuthURL), logger)
+	}
+
 	deps := app.Deps{
-		Verifier: verifier,
-		Proxy:    prx,
-		Quota:    quota.NewManager(cfg.BillingURL),
-		Logger:   logger,
+		Verifier:    verifier,
+		Proxy:       prx,
+		Quota:       quota.NewManager(cfg.BillingURL),
+		Logging:     logging.NewClient(cfg.LoggingURL),
+		Billing:     billing.NewClient(cfg.BillingURL),
+		Settings:    settings.NewStore(),
+		KeysHandler: keysHandler,
+		Logger:      logger,
 	}
 
 	ln, err := net.Listen("tcp", cfg.HTTPAddr)

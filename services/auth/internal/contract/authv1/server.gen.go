@@ -16,10 +16,29 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/oapi-codegen/runtime"
 )
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+	// AuthListApiKeys List API keys
+	// (GET /api/v1/auth/keys)
+	AuthListApiKeys(w http.ResponseWriter, r *http.Request)
+	// AuthCreateApiKey Create an API key
+	// (POST /api/v1/auth/keys)
+	AuthCreateApiKey(w http.ResponseWriter, r *http.Request)
+	// AuthDeleteApiKey Revoke an API key
+	// (DELETE /api/v1/auth/keys/{keyId})
+	AuthDeleteApiKey(w http.ResponseWriter, r *http.Request, keyId KeyId)
+	// AuthGetApiKey Get API key details
+	// (GET /api/v1/auth/keys/{keyId})
+	AuthGetApiKey(w http.ResponseWriter, r *http.Request, keyId KeyId)
+	// AuthUpdateApiKey Modify an API key
+	// (PATCH /api/v1/auth/keys/{keyId})
+	AuthUpdateApiKey(w http.ResponseWriter, r *http.Request, keyId KeyId)
+	// AuthRotateApiKey Rotate an API key
+	// (POST /api/v1/auth/keys/{keyId}/rotate)
+	AuthRotateApiKey(w http.ResponseWriter, r *http.Request, keyId KeyId)
 	// Login Log in
 	// (POST /api/v1/auth/login)
 	Login(w http.ResponseWriter, r *http.Request)
@@ -58,6 +77,42 @@ type ServerInterface interface {
 // Unimplemented server implementation that returns http.StatusNotImplemented for each endpoint.
 
 type Unimplemented struct{}
+
+// AuthListApiKeys List API keys
+// (GET /api/v1/auth/keys)
+func (_ Unimplemented) AuthListApiKeys(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// AuthCreateApiKey Create an API key
+// (POST /api/v1/auth/keys)
+func (_ Unimplemented) AuthCreateApiKey(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// AuthDeleteApiKey Revoke an API key
+// (DELETE /api/v1/auth/keys/{keyId})
+func (_ Unimplemented) AuthDeleteApiKey(w http.ResponseWriter, r *http.Request, keyId KeyId) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// AuthGetApiKey Get API key details
+// (GET /api/v1/auth/keys/{keyId})
+func (_ Unimplemented) AuthGetApiKey(w http.ResponseWriter, r *http.Request, keyId KeyId) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// AuthUpdateApiKey Modify an API key
+// (PATCH /api/v1/auth/keys/{keyId})
+func (_ Unimplemented) AuthUpdateApiKey(w http.ResponseWriter, r *http.Request, keyId KeyId) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// AuthRotateApiKey Rotate an API key
+// (POST /api/v1/auth/keys/{keyId}/rotate)
+func (_ Unimplemented) AuthRotateApiKey(w http.ResponseWriter, r *http.Request, keyId KeyId) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
 
 // Login Log in
 // (POST /api/v1/auth/login)
@@ -133,6 +188,138 @@ type ServerInterfaceWrapper struct {
 }
 
 type MiddlewareFunc func(http.Handler) http.Handler
+
+// AuthListApiKeys operation middleware
+func (siw *ServerInterfaceWrapper) AuthListApiKeys(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AuthListApiKeys(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AuthCreateApiKey operation middleware
+func (siw *ServerInterfaceWrapper) AuthCreateApiKey(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AuthCreateApiKey(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AuthDeleteApiKey operation middleware
+func (siw *ServerInterfaceWrapper) AuthDeleteApiKey(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "keyId" -------------
+	var keyId KeyId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "keyId", chi.URLParam(r, "keyId"), &keyId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "keyId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AuthDeleteApiKey(w, r, keyId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AuthGetApiKey operation middleware
+func (siw *ServerInterfaceWrapper) AuthGetApiKey(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "keyId" -------------
+	var keyId KeyId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "keyId", chi.URLParam(r, "keyId"), &keyId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "keyId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AuthGetApiKey(w, r, keyId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AuthUpdateApiKey operation middleware
+func (siw *ServerInterfaceWrapper) AuthUpdateApiKey(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "keyId" -------------
+	var keyId KeyId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "keyId", chi.URLParam(r, "keyId"), &keyId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "keyId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AuthUpdateApiKey(w, r, keyId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AuthRotateApiKey operation middleware
+func (siw *ServerInterfaceWrapper) AuthRotateApiKey(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "keyId" -------------
+	var keyId KeyId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "keyId", chi.URLParam(r, "keyId"), &keyId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "keyId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AuthRotateApiKey(w, r, keyId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
 
 // Login operation middleware
 func (siw *ServerInterfaceWrapper) Login(w http.ResponseWriter, r *http.Request) {
@@ -434,8 +621,752 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	r.Group(func(r chi.Router) {
 		r.Put(options.BaseURL+"/api/v1/auth/password", wrapper.ChangePassword)
 	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/auth/keys", wrapper.AuthListApiKeys)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/auth/keys", wrapper.AuthCreateApiKey)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/api/v1/auth/keys/{keyId}", wrapper.AuthDeleteApiKey)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/auth/keys/{keyId}", wrapper.AuthGetApiKey)
+	})
+	r.Group(func(r chi.Router) {
+		r.Patch(options.BaseURL+"/api/v1/auth/keys/{keyId}", wrapper.AuthUpdateApiKey)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/auth/keys/{keyId}/rotate", wrapper.AuthRotateApiKey)
+	})
 
 	return r
+}
+
+type AuthListApiKeysRequestObject struct {
+}
+
+type AuthListApiKeysResponseObject interface {
+	VisitAuthListApiKeysResponse(w http.ResponseWriter) error
+}
+
+type AuthListApiKeys200ResponseHeaders struct {
+	CacheControl *string
+	ContentType  *string
+}
+
+type AuthListApiKeys200JSONResponse struct {
+	Body struct {
+		Keys []ApiKey `json:"keys"`
+	}
+	Headers AuthListApiKeys200ResponseHeaders
+}
+
+func (response AuthListApiKeys200JSONResponse) VisitAuthListApiKeysResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	if response.Headers.ContentType != nil {
+		w.Header().Set("Content-Type", fmt.Sprint(*response.Headers.ContentType))
+	}
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AuthListApiKeys401ResponseHeaders struct {
+	CacheControl *string
+	ContentType  *string
+}
+
+type AuthListApiKeys401JSONResponse struct {
+	Body    Error
+	Headers AuthListApiKeys401ResponseHeaders
+}
+
+func (response AuthListApiKeys401JSONResponse) VisitAuthListApiKeysResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	if response.Headers.ContentType != nil {
+		w.Header().Set("Content-Type", fmt.Sprint(*response.Headers.ContentType))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AuthListApiKeys500ResponseHeaders struct {
+	CacheControl *string
+	ContentType  *string
+}
+
+type AuthListApiKeys500JSONResponse struct {
+	Body    Error
+	Headers AuthListApiKeys500ResponseHeaders
+}
+
+func (response AuthListApiKeys500JSONResponse) VisitAuthListApiKeysResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	if response.Headers.ContentType != nil {
+		w.Header().Set("Content-Type", fmt.Sprint(*response.Headers.ContentType))
+	}
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AuthCreateApiKeyRequestObject struct {
+	Body *AuthCreateApiKeyJSONRequestBody
+}
+
+type AuthCreateApiKeyResponseObject interface {
+	VisitAuthCreateApiKeyResponse(w http.ResponseWriter) error
+}
+
+type AuthCreateApiKey201ResponseHeaders struct {
+	CacheControl *string
+	ContentType  *string
+}
+
+type AuthCreateApiKey201JSONResponse struct {
+	Body struct {
+		// Key API key with its full secret. Returned only on create and rotate;
+		// the secret is never retrievable again.
+		Key ApiKeyCreated `json:"key"`
+	}
+	Headers AuthCreateApiKey201ResponseHeaders
+}
+
+func (response AuthCreateApiKey201JSONResponse) VisitAuthCreateApiKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	if response.Headers.ContentType != nil {
+		w.Header().Set("Content-Type", fmt.Sprint(*response.Headers.ContentType))
+	}
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AuthCreateApiKey400ResponseHeaders struct {
+	CacheControl *string
+	ContentType  *string
+}
+
+type AuthCreateApiKey400JSONResponse struct {
+	Body    Error
+	Headers AuthCreateApiKey400ResponseHeaders
+}
+
+func (response AuthCreateApiKey400JSONResponse) VisitAuthCreateApiKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	if response.Headers.ContentType != nil {
+		w.Header().Set("Content-Type", fmt.Sprint(*response.Headers.ContentType))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AuthCreateApiKey401ResponseHeaders struct {
+	CacheControl *string
+	ContentType  *string
+}
+
+type AuthCreateApiKey401JSONResponse struct {
+	Body    Error
+	Headers AuthCreateApiKey401ResponseHeaders
+}
+
+func (response AuthCreateApiKey401JSONResponse) VisitAuthCreateApiKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	if response.Headers.ContentType != nil {
+		w.Header().Set("Content-Type", fmt.Sprint(*response.Headers.ContentType))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AuthCreateApiKey500ResponseHeaders struct {
+	CacheControl *string
+	ContentType  *string
+}
+
+type AuthCreateApiKey500JSONResponse struct {
+	Body    Error
+	Headers AuthCreateApiKey500ResponseHeaders
+}
+
+func (response AuthCreateApiKey500JSONResponse) VisitAuthCreateApiKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	if response.Headers.ContentType != nil {
+		w.Header().Set("Content-Type", fmt.Sprint(*response.Headers.ContentType))
+	}
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AuthDeleteApiKeyRequestObject struct {
+	KeyId KeyId `json:"keyId"`
+}
+
+type AuthDeleteApiKeyResponseObject interface {
+	VisitAuthDeleteApiKeyResponse(w http.ResponseWriter) error
+}
+
+type AuthDeleteApiKey204ResponseHeaders struct {
+	CacheControl *string
+}
+
+type AuthDeleteApiKey204Response struct {
+	Headers AuthDeleteApiKey204ResponseHeaders
+}
+
+func (response AuthDeleteApiKey204Response) VisitAuthDeleteApiKeyResponse(w http.ResponseWriter) error {
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	w.WriteHeader(204)
+	return nil
+}
+
+type AuthDeleteApiKey401ResponseHeaders struct {
+	CacheControl *string
+	ContentType  *string
+}
+
+type AuthDeleteApiKey401JSONResponse struct {
+	Body    Error
+	Headers AuthDeleteApiKey401ResponseHeaders
+}
+
+func (response AuthDeleteApiKey401JSONResponse) VisitAuthDeleteApiKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	if response.Headers.ContentType != nil {
+		w.Header().Set("Content-Type", fmt.Sprint(*response.Headers.ContentType))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AuthDeleteApiKey404ResponseHeaders struct {
+	CacheControl *string
+	ContentType  *string
+}
+
+type AuthDeleteApiKey404JSONResponse struct {
+	Body    Error
+	Headers AuthDeleteApiKey404ResponseHeaders
+}
+
+func (response AuthDeleteApiKey404JSONResponse) VisitAuthDeleteApiKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	if response.Headers.ContentType != nil {
+		w.Header().Set("Content-Type", fmt.Sprint(*response.Headers.ContentType))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AuthDeleteApiKey500ResponseHeaders struct {
+	CacheControl *string
+	ContentType  *string
+}
+
+type AuthDeleteApiKey500JSONResponse struct {
+	Body    Error
+	Headers AuthDeleteApiKey500ResponseHeaders
+}
+
+func (response AuthDeleteApiKey500JSONResponse) VisitAuthDeleteApiKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	if response.Headers.ContentType != nil {
+		w.Header().Set("Content-Type", fmt.Sprint(*response.Headers.ContentType))
+	}
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AuthGetApiKeyRequestObject struct {
+	KeyId KeyId `json:"keyId"`
+}
+
+type AuthGetApiKeyResponseObject interface {
+	VisitAuthGetApiKeyResponse(w http.ResponseWriter) error
+}
+
+type AuthGetApiKey200ResponseHeaders struct {
+	CacheControl *string
+	ContentType  *string
+}
+
+type AuthGetApiKey200JSONResponse struct {
+	Body struct {
+		// Key Public API key view. The full secret is never returned; only
+		// `key_prefix` and `key_suffix` are exposed for identification.
+		Key ApiKey `json:"key"`
+	}
+	Headers AuthGetApiKey200ResponseHeaders
+}
+
+func (response AuthGetApiKey200JSONResponse) VisitAuthGetApiKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	if response.Headers.ContentType != nil {
+		w.Header().Set("Content-Type", fmt.Sprint(*response.Headers.ContentType))
+	}
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AuthGetApiKey401ResponseHeaders struct {
+	CacheControl *string
+	ContentType  *string
+}
+
+type AuthGetApiKey401JSONResponse struct {
+	Body    Error
+	Headers AuthGetApiKey401ResponseHeaders
+}
+
+func (response AuthGetApiKey401JSONResponse) VisitAuthGetApiKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	if response.Headers.ContentType != nil {
+		w.Header().Set("Content-Type", fmt.Sprint(*response.Headers.ContentType))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AuthGetApiKey404ResponseHeaders struct {
+	CacheControl *string
+	ContentType  *string
+}
+
+type AuthGetApiKey404JSONResponse struct {
+	Body    Error
+	Headers AuthGetApiKey404ResponseHeaders
+}
+
+func (response AuthGetApiKey404JSONResponse) VisitAuthGetApiKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	if response.Headers.ContentType != nil {
+		w.Header().Set("Content-Type", fmt.Sprint(*response.Headers.ContentType))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AuthGetApiKey500ResponseHeaders struct {
+	CacheControl *string
+	ContentType  *string
+}
+
+type AuthGetApiKey500JSONResponse struct {
+	Body    Error
+	Headers AuthGetApiKey500ResponseHeaders
+}
+
+func (response AuthGetApiKey500JSONResponse) VisitAuthGetApiKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	if response.Headers.ContentType != nil {
+		w.Header().Set("Content-Type", fmt.Sprint(*response.Headers.ContentType))
+	}
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AuthUpdateApiKeyRequestObject struct {
+	KeyId KeyId `json:"keyId"`
+	Body  *AuthUpdateApiKeyJSONRequestBody
+}
+
+type AuthUpdateApiKeyResponseObject interface {
+	VisitAuthUpdateApiKeyResponse(w http.ResponseWriter) error
+}
+
+type AuthUpdateApiKey200ResponseHeaders struct {
+	CacheControl *string
+	ContentType  *string
+}
+
+type AuthUpdateApiKey200JSONResponse struct {
+	Body struct {
+		// Key Public API key view. The full secret is never returned; only
+		// `key_prefix` and `key_suffix` are exposed for identification.
+		Key ApiKey `json:"key"`
+	}
+	Headers AuthUpdateApiKey200ResponseHeaders
+}
+
+func (response AuthUpdateApiKey200JSONResponse) VisitAuthUpdateApiKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	if response.Headers.ContentType != nil {
+		w.Header().Set("Content-Type", fmt.Sprint(*response.Headers.ContentType))
+	}
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AuthUpdateApiKey400ResponseHeaders struct {
+	CacheControl *string
+	ContentType  *string
+}
+
+type AuthUpdateApiKey400JSONResponse struct {
+	Body    Error
+	Headers AuthUpdateApiKey400ResponseHeaders
+}
+
+func (response AuthUpdateApiKey400JSONResponse) VisitAuthUpdateApiKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	if response.Headers.ContentType != nil {
+		w.Header().Set("Content-Type", fmt.Sprint(*response.Headers.ContentType))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AuthUpdateApiKey401ResponseHeaders struct {
+	CacheControl *string
+	ContentType  *string
+}
+
+type AuthUpdateApiKey401JSONResponse struct {
+	Body    Error
+	Headers AuthUpdateApiKey401ResponseHeaders
+}
+
+func (response AuthUpdateApiKey401JSONResponse) VisitAuthUpdateApiKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	if response.Headers.ContentType != nil {
+		w.Header().Set("Content-Type", fmt.Sprint(*response.Headers.ContentType))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AuthUpdateApiKey404ResponseHeaders struct {
+	CacheControl *string
+	ContentType  *string
+}
+
+type AuthUpdateApiKey404JSONResponse struct {
+	Body    Error
+	Headers AuthUpdateApiKey404ResponseHeaders
+}
+
+func (response AuthUpdateApiKey404JSONResponse) VisitAuthUpdateApiKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	if response.Headers.ContentType != nil {
+		w.Header().Set("Content-Type", fmt.Sprint(*response.Headers.ContentType))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AuthUpdateApiKey500ResponseHeaders struct {
+	CacheControl *string
+	ContentType  *string
+}
+
+type AuthUpdateApiKey500JSONResponse struct {
+	Body    Error
+	Headers AuthUpdateApiKey500ResponseHeaders
+}
+
+func (response AuthUpdateApiKey500JSONResponse) VisitAuthUpdateApiKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	if response.Headers.ContentType != nil {
+		w.Header().Set("Content-Type", fmt.Sprint(*response.Headers.ContentType))
+	}
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AuthRotateApiKeyRequestObject struct {
+	KeyId KeyId `json:"keyId"`
+}
+
+type AuthRotateApiKeyResponseObject interface {
+	VisitAuthRotateApiKeyResponse(w http.ResponseWriter) error
+}
+
+type AuthRotateApiKey200ResponseHeaders struct {
+	CacheControl *string
+	ContentType  *string
+}
+
+type AuthRotateApiKey200JSONResponse struct {
+	Body struct {
+		// Key API key with its full secret. Returned only on create and rotate;
+		// the secret is never retrievable again.
+		Key ApiKeyCreated `json:"key"`
+	}
+	Headers AuthRotateApiKey200ResponseHeaders
+}
+
+func (response AuthRotateApiKey200JSONResponse) VisitAuthRotateApiKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	if response.Headers.ContentType != nil {
+		w.Header().Set("Content-Type", fmt.Sprint(*response.Headers.ContentType))
+	}
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AuthRotateApiKey401ResponseHeaders struct {
+	CacheControl *string
+	ContentType  *string
+}
+
+type AuthRotateApiKey401JSONResponse struct {
+	Body    Error
+	Headers AuthRotateApiKey401ResponseHeaders
+}
+
+func (response AuthRotateApiKey401JSONResponse) VisitAuthRotateApiKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	if response.Headers.ContentType != nil {
+		w.Header().Set("Content-Type", fmt.Sprint(*response.Headers.ContentType))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AuthRotateApiKey404ResponseHeaders struct {
+	CacheControl *string
+	ContentType  *string
+}
+
+type AuthRotateApiKey404JSONResponse struct {
+	Body    Error
+	Headers AuthRotateApiKey404ResponseHeaders
+}
+
+func (response AuthRotateApiKey404JSONResponse) VisitAuthRotateApiKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	if response.Headers.ContentType != nil {
+		w.Header().Set("Content-Type", fmt.Sprint(*response.Headers.ContentType))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AuthRotateApiKey500ResponseHeaders struct {
+	CacheControl *string
+	ContentType  *string
+}
+
+type AuthRotateApiKey500JSONResponse struct {
+	Body    Error
+	Headers AuthRotateApiKey500ResponseHeaders
+}
+
+func (response AuthRotateApiKey500JSONResponse) VisitAuthRotateApiKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	if response.Headers.ContentType != nil {
+		w.Header().Set("Content-Type", fmt.Sprint(*response.Headers.ContentType))
+	}
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
 }
 
 type LoginRequestObject struct {
@@ -1310,6 +2241,24 @@ func (response HeadReadyz503Response) VisitHeadReadyzResponse(w http.ResponseWri
 
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
+	// AuthListApiKeys List API keys
+	// (GET /api/v1/auth/keys)
+	AuthListApiKeys(ctx context.Context, request AuthListApiKeysRequestObject) (AuthListApiKeysResponseObject, error)
+	// AuthCreateApiKey Create an API key
+	// (POST /api/v1/auth/keys)
+	AuthCreateApiKey(ctx context.Context, request AuthCreateApiKeyRequestObject) (AuthCreateApiKeyResponseObject, error)
+	// AuthDeleteApiKey Revoke an API key
+	// (DELETE /api/v1/auth/keys/{keyId})
+	AuthDeleteApiKey(ctx context.Context, request AuthDeleteApiKeyRequestObject) (AuthDeleteApiKeyResponseObject, error)
+	// AuthGetApiKey Get API key details
+	// (GET /api/v1/auth/keys/{keyId})
+	AuthGetApiKey(ctx context.Context, request AuthGetApiKeyRequestObject) (AuthGetApiKeyResponseObject, error)
+	// AuthUpdateApiKey Modify an API key
+	// (PATCH /api/v1/auth/keys/{keyId})
+	AuthUpdateApiKey(ctx context.Context, request AuthUpdateApiKeyRequestObject) (AuthUpdateApiKeyResponseObject, error)
+	// AuthRotateApiKey Rotate an API key
+	// (POST /api/v1/auth/keys/{keyId}/rotate)
+	AuthRotateApiKey(ctx context.Context, request AuthRotateApiKeyRequestObject) (AuthRotateApiKeyResponseObject, error)
 	// Login Log in
 	// (POST /api/v1/auth/login)
 	Login(ctx context.Context, request LoginRequestObject) (LoginResponseObject, error)
@@ -1382,6 +2331,172 @@ type strictHandler struct {
 	ssi         StrictServerInterface
 	middlewares []StrictMiddlewareFunc
 	options     StrictHTTPServerOptions
+}
+
+// AuthListApiKeys operation middleware
+func (sh *strictHandler) AuthListApiKeys(w http.ResponseWriter, r *http.Request) {
+	var request AuthListApiKeysRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.AuthListApiKeys(ctx, request.(AuthListApiKeysRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "AuthListApiKeys")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(AuthListApiKeysResponseObject); ok {
+		if err := validResponse.VisitAuthListApiKeysResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// AuthCreateApiKey operation middleware
+func (sh *strictHandler) AuthCreateApiKey(w http.ResponseWriter, r *http.Request) {
+	var request AuthCreateApiKeyRequestObject
+
+	var body AuthCreateApiKeyJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.AuthCreateApiKey(ctx, request.(AuthCreateApiKeyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "AuthCreateApiKey")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(AuthCreateApiKeyResponseObject); ok {
+		if err := validResponse.VisitAuthCreateApiKeyResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// AuthDeleteApiKey operation middleware
+func (sh *strictHandler) AuthDeleteApiKey(w http.ResponseWriter, r *http.Request, keyId KeyId) {
+	var request AuthDeleteApiKeyRequestObject
+
+	request.KeyId = keyId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.AuthDeleteApiKey(ctx, request.(AuthDeleteApiKeyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "AuthDeleteApiKey")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(AuthDeleteApiKeyResponseObject); ok {
+		if err := validResponse.VisitAuthDeleteApiKeyResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// AuthGetApiKey operation middleware
+func (sh *strictHandler) AuthGetApiKey(w http.ResponseWriter, r *http.Request, keyId KeyId) {
+	var request AuthGetApiKeyRequestObject
+
+	request.KeyId = keyId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.AuthGetApiKey(ctx, request.(AuthGetApiKeyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "AuthGetApiKey")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(AuthGetApiKeyResponseObject); ok {
+		if err := validResponse.VisitAuthGetApiKeyResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// AuthUpdateApiKey operation middleware
+func (sh *strictHandler) AuthUpdateApiKey(w http.ResponseWriter, r *http.Request, keyId KeyId) {
+	var request AuthUpdateApiKeyRequestObject
+
+	request.KeyId = keyId
+
+	var body AuthUpdateApiKeyJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.AuthUpdateApiKey(ctx, request.(AuthUpdateApiKeyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "AuthUpdateApiKey")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(AuthUpdateApiKeyResponseObject); ok {
+		if err := validResponse.VisitAuthUpdateApiKeyResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// AuthRotateApiKey operation middleware
+func (sh *strictHandler) AuthRotateApiKey(w http.ResponseWriter, r *http.Request, keyId KeyId) {
+	var request AuthRotateApiKeyRequestObject
+
+	request.KeyId = keyId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.AuthRotateApiKey(ctx, request.(AuthRotateApiKeyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "AuthRotateApiKey")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(AuthRotateApiKeyResponseObject); ok {
+		if err := validResponse.VisitAuthRotateApiKeyResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
 }
 
 // Login operation middleware

@@ -28,8 +28,8 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.JWTAudience != "tokenmp-web" {
 		t.Errorf("JWTAudience = %q", cfg.JWTAudience)
 	}
-	if cfg.BillingURL != "" || cfg.LoggingURL != "" {
-		t.Errorf("optional URLs should be empty: billing=%q logging=%q", cfg.BillingURL, cfg.LoggingURL)
+	if cfg.BillingURL != "" || cfg.LoggingURL != "" || cfg.AuthURL != "" {
+		t.Errorf("optional URLs should be empty: billing=%q logging=%q auth=%q", cfg.BillingURL, cfg.LoggingURL, cfg.AuthURL)
 	}
 }
 
@@ -74,6 +74,7 @@ func TestLoadOptionalURLs(t *testing.T) {
 	t.Setenv("API_EXECUTOR_TOKEN", "tok")
 	t.Setenv("API_BILLING_URL", "https://bill.example")
 	t.Setenv("API_LOGGING_URL", "https://log.example")
+	t.Setenv("API_AUTH_URL", "https://auth.example")
 	t.Setenv("API_JWT_PUBLIC_KEY_FILE", "/tmp/key.pem")
 	t.Setenv("API_JWT_ISSUER", "custom-iss")
 	t.Setenv("API_JWT_AUDIENCE", "custom-aud")
@@ -88,6 +89,9 @@ func TestLoadOptionalURLs(t *testing.T) {
 	if cfg.LoggingURL != "https://log.example" {
 		t.Errorf("LoggingURL = %q", cfg.LoggingURL)
 	}
+	if cfg.AuthURL != "https://auth.example" {
+		t.Errorf("AuthURL = %q", cfg.AuthURL)
+	}
 	if cfg.JWTPublicKeyFile != "/tmp/key.pem" {
 		t.Errorf("JWTPublicKeyFile = %q", cfg.JWTPublicKeyFile)
 	}
@@ -96,5 +100,23 @@ func TestLoadOptionalURLs(t *testing.T) {
 	}
 	if cfg.JWTAudience != "custom-aud" {
 		t.Errorf("JWTAudience = %q", cfg.JWTAudience)
+	}
+}
+
+func TestLoadInvalidAuthURL(t *testing.T) {
+	t.Setenv("API_EXECUTOR_URL", "http://x")
+	t.Setenv("API_EXECUTOR_TOKEN", "tok")
+	t.Setenv("API_AUTH_URL", "ftp://auth")
+	if _, err := Load(); err == nil {
+		t.Fatal("Load() expected error for invalid API_AUTH_URL scheme")
+	}
+}
+
+func TestLoadAuthURLWithQuery(t *testing.T) {
+	t.Setenv("API_EXECUTOR_URL", "http://x")
+	t.Setenv("API_EXECUTOR_TOKEN", "tok")
+	t.Setenv("API_AUTH_URL", "http://auth?x=1")
+	if _, err := Load(); err == nil {
+		t.Fatal("Load() expected error for API_AUTH_URL with query")
 	}
 }

@@ -19,15 +19,24 @@ Edge/BFF **不做**：模型路由、协议转换、上游转发（这些在 Exe
 - `internal/identity`：JWT 验证中间件（EdDSA/Ed25519，本地验，提取 subject/role 到 context；`API_JWT_PUBLIC_KEY_FILE` 空时 noop verifier dev-only；`NewVerifier` + `Middleware` + `FromContext`）。
 - `internal/quota`：Billing Service 客户端（`Manager` 接口，`Reserve`/`Finalize`/`Release`；`billingURL` 空时 noop；禁 redirect，10s timeout，`ErrQuotaUnavailable` 不泄漏 URL）。
 - `internal/proxy`：反向代理转发到 executor（注入 `Bearer <edge-token>`，`ErrorHandter` 返回 502 JSON）。
-- `internal/app`：chi 路由组装（`/healthz` 匿名，`/v1/*` 身份→配额→代理；`quotaMiddleware` reserve→forward→finalize/release）。
+- `internal/logging`：Logging Service 只读 HTTP 客户端（`ListLogs`/`GetLog`/`GetStats`；`loggingURL` 空时 `ErrUnavailable`，404 区分为 `NotFound`，禁 redirect、1 MiB 响应体限、不泄漏 URL）。
+- `internal/billing`：Billing Service 只读查询 HTTP 客户端（`ListPlans`/`ListUserPlans`/`GetBalance`；与 `internal/quota` 分离，后者负责 reserve/finalize/release 写入路径）。下游 `Balance`/`Plan`/`UserPlan` 为 snake_case DTO，Edge facade 映射为契约 camelCase。
+- `internal/settings`：用户设置进程内内存存储（`Get`/`Snapshot`，默认 preferredBilling="coding"/fallbackEnabled=false；`Snapshot` 用可选指针表达局部更新，支持把 bool 显式设为 false）。无持久化，生产化后可替换。
+- `internal/panel`：Panel 业务查询 handler（`ListPlans`/`ListUserPlans`/`GetUserBalance`/`ListRequestLogs`/`GetRequestLog`/`GetRequestLogStats`/`GetUserSettings`/`UpdateUserSettings`）。聚合 logging+billing+settings，以 OpenAPI 契约形状返回；金额/配额用十进制字符串。防越权：`GetRequestLog` 按身份 subject 校验日志归属（admin 可放宽）。Plan 的 int64 id 经 `int64ToUUID` 确定性映射为契约 UUID，不暴露自增序号。
+- `internal/app`：chi 路由组装（`/healthz` 匿名、`/api/v1/plans` 公开、`/api/v1/{user,request-logs,keys}` 身份、`/v1/*` 身份→配额→代理；`quotaMiddleware` reserve→forward→finalize/release）。
 - `internal/transport/healthz`：health check handler。
 
 ## 请求流
 
 ```
+# 模型执行请求
 client → identity.Middleware (JWT verify) → quotaMiddleware (reserve)
   → proxy (forward to executor, inject Bearer token)
   → response → quotaMiddleware (finalize if 2xx/3xx, release if error)
+
+# Panel 业务查询请求（不经配额）
+client → identity.Middleware (JWT verify) → panel handler
+  → (logging.Client | billing.Client | settings.Store) → 契约 JSON
 ```
 
 ## 验证
@@ -43,6 +52,7 @@ go test -race ./...
 - quota：noop、reserve→finalize→release、error、unreachable
 - proxy：forward+token、502 on unreachable
 - app：全链路（auth→quota→proxy→finalize）、auth reject 401、release on 502、healthz anonymous、quota unavailable 503
+- panel：套餐列表过滤 image/free、余额降级返 0、用户套餐余额填充、请求日志分页+status 映射、日志详情越权拦截、stats 聚合、settings PATCH 局部更新持久化、未认证 401、下游不可用 503
 
 ## 待实现
 
