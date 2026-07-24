@@ -117,6 +117,8 @@ jobs:
           --health-retries 20
     env:
       AUTH_DATABASE_URL: postgres://tokenmp:tokenmp@localhost:5432/tokenmp_auth?sslmode=disable
+      CONFIG_DATABASE_URL: postgres://tokenmp:tokenmp@localhost:5432/tokenmp_config?sslmode=disable
+      CONFIG_REPO_TEST_DSN: postgres://tokenmp:tokenmp@localhost:5432/tokenmp_config?sslmode=disable
     steps:
       - name: Checkout
         # actions/checkout v5
@@ -130,6 +132,7 @@ jobs:
           cache-dependency-path: |
             services/auth/go.sum
             services/executor/go.sum
+            services/config/go.sum
 
       - name: Generated code freshness check (Auth)
         run: |
@@ -247,6 +250,55 @@ jobs:
       # machines — the Ubuntu runner provides Docker out of the box.
       - name: docker build executor (build only, no run/push)
         run: docker build -f services/executor/Dockerfile -t tokenmp-v3-executor:${{ github.sha }} .
+
+      # ------------------------------------------------------------------
+      # Config service (skeleton): gofmt / vet / build / unit test / migration
+      # cycle / repository integration test. Reuses this job's Postgres 17
+      # service via a separate tokenmp_config database created below.
+      # ------------------------------------------------------------------
+      - name: Create tokenmp_config database
+        env:
+          PGPASSWORD: tokenmp
+        run: |
+          psql -h localhost -U tokenmp -d postgres -c "CREATE DATABASE tokenmp_config;" || true
+
+      - name: gofmt (config)
+        working-directory: services/config
+        run: |
+          out="$(gofmt -l .)"
+          if [ -n "$out" ]; then
+            echo "gofmt found unformatted files:" >&2
+            echo "$out" >&2
+            exit 1
+          fi
+
+      - name: go vet (config)
+        working-directory: services/config
+        run: go vet ./...
+
+      - name: go build (config)
+        working-directory: services/config
+        run: |
+          go build ./...
+          go build -o /tmp/config-bin ./cmd/config
+
+      - name: go test -race (config unit)
+        working-directory: services/config
+        run: go test -race ./internal/config/... ./internal/database/... ./internal/server/...
+
+      - name: Config migration cycle (up/down/up)
+        working-directory: services/config
+        run: |
+          set -euo pipefail
+          migrate -path migrations -database "$CONFIG_DATABASE_URL" up
+          migrate -path migrations -database "$CONFIG_DATABASE_URL" down -all
+          migrate -path migrations -database "$CONFIG_DATABASE_URL" up
+
+      - name: go test -race (config repository integration)
+        working-directory: services/config
+        env:
+          CONFIG_REPO_TEST_DSN: postgres://tokenmp:tokenmp@localhost:5432/tokenmp_config?sslmode=disable
+        run: go test -race ./internal/repository/...
 
       - name: Migration cycle (up/down/up)
         working-directory: services/auth
