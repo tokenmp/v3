@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -868,5 +869,58 @@ func TestBuildMetricsMiddlewareCounts401(t *testing.T) {
 	body := metricsRec.Body.String()
 	if !strings.Contains(body, `executor_http_requests_total{method="post",route="chat_completions",status_class="4xx"}`) {
 		t.Errorf("metrics output missing 401 counter for chat_completions; body:\n%s", body)
+	}
+}
+
+func TestBuildWiresLoggingSinkWhenConfigured(t *testing.T) {
+	t.Parallel()
+
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/logs/ingest" || r.Method != http.MethodPost {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		hits.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	path := writeConfig(t, minimalEmptyConfig)
+	cfg := testConfig(path, "{}")
+	cfg.LoggingServiceURL = srv.URL
+	app, err := Build(context.Background(), cfg, envLookup(healthyEnv(t, path)))
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	if app == nil || app.Handler == nil {
+		t.Fatal("Build() returned nil app/handler")
+	}
+	// The composition must succeed and produce a serving handler; the remote
+	// sink is wired but only posts when the runner records events, which an
+	// empty-config composition will not do here. The key assertion is that a
+	// valid LoggingServiceURL does not fail startup and the handler is live.
+	req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8081/healthz", nil)
+	rec := httptest.NewRecorder()
+	app.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("healthz status = %d, want 200", rec.Code)
+	}
+}
+
+func TestBuildRejectsInvalidLoggingServiceURL(t *testing.T) {
+	t.Parallel()
+
+	path := writeConfig(t, minimalEmptyConfig)
+	cfg := testConfig(path, "{}")
+	// Config validation would already reject this, but a Config constructed
+	// directly (bypassing Load) with an invalid URL must fail closed at Build.
+	cfg.LoggingServiceURL = "http://logging.example/prefix"
+	_, err := Build(context.Background(), cfg, envLookup(healthyEnv(t, path)))
+	if !errors.Is(err, ErrLoggingSink) {
+		t.Fatalf("Build() error = %v, want ErrLoggingSink", err)
+	}
+	// The error must not leak the configured URL.
+	if strings.Contains(err.Error(), "logging.example") {
+		t.Errorf("error leaks endpoint: %q", err.Error())
 	}
 }

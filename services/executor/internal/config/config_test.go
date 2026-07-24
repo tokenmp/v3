@@ -569,3 +569,63 @@ func TestLoadMetricsPathEmptyUsesDefault(t *testing.T) {
 		t.Errorf("MetricsPath = %q, want /metrics (default for empty)", got.MetricsPath)
 	}
 }
+
+func TestLoadLoggingServiceURL(t *testing.T) {
+	t.Parallel()
+
+	base := map[string]string{
+		"EXECUTOR_CONFIG_FILE":             "/tmp/executor.json",
+		"EXECUTOR_CREDENTIAL_REF_MAP_JSON": "{}",
+		"EXECUTOR_IDENTITY_MAP_JSON":       "{}",
+	}
+	marker := "unique-logging-url-leak-marker"
+	tests := []struct {
+		name    string
+		value   string
+		wantErr bool
+		want    string // expected LoggingServiceURL when no error
+	}{
+		{name: "unset defaults empty"},
+		{name: "http base", value: "http://logging.example", want: "http://logging.example"},
+		{name: "https base with port", value: "https://logging.example:18084", want: "https://logging.example:18084"},
+		{name: "trailing slash", value: "http://logging.example/", want: "http://logging.example/"},
+		{name: "query string", value: "http://" + marker + ".x/?token=secret", wantErr: true},
+		{name: "fragment", value: "http://" + marker + ".x/#frag", wantErr: true},
+		{name: "userinfo", value: "http://user:pass@" + marker + ".x/", wantErr: true},
+		{name: "path with segments", value: "http://" + marker + ".x/prefix", wantErr: true},
+		{name: "non-http scheme", value: "file://" + marker, wantErr: true},
+		{name: "missing host", value: "http://", wantErr: true},
+		{name: "whitespace trimmed", value: "  http://logging.example  ", want: "http://logging.example"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			env := make(map[string]string, len(base)+1)
+			for k, v := range base {
+				env[k] = v
+			}
+			if tc.value != "" || tc.name == "whitespace trimmed" {
+				env[EnvLoggingServiceURL] = tc.value
+			}
+			got, err := Load(func(key string) (string, bool) { v, ok := env[key]; return v, ok })
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("Load() error = nil, want error")
+				}
+				if strings.Contains(err.Error(), marker) {
+					t.Errorf("error leaks URL marker: %q", err.Error())
+				}
+				if !strings.Contains(err.Error(), EnvLoggingServiceURL) {
+					t.Errorf("error does not name the variable: %q", err.Error())
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Load() error = %v", err)
+			}
+			if got.LoggingServiceURL != tc.want {
+				t.Errorf("LoggingServiceURL = %q, want %q", got.LoggingServiceURL, tc.want)
+			}
+		})
+	}
+}

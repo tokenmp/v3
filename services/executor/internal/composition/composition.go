@@ -30,6 +30,7 @@ import (
 	"github.com/tokenmp/v3/services/executor/internal/identity"
 	"github.com/tokenmp/v3/services/executor/internal/identityenv"
 	"github.com/tokenmp/v3/services/executor/internal/jwtverifier"
+	"github.com/tokenmp/v3/services/executor/internal/logsink"
 	"github.com/tokenmp/v3/services/executor/internal/metrics"
 	"github.com/tokenmp/v3/services/executor/internal/modelcatalogfacade"
 	"github.com/tokenmp/v3/services/executor/internal/nonstreamfacade"
@@ -84,6 +85,11 @@ var (
 	// ErrJWTVerifier means the JWT identity source could not be constructed
 	// (e.g. missing or malformed public key file).
 	ErrJWTVerifier = errors.New("composition: jwt verifier unavailable")
+	// ErrLoggingSink means the optional remote logging sink could not be
+	// constructed from EXECUTOR_LOGGING_SERVICE_URL (invalid endpoint or
+	// missing local port). It is fail-closed so a misconfigured logging
+	// sink never silently degrades.
+	ErrLoggingSink = errors.New("composition: logging sink unavailable")
 	// ErrUnsupportedRoute means an enabled route declares an SDK/protocol pair
 	// for which no official non-stream adapter is registered. Only OpenAI Chat
 	// (openai/openai_chat) and Anthropic Messages (anthropic/anthropic_messages)
@@ -188,11 +194,27 @@ func Build(ctx context.Context, cfg config.Config, lookupEnv func(string) (strin
 	quotaPort := quota.NewDomainInMemory()
 	executionLog := requestlog.NewInMemoryExecution()
 
+	// Optional remote logging sink: when EXECUTOR_LOGGING_SERVICE_URL is
+	// configured, wrap the in-memory execution log with a best-effort remote
+	// sink that forwards each lifecycle event to the Logging Service ingest
+	// endpoint. The in-memory log remains the local query surface (used by
+	// the metrics gauge and tests), so EventCount/QueryEvents keep working.
+	// When the URL is unset, the in-memory log is used directly and no
+	// remote forwarding occurs.
+	var loggerPort requestlog.ExecutionPort = executionLog
+	if cfg.LoggingServiceURL != "" {
+		remoteSink, err := logsink.NewRemoteSink(logsink.Options{Endpoint: cfg.LoggingServiceURL, Local: executionLog})
+		if err != nil {
+			return nil, ErrLoggingSink
+		}
+		loggerPort = remoteSink
+	}
+
 	// ── Completion + stream runners and facades ──
 	runner := &execution.Runner{
 		Quota:       quotaPort,
 		SDKRegistry: registry,
-		Logger:      executionLog,
+		Logger:      loggerPort,
 	}
 	facade := nonstreamfacade.New(nonstreamfacade.Options{
 		Store:       store,
@@ -203,7 +225,7 @@ func Build(ctx context.Context, cfg config.Config, lookupEnv func(string) (strin
 	streamDriver := &execution.StreamDriver{
 		Quota:       quotaPort,
 		SDKRegistry: registry,
-		Logger:      executionLog,
+		Logger:      loggerPort,
 	}
 	streamFacade := streamfacade.New(streamfacade.Options{
 		Store:       store,
