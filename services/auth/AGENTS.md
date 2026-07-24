@@ -13,7 +13,7 @@
 - 模块说明：`README.md`
 - 架构决策：`../../docs/adr/0004-auth-service-foundation.md`、`../../docs/adr/0005-auth-identity-flows.md`
 - 接口契约：`../../packages/contracts/openapi/auth/v1.yaml`（唯一权威副本；消费者不得读取 Auth 源码发现 API）
-- Migration 文件：`migrations/000001_create_users.{up,down}.sql`、`migrations/000002_create_auth_sessions.{up,down}.sql`
+- Migration 文件：`migrations/000001_create_users.{up,down}.sql`、`migrations/000002_create_auth_sessions.{up,down}.sql`、`migrations/000003_create_api_keys.{up,down}.sql`
 - Go workspace：`../../go.work`
 - 仓库 Docker 规范：`../../.agents/docker.md`
 
@@ -48,7 +48,7 @@ Refresh 为 32-byte `crypto/rand` base64url；DB 只存 SHA-256 BYTEA；默认 3
 | 依赖 | `@tokenmp/contracts` | Auth API 契约唯一事实来源 + Go 代码生成 | 设计/构建时契约依赖 + 生成代码 | `packages/contracts/openapi/auth/v1.yaml` → `internal/contract/authv1/{models,server}.gen.go` | contracts lint/test + Auth conformance test + 生成物源头标记测试 + `check-generated.sh` |
 | 依赖 | `github.com/google/uuid` | UUID 类型（生成代码运行时依赖，由 oapi-codegen type-mapping 配置） | Go module import | `uuid.UUID`、`uuid.Parse` | `go build ./...`、`go test -race` |
 | 依赖 | `github.com/getkin/kin-openapi` | OpenAPI 契约解析与验证（仅测试依赖） | Go module import（test） | kin-openapi 公开 API | `go test -race ./internal/server/` |
-| 依赖 | PostgreSQL（库名 `tokenmp_auth`） | 用户/session 持久化 | GORM PG driver / SQL | `AUTH_DATABASE_URL`、`migrations/*.sql` | migration 周期 + 集成测试 |
+| 依赖 | PostgreSQL（库名 `tokenmp_auth`） | 用户/session/API key 持久化 | GORM PG driver / SQL | `AUTH_DATABASE_URL`、`migrations/*.sql` | migration 周期 + repository/integration 测试 |
 | 依赖 | `github.com/go-chi/chi/v5` | HTTP 路由与中间件 | Go module import | chi v5 公开 API | `go build ./...` |
 | 依赖 | `gorm.io/gorm` + `gorm.io/driver/postgres` | ORM 与连接池；事务 + `clause.Locking` SELECT FOR UPDATE | Go module import | GORM 公开 API | `go vet`、`go test -race` |
 | 依赖 | `github.com/golang-jwt/jwt/v5` | Ed25519/EdDSA Access Token 签发与验证 | Go module import | `jwt/v5` 公开 API | `go test -race`、集成测试 |
@@ -115,7 +115,7 @@ go test -tags=integration -race ./test/integration/...
 
 - 允许访问：自身 module、`tokenmp_auth` 数据库、公开依赖（chi、gorm、pgx 驱动）。
 - 禁止访问：其他服务的私有源码或私有数据库；其他服务的 migration。
-- 数据所有权：`tokenmp_auth` 数据库中的 `users` 与 `auth_sessions` 表，由本服务独占。
+- 数据所有权：`tokenmp_auth` 数据库中的 `users`、`auth_sessions` 与 `api_keys` 表，由本服务独占；`api_keys` 统一取代旧版重叠的 `api_keys`、`user_api_keys` 与 `bot_keys`，只存 API key 的 SHA-256 hash。
 - 配置和环境变量：仅 `AUTH_*`（见 README 表格）；`AUTH_DATABASE_URL` 必填，严格解析
   （仅 postgres/postgresql、必有 host、非空 user、path 精确 `tokenmp_auth`）；
   所有 `AUTH_DB_MAX_*` / lifetime / shutdown timeout 非法值 fail-fast，不静默 fallback；

@@ -78,3 +78,25 @@ type AuthSession struct {
 
 // TableName fixes the table name for GORM.
 func (AuthSession) TableName() string { return "auth_sessions" }
+
+// APIKey mirrors the api_keys table, which unifies the legacy api_keys,
+// user_api_keys, and bot_keys tables into a single identity-owned table.
+// The full API key string is never persisted; only its SHA-256 hash is stored.
+// KeyPrefix and KeySuffix are for display only (for example, "tmp_abc1...wxyz").
+type APIKey struct {
+	ID         string     `gorm:"primaryKey;type:uuid;column:id;default:gen_random_uuid()"`
+	UserID     string     `gorm:"type:uuid;column:user_id"`
+	Name       string     `gorm:"type:varchar(128);column:name"`
+	KeyHash    []byte     `gorm:"type:bytea;column:key_hash"`
+	KeyPrefix  string     `gorm:"type:varchar(16);column:key_prefix"`
+	KeySuffix  string     `gorm:"type:varchar(8);column:key_suffix"`
+	Role       Role       `gorm:"type:varchar(16);column:role"`
+	Status     string     `gorm:"type:varchar(16);column:status"` // active/disabled/revoked
+	ExpiresAt  *time.Time `gorm:"column:expires_at"`
+	LastUsedAt *time.Time `gorm:"column:last_used_at"`
+	CreatedAt  time.Time  `gorm:"column:created_at"`
+	UpdatedAt  time.Time  `gorm:"column:updated_at"`
+}
+
+// TableName fixes the table name for GORM.
+func (APIKey) TableName() string { return "api_keys" }

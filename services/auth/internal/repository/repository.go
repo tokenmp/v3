@@ -280,6 +280,79 @@ func (r *SessionRepository) FindByID(ctx context.Context, id string) (*models.Au
 	return &s, nil
 }
 
+// APIKeyRepository is the GORM implementation of the Auth API-key
+// persistence port. It stores only SHA-256 hashes, never complete API keys.
+type APIKeyRepository struct {
+	db *gorm.DB
+}
+
+// NewAPIKeyRepository builds an APIKeyRepository bound to the given db.
+func NewAPIKeyRepository(db *gorm.DB) *APIKeyRepository {
+	return &APIKeyRepository{db: db}
+}
+
+// Create inserts an API key row. The caller must first use apikey.Generate to
+// obtain the complete key and its hash. This method returns no key material.
+func (r *APIKeyRepository) Create(ctx context.Context, key *models.APIKey) error {
+	if err := withTx(ctx, r.db).Create(key).Error; err != nil {
+		return classify(err)
+	}
+	return nil
+}
+
+// FindByHash returns an active API key by SHA-256 hash. Disabled and revoked
+// keys deliberately map to ErrNotFound so verification callers cannot use
+// either lifecycle state to authenticate or probe key state.
+func (r *APIKeyRepository) FindByHash(ctx context.Context, hash []byte) (*models.APIKey, error) {
+	var key models.APIKey
+	if err := withTx(ctx, r.db).
+		Where("key_hash = ? AND status = ?", hash, "active").
+		First(&key).Error; err != nil {
+		return nil, classify(err)
+	}
+	return &key, nil
+}
+
+// ListByUser returns all non-revoked API keys for a user, newest first.
+// Disabled keys remain visible to their owner for lifecycle management.
+func (r *APIKeyRepository) ListByUser(ctx context.Context, userID string) ([]models.APIKey, error) {
+	var keys []models.APIKey
+	if err := withTx(ctx, r.db).
+		Where("user_id = ? AND status <> ?", userID, "revoked").
+		Order("created_at DESC").
+		Find(&keys).Error; err != nil {
+		return nil, classify(err)
+	}
+	return keys, nil
+}
+
+// Revoke marks a key as revoked. The user constraint prevents cross-user
+// revocation. An already-revoked row is a no-op, making revocation idempotent.
+func (r *APIKeyRepository) Revoke(ctx context.Context, id, userID string) error {
+	res := withTx(ctx, r.db).
+		Model(&models.APIKey{}).
+		Where("id = ? AND user_id = ? AND status <> ?", id, userID, "revoked").
+		Update("status", "revoked")
+	if res.Error != nil {
+		return classify(res.Error)
+	}
+	return nil
+}
+
+// UpdateLastUsed records a successful key use. A missing row is intentionally
+// a no-op because verification must not fail after successful authentication
+// solely because best-effort bookkeeping races with key deletion.
+func (r *APIKeyRepository) UpdateLastUsed(ctx context.Context, id string) error {
+	res := withTx(ctx, r.db).
+		Model(&models.APIKey{}).
+		Where("id = ?", id).
+		Update("last_used_at", time.Now().UTC())
+	if res.Error != nil {
+		return classify(res.Error)
+	}
+	return nil
+}
+
 // TxRunner runs a function within a GORM transaction. The transaction handle
 // is stored in ctx so repository methods called inside fn bind to it.
 type TxRunner struct {

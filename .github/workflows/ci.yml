@@ -412,6 +412,12 @@ jobs:
           migrate -path migrations -database "$AUTH_DATABASE_URL" down -all
           migrate -path migrations -database "$AUTH_DATABASE_URL" up
 
+      - name: go test -race (auth repository integration)
+        working-directory: services/auth
+        env:
+          AUTH_REPOSITORY_TEST_DSN: postgres://tokenmp:tokenmp@localhost:5432/tokenmp_auth?sslmode=disable
+        run: go test -race ./internal/repository/...
+
       - name: Integration tests
         working-directory: services/auth
         run: go test -tags=integration -race ./test/integration/...

@@ -203,6 +203,72 @@ func TestSchema_EmailUniqueNormalized(t *testing.T) {
 	}
 }
 
+// TestSchema_APIKeysConstraintsAndIndexes verifies the Auth-owned API-key
+// schema that unifies legacy api_keys, user_api_keys, and bot_keys. It covers
+// defaults, lifecycle constraints, hash uniqueness, ownership FK, expiry, and
+// the updated_at trigger; plaintext API key material never enters the table.
+func TestSchema_APIKeysConstraintsAndIndexes(t *testing.T) {
+	dsn := dbDSN(t)
+	migrationsURL := migrationsPath(t)
+	migrateDownThenUp(t, migrationsURL, dsn)
+	db := openDB(t, dsn)
+
+	var userID string
+	if err := db.QueryRow(`INSERT INTO users (email, password_hash) VALUES ('api-key-schema@example.com', '$2a$10$abc') RETURNING id`).Scan(&userID); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+
+	var keyID string
+	var role, status string
+	var createdAt, updatedAt time.Time
+	err := db.QueryRow(`
+		INSERT INTO api_keys (user_id, name, key_hash, key_prefix, key_suffix, created_at)
+		VALUES ($1, 'default key', $2, 'tmp_display', 'play', now() - interval '1 hour')
+		RETURNING id, role, status, created_at, updated_at
+	`, userID, []byte("hash-a")).Scan(&keyID, &role, &status, &createdAt, &updatedAt)
+	if err != nil {
+		t.Fatalf("insert API key defaults: %v", err)
+	}
+	if role != "user" || status != "active" {
+		t.Errorf("defaults role/status = %q/%q, want user/active", role, status)
+	}
+	if !updatedAt.After(createdAt) {
+		t.Errorf("default updated_at = %v, want after explicit created_at %v", updatedAt, createdAt)
+	}
+	initialUpdatedAt := updatedAt
+
+	if _, err := db.Exec(`UPDATE api_keys SET name = 'touched key', updated_at = created_at - interval '1 hour' WHERE id = $1`, keyID); err != nil {
+		t.Fatalf("update API key: %v", err)
+	}
+	if err := db.QueryRow(`SELECT updated_at FROM api_keys WHERE id = $1`, keyID).Scan(&updatedAt); err != nil {
+		t.Fatalf("read touched updated_at: %v", err)
+	}
+	if updatedAt.Before(initialUpdatedAt) {
+		t.Errorf("trigger updated_at = %v, want no earlier than prior value %v", updatedAt, initialUpdatedAt)
+	}
+
+	cases := []struct {
+		name  string
+		query string
+		args  []any
+	}{
+		{"duplicate hash", `INSERT INTO api_keys (user_id,name,key_hash,key_prefix,key_suffix) VALUES ($1,'duplicate',$2,'tmp_display','play')`, []any{userID, []byte("hash-a")}},
+		{"empty name", `INSERT INTO api_keys (user_id,name,key_hash,key_prefix,key_suffix) VALUES ($1,'',$2,'tmp_display','play')`, []any{userID, []byte("hash-b")}},
+		{"empty hash", `INSERT INTO api_keys (user_id,name,key_hash,key_prefix,key_suffix) VALUES ($1,'empty hash',$2,'tmp_display','play')`, []any{userID, []byte{}}},
+		{"invalid role", `INSERT INTO api_keys (user_id,name,key_hash,key_prefix,key_suffix,role) VALUES ($1,'bad role',$2,'tmp_display','play','owner')`, []any{userID, []byte("hash-c")}},
+		{"invalid status", `INSERT INTO api_keys (user_id,name,key_hash,key_prefix,key_suffix,status) VALUES ($1,'bad status',$2,'tmp_display','play','expired')`, []any{userID, []byte("hash-d")}},
+		{"invalid expiry", `INSERT INTO api_keys (user_id,name,key_hash,key_prefix,key_suffix,created_at,expires_at) VALUES ($1,'bad expiry',$2,'tmp_display','play',now(),now())`, []any{userID, []byte("hash-e")}},
+		{"missing user", `INSERT INTO api_keys (user_id,name,key_hash,key_prefix,key_suffix) VALUES ('00000000-0000-0000-0000-000000000000','missing user',$1,'tmp_display','play')`, []any{[]byte("hash-f")}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := db.Exec(tc.query, tc.args...); err == nil {
+				t.Error("expected schema constraint violation")
+			}
+		})
+	}
+}
+
 // TestSchema_AuthSessionsConstraintsAndIndexes verifies the auth_sessions
 // table: defaults, CHECK constraints (revoke_reason allow-list, revoked
 // consistency, refresh_token_hash non-empty, expires_at > created_at), the
