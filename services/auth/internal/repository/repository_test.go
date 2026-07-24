@@ -1,11 +1,18 @@
 package repository
 
 import (
+	"context"
 	"errors"
+	"os"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
+
+	"github.com/tokenmp/v3/services/auth/internal/database"
+	"github.com/tokenmp/v3/services/auth/internal/database/models"
+	"github.com/tokenmp/v3/services/auth/internal/security/apikey"
 )
 
 func TestClassify_Nil(t *testing.T) {
@@ -44,14 +51,23 @@ func TestClassify_PgError_UniqueViolation_EmailConstraint(t *testing.T) {
 	}
 }
 
-func TestClassify_PgError_UniqueViolation_RefreshTokenHash(t *testing.T) {
-	pgErr := &pgconn.PgError{
-		Code:           "23505",
-		ConstraintName: "auth_sessions_refresh_token_hash_key",
-	}
-	got := classify(pgErr)
-	if !errors.Is(got, ErrConstraint) {
-		t.Errorf("classify(23505 refresh_token_hash_key) = %v, want ErrConstraint", got)
+func TestClassify_PgError_UniqueViolation_SecretHash(t *testing.T) {
+	for _, constraintName := range []string{
+		"auth_sessions_refresh_token_hash_unique_idx",
+		"auth_sessions_refresh_token_hash_key",
+		"api_keys_key_hash_unique_idx",
+		"api_keys_key_hash_key",
+	} {
+		t.Run(constraintName, func(t *testing.T) {
+			pgErr := &pgconn.PgError{
+				Code:           "23505",
+				ConstraintName: constraintName,
+			}
+			got := classify(pgErr)
+			if !errors.Is(got, ErrConstraint) {
+				t.Errorf("classify(23505 %s) = %v, want ErrConstraint", constraintName, got)
+			}
+		})
 	}
 }
 
@@ -129,3 +145,122 @@ type wrappedErr struct{ err error }
 
 func (e wrappedErr) Error() string { return "wrapped: " + e.err.Error() }
 func (e wrappedErr) Unwrap() error { return e.err }
+
+func TestAPIKeyRepository_Flow(t *testing.T) {
+	// Repository integration runs only after the CI migration cycle. Keeping
+	// its DSN separate from AUTH_DATABASE_URL prevents the ordinary unit-test
+	// phase from connecting to a database before schema setup.
+	dsn := os.Getenv("AUTH_REPOSITORY_TEST_DSN")
+	if dsn == "" {
+		t.Skip("AUTH_REPOSITORY_TEST_DSN not set; skipping repository integration test")
+	}
+
+	ctx := context.Background()
+	db, err := database.Open(ctx, database.Config{
+		DatabaseURL:     dsn,
+		MaxOpenConns:    5,
+		MaxIdleConns:    1,
+		ConnMaxLifetime: time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("database.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close(db) })
+
+	users := NewUserRepository(db)
+	keys := NewAPIKeyRepository(db)
+	user := &models.User{
+		Email:        "apikey-repository-" + time.Now().UTC().Format("20060102150405.000000000") + "@example.com",
+		PasswordHash: "test-password-hash",
+		Role:         models.RoleUser,
+		Status:       models.StatusActive,
+		TokenVersion: 1,
+	}
+	if err := users.Create(ctx, user); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+
+	fullKey, hash, err := apikey.Generate()
+	if err != nil {
+		t.Fatalf("apikey.Generate: %v", err)
+	}
+	key := &models.APIKey{
+		UserID:    user.ID,
+		Name:      "repository flow",
+		KeyHash:   hash,
+		KeyPrefix: apikey.Prefix(fullKey),
+		KeySuffix: apikey.Suffix(fullKey),
+		Role:      models.RoleUser,
+		Status:    "active",
+	}
+	if err := keys.Create(ctx, key); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if key.ID == "" {
+		t.Fatal("Create did not return database-generated API key ID")
+	}
+
+	found, err := keys.FindByHash(ctx, hash)
+	if err != nil {
+		t.Fatalf("FindByHash: %v", err)
+	}
+	if found.ID != key.ID || found.UserID != user.ID || found.Status != "active" {
+		t.Errorf("FindByHash returned %+v, want active key %s for user %s", found, key.ID, user.ID)
+	}
+
+	listed, err := keys.ListByUser(ctx, user.ID)
+	if err != nil {
+		t.Fatalf("ListByUser: %v", err)
+	}
+	if len(listed) != 1 || listed[0].ID != key.ID {
+		t.Fatalf("ListByUser = %+v, want only key %s", listed, key.ID)
+	}
+
+	before := time.Now().UTC()
+	if err := keys.UpdateLastUsed(ctx, key.ID); err != nil {
+		t.Fatalf("UpdateLastUsed: %v", err)
+	}
+	used, err := keys.FindByHash(ctx, hash)
+	if err != nil {
+		t.Fatalf("FindByHash after UpdateLastUsed: %v", err)
+	}
+	if used.LastUsedAt == nil || used.LastUsedAt.Before(before) {
+		t.Errorf("LastUsedAt = %v, want a timestamp after %v", used.LastUsedAt, before)
+	}
+	if err := keys.UpdateLastUsed(ctx, "00000000-0000-0000-0000-000000000000"); err != nil {
+		t.Errorf("UpdateLastUsed missing key = %v, want no-op", err)
+	}
+
+	if err := keys.Revoke(ctx, key.ID, user.ID); err != nil {
+		t.Fatalf("Revoke: %v", err)
+	}
+	if err := keys.Revoke(ctx, key.ID, user.ID); err != nil {
+		t.Errorf("second Revoke = %v, want idempotent no-op", err)
+	}
+	if _, err := keys.FindByHash(ctx, hash); !errors.Is(err, ErrNotFound) {
+		t.Errorf("FindByHash revoked key = %v, want ErrNotFound", err)
+	}
+	listed, err = keys.ListByUser(ctx, user.ID)
+	if err != nil {
+		t.Fatalf("ListByUser after revoke: %v", err)
+	}
+	if len(listed) != 0 {
+		t.Errorf("ListByUser after revoke = %+v, want no keys", listed)
+	}
+	if _, err := keys.FindByHash(ctx, []byte("not-a-real-hash")); !errors.Is(err, ErrNotFound) {
+		t.Errorf("FindByHash missing key = %v, want ErrNotFound", err)
+	}
+
+	duplicate := &models.APIKey{
+		UserID:    user.ID,
+		Name:      "duplicate hash",
+		KeyHash:   hash,
+		KeyPrefix: apikey.Prefix(fullKey),
+		KeySuffix: apikey.Suffix(fullKey),
+		Role:      models.RoleUser,
+		Status:    "active",
+	}
+	if err := keys.Create(ctx, duplicate); !errors.Is(err, ErrConstraint) {
+		t.Errorf("Create duplicate key hash = %v, want ErrConstraint", err)
+	}
+}

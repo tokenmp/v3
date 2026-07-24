@@ -55,8 +55,8 @@ Monorepo 是代码组织和工程治理方式，不表示所有服务必须：
 
 以下边界属于当前已知约束，后续设计不得擅自改变：
 
-- `auth`：负责认证和 JWT，只访问认证数据库。
-- `api`：负责 API Key、业务配置、模型与上游配置、业务及请求日志相关能力。
+- `auth`：负责认证、JWT 和身份拥有的 API Key，只访问认证数据库。Auth 的 `api_keys` 统一取代旧版重叠的 `api_keys`、`user_api_keys` 与 `bot_keys`；Executor 仍只做本地 API Key 验证，不查 Auth 库。
+- `api`：负责业务配置、模型与上游配置、业务及请求日志相关能力，不拥有身份 API Key。
 - `quota`：负责配额检查、预留、结算、释放及流水。
 - `executor`：核心转发执行服务，保持 Go 实现。Foundation 阶段采用 Mock-first，通过 Mock/InMemory ports 验证执行架构，不直接访问数据库；后续如有持久化需求，必须经独立设计，并且只能由 Executor 自己拥有和访问其配置或运行时数据库及 Repository 实现。Executor 不得直接访问 Auth、API、Quota 或其他服务拥有的数据库；与其他服务的交互必须通过明确、可配置、版本化的内部契约。
 - Web、Admin 或 Gateway 属于独立应用/可部署单元，不得把核心执行逻辑复制进前端或网关。
