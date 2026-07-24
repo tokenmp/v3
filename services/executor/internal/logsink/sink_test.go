@@ -209,7 +209,7 @@ func TestRecordExecutionPostsBatchAndPreservesLocalQuery(t *testing.T) {
 	if len(b.Events) != 1 {
 		t.Fatalf("len(batch.Events) = %d, want 1", len(b.Events))
 	}
-	if b.Events[0].Source != "executor" || b.Events[0].Stage != requestlog.KindAttempt {
+	if b.Events[0].Source != "executor" || b.Events[0].Stage != "upstream_started" {
 		t.Errorf("batch.Events[0] source/stage = %q/%q", b.Events[0].Source, b.Events[0].Stage)
 	}
 	if b.Events[0].RequestID != "req-1" || b.Events[0].DurationMS != 250 {
@@ -253,8 +253,8 @@ func TestRecordExecutionNonAttemptKindHasNoAttemptRow(t *testing.T) {
 	if len(b.Events) != 1 {
 		t.Fatalf("len(Events) = %d, want 1", len(b.Events))
 	}
-	if b.Events[0].Stage != requestlog.KindFinalized {
-		t.Errorf("Event stage = %q, want finalized", b.Events[0].Stage)
+	if b.Events[0].Stage != "completed" {
+		t.Errorf("Event stage = %q, want completed", b.Events[0].Stage)
 	}
 	if b.Log.CompletedAt == nil {
 		t.Error("Log.CompletedAt is nil for finalized, want timestamp")

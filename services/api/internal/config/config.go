@@ -51,8 +51,11 @@ type Config struct {
 	// JWTAudience is the expected JWT audience. Defaults to "tokenmp-web".
 	JWTAudience string
 
-	// ExecutorToken is the Bearer token the edge uses to authenticate to
-	// the executor (a service-level JWT or API key). Required.
+	// ExecutorToken is the service-level Bearer token the edge uses to
+	// authenticate to the executor when it runs in API-key (identityenv) mode.
+	// Optional; when empty, the proxy forwards the client's Authorization
+	// header as-is (JWT passthrough mode, both edge and executor verify the
+	// same JWT with the Auth service public key).
 	ExecutorToken string
 }
 
@@ -138,9 +141,7 @@ func Load() (*Config, error) {
 	}
 
 	cfg.ExecutorToken = os.Getenv("API_EXECUTOR_TOKEN")
-	if strings.TrimSpace(cfg.ExecutorToken) == "" {
-		return nil, errors.New("API_EXECUTOR_TOKEN is required")
-	}
+	// ExecutorToken is optional (JWT passthrough mode when empty).
 
 	return cfg, nil
 }

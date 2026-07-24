@@ -41,11 +41,15 @@ func TestLoadMissingExecutorURL(t *testing.T) {
 	}
 }
 
-func TestLoadMissingExecutorToken(t *testing.T) {
+func TestLoadExecutorTokenOptional(t *testing.T) {
 	t.Setenv("API_EXECUTOR_URL", "http://x")
 	t.Setenv("API_EXECUTOR_TOKEN", "")
-	if _, err := Load(); err == nil {
-		t.Fatal("Load() expected error for missing API_EXECUTOR_TOKEN")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v, want nil (token is optional)", err)
+	}
+	if cfg.ExecutorToken != "" {
+		t.Errorf("ExecutorToken = %q, want empty", cfg.ExecutorToken)
 	}
 }
 

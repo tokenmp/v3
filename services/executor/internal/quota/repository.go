@@ -90,9 +90,13 @@ func ValidateRequestID(requestID string) error {
 }
 
 // ValidateQuotaIdentity validates request-authenticated quota attribution
-// independently from a generated request ID.
+// independently from a generated request ID. Subject and protocol are always
+// required; keyID is optional because JWT sources carry no kid.
 func ValidateQuotaIdentity(subject, keyID, protocol string) error {
-	if !safeToken.MatchString(subject) || !safeToken.MatchString(keyID) || !safeToken.MatchString(protocol) {
+	if !safeToken.MatchString(subject) || !safeToken.MatchString(protocol) {
+		return ErrInvalidMetadata
+	}
+	if keyID != "" && !safeToken.MatchString(keyID) {
 		return ErrInvalidMetadata
 	}
 	return nil
