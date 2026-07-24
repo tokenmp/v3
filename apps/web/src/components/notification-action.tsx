@@ -1,0 +1,23 @@
+'use client';
+
+import Link from 'next/link';
+import type { NotificationAction } from '@/types';
+
+/** Data-driven notification action renderer.
+ *  - null → render nothing
+ *  - action.type === 'link' → render a Link styled as outline button
+ *  - unknown type → render nothing (graceful ignore)
+ */
+export function NotificationAction({ action }: { action: NotificationAction | null }) {
+  if (!action) return null;
+  if (action.type !== 'link') return null;
+
+  return (
+    <Link
+      href={action.href}
+      className="focus-inset inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium border border-input bg-background hover:bg-accent hover:text-accent-foreground h-9 px-3 transition-colors"
+    >
+      {action.label}
+    </Link>
+  );
+}

@@ -1,0 +1,351 @@
+// Package server wires the notice service HTTP routes: health/readiness
+// probes, JWT-authenticated announcement/changelog/notification endpoints.
+//
+// Errors are stable, classified JSON bodies of the form
+// {"error":{"code","message"}} and never leak driver/DSN details. All
+// responses carry Cache-Control: no-store.
+package server
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"log/slog"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/tokenmp/v3/services/notice/internal/jwtverifier"
+	"github.com/tokenmp/v3/services/notice/internal/models"
+	"github.com/tokenmp/v3/services/notice/internal/repository"
+)
+
+// Pinger is the readiness contract.
+type Pinger interface {
+	Ping(ctx context.Context) error
+}
+
+// Store is the data-access contract the server depends on. It is satisfied by
+// *repository.Repository and by test doubles.
+type Store interface {
+	ListAnnouncements(ctx context.Context, limit, offset int) ([]models.Announcement, int, error)
+	GetAnnouncement(ctx context.Context, id string) (models.Announcement, error)
+	ListChangelogs(ctx context.Context, limit, offset int) ([]models.Changelog, int, error)
+	GetChangelog(ctx context.Context, id string) (models.Changelog, error)
+	ListNotifications(ctx context.Context, userID string, limit, offset int) ([]models.Notification, int, error)
+	UnreadCount(ctx context.Context, userID string) (int, error)
+	MarkRead(ctx context.Context, userID, id string) error
+	MarkAllRead(ctx context.Context, userID string) error
+}
+
+// AuthVerifier is the JWT verification contract. It is satisfied by
+// *jwtverifier.Verifier and by test doubles.
+type AuthVerifier interface {
+	Verify(raw string) (jwtverifier.Subject, error)
+}
+
+// Server holds the notice service dependencies.
+type Server struct {
+	addr     string
+	pinger   Pinger
+	verifier AuthVerifier
+	store    Store
+	logger   *slog.Logger
+	now      func() time.Time
+}
+
+// ServerConfig assembles a Server.
+type ServerConfig struct {
+	Addr     string
+	Pinger   Pinger
+	Verifier AuthVerifier
+	Store    Store
+	Logger   *slog.Logger
+}
+
+// New returns a configured *http.Server with all routes registered.
+func New(cfg ServerConfig) *http.Server {
+	mux := http.NewServeMux()
+	s := &Server{
+		addr:     cfg.Addr,
+		pinger:   cfg.Pinger,
+		verifier: cfg.Verifier,
+		store:    cfg.Store,
+		logger:   cfg.Logger,
+		now:      time.Now,
+	}
+
+	// Health / readiness (anonymous).
+	mux.HandleFunc("GET /healthz", s.handleHealthz)
+	mux.HandleFunc("HEAD /healthz", s.handleHealthzNoBody)
+	mux.HandleFunc("GET /readyz", s.handleReadyz)
+
+	// Authenticated notice endpoints.
+	authMux := http.NewServeMux()
+	authMux.HandleFunc("GET /api/v1/announcements", s.handleListAnnouncements)
+	authMux.HandleFunc("GET /api/v1/announcements/{id}", s.handleGetAnnouncement)
+	authMux.HandleFunc("GET /api/v1/changelogs", s.handleListChangelogs)
+	authMux.HandleFunc("GET /api/v1/changelogs/{id}", s.handleGetChangelog)
+	authMux.HandleFunc("GET /api/v1/notifications", s.handleListNotifications)
+	authMux.HandleFunc("GET /api/v1/notifications/unread-count", s.handleUnreadCount)
+	authMux.HandleFunc("POST /api/v1/notifications/{id}/read", s.handleMarkRead)
+	authMux.HandleFunc("POST /api/v1/notifications/read-all", s.handleMarkAllRead)
+
+	mux.Handle("/api/", s.authMiddleware(authMux))
+
+	return &http.Server{
+		Addr:              s.addr,
+		Handler:           s.noStoreMiddleware(mux),
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+}
+
+// ---- Middleware ----
+
+// noStoreMiddleware sets Cache-Control: no-store on every response.
+func (s *Server) noStoreMiddleware(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		h.ServeHTTP(w, r)
+	})
+}
+
+// authMiddleware verifies the bearer token and stores the subject in the
+// request context. On any failure it returns a protocol-native 401 fail
+// closed, without leaking which check failed.
+func (s *Server) authMiddleware(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authHeader := r.Header.Get("Authorization")
+		if !strings.HasPrefix(authHeader, "Bearer ") {
+			writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required.")
+			return
+		}
+		raw := strings.TrimPrefix(authHeader, "Bearer ")
+		subject, err := s.verifier.Verify(raw)
+		if err != nil {
+			writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required.")
+			return
+		}
+		ctx := context.WithValue(r.Context(), subjectKey{}, subject)
+		h.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+type subjectKey struct{}
+
+func subjectFromCtx(r *http.Request) jwtverifier.Subject {
+	if v, ok := r.Context().Value(subjectKey{}).(jwtverifier.Subject); ok {
+		return v
+	}
+	return jwtverifier.Subject{}
+}
+
+// ---- Helpers ----
+
+func writeJSON(w http.ResponseWriter, status int, body any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(body)
+}
+
+func writeError(w http.ResponseWriter, status int, code, message string) {
+	writeJSON(w, status, map[string]any{
+		"error": map[string]any{"code": code, "message": message},
+	})
+}
+
+func parsePaging(r *http.Request) (int, int) {
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	return limit, offset
+}
+
+// notificationOut maps a model to its JSON shape, exposing the action as a
+// nullable object.
+type notificationOut struct {
+	ID        string                 `json:"id"`
+	Type      string                 `json:"type"`
+	Title     string                 `json:"title"`
+	Body      string                 `json:"body"`
+	Action    *models.NotificationAction `json:"action"`
+	ReadAt    *time.Time             `json:"read_at"`
+	CreatedAt time.Time              `json:"created_at"`
+}
+
+func toNotificationOut(n models.Notification) notificationOut {
+	return notificationOut{
+		ID:        n.ID,
+		Type:      n.Type,
+		Title:     n.Title,
+		Body:      n.Body,
+		Action:    n.Action.Action,
+		ReadAt:    n.ReadAt,
+		CreatedAt: n.CreatedAt,
+	}
+}
+
+// ---- Handlers ----
+
+func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":    "ok",
+		"service":   "notice",
+		"timestamp": s.now().UTC().Format(time.RFC3339),
+	})
+}
+
+func (s *Server) handleHealthzNoBody(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+}
+
+func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
+	if s.pinger == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"status":  "unready",
+			"service": "notice",
+		})
+		return
+	}
+	pingCtx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+	defer cancel()
+	if err := s.pinger.Ping(pingCtx); err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"status":  "unready",
+			"service": "notice",
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":    "ok",
+		"service":   "notice",
+		"timestamp": s.now().UTC().Format(time.RFC3339),
+	})
+}
+
+func (s *Server) handleListAnnouncements(w http.ResponseWriter, r *http.Request) {
+	limit, offset := parsePaging(r)
+	items, total, err := s.store.ListAnnouncements(r.Context(), limit, offset)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "An internal error occurred.")
+		return
+	}
+	writeJSON(w, http.StatusOK, models.Page[models.Announcement]{Items: items, Total: total})
+}
+
+func (s *Server) handleGetAnnouncement(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if err := repository.ParseUUID(id); err != nil {
+		writeError(w, http.StatusNotFound, "not_found", "Announcement not found.")
+		return
+	}
+	a, err := s.store.GetAnnouncement(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", "Announcement not found.")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal_error", "An internal error occurred.")
+		return
+	}
+	writeJSON(w, http.StatusOK, a)
+}
+
+func (s *Server) handleListChangelogs(w http.ResponseWriter, r *http.Request) {
+	limit, offset := parsePaging(r)
+	items, total, err := s.store.ListChangelogs(r.Context(), limit, offset)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "An internal error occurred.")
+		return
+	}
+	writeJSON(w, http.StatusOK, models.Page[models.Changelog]{Items: items, Total: total})
+}
+
+func (s *Server) handleGetChangelog(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if err := repository.ParseUUID(id); err != nil {
+		writeError(w, http.StatusNotFound, "not_found", "Changelog not found.")
+		return
+	}
+	c, err := s.store.GetChangelog(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", "Changelog not found.")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal_error", "An internal error occurred.")
+		return
+	}
+	writeJSON(w, http.StatusOK, c)
+}
+
+func (s *Server) handleListNotifications(w http.ResponseWriter, r *http.Request) {
+	sub := subjectFromCtx(r)
+	if sub.UserID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required.")
+		return
+	}
+	limit, offset := parsePaging(r)
+	items, total, err := s.store.ListNotifications(r.Context(), sub.UserID, limit, offset)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "An internal error occurred.")
+		return
+	}
+	outs := make([]notificationOut, 0, len(items))
+	for _, n := range items {
+		outs = append(outs, toNotificationOut(n))
+	}
+	writeJSON(w, http.StatusOK, struct {
+		Items []notificationOut `json:"items"`
+		Total int               `json:"total"`
+	}{Items: outs, Total: total})
+}
+
+func (s *Server) handleUnreadCount(w http.ResponseWriter, r *http.Request) {
+	sub := subjectFromCtx(r)
+	if sub.UserID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required.")
+		return
+	}
+	count, err := s.store.UnreadCount(r.Context(), sub.UserID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "An internal error occurred.")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"count": count})
+}
+
+func (s *Server) handleMarkRead(w http.ResponseWriter, r *http.Request) {
+	sub := subjectFromCtx(r)
+	if sub.UserID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required.")
+		return
+	}
+	id := r.PathValue("id")
+	if err := repository.ParseUUID(id); err != nil {
+		writeError(w, http.StatusNotFound, "not_found", "Notification not found.")
+		return
+	}
+	if err := s.store.MarkRead(r.Context(), sub.UserID, id); err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", "Notification not found.")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal_error", "An internal error occurred.")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleMarkAllRead(w http.ResponseWriter, r *http.Request) {
+	sub := subjectFromCtx(r)
+	if sub.UserID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required.")
+		return
+	}
+	if err := s.store.MarkAllRead(r.Context(), sub.UserID); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "An internal error occurred.")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}

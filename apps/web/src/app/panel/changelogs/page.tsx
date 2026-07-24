@@ -4,7 +4,6 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { noticeApi } from '@/lib/api/notice';
 import { Card, CardContent } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import {
   Table,
   TableBody,
@@ -13,27 +12,15 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { Megaphone, ChevronDown, ChevronUp } from 'lucide-react';
-import type { Announcement, AnnouncementSeverity } from '@/types';
+import { GitCommitHorizontal, ChevronDown, ChevronUp } from 'lucide-react';
+import type { Changelog } from '@/types';
 
 function formatTime(iso: string) {
   return new Date(iso).toLocaleString('zh-CN');
 }
 
-function severityConfig(severity: AnnouncementSeverity) {
-  switch (severity) {
-    case 'warning':
-      return { label: '警告', variant: 'warning' as const };
-    case 'maintenance':
-      return { label: '维护', variant: 'outline' as const, className: 'border-transparent bg-purple-500/15 text-purple-500' };
-    default:
-      return { label: '通知', variant: 'default' as const };
-  }
-}
-
-function AnnouncementRow({ item }: { item: Announcement }) {
+function ChangelogRow({ item }: { item: Changelog }) {
   const [expanded, setExpanded] = useState(false);
-  const cfg = severityConfig(item.severity);
 
   return (
     <>
@@ -44,14 +31,9 @@ function AnnouncementRow({ item }: { item: Announcement }) {
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpanded((v) => !v); } }}
       >
         <TableCell>
-          <div className="flex items-center gap-2">
-            <Badge variant={cfg.variant} className={cfg.className}>{cfg.label}</Badge>
-            <span className="font-medium">{item.title}</span>
-          </div>
+          <span className="text-lg font-bold font-mono">{item.version}</span>
         </TableCell>
-        <TableCell className="text-sm text-muted-foreground max-w-xs truncate hidden md:table-cell">
-          {item.summary}
-        </TableCell>
+        <TableCell className="text-sm">{item.title}</TableCell>
         <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
           {formatTime(item.published_at)}
         </TableCell>
@@ -62,10 +44,7 @@ function AnnouncementRow({ item }: { item: Announcement }) {
       {expanded && (
         <TableRow>
           <TableCell colSpan={4} className="bg-muted/30">
-            <div className="py-3 space-y-2">
-              <p className="text-sm text-muted-foreground md:hidden">{item.summary}</p>
-              <div className="text-sm whitespace-pre-wrap">{item.body}</div>
-            </div>
+            <div className="py-3 text-sm whitespace-pre-wrap">{item.body}</div>
           </TableCell>
         </TableRow>
       )}
@@ -73,9 +52,8 @@ function AnnouncementRow({ item }: { item: Announcement }) {
   );
 }
 
-function AnnouncementCard({ item }: { item: Announcement }) {
+function ChangelogCard({ item }: { item: Changelog }) {
   const [expanded, setExpanded] = useState(false);
-  const cfg = severityConfig(item.severity);
 
   return (
     <Card
@@ -86,13 +64,10 @@ function AnnouncementCard({ item }: { item: Announcement }) {
     >
       <CardContent className="p-4 space-y-2">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2 min-w-0">
-            <Badge variant={cfg.variant} className={cfg.className}>{cfg.label}</Badge>
-            <span className="font-medium text-sm truncate">{item.title}</span>
-          </div>
+          <span className="text-lg font-bold font-mono">{item.version}</span>
           {expanded ? <ChevronUp className="h-4 w-4 text-muted-foreground shrink-0" /> : <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />}
         </div>
-        <p className="text-xs text-muted-foreground">{item.summary}</p>
+        <p className="text-sm">{item.title}</p>
         <p className="text-xs text-muted-foreground">{formatTime(item.published_at)}</p>
         {expanded && (
           <div className="text-sm whitespace-pre-wrap pt-2 border-t">{item.body}</div>
@@ -102,17 +77,17 @@ function AnnouncementCard({ item }: { item: Announcement }) {
   );
 }
 
-export default function AnnouncementsPage() {
+export default function ChangelogsPage() {
   const { data, isLoading } = useQuery({
-    queryKey: ['announcements'],
-    queryFn: () => noticeApi.listAnnouncements(),
+    queryKey: ['changelogs'],
+    queryFn: () => noticeApi.listChangelogs(),
   });
 
   const items = data?.items ?? [];
 
   return (
     <div className="space-y-6">
-      <h2 className="text-2xl font-bold">公告</h2>
+      <h2 className="text-2xl font-bold">版本日志</h2>
 
       {isLoading && (
         <Card>
@@ -125,8 +100,8 @@ export default function AnnouncementsPage() {
       {!isLoading && items.length === 0 && (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-16 text-center">
-            <Megaphone className="h-12 w-12 text-muted-foreground mb-4" />
-            <p className="text-muted-foreground">暂无公告</p>
+            <GitCommitHorizontal className="h-12 w-12 text-muted-foreground mb-4" />
+            <p className="text-muted-foreground">暂无版本日志</p>
           </CardContent>
         </Card>
       )}
@@ -139,15 +114,15 @@ export default function AnnouncementsPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead>版本</TableHead>
                     <TableHead>标题</TableHead>
-                    <TableHead>摘要</TableHead>
                     <TableHead>发布时间</TableHead>
                     <TableHead className="w-8" />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {items.map((a) => (
-                    <AnnouncementRow key={a.id} item={a} />
+                  {items.map((c) => (
+                    <ChangelogRow key={c.id} item={c} />
                   ))}
                 </TableBody>
               </Table>
@@ -156,8 +131,8 @@ export default function AnnouncementsPage() {
 
           {/* Mobile card list */}
           <div className="md:hidden space-y-3">
-            {items.map((a) => (
-              <AnnouncementCard key={a.id} item={a} />
+            {items.map((c) => (
+              <ChangelogCard key={c.id} item={c} />
             ))}
           </div>
         </>

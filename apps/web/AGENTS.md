@@ -31,7 +31,7 @@ Next.js 16 (App Router) + React 19 + Tailwind CSS v4 + `@tokenmp/ui-tokens` + sh
 | `/login` `/register` `/forgot-password` | 认证页（auth-shell 两栏布局） |
 | `/panel` | 概览 |
 | `/panel/keys` `/panel/requests` | API 密钥 / 请求日志 |
-| `/panel/announcements` `/panel/notifications` | 占位 |
+| `/panel/announcements` `/panel/notifications` `/panel/changelogs` | 公告 / 通知 / 版本日志 |
 
 ## 认证与数据层
 
@@ -40,6 +40,7 @@ Next.js 16 (App Router) + React 19 + Tailwind CSS v4 + `@tokenmp/ui-tokens` + sh
 - `src/lib/api/auth.ts` 默认走 **mock auth**（`mock-auth.ts`），无需后端即可登录。设 `NEXT_PUBLIC_USE_MOCK_AUTH=0` 切回真实 fetch 客户端。
 - Mock 凭据：`demo@tokenmp.cn` / `demo1234`（user）；`admin@tokenmp.cn` / `admin1234`（admin）。任意邮箱 + 12 位以上密码可注册。
 - Panel 数据 API：`src/lib/api/user.ts` 为 **mock 层**（keys/requests/quota），后端未实现；切换时替换为 fetch 调用，组件不变。
+- Notice API：`src/lib/api/notice.ts`（`noticeApi`）对接 Notice Service（`packages/contracts/openapi/notice/v1.yaml`）。公告/changelog/通知，默认 mock（`NEXT_PUBLIC_USE_MOCK_NOTICE` 默认启用），`NEXT_PUBLIC_USE_MOCK_NOTICE=0` 切真实 fetch。通知 `action` 由通用 `NotificationAction` 组件数据驱动渲染，不写死跳转。
 - Auth 契约来源：`packages/contracts/openapi/auth/v1.yaml`（类型手动对齐，未生成 client）。
 
 ## 依赖关系与消费者

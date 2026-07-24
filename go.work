@@ -7,4 +7,5 @@ use (
 	./services/config
 	./services/executor
 	./services/logging
+	./services/notice
 )
