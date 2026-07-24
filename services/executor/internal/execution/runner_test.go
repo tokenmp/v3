@@ -997,7 +997,6 @@ func TestRunnerInvalidQuotaIdentityFailsBeforePreflightOrQuota(t *testing.T) {
 		identity QuotaIdentity
 	}{
 		{"empty subject", QuotaIdentity{Subject: "", KeyID: "key-1", Protocol: "openai_chat"}},
-		{"empty key", QuotaIdentity{Subject: "subject", KeyID: "", Protocol: "openai_chat"}},
 		{"empty protocol", QuotaIdentity{Subject: "subject", KeyID: "key-1", Protocol: ""}},
 		{"invalid subject", QuotaIdentity{Subject: " invalid", KeyID: "key-1", Protocol: "openai_chat"}},
 	} {

@@ -39,5 +39,10 @@ coverage/
 *.swo
 *~
 
-# Local-only flowchart diagrams (not committed)
+# Local-only planning/architecture docs (not committed)
 docs/implemented-flows.md
+docs/old-vs-v3-diff.md
+docs/cross-protocol-and-governance-plan.md
+docs/legacy-db-recon.md
+docs/v3-layered-architecture.md
+docs/v3-db-schema-draft.md

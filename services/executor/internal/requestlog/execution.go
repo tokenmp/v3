@@ -52,7 +52,12 @@ type ExecutionEvent struct {
 	Status        string
 	Code          string
 	Type          string
-	Timestamp     time.Time
+	// FailureCategory carries a coarse upstream failure classification
+	// (timeout / transport_error / upstream_error) for Kind=attempt and
+	// Kind=released events. It is the safe, provider-agnostic label used by
+	// remote sinks to populate the Logging DB final_status enum.
+	FailureCategory string
+	Timestamp       time.Time
 
 	// Subject is the authenticated identity subject (non-secret).
 	Subject string

@@ -689,6 +689,7 @@ func (r *Runner) logFailure(ctx context.Context, in Input, prepared routing.Prep
 	}
 	event := r.baseEvent(in, prepared, attemptNo)
 	event.Status = "failed"
+	event.FailureCategory = classifyFailure(classified)
 	event.Latency = latency
 	// Record adapter-mapped public error identifiers rather than raw upstream
 	// metadata. ExecutionEvent has no numeric-status field; its Status remains
@@ -805,4 +806,24 @@ func (r *Runner) logTerminalizationUnknown(ctx context.Context, in Input, prepar
 	logCtx, cancel := r.logContext(ctx)
 	defer cancel()
 	_ = r.Logger.RecordExecution(logCtx, event)
+}
+
+// classifyFailure maps an SDK ClassifiedError to the coarse failure category
+// used by remote sinks (Logging DB final_status enum). It never inspects the
+// upstream message: it only inspects the classified kind sentinel, which the
+// SDK reduces to a fixed, safe set. A nil classified error returns empty
+// (no category) since a failure event without classification cannot be
+// precisely categorized.
+func classifyFailure(classified *sdk.ClassifiedError) string {
+	if classified == nil {
+		return ""
+	}
+	switch {
+	case errors.Is(classified, sdk.ErrTimeout):
+		return "timeout"
+	case errors.Is(classified, sdk.ErrTransport):
+		return "transport_error"
+	default:
+		return "upstream_error"
+	}
 }

@@ -133,7 +133,10 @@ func (s *RemoteSink) RecordExecution(ctx context.Context, event requestlog.Execu
 	if event.RequestID == "" {
 		return nil
 	}
-	b := buildBatch(event)
+	b, ok := buildBatch(event)
+	if !ok {
+		return nil
+	}
 	if err := s.post(b); err != nil {
 		s.logger.Warn("logsink post failed", "request_id", event.RequestID, "error", err)
 	}
@@ -264,7 +267,15 @@ type batch struct {
 }
 
 // buildBatch assembles a single-event ingest batch from an ExecutionEvent.
-func buildBatch(e requestlog.ExecutionEvent) batch {
+// Returns ok=false for KindReserved events: a reservation is an intermediate
+// lifecycle signal that carries no terminal outcome and cannot populate the
+// Logging DB final_status NOT NULL/CHECK constraint. The caller skips the
+// post, and the terminal event (KindFinalized or KindReleased) that follows
+// carries the complete request_log row.
+func buildBatch(e requestlog.ExecutionEvent) (batch, bool) {
+	if e.Kind == requestlog.KindReserved {
+		return batch{}, false
+	}
 	log := requestLog{
 		RequestID:     e.RequestID,
 		UserID:        e.Subject,
@@ -278,14 +289,27 @@ func buildBatch(e requestlog.ExecutionEvent) batch {
 		CreatedAt:     e.Timestamp,
 	}
 
-	// Final status from event status or kind.
-	log.FinalStatus = e.Status
-	if log.FinalStatus == "" {
-		switch e.Kind {
-		case requestlog.KindFinalized:
+	// Final status from event status or kind. The Logging DB final_status
+	// CHECK constraint only accepts: success, client_error,
+	// upstream_error, timeout, transport_error. The executor's coarse
+	// FailureCategory (set by the Runner from SDK classification) maps
+	// directly to these enum values for failure events.
+	switch e.Kind {
+	case requestlog.KindFinalized:
+		log.FinalStatus = "success"
+	case requestlog.KindReleased:
+		if e.FailureCategory != "" {
+			log.FinalStatus = e.FailureCategory
+		} else {
+			log.FinalStatus = "upstream_error"
+		}
+	case requestlog.KindAttempt:
+		if e.Status == "success" {
 			log.FinalStatus = "success"
-		case requestlog.KindReleased:
-			log.FinalStatus = "failed"
+		} else if e.FailureCategory != "" {
+			log.FinalStatus = e.FailureCategory
+		} else {
+			log.FinalStatus = "upstream_error"
 		}
 	}
 
@@ -323,7 +347,7 @@ func buildBatch(e requestlog.ExecutionEvent) batch {
 			ProviderID:    e.Candidate.ProviderID,
 			CredentialID:  e.Candidate.CredentialID,
 			UpstreamModel: e.Candidate.ModelID,
-			Status:        e.Status,
+			Status:        mapAttemptStatus(e),
 			HTTPStatus:    parseHTTPStatus(e.Code),
 			LatencyMS:     int(e.Latency / time.Millisecond),
 			ErrorCode:     e.Code,
@@ -337,14 +361,14 @@ func buildBatch(e requestlog.ExecutionEvent) batch {
 	b.Events = []timelineEvent{{
 		RequestID:    e.RequestID,
 		Source:       "executor",
-		Stage:        e.Kind,
-		Status:       e.Status,
+		Stage:        mapEventStage(e.Kind),
+		Status:       mapEventStatus(e.Status, e.Kind),
 		AttemptIndex: ptrIfPositive(idx),
 		DurationMS:   int(e.Latency / time.Millisecond),
 		CreatedAt:    e.Timestamp,
 	}}
 
-	return b
+	return b, true
 }
 
 // parseHTTPStatus tries to parse a 3-digit HTTP status from a code string.
@@ -370,4 +394,45 @@ func ptrIfPositive(v int) *int {
 		return &v
 	}
 	return nil
+}
+
+// mapAttemptStatus maps an execution event to the Logging DB request_attempts
+// status enum: success, upstream_error, timeout, transport_error.
+func mapAttemptStatus(e requestlog.ExecutionEvent) string {
+	if e.Status == "success" {
+		return "success"
+	}
+	if e.FailureCategory != "" {
+		return e.FailureCategory
+	}
+	return "upstream_error"
+}
+
+// mapEventStage maps an executor event Kind to the Logging DB
+// request_log_events stage enum.
+func mapEventStage(kind string) string {
+	switch kind {
+	case requestlog.KindReserved:
+		return "quota_reserved"
+	case requestlog.KindAttempt:
+		return "upstream_started"
+	case requestlog.KindFinalized:
+		return "completed"
+	case requestlog.KindReleased:
+		return "terminal"
+	default:
+		return "terminal"
+	}
+}
+
+// mapEventStatus maps an executor event status to the Logging DB
+// request_log_events status enum: info, success, failed, skipped.
+func mapEventStatus(status, kind string) string {
+	if status == "success" || kind == requestlog.KindFinalized {
+		return "success"
+	}
+	if status == "failed" || kind == requestlog.KindReleased {
+		return "failed"
+	}
+	return "info"
 }
