@@ -1,0 +1,85 @@
+# apps/web
+
+> 作用域：`apps/web`。继承仓库根目录 `AGENTS.md` 与 `apps/AGENTS.md`。
+
+## 模块职责
+
+- 负责：TokenMP 用户前端（认证流程 + 用户 Panel）。
+  - 认证：登录、注册、忘记密码（占位）。
+  - Panel：概览、API 密钥管理、请求日志、公告/通知（占位）。
+  - 账户操作整合到右上角用户下拉菜单：修改密码（弹窗）、登出所有设备、退出登录（均带确认）。
+- 不负责：Landing 公开页、定价、文档、Admin Dashboard、模型可视化、Billing、Bot Keys。
+- 所有者：前端。
+
+## 必读文档
+
+- 方案：`docs/plans/panel-app.md`
+- 设计 token：`packages/ui-tokens/AGENTS.md`（CSS 变量 + tailwind + shadcn integration）
+- Auth 契约：`packages/contracts/openapi/auth/v1.yaml`
+- 旧版参考（非本仓库）：july `panel-sidebar`、executor `bottom-nav` / `header`。
+
+## 技术栈
+
+Next.js 16 (App Router) + React 19 + Tailwind CSS v4 + `@tokenmp/ui-tokens` + shadcn 风格组件（手写，非 radix CLI）+ Zustand (auth/sidebar store, persist) + TanStack React Query v5 + react-hook-form + zod v4 + sonner + lucide-react。
+
+## 对外能力与返回契约
+
+前端应用，无对外导出。页面路由：
+
+| 路由 | 说明 |
+|---|---|
+| `/login` `/register` `/forgot-password` | 认证页（auth-shell 两栏布局） |
+| `/panel` | 概览 |
+| `/panel/keys` `/panel/requests` | API 密钥 / 请求日志 |
+| `/panel/announcements` `/panel/notifications` | 占位 |
+
+## 认证与数据层
+
+- Auth store：`src/lib/auth.ts`（zustand persist，key `tokenmp-auth`）。
+- API client：`src/lib/api/core.ts`（fetch wrapper，自动注入 Bearer，401 自动 refresh 一次）。
+- `src/lib/api/auth.ts` 默认走 **mock auth**（`mock-auth.ts`），无需后端即可登录。设 `NEXT_PUBLIC_USE_MOCK_AUTH=0` 切回真实 fetch 客户端。
+- Mock 凭据：`demo@tokenmp.cn` / `demo1234`（user）；`admin@tokenmp.cn` / `admin1234`（admin）。任意邮箱 + 12 位以上密码可注册。
+- Panel 数据 API：`src/lib/api/user.ts` 为 **mock 层**（keys/requests/quota），后端未实现；切换时替换为 fetch 调用，组件不变。
+- Auth 契约来源：`packages/contracts/openapi/auth/v1.yaml`（类型手动对齐，未生成 client）。
+
+## 依赖关系与消费者
+
+| 方向 | 模块/资源 | 使用功能 | 依赖方式 | 变更后验证 |
+|---|---|---|---|---|
+| 依赖 | `@tokenmp/ui-tokens` | design tokens + tailwind/shadcn integration | workspace import (CSS) | `pnpm build` |
+| 依赖 | `@tokenmp/contracts` | auth OpenAPI 契约参考 | 类型对齐（非 runtime import） | typecheck |
+
+## 开发与验证
+
+```bash
+pnpm --filter @tokenmp/web dev      # http://localhost:3100
+pnpm --filter @tokenmp/web typecheck
+pnpm --filter @tokenmp/web lint
+pnpm --filter @tokenmp/web build    # output: standalone
+```
+
+- 最小验证：typecheck + lint + build 全过。
+- 视觉验证：Playwright（桌面 1440 + 移动 390），确认表格表头、布局不错乱、键盘可访问性。
+
+## 部署
+
+`Dockerfile` 基于预构建 standalone 产物打包（不在镜像内 build）。dev 服务器以 Docker 容器运行（`node:22-alpine`），映射端口到宿主。
+
+## 模块边界
+
+- 允许访问：`packages/*` 公开入口。
+- 禁止访问：service 私有源码、服务数据库。
+- 配置和环境变量：`NEXT_PUBLIC_API_BASE`（API base，默认空=同源）、`NEXT_PUBLIC_USE_MOCK_AUTH`（默认启用 mock）。
+- 设计 token：CSS 变量统一来自 `@tokenmp/ui-tokens`，组件内不内联颜色 hex（`--brand-solid: #111827` 除外，与 logo 一致）。
+
+## 焦点样式体系
+
+全局 `*:focus-visible` 用双层 box-shadow ring（`--tmp-color-focus-ring` + offset）。组件按需附加：
+- `focus-inset` / `focus-nav`：导航/菜单类，深背景 + 内描边（区别于 hover 浅、active 蓝）。
+
+## DO NOT
+
+- **DO NOT** 直接在组件里硬编码数据——经 `api.*` 层（mock 或真实）。
+- **DO NOT** 用 `hsl(var(--primary))`——token 是完整颜色值（oklch/hex），用 `color-mix(in oklch, ...)`。
+- **DO NOT** 在 route group `(panel)` 放需要 `/panel/*` URL 的页面——route group 不产生 URL 段，用真实 `panel/` 目录。
+- **DO NOT** 在 client component 用 `useSearchParams()` 而不包 Suspense（build prerender 报错）。

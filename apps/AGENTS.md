@@ -4,7 +4,11 @@
 
 ## 分区职责
 
-`apps/` 用于面向用户、运营人员或外部入口的可独立构建应用，例如 Web、Admin 或 Gateway。当前应用清单为空。
+`apps/` 用于面向用户、运营人员或外部入口的可独立构建应用，例如 Web、Admin 或 Gateway。
+
+当前应用清单：
+
+- `apps/web`：TokenMP 用户前端（Next.js 16 + React 19 + Tailwind v4 + `@tokenmp/ui-tokens`）。认证流程（登录/注册/忘记密码占位）+ 用户 Panel（概览/API 密钥/请求日志/公告通知占位）。默认 mock auth 与 mock 数据层，无需后端即可本地运行；设 `NEXT_PUBLIC_USE_MOCK_AUTH=0` 切真实 API。详见 `apps/web/AGENTS.md`。
 
 ## 新增模块准入
 
