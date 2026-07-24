@@ -4,7 +4,11 @@
 
 ## 分区职责
 
-`infra/` 用于可提交的基础设施定义，例如 Docker、Compose、代理、可观测性和部署模板。当前基础设施模块清单为空。
+`infra/` 用于可提交的基础设施定义，例如 Docker、Compose、代理、可观测性和部署模板。
+
+## 已实施模块
+
+- **DB Schema 迁移**：`infra/db/AGENTS.md`（三库物理分离的中立基建层。Config DB 初始化迁移 `migrations/config/0001_init.sql` 已实施：providers/models/route_mappings/adapters/config_revisions 等 15 张表，含 is_default 部分唯一索引、FK VALID、软删除 status、updated_at 触发器，经 PostgreSQL 17/18 语法与约束校验。Log DB 与 Billing DB 迁移待生成。）
 
 ## 新增模块准入
 
