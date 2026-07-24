@@ -13,6 +13,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { GitCommitHorizontal, ChevronDown, ChevronUp } from 'lucide-react';
+import { Markdown } from '@/components/markdown';
 import type { Changelog } from '@/types';
 
 function formatTime(iso: string) {
@@ -44,7 +45,7 @@ function ChangelogRow({ item }: { item: Changelog }) {
       {expanded && (
         <TableRow>
           <TableCell colSpan={4} className="bg-muted/30">
-            <div className="py-3 text-sm whitespace-pre-wrap">{item.body}</div>
+            <div className="py-3"><Markdown>{item.body}</Markdown></div>
           </TableCell>
         </TableRow>
       )}
@@ -70,7 +71,7 @@ function ChangelogCard({ item }: { item: Changelog }) {
         <p className="text-sm">{item.title}</p>
         <p className="text-xs text-muted-foreground">{formatTime(item.published_at)}</p>
         {expanded && (
-          <div className="text-sm whitespace-pre-wrap pt-2 border-t">{item.body}</div>
+          <div className="pt-2 border-t"><Markdown>{item.body}</Markdown></div>
         )}
       </CardContent>
     </Card>

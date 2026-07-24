@@ -14,6 +14,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Megaphone, ChevronDown, ChevronUp } from 'lucide-react';
+import { Markdown } from '@/components/markdown';
 import type { Announcement, AnnouncementSeverity } from '@/types';
 
 function formatTime(iso: string) {
@@ -64,7 +65,7 @@ function AnnouncementRow({ item }: { item: Announcement }) {
           <TableCell colSpan={4} className="bg-muted/30">
             <div className="py-3 space-y-2">
               <p className="text-sm text-muted-foreground md:hidden">{item.summary}</p>
-              <div className="text-sm whitespace-pre-wrap">{item.body}</div>
+              <Markdown>{item.body}</Markdown>
             </div>
           </TableCell>
         </TableRow>
@@ -95,7 +96,7 @@ function AnnouncementCard({ item }: { item: Announcement }) {
         <p className="text-xs text-muted-foreground">{item.summary}</p>
         <p className="text-xs text-muted-foreground">{formatTime(item.published_at)}</p>
         {expanded && (
-          <div className="text-sm whitespace-pre-wrap pt-2 border-t">{item.body}</div>
+          <div className="pt-2 border-t"><Markdown>{item.body}</Markdown></div>
         )}
       </CardContent>
     </Card>
