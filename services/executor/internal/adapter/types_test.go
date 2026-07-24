@@ -13,7 +13,7 @@ func TestEnumValid(t *testing.T) {
 		{"auth kind", AuthBearerHeader.Valid()},
 		{"capability", CapabilityThinking.Valid()},
 		{"thinking effort", ThinkingXHigh.Valid()},
-		{"request action", RequestClampNumber.Valid()},
+		{"request action", RequestSetIfMissing.Valid()},
 	}
 
 	for _, tt := range tests {

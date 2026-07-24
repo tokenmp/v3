@@ -139,20 +139,21 @@ func (e ThinkingEffort) Valid() bool {
 type RequestAction string
 
 const (
-	RequestSet         RequestAction = "set"
-	RequestCopy        RequestAction = "copy"
-	RequestRemove      RequestAction = "remove"
-	RequestRename      RequestAction = "rename"
-	RequestMapEnum     RequestAction = "map_enum"
-	RequestClampNumber RequestAction = "clamp_number"
-	RequestSetHeader   RequestAction = "set_header"
-	RequestSetQuery    RequestAction = "set_query"
+	RequestSet          RequestAction = "set"
+	RequestSetIfMissing RequestAction = "set_if_missing"
+	RequestCopy         RequestAction = "copy"
+	RequestRemove       RequestAction = "remove"
+	RequestRename       RequestAction = "rename"
+	RequestMapEnum      RequestAction = "map_enum"
+	RequestClampNumber  RequestAction = "clamp_number"
+	RequestSetHeader    RequestAction = "set_header"
+	RequestSetQuery     RequestAction = "set_query"
 )
 
 // Valid reports whether a is a permitted request action.
 func (a RequestAction) Valid() bool {
 	switch a {
-	case RequestSet, RequestCopy, RequestRemove, RequestRename, RequestMapEnum, RequestClampNumber, RequestSetHeader, RequestSetQuery:
+	case RequestSet, RequestSetIfMissing, RequestCopy, RequestRemove, RequestRename, RequestMapEnum, RequestClampNumber, RequestSetHeader, RequestSetQuery:
 		return true
 	default:
 		return false

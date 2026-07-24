@@ -62,7 +62,7 @@ func (c *Client) Stream(ctx context.Context, call sdk.StreamCall) (sdk.StreamOpe
 	if err := validateInjection(call.Request.InjectionPlan); err != nil {
 		return sdk.StreamOpen{}, ErrInvalidInjection
 	}
-	params, err := decodeChatParams(ctx, call.Request.Body)
+	params, err := decodeChatParams(ctx, call.Request.Body, call.Request.Thinking)
 	if err != nil {
 		return sdk.StreamOpen{}, ErrInvalidRequest
 	}

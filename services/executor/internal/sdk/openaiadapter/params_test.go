@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/tokenmp/v3/services/executor/internal/adapter"
 )
 
 func TestDecodeChatParams_AcceptsContractToolsChoiceReasoningAndVision(t *testing.T) {
@@ -12,7 +14,7 @@ func TestDecodeChatParams_AcceptsContractToolsChoiceReasoningAndVision(t *testin
 	if parseErr != nil || validateChatRequest(value) != nil {
 		t.Fatalf("strict validation: parse=%v validation=%v", parseErr, validateChatRequest(value))
 	}
-	params, err := decodeChatParams(context.Background(), body)
+	params, err := decodeChatParams(context.Background(), body, adapter.EffectiveThinking{})
 	if err != nil {
 		t.Fatalf("decodeChatParams: %v", err)
 	}
@@ -60,7 +62,7 @@ func TestDecodeChatParams_RejectsInvalidRequests(t *testing.T) {
 	}
 	for name, body := range cases {
 		t.Run(name, func(t *testing.T) {
-			if _, err := decodeChatParams(context.Background(), []byte(body)); err == nil {
+			if _, err := decodeChatParams(context.Background(), []byte(body), adapter.EffectiveThinking{}); err == nil {
 				t.Fatal("invalid request accepted")
 			}
 		})
@@ -68,18 +70,18 @@ func TestDecodeChatParams_RejectsInvalidRequests(t *testing.T) {
 
 	t.Run("node limit", func(t *testing.T) {
 		body := `{"messages":[` + strings.Repeat(`null,`, maxJSONNodes) + `null]}`
-		if _, err := decodeChatParams(context.Background(), []byte(body)); err == nil {
+		if _, err := decodeChatParams(context.Background(), []byte(body), adapter.EffectiveThinking{}); err == nil {
 			t.Fatal("over-limit JSON tree accepted")
 		}
 	})
 }
 
 func TestDecodeChatParams_RejectsInvalidUTF8AndOversize(t *testing.T) {
-	if _, err := decodeChatParams(context.Background(), []byte{'{', 0xff, '}'}); err == nil {
+	if _, err := decodeChatParams(context.Background(), []byte{'{', 0xff, '}'}, adapter.EffectiveThinking{}); err == nil {
 		t.Fatal("invalid UTF-8 accepted")
 	}
 	body := make([]byte, maxParamBodyBytes+1)
-	if _, err := decodeChatParams(context.Background(), body); err == nil {
+	if _, err := decodeChatParams(context.Background(), body, adapter.EffectiveThinking{}); err == nil {
 		t.Fatal("oversize body accepted")
 	}
 }
@@ -88,6 +90,6 @@ func FuzzDecodeChatParams(f *testing.F) {
 	f.Add([]byte(`{"messages":[{"role":"user","content":"hello"}]}`))
 	f.Add([]byte(`{"messages":[{"role":"user","content":{"__proto__":"x"}}]}`))
 	f.Fuzz(func(t *testing.T, body []byte) {
-		_, _ = decodeChatParams(context.Background(), body)
+		_, _ = decodeChatParams(context.Background(), body, adapter.EffectiveThinking{})
 	})
 }

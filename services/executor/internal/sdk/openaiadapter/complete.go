@@ -47,7 +47,7 @@ func (c *Client) completeChat(ctx context.Context, call sdk.Call) (sdk.Completio
 	if err := validateInjection(call.Request.InjectionPlan); err != nil {
 		return sdk.Completion{}, ErrInvalidInjection
 	}
-	params, err := decodeChatParams(ctx, call.Request.Body)
+	params, err := decodeChatParams(ctx, call.Request.Body, call.Request.Thinking)
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return sdk.Completion{}, classifyContextError(ctxErr)

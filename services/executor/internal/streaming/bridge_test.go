@@ -1362,3 +1362,260 @@ func TestEventFormattingRedactsMetadata(t *testing.T) {
 		t.Fatalf("Event formatting = %q", got)
 	}
 }
+
+// ── EndOfStreamFinalizer ────────────────────────────────────────────────────
+
+func TestBridgePostCommitEOFFinalizerCompletesStream(t *testing.T) {
+	t.Parallel()
+	src := newFakeSource(assignSequence(
+		Event{Kind: EventSemantic},
+		// then EOF without a finish event
+	)...)
+	sink := &recordSink{}
+	b := newTestBridge(src, sink, &manualTimerSource{})
+	var calls int
+	b.Finalizer = func(ctx context.Context) (TerminalMeta, error) {
+		calls++
+		return TerminalMeta{Finish: "stop", Usage: &Usage{PromptTokens: 3, CompletionTokens: 5, TotalTokens: 8}}, nil
+	}
+
+	out, err := b.Run(context.Background())
+	if err != nil {
+		t.Fatalf("err = %v, want nil", err)
+	}
+	if out.State != StateCompleted {
+		t.Fatalf("state = %q, want completed", out.State)
+	}
+	if out.Reason != ReasonCompleted {
+		t.Fatalf("reason = %q, want completed", out.Reason)
+	}
+	if !out.Committed {
+		t.Fatal("Committed must be true")
+	}
+	if out.Finish != "stop" {
+		t.Fatalf("Finish = %q, want stop", out.Finish)
+	}
+	if !out.UsageKnown {
+		t.Fatal("UsageKnown must be true after finalizer usage")
+	}
+	if out.Usage.TotalTokens != 8 || out.Usage.PromptTokens != 3 || out.Usage.CompletionTokens != 5 {
+		t.Fatalf("Usage = %+v, want 3/5/8", out.Usage)
+	}
+	if out.UnresolvedCost {
+		t.Fatal("UnresolvedCost must be false with known usage")
+	}
+	if calls != 1 {
+		t.Fatalf("finalizer called %d times, want exactly 1", calls)
+	}
+	if out.TTFT == 0 {
+		t.Fatal("TTFT must be recorded after commit")
+	}
+}
+
+func TestBridgePostCommitEOFFinalizerSanitizesFinishAndClampsUsage(t *testing.T) {
+	t.Parallel()
+	src := newFakeSource(assignSequence(
+		Event{Kind: EventSemantic},
+	)...)
+	sink := &recordSink{}
+	b := newTestBridge(src, sink, &manualTimerSource{})
+	b.MaxTotal = 100
+	b.Finalizer = func(ctx context.Context) (TerminalMeta, error) {
+		return TerminalMeta{
+			Finish: "stop; drop table--", // unsafe chars must be sanitized to empty
+			Usage:  &Usage{PromptTokens: 999, CompletionTokens: 5, TotalTokens: 999},
+		}, nil
+	}
+	out, err := b.Run(context.Background())
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if out.Finish != "" {
+		t.Fatalf("Finish = %q, want empty (sanitized)", out.Finish)
+	}
+	if out.Usage.PromptTokens != 100 || out.Usage.TotalTokens != 100 {
+		t.Fatalf("Usage = %+v, want clamped to MaxTotal=100", out.Usage)
+	}
+	if !out.UsageKnown {
+		t.Fatal("UsageKnown must remain true")
+	}
+}
+
+func TestBridgePostCommitEOFFinalizerMergesUsageMonotonically(t *testing.T) {
+	t.Parallel()
+	src := newFakeSource(assignSequence(
+		Event{Kind: EventSemantic, Usage: &Usage{PromptTokens: 4, CompletionTokens: 0, TotalTokens: 4}},
+		// a usage event before EOF
+		Event{Kind: EventUsage, Usage: &Usage{PromptTokens: 4, CompletionTokens: 6, TotalTokens: 10}},
+	)...)
+	sink := &recordSink{}
+	b := newTestBridge(src, sink, &manualTimerSource{})
+	b.Finalizer = func(ctx context.Context) (TerminalMeta, error) {
+		// finalizer reports completion usage already seen; merge is monotonic max.
+		return TerminalMeta{Usage: &Usage{PromptTokens: 4, CompletionTokens: 6, TotalTokens: 10}}, nil
+	}
+	out, err := b.Run(context.Background())
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if out.Usage.TotalTokens != 10 {
+		t.Fatalf("Usage.TotalTokens = %d, want 10 (monotonic merge, no double)", out.Usage.TotalTokens)
+	}
+}
+
+func TestBridgePostCommitEOFFinalizerNilPreservesTruncated(t *testing.T) {
+	t.Parallel()
+	src := newFakeSource(assignSequence(
+		Event{Kind: EventSemantic},
+	)...)
+	sink := &recordSink{}
+	b := newTestBridge(src, sink, &manualTimerSource{})
+	// No Finalizer set: legacy contract.
+	out, err := b.Run(context.Background())
+	if err != nil {
+		t.Fatalf("err = %v, want nil", err)
+	}
+	if out.State != StateFailedAfterCommit {
+		t.Fatalf("state = %q, want failed_after_commit", out.State)
+	}
+	if out.Reason != ReasonStreamTruncated {
+		t.Fatalf("reason = %q, want stream_truncated", out.Reason)
+	}
+}
+
+func TestBridgePostCommitEOFFinalizerErrorIsPostCommitFailure(t *testing.T) {
+	t.Parallel()
+	src := newFakeSource(assignSequence(
+		Event{Kind: EventSemantic},
+	)...)
+	sink := &recordSink{}
+	b := newTestBridge(src, sink, &manualTimerSource{})
+	b.Finalizer = func(ctx context.Context) (TerminalMeta, error) {
+		return TerminalMeta{}, errors.New("boom")
+	}
+	out, err := b.Run(context.Background())
+	if err != nil {
+		t.Fatalf("err = %v, want nil (post-commit failure returns nil error)", err)
+	}
+	if out.State != StateFailedAfterCommit {
+		t.Fatalf("state = %q, want failed_after_commit", out.State)
+	}
+	if out.Reason != ReasonSinkWrite {
+		t.Fatalf("reason = %q, want sink_write", out.Reason)
+	}
+	if !out.Committed {
+		t.Fatal("Committed must be true")
+	}
+}
+
+func TestBridgePostCommitEOFFinalizerContextErrorIsCancellation(t *testing.T) {
+	t.Parallel()
+	src := newFakeSource(assignSequence(
+		Event{Kind: EventSemantic},
+	)...)
+	sink := &recordSink{}
+	b := newTestBridge(src, sink, &manualTimerSource{})
+	b.Finalizer = func(ctx context.Context) (TerminalMeta, error) {
+		return TerminalMeta{}, context.Canceled
+	}
+	out, err := b.Run(context.Background())
+	if err != nil {
+		t.Fatalf("err = %v, want nil", err)
+	}
+	if out.State != StateClientCancelled {
+		t.Fatalf("state = %q, want client_cancelled", out.State)
+	}
+	if !out.Committed {
+		t.Fatal("Committed must be true")
+	}
+}
+
+func TestBridgePostCommitEOFFinalizerPreCommitEOFStillProtocolFailure(t *testing.T) {
+	t.Parallel()
+	// EOF before any semantic event: finalizer MUST NOT run; pre-commit
+	// protocol failure regardless of Finalizer presence.
+	src := newFakeSource() // empty -> immediate EOF
+	sink := &recordSink{}
+	b := newTestBridge(src, sink, &manualTimerSource{})
+	var calls int
+	b.Finalizer = func(ctx context.Context) (TerminalMeta, error) {
+		calls++
+		return TerminalMeta{Finish: "stop"}, nil
+	}
+	out, err := b.Run(context.Background())
+	if err != ErrProtocol {
+		t.Fatalf("err = %v, want ErrProtocol", err)
+	}
+	if out.State != StateFailedBeforeCommit {
+		t.Fatalf("state = %q, want failed_before_commit", out.State)
+	}
+	if calls != 0 {
+		t.Fatalf("finalizer called %d times, want 0 (pre-commit EOF)", calls)
+	}
+}
+
+func TestBridgePostCommitEOFFinalizerDoesNotRunOnExplicitFinish(t *testing.T) {
+	t.Parallel()
+	// An explicit EventFinish returns before EOF; the finalizer must not run.
+	src := newFakeSource(assignSequence(
+		Event{Kind: EventSemantic},
+		Event{Kind: EventFinish, FinishReason: "stop"},
+	)...)
+	sink := &recordSink{}
+	b := newTestBridge(src, sink, &manualTimerSource{})
+	var calls int
+	b.Finalizer = func(ctx context.Context) (TerminalMeta, error) {
+		calls++
+		return TerminalMeta{Finish: "should-not-happen"}, nil
+	}
+	out, err := b.Run(context.Background())
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if out.State != StateCompleted {
+		t.Fatalf("state = %q, want completed", out.State)
+	}
+	if out.Finish != "stop" {
+		t.Fatalf("Finish = %q, want stop (from explicit finish)", out.Finish)
+	}
+	if calls != 0 {
+		t.Fatalf("finalizer called %d times, want 0 (explicit finish)", calls)
+	}
+}
+
+func TestBridgePostCommitEOFFinalizerHonoursCancellation(t *testing.T) {
+	t.Parallel()
+	// Cancellation precedence over finalization: a source that blocks after
+	// commit (blockOnEmpty) keeps the pump in Next until ctx is cancelled. The
+	// cancelled Next returns a ctx error, which the Bridge resolves as client
+	// cancellation WITHOUT invoking the finalizer — exactly like any other
+	// event path where ctx.Err() wins the deadline recheck.
+	src := &fakeSource{events: assignSequence(Event{Kind: EventSemantic}), blockOnEmpty: true}
+	sink := &recordSink{}
+	ctx, cancel := context.WithCancel(context.Background())
+	b := newTestBridge(src, sink, &manualTimerSource{})
+	var calls int
+	b.Finalizer = func(ctx context.Context) (TerminalMeta, error) {
+		calls++
+		return TerminalMeta{Finish: "should-not-happen"}, nil
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		// Give the pump a moment to commit the semantic event, then cancel
+		// while the source blocks (no EOF has been delivered yet).
+		time.Sleep(5 * time.Millisecond)
+		cancel()
+	}()
+	out, _ := b.Run(ctx)
+	<-done
+	if calls != 0 {
+		t.Fatalf("finalizer called %d times, want 0 (cancellation won)", calls)
+	}
+	if out.State != StateClientCancelled {
+		t.Fatalf("state = %q, want client_cancelled", out.State)
+	}
+	if !out.Committed {
+		t.Fatal("Committed must be true (commit happened before cancel)")
+	}
+}

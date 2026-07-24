@@ -412,7 +412,7 @@ func applyRule(document any, rule RequestRule, allowedHeaders, allowedQuery map[
 		}
 	}
 	switch rule.Action {
-	case RequestSet:
+	case RequestSet, RequestSetIfMissing:
 		value, err := decodeEngineJSON(rule.Value)
 		if err != nil {
 			return fmt.Errorf("%w: invalid set value", ErrRule)
@@ -423,6 +423,13 @@ func applyRule(document any, rule RequestRule, allowedHeaders, allowedQuery map[
 		// but only after the terminal check below would already have panicked.
 		if rule.Path == "" {
 			return fmt.Errorf("%w: invalid set path", ErrRule)
+		}
+		if rule.Action == RequestSetIfMissing {
+			if _, err := pointerGet(document, rule.Path); err == nil {
+				return nil
+			} else if !errors.Is(err, errPointerNotFound) {
+				return err
+			}
 		}
 		if pointerTerminal(rule.Path) == "-" {
 			return pointerAppend(document, rule.Path, value)
@@ -553,7 +560,7 @@ func applyRule(document any, rule RequestRule, allowedHeaders, allowedQuery map[
 // consume or mutate. Unknown/header/query actions have no body path.
 func ruleBodyPaths(rule RequestRule) []string {
 	switch rule.Action {
-	case RequestSet, RequestRemove, RequestMapEnum, RequestClampNumber:
+	case RequestSet, RequestSetIfMissing, RequestRemove, RequestMapEnum, RequestClampNumber:
 		return []string{rule.Path}
 	case RequestCopy, RequestRename:
 		return []string{rule.From, rule.To}

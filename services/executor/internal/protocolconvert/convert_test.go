@@ -2,6 +2,7 @@ package protocolconvert
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/rand"
 	"testing"
@@ -80,6 +81,86 @@ func TestConvertRequest_OpenAIToAnthropic_PlainText(t *testing.T) {
 	}
 	if msg["content"] != "Hello" {
 		t.Errorf("content = %v, want Hello", msg["content"])
+	}
+}
+
+func TestConvertRequest_OpenAIToAnthropic_ImageDataURI(t *testing.T) {
+	body := mustMarshal(t, map[string]any{
+		"model": "gpt-4", "messages": []any{map[string]any{"role": "user", "content": []any{
+			map[string]any{"type": "text", "text": "What is shown?"},
+			map[string]any{"type": "image_url", "image_url": map[string]any{"url": "data:image/png;base64,aGVsbG8="}},
+		}}},
+	})
+	result, err := ConvertRequest(body, adapter.ProtocolOpenAIChat, adapter.ProtocolAnthropic)
+	if err != nil {
+		t.Fatalf("ConvertRequest: %v", err)
+	}
+	blocks := mustUnmarshal(t, result)["messages"].([]any)[0].(map[string]any)["content"].([]any)
+	if got := blocks[0].(map[string]any)["text"]; got != "What is shown?" {
+		t.Errorf("text = %v, want question", got)
+	}
+	source := blocks[1].(map[string]any)["source"].(map[string]any)
+	if blocks[1].(map[string]any)["type"] != "image" || source["type"] != "base64" || source["media_type"] != "image/png" || source["data"] != "aGVsbG8=" {
+		t.Errorf("image block = %#v, want base64 PNG", blocks[1])
+	}
+}
+
+func TestConvertRequest_OpenAIToAnthropic_ImageURL(t *testing.T) {
+	body := mustMarshal(t, map[string]any{
+		"model": "gpt-4", "messages": []any{map[string]any{"role": "user", "content": []any{
+			map[string]any{"type": "image_url", "image_url": map[string]any{"url": "https://example.test/cat.png"}},
+		}}},
+	})
+	result, err := ConvertRequest(body, adapter.ProtocolOpenAIChat, adapter.ProtocolAnthropic)
+	if err != nil {
+		t.Fatalf("ConvertRequest: %v", err)
+	}
+	source := mustUnmarshal(t, result)["messages"].([]any)[0].(map[string]any)["content"].([]any)[0].(map[string]any)["source"].(map[string]any)
+	if source["type"] != "url" || source["url"] != "https://example.test/cat.png" {
+		t.Errorf("source = %#v, want URL source", source)
+	}
+}
+
+func TestConvertRequest_OpenAIToAnthropic_MalformedImageDataURI(t *testing.T) {
+	body := mustMarshal(t, map[string]any{
+		"model": "gpt-4", "messages": []any{map[string]any{"role": "user", "content": []any{
+			map[string]any{"type": "image_url", "image_url": map[string]any{"url": "data:image/png;base64,not base64"}},
+		}}},
+	})
+	if _, err := ConvertRequest(body, adapter.ProtocolOpenAIChat, adapter.ProtocolAnthropic); !errors.Is(err, ErrInvalidRequest) {
+		t.Errorf("error = %v, want ErrInvalidRequest", err)
+	}
+}
+
+func TestConvertRequest_AnthropicToOpenAI_ImageSources(t *testing.T) {
+	tests := []struct {
+		name, sourceType, wantURL string
+		source                    map[string]any
+	}{
+		{name: "base64", sourceType: "base64", wantURL: "data:image/png;base64,aGVsbG8=", source: map[string]any{"type": "base64", "media_type": "image/png", "data": "aGVsbG8="}},
+		{name: "url", sourceType: "url", wantURL: "https://example.test/cat.png", source: map[string]any{"type": "url", "url": "https://example.test/cat.png"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body := mustMarshal(t, map[string]any{
+				"model": "claude", "max_tokens": 32, "messages": []any{map[string]any{"role": "user", "content": []any{
+					map[string]any{"type": "text", "text": "Describe this"},
+					map[string]any{"type": "image", "source": tt.source},
+				}}},
+			})
+			result, err := ConvertRequest(body, adapter.ProtocolAnthropic, adapter.ProtocolOpenAIChat)
+			if err != nil {
+				t.Fatalf("ConvertRequest: %v", err)
+			}
+			parts := mustUnmarshal(t, result)["messages"].([]any)[0].(map[string]any)["content"].([]any)
+			if parts[0].(map[string]any)["text"] != "Describe this" {
+				t.Errorf("text part = %#v", parts[0])
+			}
+			url := parts[1].(map[string]any)["image_url"].(map[string]any)["url"]
+			if parts[1].(map[string]any)["type"] != "image_url" || url != tt.wantURL {
+				t.Errorf("image part = %#v, want URL %q", parts[1], tt.wantURL)
+			}
+		})
 	}
 }
 
@@ -1045,9 +1126,11 @@ func TestConvertRequest_UnsupportedProtocol(t *testing.T) {
 	if err != ErrUnsupportedConversion {
 		t.Errorf("same protocol: err = %v, want ErrUnsupportedConversion", err)
 	}
+	// Chat → Responses is now a supported pair: an empty body must be rejected
+	// as ErrInvalidRequest, NOT ErrUnsupportedConversion.
 	_, err = ConvertRequest([]byte(`{}`), adapter.ProtocolOpenAIChat, adapter.ProtocolOpenAIResponses)
-	if err != ErrUnsupportedConversion {
-		t.Errorf("unsupported pair: err = %v, want ErrUnsupportedConversion", err)
+	if err == ErrUnsupportedConversion {
+		t.Errorf("chat→responses: err = ErrUnsupportedConversion, want supported (ErrInvalidRequest)")
 	}
 }
 

@@ -131,15 +131,21 @@ func (d *StreamDriver) Run(ctx context.Context, in StreamInput) (StreamResult, e
 		targetProtocol := prepared.Target.Protocol
 		crossProtocol := reqProtocol != targetProtocol
 
+		// toolNameMap captures the sanitized→original tool name mapping from
+		// request conversion (Anthropic→OpenAI). It is per-attempt and must be
+		// scoped to the retry loop so each attempt can derive its own mapping.
+		var toolNameMap map[string]string
+
 		attempt, acquired, began, opened, openErr := preparedCall.NewAttemptSession(state, policy, in.Credentials).ExecuteStream(attemptCtx, func(client sdk.StreamClient, call sdk.StreamCall) (sdk.StreamOpen, error) {
 			// Cross-protocol request conversion: replace the applied body with the
 			// converted body when the request protocol differs from the target.
 			if crossProtocol {
-				converted, convErr := protocolconvert.ConvertRequest(call.Request.Body, reqProtocol, targetProtocol)
+				converted, nameMap, convErr := protocolconvert.ConvertRequestWithToolMap(call.Request.Body, reqProtocol, targetProtocol)
 				if convErr != nil {
 					return sdk.StreamOpen{}, ErrProtocolConvert
 				}
 				call.Request.Body = converted
+				toolNameMap = nameMap
 			}
 			return client.Stream(attemptCtx, call)
 		})
@@ -186,7 +192,7 @@ func (d *StreamDriver) Run(ctx context.Context, in StreamInput) (StreamResult, e
 			_ = state.Cancel()
 			return StreamResult{}, d.releaseFailureWithLog(ctx, terminalizer, ErrMisconfigured, in, prepared, attemptNo)
 		}
-		source, sink, err := newSDKPayloadSource(opened.Source, newConvertingSink(in.Sink, targetProtocol, reqProtocol))
+		source, sink, err := newSDKPayloadSource(opened.Source, newConvertingSink(in.Sink, targetProtocol, reqProtocol, toolNameMap))
 		if err != nil {
 			// newSDKPayloadSource rejected an otherwise opened provider source.
 			// It is still ours to close; never expose provider cleanup details.
@@ -200,6 +206,15 @@ func (d *StreamDriver) Run(ctx context.Context, in StreamInput) (StreamResult, e
 			return StreamResult{}, d.releaseFailureWithLog(ctx, terminalizer, primary, in, prepared, attemptNo)
 		}
 		bridge := streaming.Bridge{Source: source, Sink: sink, Timeouts: streamTimeouts(prepared)}
+		// Wire the optional cross-protocol EndOfStreamFinalizer so a committed
+		// clean EOF (e.g. OpenAI [DONE] that never carried finish_reason) is
+		// completed via synthesized protocol-native terminal output instead of
+		// being treated as a truncated stream. Same-protocol sinks expose no
+		// finalizer (nil) and keep the legacy contract. The closure carries no
+		// raw bytes across the streaming boundary.
+		if fn := sink.finalizer(); fn != nil {
+			bridge.Finalizer = fn
+		}
 		outcome, bridgeErr := bridge.Run(attemptCtx)
 		sink.Discard()
 		cancelAttempt() // only after Bridge has closed/drained its source.

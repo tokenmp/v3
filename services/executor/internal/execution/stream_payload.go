@@ -243,6 +243,27 @@ func (s *streamPayloadSink) Discard() {
 	s.source.discard()
 }
 
+// finalizer returns the streaming.Bridge EndOfStreamFinalizer closure if the
+// wrapped sink supports terminal synthesis, else nil. The streamPayloadSink
+// delegates to the optional convertingSink finalizer: a cross-protocol
+// convertingSink implements streamFinalizer and synthesizes the protocol-native
+// terminal on a committed clean EOF; a plain same-protocol ProtocolSink does
+// not, so nil preserves the legacy committed-EOF-is-truncated contract. The
+// returned closure carries no raw bytes across the streaming boundary — it
+// returns only sanitized streaming.TerminalMeta.
+func (s *streamPayloadSink) finalizer() streaming.EndOfStreamFinalizer {
+	if s == nil {
+		return nil
+	}
+	f, ok := s.sink.(streamFinalizer)
+	if !ok {
+		return nil
+	}
+	return func(ctx context.Context) (streaming.TerminalMeta, error) {
+		return f.Finalize(ctx)
+	}
+}
+
 func (s *sdkPayloadSource) resolve(events []streaming.Event) ([]sdk.StreamEvent, error) {
 	if len(events) == 0 {
 		return nil, ErrStreamPayloadProtocol

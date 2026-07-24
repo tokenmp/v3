@@ -93,6 +93,18 @@ type Bridge struct {
 	// cap.
 	MaxEvents int64
 
+	// Finalizer is an optional EndOfStreamFinalizer invoked exactly once on a
+	// committed clean EOF (the upstream stream ended cleanly after commit
+	// without an explicit EventFinish). It is the ONLY path by which a
+	// committed clean EOF becomes a completed stream: the finalizer synthesizes
+	// and writes any protocol-native terminal output downstream itself (the
+	// streaming package never sees raw bytes), then returns sanitized
+	// TerminalMeta the Bridge folds into the Outcome. A nil Finalizer preserves
+	// the legacy contract: a committed EOF without finish is a truncated-stream
+	// failure (ReasonStreamTruncated). It does not widen Sink: the Sink
+	// interface remains Commit/WriteEvent/Flush.
+	Finalizer EndOfStreamFinalizer
+
 	runOnce atomic.Bool // guards single-use
 }
 
@@ -166,6 +178,7 @@ func (b *Bridge) Run(ctx context.Context) (Outcome, error) {
 		usage        Usage
 		hasUsage     bool
 		committed    bool
+		finalized    bool // exactly-once: set before invoking Finalizer on committed EOF
 		ttftElapsed  time.Duration
 		lastProgress time.Time // authoritative idle-deadline anchor after commit
 		eventsSeen   int64
@@ -331,9 +344,44 @@ func (b *Bridge) Run(ctx context.Context) (Outcome, error) {
 					if !committed {
 						return preFail(ReasonProtocol, ErrProtocol)
 					}
-					// Post-commit EOF without a finish event: the only success
-					// path after commit is an explicit finish.
-					return postFail(ReasonStreamTruncated)
+					// Post-commit clean EOF without an explicit finish. An EventFinish
+					// already returned before EOF, so reaching here means no finish was
+					// received. With a Finalizer, synthesize terminal output exactly
+					// once and complete; without one, preserve the legacy
+					// truncated-stream failure.
+					if b.Finalizer == nil || finalized {
+						return postFail(ReasonStreamTruncated)
+					}
+					// Recheck authoritative cancellation/deadlines before finalizing: a
+					// clean EOF does not outrun parent cancellation or an elapsed
+					// absolute deadline, exactly like any other event.
+					if out, err, terminal := deadlineOutcome(); terminal {
+						return out, err
+					}
+					finalized = true // exactly-once: a second EOF is impossible; guard anyway
+					meta, ferr := b.Finalizer(ctx)
+					if ferr != nil {
+						if isCtxErr(ferr) {
+							return cancelOut()
+						}
+						return postFail(ReasonSinkWrite)
+					}
+					if meta.Usage != nil {
+						usage = mergeUsage(usage, *meta.Usage, maxTotal)
+						hasUsage = true
+					}
+					finish := sanitizeToken(meta.Finish)
+					transition(&state, StateCompleted)
+					return Outcome{
+						State:          StateCompleted,
+						Reason:         ReasonCompleted,
+						Committed:      true,
+						Usage:          usage,
+						UsageKnown:     hasUsage,
+						Finish:         finish,
+						UnresolvedCost: !hasUsage,
+						TTFT:           ttftElapsed,
+					}, nil
 				case isCtxErr(r.err):
 					return cancelOut()
 				default:

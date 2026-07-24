@@ -7,15 +7,19 @@
 // Supported conversions:
 //   - OpenAI Chat ↔ Anthropic Messages: request, response, and stream chunks
 //
-// Thinking/reasoning fields are preserved but not transformed in this version.
+// Thinking/reasoning fields are converted between their protocol-native shapes.
 package protocolconvert
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"mime"
+	"net/url"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/tokenmp/v3/services/executor/internal/adapter"
@@ -39,14 +43,53 @@ const (
 	defaultMaxTokens = 4096
 )
 
+// defaultEffortBudgets are conservative protocolconvert defaults. The
+// conversion layer has no adapter-engine EffectiveThinking; runtime callers
+// that require an exact budget must override this value in the Runner layer.
+var defaultEffortBudgets = map[string]int64{
+	"minimal": 1024,
+	"low":     2048,
+	"medium":  8192,
+	"high":    16384,
+	"xhigh":   32768,
+	"max":     65536,
+}
+
 // ── Supported conversion check ──────────────────────────────────────────────
 
+// supportedConversion reports whether protocolconvert implements the
+// (fromProtocol → toProtocol) conversion for at least one of request,
+// response, and streaming. The supported cross-protocol pairs are:
+//   - OpenAI Chat ↔ Anthropic Messages (request, response, streaming)
+//   - OpenAI Chat ↔ OpenAI Responses (request, response, streaming)
+//   - Anthropic Messages ↔ OpenAI Responses (request, response, streaming;
+//     composed through Chat)
+//
+// Images is intentionally unsupported. Same-protocol is never a conversion.
 func supportedConversion(from, to adapter.Protocol) bool {
 	if from == to {
 		return false
 	}
-	return (from == adapter.ProtocolOpenAIChat && to == adapter.ProtocolAnthropic) ||
-		(from == adapter.ProtocolAnthropic && to == adapter.ProtocolOpenAIChat)
+	for _, p := range []adapter.Protocol{adapter.ProtocolOpenAIChat, adapter.ProtocolAnthropic, adapter.ProtocolOpenAIResponses} {
+		if from != p && to != p {
+			continue
+		}
+	}
+	// Either side must be one of the three convertible protocols, and the
+	// other side must also be convertible (excluding Images).
+	if !isConvertibleProtocol(from) || !isConvertibleProtocol(to) {
+		return false
+	}
+	return true
+}
+
+// isConvertibleProtocol reports whether p participates in any conversion.
+func isConvertibleProtocol(p adapter.Protocol) bool {
+	switch p {
+	case adapter.ProtocolOpenAIChat, adapter.ProtocolAnthropic, adapter.ProtocolOpenAIResponses:
+		return true
+	}
+	return false
 }
 
 // ── Strict JSON parser (shared, duplicate-key/prototype-safe) ───────────────
@@ -187,6 +230,19 @@ func optionalPositiveInt(m map[string]any, k string) bool {
 	return err == nil && i >= 1
 }
 
+func optionalNonNegativeInt(m map[string]any, k string) bool {
+	v, ok := m[k]
+	if !ok {
+		return true
+	}
+	n, ok := v.(json.Number)
+	if !ok {
+		return false
+	}
+	i, err := n.Int64()
+	return err == nil && i >= 0
+}
+
 func optionalNumberInRange(m map[string]any, k string, min, max float64) bool {
 	v, ok := m[k]
 	if !ok {
@@ -203,30 +259,53 @@ func optionalNumberInRange(m map[string]any, k string, min, max float64) bool {
 // ── ConvertRequest ──────────────────────────────────────────────────────────
 
 // ConvertRequest converts a request body from one protocol to another.
-// Supported: OpenAI Chat ↔ Anthropic Messages. The model field is preserved
-// as-is; the Runner layer replaces it with the target upstream model.
+// Supported: OpenAI Chat ↔ Anthropic Messages, OpenAI Chat ↔ OpenAI
+// Responses, and Anthropic Messages ↔ OpenAI Responses (composed through
+// Chat). The model field is preserved as-is; the Runner layer replaces it
+// with the target upstream model.
 func ConvertRequest(reqBody []byte, fromProtocol, toProtocol adapter.Protocol) ([]byte, error) {
 	if !supportedConversion(fromProtocol, toProtocol) {
 		return nil, ErrUnsupportedConversion
 	}
-	if fromProtocol == adapter.ProtocolOpenAIChat {
+	switch {
+	case fromProtocol == adapter.ProtocolOpenAIResponses && toProtocol == adapter.ProtocolOpenAIChat:
+		return convertRequestResponsesToOpenAI(reqBody)
+	case fromProtocol == adapter.ProtocolOpenAIChat && toProtocol == adapter.ProtocolOpenAIResponses:
+		return convertRequestOpenAIToResponses(reqBody)
+	case fromProtocol == adapter.ProtocolOpenAIResponses && toProtocol == adapter.ProtocolAnthropic:
+		return convertRequestResponsesToAnthropic(reqBody)
+	case fromProtocol == adapter.ProtocolAnthropic && toProtocol == adapter.ProtocolOpenAIResponses:
+		return convertRequestAnthropicToResponses(reqBody)
+	case fromProtocol == adapter.ProtocolOpenAIChat:
 		return convertRequestOpenAIToAnthropic(reqBody)
+	default:
+		return convertRequestAnthropicToOpenAI(reqBody)
 	}
-	return convertRequestAnthropicToOpenAI(reqBody)
 }
 
 // ── ConvertResponse ─────────────────────────────────────────────────────────
 
 // ConvertResponse converts a non-streaming response body from one protocol to
-// another. Supported: OpenAI Chat ↔ Anthropic Messages.
+// another. Supported: OpenAI Chat ↔ Anthropic Messages, OpenAI Chat ↔ OpenAI
+// Responses, and Anthropic Messages ↔ OpenAI Responses (composed through Chat).
 func ConvertResponse(respBody []byte, fromProtocol, toProtocol adapter.Protocol) ([]byte, error) {
 	if !supportedConversion(fromProtocol, toProtocol) {
 		return nil, ErrUnsupportedConversion
 	}
-	if fromProtocol == adapter.ProtocolOpenAIChat {
+	switch {
+	case fromProtocol == adapter.ProtocolOpenAIResponses && toProtocol == adapter.ProtocolOpenAIChat:
+		return convertResponseResponsesToOpenAI(respBody)
+	case fromProtocol == adapter.ProtocolOpenAIChat && toProtocol == adapter.ProtocolOpenAIResponses:
+		return convertResponseOpenAIToResponses(respBody)
+	case fromProtocol == adapter.ProtocolOpenAIResponses && toProtocol == adapter.ProtocolAnthropic:
+		return convertResponseResponsesToAnthropic(respBody)
+	case fromProtocol == adapter.ProtocolAnthropic && toProtocol == adapter.ProtocolOpenAIResponses:
+		return convertResponseAnthropicToResponses(respBody)
+	case fromProtocol == adapter.ProtocolOpenAIChat:
 		return convertResponseOpenAIToAnthropic(respBody)
+	default:
+		return convertResponseAnthropicToOpenAI(respBody)
 	}
-	return convertResponseAnthropicToOpenAI(respBody)
 }
 
 // ── StreamState ─────────────────────────────────────────────────────────────
@@ -236,22 +315,71 @@ func ConvertResponse(respBody []byte, fromProtocol, toProtocol adapter.Protocol)
 // in one stream. It must not be reused across streams.
 type StreamState struct {
 	// OpenAI→Anthropic state
-	OAIStarted       bool
-	OAIBlockIndex    int
-	OAIToolCallIndex int
-	OAIFinishReason  string
-	OAIModel         string
-	OAIMessageID     string
-	OAIUsage         streamUsageAccum
+	OAIStarted         bool
+	OAIBlockIndex      int
+	OAIToolCallIndex   int
+	OAIFinishReason    string
+	OAIModel           string
+	OAIMessageID       string
+	OAIUsage           streamUsageAccum
+	OAIThinkingStarted bool
+	OAIThinkingStopped bool
+	OAIThinkingIndex   int
 
 	// Anthropic→OpenAI state
-	AntStarted       bool
-	AntBlockIndex    int
-	AntToolCallIndex int
-	AntMessageID     string
-	AntModel         string
-	AntFinishReason  string
-	AntUsage         streamUsageAccum
+	AntStarted        bool
+	AntBlockIndex     int
+	AntToolCallIndex  int
+	AntMessageID      string
+	AntModel          string
+	AntFinishReason   string
+	AntUsage          streamUsageAccum
+	AntRoleAnnounced  bool
+	AntThinkingActive bool
+
+	// Responses-inbound state (upstream Chat/Anthropic → inbound Responses).
+	// RespStarted records that response.created has been emitted.
+	RespStarted         bool
+	RespResponseID      string
+	RespModel           string
+	RespSequence        int
+	RespOutputIndex     int
+	RespContentIndex    int
+	RespMessageItemID   string
+	RespTextBlockOpen   bool
+	RespReasoningItemID string
+	RespReasoningOpen   bool
+	RespToolItemByID    map[string]string   // tool call id / index → Responses item id
+	RespToolCallByItem  map[string][]string // item id → announced tool names (custom detection)
+	RespToolCallsAccum  []map[string]any    // accumulated tool calls for response.completed
+	RespTextAccum       string
+	RespReasoningText   string
+	RespUsage           streamUsageAccum
+	RespStatus          string
+	RespDone            bool
+
+	// Responses-upstream state (upstream Responses → inbound Chat).
+	// RespInCreated records receipt of the mandatory response.created event.
+	// Responses lifecycle/output events are rejected before this transition.
+	RespInCreated   bool
+	RespInStarted   bool
+	RespInMessageID string
+	RespInModel     string
+	RespInDone      bool
+	RespInTextAccum string
+	RespInToolItems map[string]int   // item_id → Chat tool_calls index
+	RespInToolCalls []map[string]any // accumulating tool calls
+	RespInReasoning string
+	RespInUsage     streamUsageAccum
+	RespInFinish    string
+
+	// Composite sub-states for Anthropic ↔ Responses streaming, which is
+	// composed through Chat. Each composite direction uses a distinct pair;
+	// the unused pair stays nil and inert. They are lazily allocated.
+	SubAntToChat  *StreamState // Anthropic → Chat leg (Anthropic → Responses)
+	SubChatToResp *StreamState // Chat → Responses leg (Anthropic → Responses)
+	SubRespToChat *StreamState // Responses → Chat leg (Responses → Anthropic)
+	SubChatToAnt  *StreamState // Chat → Anthropic leg (Responses → Anthropic)
 }
 
 type streamUsageAccum struct {
@@ -285,6 +413,17 @@ func ConvertStreamChunk(rawChunk []byte, fromProtocol, toProtocol adapter.Protoc
 	}
 	if len(rawChunk) == 0 {
 		return nil, nil
+	}
+
+	switch {
+	case fromProtocol == adapter.ProtocolOpenAIChat && toProtocol == adapter.ProtocolOpenAIResponses:
+		return convertStreamChunkOpenAIToResponses(rawChunk, state)
+	case fromProtocol == adapter.ProtocolAnthropic && toProtocol == adapter.ProtocolOpenAIResponses:
+		return convertStreamChunkAnthropicToResponses(rawChunk, state)
+	case fromProtocol == adapter.ProtocolOpenAIResponses && toProtocol == adapter.ProtocolOpenAIChat:
+		return convertStreamChunkResponsesToOpenAI(rawChunk, state)
+	case fromProtocol == adapter.ProtocolOpenAIResponses && toProtocol == adapter.ProtocolAnthropic:
+		return convertStreamChunkResponsesToAnthropic(rawChunk, state)
 	}
 
 	if fromProtocol == adapter.ProtocolOpenAIChat {
@@ -340,6 +479,9 @@ func validateOpenAIChatRequest(root map[string]any) error {
 	if !optionalPositiveInt(root, "max_completion_tokens") {
 		return ErrInvalidRequest
 	}
+	if !optionalOpenAIReasoningEffort(root) {
+		return ErrInvalidRequest
+	}
 	if !validateOpenAIStop(root) {
 		return ErrInvalidRequest
 	}
@@ -377,6 +519,9 @@ func validateOpenAIMessage(v any) error {
 		if !optionalString(m, "reasoning_content") {
 			return ErrInvalidRequest
 		}
+		if content, ok := m["content"]; ok && content != nil && !validOpenAIContent(content) {
+			return ErrInvalidRequest
+		}
 		if tc, ok := m["tool_calls"]; ok && !validateOpenAIToolCalls(tc) {
 			return ErrInvalidRequest
 		}
@@ -410,13 +555,37 @@ func validOpenAIContent(v any) bool {
 				return false
 			}
 		case "image_url":
-			// Accept image_url content parts but skip deep validation
-			// (they are converted to Anthropic image blocks)
+			if !validOpenAIImageURLPart(part) {
+				return false
+			}
 		default:
 			return false
 		}
 	}
 	return true
+}
+
+func validOpenAIImageURLPart(part map[string]any) bool {
+	if !onlyFields(part, fieldSet("type", "image_url")) {
+		return false
+	}
+	imageURL, ok := part["image_url"].(map[string]any)
+	if !ok || !onlyFields(imageURL, fieldSet("url")) || !isString(imageURL["url"]) {
+		return false
+	}
+	return validImageReference(stringVal(imageURL["url"]))
+}
+
+func optionalOpenAIReasoningEffort(root map[string]any) bool {
+	v, ok := root["reasoning_effort"]
+	if !ok {
+		return true
+	}
+	effort, ok := v.(string)
+	if !ok {
+		return false
+	}
+	return effort == "none" || effort == "minimal" || effort == "low" || effort == "medium" || effort == "high" || effort == "xhigh" || effort == "max"
 }
 
 func validateOpenAIStop(root map[string]any) bool {
@@ -534,6 +703,17 @@ func buildAnthropicRequest(root map[string]any) ([]byte, error) {
 		out["max_tokens"] = mt
 	} else {
 		out["max_tokens"] = json.Number(fmt.Sprintf("%d", defaultMaxTokens))
+	}
+
+	// reasoning_effort → thinking. These conservative defaults are superseded
+	// by execution-authoritative EffectiveThinking when the Runner applies it.
+	if budget := effortBudget(stringVal(root["reasoning_effort"])); budget > 0 {
+		// Anthropic requires budget_tokens to be less than max_tokens. Preserve a
+		// caller's larger limit; otherwise raise this conversion-only default.
+		if intVal(out["max_tokens"]) <= budget {
+			out["max_tokens"] = json.Number(fmt.Sprintf("%d", budget+1024))
+		}
+		out["thinking"] = map[string]any{"type": "enabled", "budget_tokens": json.Number(fmt.Sprintf("%d", budget))}
 	}
 
 	// stream
@@ -662,15 +842,18 @@ func buildAnthropicUserMessage(msg map[string]any) map[string]any {
 func buildAnthropicAssistantMessage(msg map[string]any) map[string]any {
 	var blocks []any
 
+	// Anthropic requires thinking blocks to precede text blocks.
+	if reasoning, ok := msg["reasoning_content"].(string); ok {
+		blocks = append(blocks, map[string]any{"type": "thinking", "thinking": reasoning, "signature": ""})
+	}
+
 	// Content text
 	if content := msg["content"]; content != nil {
 		if s, ok := content.(string); ok && s != "" {
 			blocks = append(blocks, map[string]any{"type": "text", "text": s})
 		} else if arr, ok := content.([]any); ok {
-			for _, c := range arr {
-				if part, ok := c.(map[string]any); ok && stringVal(part["type"]) == "text" {
-					blocks = append(blocks, map[string]any{"type": "text", "text": part["text"]})
-				}
+			for _, block := range convertOpenAIContentToAnthropic(arr, "assistant").([]any) {
+				blocks = append(blocks, block)
 			}
 		}
 	}
@@ -744,71 +927,55 @@ func convertOpenAIContentToAnthropic(content any, role string) any {
 	if !ok {
 		return ""
 	}
-	var blocks []any
+	blocks := make([]any, 0, len(parts))
 	for _, p := range parts {
-		part, ok := p.(map[string]any)
-		if !ok {
-			continue
-		}
-		typ := stringVal(part["type"])
-		switch typ {
+		part := p.(map[string]any) // validated by validOpenAIContent
+		switch stringVal(part["type"]) {
 		case "text":
 			blocks = append(blocks, map[string]any{"type": "text", "text": part["text"]})
 		case "image_url":
-			imgURL, ok := part["image_url"].(map[string]any)
-			if !ok || !isString(imgURL["url"]) {
-				continue
-			}
-			urlStr := stringVal(imgURL["url"])
+			urlStr := stringVal(part["image_url"].(map[string]any)["url"])
 			if mediaType, data, ok := parseDataURL(urlStr); ok {
-				blocks = append(blocks, map[string]any{
-					"type": "image",
-					"source": map[string]any{
-						"type":       "base64",
-						"media_type": mediaType,
-						"data":       data,
-					},
-				})
+				blocks = append(blocks, map[string]any{"type": "image", "source": map[string]any{
+					"type": "base64", "media_type": mediaType, "data": data,
+				}})
+			} else {
+				blocks = append(blocks, map[string]any{"type": "image", "source": map[string]any{
+					"type": "url", "url": urlStr,
+				}})
 			}
-			// Non-data URLs for images are not supported in Anthropic
 		}
-	}
-	if len(blocks) == 0 {
-		return ""
 	}
 	return blocks
 }
 
-func parseDataURL(urlStr string) (mediaType, data string, ok bool) {
-	// data:image/png;base64,<base64data>
+func validImageReference(value string) bool {
+	if strings.HasPrefix(value, "data:") {
+		_, _, ok := parseDataURL(value)
+		return ok
+	}
+	parsed, err := url.Parse(value)
+	return err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") && parsed.Host != ""
+}
+
+func parseDataURL(value string) (mediaType, data string, ok bool) {
 	const prefix = "data:"
-	if len(urlStr) < len(prefix) || urlStr[:len(prefix)] != prefix {
+	if !strings.HasPrefix(value, prefix) {
 		return "", "", false
 	}
-	rest := urlStr[len(prefix):]
-	semi := -1
-	for i, c := range rest {
-		if c == ';' {
-			semi = i
-			break
-		}
-	}
-	if semi < 0 {
+	metadata, data, found := strings.Cut(value[len(prefix):], ",")
+	if !found || !strings.HasSuffix(metadata, ";base64") {
 		return "", "", false
 	}
-	mediaType = rest[:semi]
-	rest = rest[semi+1:]
-	comma := -1
-	for i, c := range rest {
-		if c == ',' {
-			comma = i
-			break
-		}
-	}
-	if comma < 0 || rest[:comma] != "base64" {
+	mediaType = strings.TrimSuffix(metadata, ";base64")
+	parsedMediaType, _, err := mime.ParseMediaType(mediaType)
+	if err != nil || parsedMediaType != mediaType || !strings.HasPrefix(mediaType, "image/") || data == "" {
 		return "", "", false
 	}
-	data = rest[comma+1:]
+	decoded, err := base64.StdEncoding.DecodeString(data)
+	if err != nil || len(decoded) == 0 {
+		return "", "", false
+	}
 	return mediaType, data, true
 }
 
@@ -911,7 +1078,7 @@ func validateAnthropicRequest(root map[string]any) error {
 	if !validateAnthropicToolChoice(root) {
 		return ErrInvalidRequest
 	}
-	if !validateAnthropicMetadata(root) {
+	if !validateAnthropicMetadata(root) || !validateAnthropicThinking(root) {
 		return ErrInvalidRequest
 	}
 	return nil
@@ -963,7 +1130,9 @@ func validateAnthropicContent(v any) error {
 				return ErrInvalidRequest
 			}
 		case "image":
-			// Accept image blocks
+			if !validAnthropicImageBlock(block) {
+				return ErrInvalidRequest
+			}
 		case "thinking":
 			if !isString(block["thinking"]) || !isString(block["signature"]) {
 				return ErrInvalidRequest
@@ -973,6 +1142,29 @@ func validateAnthropicContent(v any) error {
 		}
 	}
 	return nil
+}
+
+func validAnthropicImageBlock(block map[string]any) bool {
+	if !onlyFields(block, fieldSet("type", "source")) {
+		return false
+	}
+	source, ok := block["source"].(map[string]any)
+	if !ok {
+		return false
+	}
+	switch stringVal(source["type"]) {
+	case "base64":
+		if !onlyFields(source, fieldSet("type", "media_type", "data")) || !isString(source["media_type"]) || !isString(source["data"]) {
+			return false
+		}
+		mediaType, data := stringVal(source["media_type"]), stringVal(source["data"])
+		_, _, ok := parseDataURL("data:" + mediaType + ";base64," + data)
+		return ok
+	case "url":
+		return onlyFields(source, fieldSet("type", "url")) && isString(source["url"]) && validImageReference(stringVal(source["url"]))
+	default:
+		return false
+	}
 }
 
 func validateAnthropicStopSequences(root map[string]any) bool {
@@ -1046,6 +1238,22 @@ func validateAnthropicToolChoice(root map[string]any) bool {
 	return true
 }
 
+func validateAnthropicThinking(root map[string]any) bool {
+	v, ok := root["thinking"]
+	if !ok {
+		return true
+	}
+	thinking, ok := v.(map[string]any)
+	if !ok {
+		return false
+	}
+	if stringVal(thinking["type"]) == "disabled" {
+		return onlyFields(thinking, fieldSet("type"))
+	}
+	return onlyFields(thinking, fieldSet("type", "budget_tokens")) &&
+		stringVal(thinking["type"]) == "enabled" && optionalNonNegativeInt(thinking, "budget_tokens") && hasField(thinking, "budget_tokens")
+}
+
 func validateAnthropicMetadata(root map[string]any) bool {
 	v, ok := root["metadata"]
 	if !ok {
@@ -1067,6 +1275,14 @@ func buildOpenAIRequest(root map[string]any) ([]byte, error) {
 	// max_tokens
 	if mt, ok := root["max_tokens"]; ok {
 		out["max_tokens"] = mt
+	}
+
+	// thinking → reasoning_effort. These conservative protocolconvert thresholds
+	// are superseded by execution-authoritative EffectiveThinking in the Runner.
+	if thinking, ok := root["thinking"].(map[string]any); ok {
+		if effort := budgetEffort(intVal(thinking["budget_tokens"])); effort != "" {
+			out["reasoning_effort"] = effort
+		}
 	}
 
 	// stream
@@ -1279,23 +1495,16 @@ func convertAnthropicToolResultContent(content any) any {
 }
 
 func convertAnthropicBlockToOpenAI(block map[string]any) any {
-	typ := stringVal(block["type"])
-	switch typ {
+	switch stringVal(block["type"]) {
 	case "text":
 		return map[string]any{"type": "text", "text": block["text"]}
 	case "image":
-		source, ok := block["source"].(map[string]any)
-		if !ok || stringVal(source["type"]) != "base64" {
-			return nil
+		source := block["source"].(map[string]any) // validated by validAnthropicImageBlock
+		url := stringVal(source["url"])
+		if stringVal(source["type"]) == "base64" {
+			url = "data:" + stringVal(source["media_type"]) + ";base64," + stringVal(source["data"])
 		}
-		mediaType := stringVal(source["media_type"])
-		data := stringVal(source["data"])
-		return map[string]any{
-			"type": "image_url",
-			"image_url": map[string]any{
-				"url": "data:" + mediaType + ";base64," + data,
-			},
-		}
+		return map[string]any{"type": "image_url", "image_url": map[string]any{"url": url}}
 	}
 	return nil
 }
@@ -1306,6 +1515,7 @@ func buildOpenAIAssistantMessage(msg map[string]any) map[string]any {
 
 	// Extract text and tool_use from content blocks
 	var textParts []string
+	var reasoningParts []string
 	var toolCalls []any
 
 	if s, ok := content.(string); ok {
@@ -1331,7 +1541,7 @@ func buildOpenAIAssistantMessage(msg map[string]any) map[string]any {
 					},
 				})
 			case "thinking":
-				// Preserve thinking in reasoning_content (skip for now, task says skip thinking)
+				reasoningParts = append(reasoningParts, stringVal(block["thinking"]))
 			}
 		}
 	}
@@ -1355,8 +1565,47 @@ func buildOpenAIAssistantMessage(msg map[string]any) map[string]any {
 	if len(toolCalls) > 0 {
 		out["tool_calls"] = toolCalls
 	}
+	if len(reasoningParts) > 0 {
+		out["reasoning_content"] = joinTextParts(reasoningParts)
+	}
 
 	return out
+}
+
+func joinTextParts(parts []string) string {
+	if len(parts) == 0 {
+		return ""
+	}
+	out := parts[0]
+	for _, part := range parts[1:] {
+		out += "\n" + part
+	}
+	return out
+}
+
+func effortBudget(effort string) int64 {
+	return defaultEffortBudgets[effort]
+}
+
+func budgetEffort(budget int64) string {
+	switch {
+	case budget <= 0:
+		return "none"
+	case budget >= defaultEffortBudgets["max"]:
+		return "max"
+	case budget >= defaultEffortBudgets["xhigh"]:
+		return "xhigh"
+	case budget >= defaultEffortBudgets["high"]:
+		return "high"
+	case budget >= defaultEffortBudgets["medium"]:
+		return "medium"
+	case budget >= defaultEffortBudgets["low"]:
+		return "low"
+	case budget >= defaultEffortBudgets["minimal"]:
+		return "minimal"
+	default:
+		return ""
+	}
 }
 
 func convertAnthropicToolsToOpenAI(tools any) []any {
@@ -1599,21 +1848,16 @@ func mapAnthropicFinishToOpenAI(reason string) string {
 }
 
 // ── Stream: OpenAI → Anthropic ──────────────────────────────────────────────
+//
+// Image blocks are request-only in this converter. Provider stream deltas do
+// not carry image content, so image deltas are deliberately unsupported here.
 
 func convertStreamChunkOpenAIToAnthropic(raw []byte, state *StreamState) ([][]byte, error) {
-	// Handle [DONE] sentinel
+	// Handle [DONE] sentinel: it is equivalent to a clean EOF, so it delegates
+	// to the same terminal-synthesis helper FinalizeStream exposes for a
+	// committed clean stream end.
 	if bytes.Equal(bytes.TrimSpace(raw), []byte("[DONE]")) {
-		var results [][]byte
-		if state.OAIStarted && state.OAIFinishReason == "" {
-			state.OAIFinishReason = "end_turn"
-		}
-		if state.OAIStarted {
-			// Emit message_delta + message_stop
-			results = append(results, buildAnthropicMessageDelta(state.OAIFinishReason, &state.OAIUsage))
-			results = append(results, buildAnthropicMessageStop())
-			state.OAIStarted = false
-		}
-		return results, nil
+		return finalizeOpenAIToAnthropic(state), nil
 	}
 
 	root, err := parseStrictJSON(raw)
@@ -1628,27 +1872,44 @@ func convertStreamChunkOpenAIToAnthropic(raw []byte, state *StreamState) ([][]by
 
 	var results [][]byte
 
-	// First chunk: emit message_start
+	// Accumulate usage from any chunk that carries it. OpenAI emits a
+	// terminal choices:[] + usage chunk when stream_options.include_usage is
+	// on; its completion_tokens must be captured before terminal synthesis.
+	if usage, ok := root["usage"].(map[string]any); ok {
+		if pt, ok := usage["prompt_tokens"]; ok {
+			state.OAIUsage.PromptTokens = intVal(pt)
+		}
+		if ct, ok := usage["completion_tokens"]; ok {
+			state.OAIUsage.CompletionTokens = intVal(ct)
+		}
+	}
+
+	choices, ok := root["choices"].([]any)
+	if !ok || len(choices) == 0 {
+		// Usage-only or lifecycle chunk. A usage-only chunk arriving on a
+		// started (not yet closed) stream completes the message exactly once,
+		// carrying the accumulated usage (the OpenAI include_usage final
+		// chunk). A usage-only chunk on a stream that has not started (e.g. an
+		// initial usage-only chunk) must not synthesize a message_start or a
+		// terminal, so it is a no-op here.
+		if _, ok := root["usage"].(map[string]any); ok && state.OAIStarted {
+			return finalizeOpenAIToAnthropic(state), nil
+		}
+		return results, nil
+	}
+
+	// First content/role chunk starts the message. This is deferred until a
+	// chunk with a non-empty choices array arrives so a usage-only initial
+	// chunk does not emit a spurious message_start.
 	if !state.OAIStarted {
 		state.OAIStarted = true
 		state.OAIMessageID = stringVal(root["id"])
 		state.OAIModel = stringVal(root["model"])
 		state.OAIBlockIndex = 0
 		state.OAIToolCallIndex = 0
+		state.OAIThinkingStarted = false
+		state.OAIThinkingStopped = false
 		results = append(results, buildAnthropicMessageStart(state.OAIMessageID, state.OAIModel))
-	}
-
-	// Extract usage from the chunk
-	if usage, ok := root["usage"].(map[string]any); ok {
-		if pt, ok := usage["prompt_tokens"]; ok {
-			state.OAIUsage.PromptTokens = intVal(pt)
-		}
-	}
-
-	choices, ok := root["choices"].([]any)
-	if !ok || len(choices) == 0 {
-		// Usage-only or lifecycle chunk
-		return results, nil
 	}
 
 	choice, ok := choices[0].(map[string]any)
@@ -1668,8 +1929,27 @@ func convertStreamChunkOpenAIToAnthropic(raw []byte, state *StreamState) ([][]by
 		return results, nil
 	}
 
+	// Reasoning must precede text in Anthropic content. A text delta closes an
+	// open thinking block before opening the text block.
+	if reasoning, ok := delta["reasoning_content"]; ok && isString(reasoning) && stringVal(reasoning) != "" {
+		if !state.OAIThinkingStarted && !state.OAIThinkingStopped {
+			state.OAIThinkingIndex = state.OAIBlockIndex
+			results = append(results, buildAnthropicContentBlockStart(state.OAIThinkingIndex, "thinking"))
+			state.OAIBlockIndex++
+			state.OAIThinkingStarted = true
+		}
+		if state.OAIThinkingStarted {
+			results = append(results, buildAnthropicContentBlockDelta(state.OAIThinkingIndex, "thinking_delta", stringVal(reasoning)))
+		}
+	}
+
 	// Text content
 	if content, ok := delta["content"]; ok && isString(content) {
+		if state.OAIThinkingStarted {
+			results = append(results, buildAnthropicContentBlockStop(state.OAIThinkingIndex))
+			state.OAIThinkingStarted = false
+			state.OAIThinkingStopped = true
+		}
 		text := stringVal(content)
 		if !state.hasOpenAITextBlock() {
 			results = append(results, buildAnthropicContentBlockStart(state.OAIBlockIndex, "text", ""))
@@ -1683,6 +1963,11 @@ func convertStreamChunkOpenAIToAnthropic(raw []byte, state *StreamState) ([][]by
 
 	// Tool calls
 	if tcs, ok := delta["tool_calls"].([]any); ok {
+		if state.OAIThinkingStarted {
+			results = append(results, buildAnthropicContentBlockStop(state.OAIThinkingIndex))
+			state.OAIThinkingStarted = false
+			state.OAIThinkingStopped = true
+		}
 		for _, tc := range tcs {
 			call, ok := tc.(map[string]any)
 			if !ok {
@@ -1713,6 +1998,11 @@ func convertStreamChunkOpenAIToAnthropic(raw []byte, state *StreamState) ([][]by
 		state.OAIFinishReason = mapOpenAIFinishToAnthropic(finishReason)
 
 		// Close any open blocks
+		if state.OAIThinkingStarted {
+			results = append(results, buildAnthropicContentBlockStop(state.OAIThinkingIndex))
+			state.OAIThinkingStarted = false
+			state.OAIThinkingStopped = true
+		}
 		if state.hasOpenAITextBlock() {
 			results = append(results, buildAnthropicContentBlockStop(state.OAIBlockIndex-1))
 			state.setOpenAITextBlock(false)
@@ -1795,6 +2085,8 @@ func buildAnthropicContentBlockStart(index int, blockType string, extra ...strin
 	switch blockType {
 	case "text":
 		block["text"] = ""
+	case "thinking":
+		block["thinking"] = ""
 	case "tool_use":
 		if len(extra) >= 2 {
 			block["id"] = extra[0]
@@ -1820,6 +2112,8 @@ func buildAnthropicContentBlockDelta(index int, deltaType, text string) []byte {
 		delta["text"] = text
 	case "input_json_delta":
 		delta["partial_json"] = text
+	case "thinking_delta":
+		delta["thinking"] = text
 	}
 	ev := map[string]any{
 		"type":  "content_block_delta",
@@ -1892,16 +2186,15 @@ func convertStreamChunkAnthropicToOpenAI(raw []byte, state *StreamState) ([][]by
 		blockIndex := int(intVal(root["index"]))
 		state.AntBlockIndex = blockIndex
 		if block, ok := root["content_block"].(map[string]any); ok {
+			if !state.AntRoleAnnounced {
+				results = append(results, buildOpenAIChunk(state.AntMessageID, state.AntModel, map[string]any{"role": "assistant"}, "", nil))
+				state.AntRoleAnnounced = true
+			}
 			switch stringVal(block["type"]) {
+			case "thinking":
+				state.AntThinkingActive = true
 			case "text":
-				// Emit a role-announcement chunk on first block
-				if blockIndex == 0 {
-					results = append(results, buildOpenAIChunk(state.AntMessageID, state.AntModel, map[string]any{"role": "assistant"}, "", nil))
-				}
 			case "tool_use":
-				if blockIndex == 0 {
-					results = append(results, buildOpenAIChunk(state.AntMessageID, state.AntModel, map[string]any{"role": "assistant"}, "", nil))
-				}
 				// Emit tool_calls start
 				toolCallIdx := state.AntToolCallIndex
 				results = append(results, buildOpenAIChunk(state.AntMessageID, state.AntModel, map[string]any{
@@ -1934,6 +2227,11 @@ func convertStreamChunkAnthropicToOpenAI(raw []byte, state *StreamState) ([][]by
 			if text != "" {
 				results = append(results, buildOpenAIChunk(state.AntMessageID, state.AntModel, map[string]any{"content": text}, "", nil))
 			}
+		case "thinking_delta":
+			thinking := stringVal(delta["thinking"])
+			if thinking != "" {
+				results = append(results, buildOpenAIChunk(state.AntMessageID, state.AntModel, map[string]any{"reasoning_content": thinking}, "", nil))
+			}
 		case "input_json_delta":
 			partialJSON := stringVal(delta["partial_json"])
 			if partialJSON != "" {
@@ -1951,6 +2249,9 @@ func convertStreamChunkAnthropicToOpenAI(raw []byte, state *StreamState) ([][]by
 		}
 
 	case "content_block_stop":
+		if state.AntThinkingActive && int(intVal(root["index"])) == state.AntBlockIndex {
+			state.AntThinkingActive = false
+		}
 		// No explicit OpenAI equivalent
 
 	case "message_delta":
@@ -1980,6 +2281,99 @@ func convertStreamChunkAnthropicToOpenAI(raw []byte, state *StreamState) ([][]by
 	}
 
 	return results, nil
+}
+
+// FinalizeStream synthesizes the protocol-native terminal stream event(s)
+// for a converted stream that ended cleanly (the upstream returned EOF)
+// without an explicit terminal event having been converted. It is driven
+// entirely by the caller-owned StreamState accumulated across ConvertStreamChunk
+// calls for the same stream: it performs no I/O, never sees a downstream
+// renderer, and never touches credentials or URLs.
+//
+// It is idempotent and exactly-once: once the state records the message has
+// been closed (OAIStarted/AntStarted false — set by an earlier finish chunk
+// conversion or a prior FinalizeStream), it returns nil without synthesizing a
+// second terminal. A caller MUST call it at most once per stream after the
+// last ConvertStreamChunk; the exactly-once guard makes a redundant call
+// safe but a well-behaved caller avoids it.
+//
+// For OpenAI→Anthropic: if the state still has an open Anthropic message, it
+// synthesizes message_delta (carrying the accumulated stop reason, defaulting
+// to "end_turn" when none was seen, and accumulated usage) and message_stop,
+// then marks the message closed.
+//
+// For Anthropic→OpenAI: if the state still has an open message, it synthesizes
+// one final OpenAI chat.completion.chunk carrying finish_reason (mapped from
+// the accumulated Anthropic stop reason) and usage, then marks the message
+// closed.
+//
+// Returns the synthesized JSON event payloads (without SSE framing). An empty
+// slice means no synthesis was needed: the stream already emitted its terminal
+// via a converted finish chunk, so a finalizer must not synthesize a second.
+func FinalizeStream(fromProtocol, toProtocol adapter.Protocol, state *StreamState) ([][]byte, error) {
+	if !supportedConversion(fromProtocol, toProtocol) {
+		return nil, ErrUnsupportedConversion
+	}
+	if state == nil {
+		return nil, ErrInvalidStreamChunk
+	}
+	switch {
+	case fromProtocol == adapter.ProtocolOpenAIChat && toProtocol == adapter.ProtocolOpenAIResponses:
+		return finalizeOpenAIToResponses(state), nil
+	case fromProtocol == adapter.ProtocolAnthropic && toProtocol == adapter.ProtocolOpenAIResponses:
+		return finalizeAnthropicToResponses(state), nil
+	case fromProtocol == adapter.ProtocolOpenAIResponses && toProtocol == adapter.ProtocolOpenAIChat:
+		return finalizeResponsesToOpenAI(state), nil
+	case fromProtocol == adapter.ProtocolOpenAIResponses && toProtocol == adapter.ProtocolAnthropic:
+		return finalizeResponsesToAnthropic(state), nil
+	}
+	if fromProtocol == adapter.ProtocolOpenAIChat {
+		return finalizeOpenAIToAnthropic(state), nil
+	}
+	return finalizeAnthropicToOpenAI(state), nil
+}
+
+// finalizeOpenAIToAnthropic is the shared, exactly-once terminal synthesis for
+// an OpenAI→Anthropic stream that ended cleanly. It mirrors the legacy
+// [DONE]-sentinel semantics so both paths produce identical output.
+func finalizeOpenAIToAnthropic(state *StreamState) [][]byte {
+	if !state.OAIStarted {
+		return nil
+	}
+	if state.OAIFinishReason == "" {
+		state.OAIFinishReason = "end_turn"
+	}
+	var results [][]byte
+	if state.OAIThinkingStarted {
+		results = append(results, buildAnthropicContentBlockStop(state.OAIThinkingIndex))
+		state.OAIThinkingStarted = false
+		state.OAIThinkingStopped = true
+	}
+	results = append(results,
+		buildAnthropicMessageDelta(state.OAIFinishReason, &state.OAIUsage),
+		buildAnthropicMessageStop(),
+	)
+	state.OAIStarted = false
+	return results
+}
+
+// finalizeAnthropicToOpenAI is the exactly-once terminal synthesis for an
+// Anthropic→OpenAI stream that ended cleanly. It mirrors the message_stop
+// branch of convertStreamChunkAnthropicToOpenAI so both paths produce identical
+// output.
+func finalizeAnthropicToOpenAI(state *StreamState) [][]byte {
+	if !state.AntStarted {
+		return nil
+	}
+	finishReason := mapAnthropicFinishToOpenAI(state.AntFinishReason)
+	usage := map[string]any{
+		"prompt_tokens":     json.Number(fmt.Sprintf("%d", state.AntUsage.PromptTokens)),
+		"completion_tokens": json.Number(fmt.Sprintf("%d", state.AntUsage.CompletionTokens)),
+		"total_tokens":      json.Number(fmt.Sprintf("%d", state.AntUsage.PromptTokens+state.AntUsage.CompletionTokens)),
+	}
+	results := [][]byte{buildOpenAIChunk(state.AntMessageID, state.AntModel, map[string]any{}, finishReason, usage)}
+	state.AntStarted = false
+	return results
 }
 
 func buildOpenAIChunk(id, model string, delta map[string]any, finishReason string, usage map[string]any) []byte {

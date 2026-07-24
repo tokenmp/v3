@@ -3,6 +3,7 @@ package openaiadapter
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -120,6 +121,30 @@ func FuzzSSEObserver(f *testing.F) {
 			offset = end
 		}
 	})
+}
+
+func TestStream_AuthoritativeEffectiveThinkingOnWire(t *testing.T) {
+	var received map[string]any
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: [DONE]\\n\\n")
+	}))
+	defer ts.Close()
+
+	call := sseStreamCall(ts.URL, "key")
+	call.Request.Body = []byte(`{"model":"caller","reasoning_effort":"low","messages":[{"role":"user","content":"hi"}]}`)
+	call.Request.Thinking = adapter.EffectiveThinking{EffectiveEffort: adapter.ThinkingHigh}
+	open, err := newTestClient(t, ts, nil).Stream(context.Background(), call)
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	defer open.Source.Close()
+	if got := received["reasoning_effort"]; got != "high" {
+		t.Fatalf("reasoning_effort = %v, want high", got)
+	}
 }
 
 func TestStreamOpeningMetadataAndLifecycle(t *testing.T) {
