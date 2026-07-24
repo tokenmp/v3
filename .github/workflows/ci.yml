@@ -119,6 +119,8 @@ jobs:
       AUTH_DATABASE_URL: postgres://tokenmp:tokenmp@localhost:5432/tokenmp_auth?sslmode=disable
       CONFIG_DATABASE_URL: postgres://tokenmp:tokenmp@localhost:5432/tokenmp_config?sslmode=disable
       CONFIG_REPO_TEST_DSN: postgres://tokenmp:tokenmp@localhost:5432/tokenmp_config?sslmode=disable
+      LOGGING_DATABASE_URL: postgres://tokenmp:tokenmp@localhost:5432/tokenmp_logging?sslmode=disable
+      LOGGING_REPO_TEST_DSN: postgres://tokenmp:tokenmp@localhost:5432/tokenmp_logging?sslmode=disable
     steps:
       - name: Checkout
         # actions/checkout v5
@@ -133,6 +135,7 @@ jobs:
             services/auth/go.sum
             services/executor/go.sum
             services/config/go.sum
+            services/logging/go.sum
 
       - name: Generated code freshness check (Auth)
         run: |
@@ -298,6 +301,55 @@ jobs:
         working-directory: services/config
         env:
           CONFIG_REPO_TEST_DSN: postgres://tokenmp:tokenmp@localhost:5432/tokenmp_config?sslmode=disable
+        run: go test -race ./internal/repository/...
+
+      # ------------------------------------------------------------------
+      # Logging service (skeleton): gofmt / vet / build / unit test / migration
+      # cycle / repository integration test. Reuses this job's Postgres 17
+      # service via a separate tokenmp_logging database created below.
+      # ------------------------------------------------------------------
+      - name: Create tokenmp_logging database
+        env:
+          PGPASSWORD: tokenmp
+        run: |
+          psql -h localhost -U tokenmp -d postgres -c "CREATE DATABASE tokenmp_logging;" || true
+
+      - name: gofmt (logging)
+        working-directory: services/logging
+        run: |
+          out="$(gofmt -l .)"
+          if [ -n "$out" ]; then
+            echo "gofmt found unformatted files:" >&2
+            echo "$out" >&2
+            exit 1
+          fi
+
+      - name: go vet (logging)
+        working-directory: services/logging
+        run: go vet ./...
+
+      - name: go build (logging)
+        working-directory: services/logging
+        run: |
+          go build ./...
+          go build -o /tmp/logging-bin ./cmd/logging
+
+      - name: go test -race (logging unit)
+        working-directory: services/logging
+        run: go test -race ./internal/config/... ./internal/database/... ./internal/server/...
+
+      - name: Logging migration cycle (up/down/up)
+        working-directory: services/logging
+        run: |
+          set -euo pipefail
+          migrate -path migrations -database "$LOGGING_DATABASE_URL" up
+          migrate -path migrations -database "$LOGGING_DATABASE_URL" down -all
+          migrate -path migrations -database "$LOGGING_DATABASE_URL" up
+
+      - name: go test -race (logging repository integration)
+        working-directory: services/logging
+        env:
+          LOGGING_REPO_TEST_DSN: postgres://tokenmp:tokenmp@localhost:5432/tokenmp_logging?sslmode=disable
         run: go test -race ./internal/repository/...
 
       - name: Migration cycle (up/down/up)
