@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -78,6 +80,133 @@ func strictDecodeAndMarshal(t *testing.T, raw []byte, mutate func(*snapshot.Conf
 		t.Fatalf("marshal: %v", err)
 	}
 	return out
+}
+
+func configServiceServer(t *testing.T, revision string, raw []byte) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Errorf("method = %s, want GET", r.Method)
+		}
+		if got := r.Header.Get("Accept"); got != "application/json" {
+			t.Errorf("Accept = %q, want application/json", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(map[string]any{
+			"revision": revision, "snapshot": json.RawMessage(raw), "sha256": "test-sha",
+			"compiled_meta": nil, "created_at": "2026-07-24T00:00:00Z",
+		}); err != nil {
+			t.Errorf("encode response: %v", err)
+		}
+	}))
+}
+
+func TestLoadFromConfigService(t *testing.T) {
+	srv := configServiceServer(t, "  authoritative-revision\t", readFixture(t, "default"))
+	defer srv.Close()
+	cfg, err := LoadFromConfigService(context.Background(), srv.URL+"/v1/config/snapshots/latest")
+	if err != nil {
+		t.Fatalf("LoadFromConfigService: %v", err)
+	}
+	if cfg.Revision != "authoritative-revision" {
+		t.Errorf("Revision = %q, want authoritative-revision", cfg.Revision)
+	}
+}
+
+func TestLoadFromConfigServiceTooLarge(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(bytes.Repeat([]byte("x"), int(MaxConfigServiceResponseBytes)+1))
+	}))
+	defer srv.Close()
+	_, err := LoadFromConfigService(context.Background(), srv.URL+"/v1/config/snapshots/latest")
+	if !errors.Is(err, ErrConfigTooLarge) {
+		t.Errorf("err = %v, want ErrConfigTooLarge", err)
+	}
+}
+
+func TestLoadFromConfigServiceNon200(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNotFound) }))
+	defer srv.Close()
+	_, err := LoadFromConfigService(context.Background(), srv.URL+"/v1/config/snapshots/latest")
+	if !errors.Is(err, ErrConfigServiceStatus) {
+		t.Errorf("err = %v, want ErrConfigServiceStatus", err)
+	}
+}
+
+func TestLoadFromConfigServiceEmptySnapshot(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"revision":"r","snapshot":null}`))
+	}))
+	defer srv.Close()
+	_, err := LoadFromConfigService(context.Background(), srv.URL+"/v1/config/snapshots/latest")
+	if !errors.Is(err, ErrConfigServiceEmpty) {
+		t.Errorf("err = %v, want ErrConfigServiceEmpty", err)
+	}
+}
+
+func TestLoadFromConfigServiceSecretDetected(t *testing.T) {
+	raw := bytes.Replace(readFixture(t, "default"), []byte(`"https://api.openai.example/v1"`), []byte(`"https://api.openai.example/v1?api_key=sk-leaked"`), 1)
+	srv := configServiceServer(t, "r", raw)
+	defer srv.Close()
+	_, err := LoadFromConfigService(context.Background(), srv.URL+"/v1/config/snapshots/latest")
+	if !errors.Is(err, ErrConfigSecretDetected) {
+		t.Errorf("err = %v, want ErrConfigSecretDetected", err)
+	}
+}
+
+func TestLoadFromConfigServiceNoLeak(t *testing.T) {
+	leak := "unique-config-service-url-marker"
+	_, err := LoadFromConfigService(context.Background(), "http://"+leak+".invalid/v1/config/snapshots/latest")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if strings.Contains(err.Error(), leak) {
+		t.Errorf("error leaks URL: %q", err.Error())
+	}
+	if errors.Unwrap(err) != nil {
+		t.Errorf("error unwrap = %v, want nil", errors.Unwrap(err))
+	}
+}
+
+func TestCompileAndPublishFromConfigService(t *testing.T) {
+	srv := configServiceServer(t, "service-v1", readFixture(t, "default"))
+	defer srv.Close()
+	var store snapshot.Store
+	meta, err := CompileAndPublishInitialFromConfigService(context.Background(), &store, srv.URL+"/v1/config/snapshots/latest")
+	if err != nil {
+		t.Fatalf("initial: %v", err)
+	}
+	if meta.Generation() != 1 || meta.Revision() != "service-v1" {
+		t.Errorf("meta = gen %d rev %q, want 1/service-v1", meta.Generation(), meta.Revision())
+	}
+
+	srv2 := configServiceServer(t, "service-v2", readFixture(t, "default"))
+	defer srv2.Close()
+	next, err := CompileAndPublishNextFromConfigService(context.Background(), &store, srv2.URL+"/v1/config/snapshots/latest")
+	if err != nil {
+		t.Fatalf("next: %v", err)
+	}
+	if next.Generation() != 2 || next.Revision() != "service-v2" {
+		t.Errorf("next = gen %d rev %q, want 2/service-v2", next.Generation(), next.Revision())
+	}
+
+	noop, err := CompileAndPublishNextFromConfigService(context.Background(), &store, srv2.URL+"/v1/config/snapshots/latest")
+	if err != nil {
+		t.Fatalf("same revision: %v", err)
+	}
+	if noop.Generation() != 2 {
+		t.Errorf("noop generation = %d, want 2", noop.Generation())
+	}
+}
+
+func TestCompileAndPublishNextFromConfigServiceNoInitial(t *testing.T) {
+	srv := configServiceServer(t, "service-v1", readFixture(t, "default"))
+	defer srv.Close()
+	var store snapshot.Store
+	_, err := CompileAndPublishNextFromConfigService(context.Background(), &store, srv.URL+"/v1/config/snapshots/latest")
+	if !errors.Is(err, ErrConfigNoInitialSnapshot) {
+		t.Errorf("err = %v, want ErrConfigNoInitialSnapshot", err)
+	}
 }
 
 func TestLoadFileFixtures(t *testing.T) {
@@ -846,7 +975,7 @@ func TestSentinelErrorsDoNotUnwrap(t *testing.T) {
 	sentinels := []error{
 		ErrConfigBlankPath, ErrConfigNotFound, ErrConfigNotRegular, ErrConfigTooLarge,
 		ErrConfigEmpty, ErrConfigUnreadable, ErrConfigMalformed,
-		ErrConfigSecretDetected, ErrConfigCompileFailed, ErrConfigPublishFailed,
+		ErrConfigSecretDetected, ErrConfigServiceUnavailable, ErrConfigServiceStatus, ErrConfigServiceEmpty, ErrConfigCompileFailed, ErrConfigPublishFailed,
 	}
 	for _, s := range sentinels {
 		if errors.Unwrap(s) != nil {

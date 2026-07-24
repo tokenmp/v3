@@ -14,7 +14,7 @@ Executor 是 TokenMP v3 的 Mock-first 模型请求执行服务。runtime `main`
 - transport-neutral non-stream 边界与 composition（四个模块内包，经 composition 接入 runtime 公开路由）：`internal/nonstream` 是一次 non-stream 请求的 transport-neutral 边界，拥有 `Request`/`Result` 形状、窄 `Executor` 端口、经认证的 secret-free 调用方 `Principal`，以及 transport renderer 归约为协议原生响应的安全 sentinel 错误（`ErrModelNotFound`/404、`ErrInvalidRequest`/400、`ErrUnauthorized`/401、`ErrMisconfigured`/internal）；它不导入任何 HTTP/chi/generated contract/transport 代码，仅依赖 adapter（`Protocol`/`ThinkingRequest`）与 execution（`Result`），且只有 transport-facing facade 可构造携带 trusted `Principal` 的 `Request`。`internal/nonstreamfacade` 实现 `nonstream.Executor` 的 transport-neutral composition root：每请求 pin 当前 compiled snapshot、构造保留 resolver-owned Plan 的 protocol-filtered routing Resolver、要求并防御性 revalidate trusted `Principal`、经 shared `requestid` 发出 CSPRNG reservation 标识符，并精确委托一次 `execution.Runner.Run`；它不拥有 HTTP/数据库/env/main/路由注册，不导入 transport 代码，任何不安全输入（nil/typed-nil 依赖、缺失或非法 `Principal`、缺失 snapshot、未知 model）均 fail-closed 为安全 sentinel。`internal/authcontext` 拥有贯穿请求管道的 request-scoped 经认证调用方 identity，集中私有 context key 与公开只读 accessor，使 transport auth boundary（`executorv1api.AuthMiddleware`）与 transport normalizer 共享单一 canonical、secret-free identity 通道而不在 transport surface 暴露可伪造 writer；`WithIdentity` 是仅供内部 composition 的窄 writer（`AuthMiddleware` 为唯一预期调用方），`IdentityFromContext` 返回不含 key material 的副本。shared `internal/requestid` 定义被 non-stream facade 与 execution Runner 共用的 reservation 标识符语法与来源：reservation id 服务端生成、绝不接受客户端输入，语法为 `res_` + 16–128 个 URL-safe unreserved 字符（base64 `RawURLEncoding` 字母表）；默认 `Random` source 取 16 字节 crypto-random 并以 `RawURLEncoding` 编码为 22 字符后缀，nil/typed-nil source 回退到 cryptographic default，短读返回空串 fail-closed。Runner 现以 `requestid.ValidReservationID` 校验 `ReservationID`（取代原先 trim-only 空检查），在任何 preflight/quota/upstream call 前拒绝非法 reservation id；`Selector` 新增非 canonical 的 programmatic `Protocol` filter（由 facade 等调用方设置而非从 selector 字符串解析），当非空时 `Resolve` 只放行 compiled protocol 匹配的 route，故 chat completion 请求不会解析到 anthropic_messages route，反之亦然；transport `NonStreamExecutor`/`NonStreamRequest`/`NonStreamResult` 现为 transport-neutral `nonstream.*` 的类型别名并携带 `Principal`，renderer 现将 `nonstream.ErrUnauthorized`(401) 与 `nonstream.ErrModelNotFound`(404) 渲染为协议原生响应。四包均由独立 race 包覆盖，并经 `internal/composition` 接入 identity、runtime config source、facade/reservation composition 与公开路由。
 - 路由契约一致性测试（`internal/server/contract_test.go`）：以 kin-openapi 加载 `openapi/executor/v1.yaml`，遍历 generated `Handler` 的 Chi 路由，与契约 method+path 双向严格比较（7 条路由）。
 - `cmd/executor` 读取配置、在 `net.Listen` 之前组装 runtime composition、监听 HTTP，并在 `SIGINT` 或 `SIGTERM` 后以配置的超时优雅关闭；HTTP server 使用 header 读取和 keep-alive 空闲连接边界。`composition.Build` 在启动时组装 immutable snapshot store、strict secret-free config source、credential/identity env resolver、in-memory runtime/quarantine/quota/execution log、精确 OpenAI/Anthropic SDK registry、Runner、facade、generated strict handler 与 `AuthMiddleware(CaptureRawBody(...))`；启动拒绝不受支持的 enabled SDK/protocol route（仅 OpenAIChat 与 Anthropic Messages）。
-- `internal/config` 验证运行时配置，并要求 `EXECUTOR_CONFIG_FILE`、`EXECUTOR_CREDENTIAL_REF_MAP_JSON` 与 `EXECUTOR_IDENTITY_MAP_JSON`；错误为固定/redacted，不泄露 JSON、路径或密钥。
+- `internal/config` 验证运行时配置，要求 `EXECUTOR_CONFIG_FILE` 或 `EXECUTOR_CONFIG_SERVICE_URL` 至少一个，以及 `EXECUTOR_CREDENTIAL_REF_MAP_JSON` 与 `EXECUTOR_IDENTITY_MAP_JSON`；Config Service URL 非空时优先，错误为固定/redacted，不泄露 JSON、路径、URL 或密钥。
 - `internal/app` 以注入的 handler 创建 HTTP server；nil/typed-nil handler fail-closed 返回错误。
 - `internal/{configrepo,identity,quota,requestlog,runtime}` 提供端口，以及 Mock/InMemory 实现。`quota` 包提供 typed `Repository` 端口及 `DomainInMemory`/`TypedMock` 实现。
 - quota reservation 只能从 `reserved` 迁移到 `finalized` 或 `released`：相同终态幂等，相反终态返回稳定冲突。`quota.Repository` 是唯一的 quota 端口，提供 typed `ReservationID`、bounded/redacted metadata、仅 `BasisNone` estimate、typed terminal settlement 和 `Lookup`，由 `DomainInMemory`/`TypedMock` shared contract/race/fuzz 覆盖。Runner finalize 使用 `AccountingUnpricedSuccess`；StreamDriver 使用 `AccountingConfirmedUsage`（当 `streaming.UsageKnown` 为 true 时携带 `ConfirmedUsage` token 计数）或 `AccountingUnpricedSuccess`。两者经 `QuotaIdentity`（subject/key_id/protocol）传递认证身份。legacy `quota.Port` 已删除。无 usage charging、数据库或 durable storage。
@@ -37,13 +37,14 @@ Executor 是 TokenMP v3 的 Mock-first 模型请求执行服务。runtime `main`
 | `EXECUTOR_SHUTDOWN_TIMEOUT` | `10s` | 收到终止信号后等待优雅关闭完成的最长正 duration；显式空值、无效值或非正值会使启动失败。 |
 | `EXECUTOR_READ_HEADER_TIMEOUT` | `10s` | 读取请求 headers 的最长正 duration，限制慢速 headers；缺失时使用默认，显式空值、无效值或非正值会使启动失败。 |
 | `EXECUTOR_IDLE_TIMEOUT` | `60s` | keep-alive 空闲连接的最长正 duration；缺失时使用默认，显式空值、无效值或非正值会使启动失败。 |
-| `EXECUTOR_CONFIG_FILE` | （必填） | strict secret-free 配置文件路径；缺失或空白会使启动失败，错误不泄露路径或内容。 |
+| `EXECUTOR_CONFIG_FILE` | （Config Service URL 为空时必填） | strict secret-free 配置文件 fallback 路径；与 Config Service URL 至少配置一个。若两者均配置，Config Service URL 优先；错误不泄露路径或内容。 |
+| `EXECUTOR_CONFIG_SERVICE_URL` | （optional；优先） | exact Config Service `GET /v1/config/snapshots/latest` 的 `http(s)` URL；不得有 query、fragment 或 userinfo。响应限制 2 MiB、10s timeout、禁止 redirect/retry，外层 revision 为权威 revision。 |
 | `EXECUTOR_CREDENTIAL_REF_MAP_JSON` | （必填） | 非 secret `vault://` credential ref → `EXECUTOR_CREDENTIAL_*` 环境变量名 JSON 映射；可较长，缺失或空白会使启动失败，错误不泄露 JSON 内容。 |
 | `EXECUTOR_IDENTITY_MAP_JSON` | （JWT 时 optional；否则必填） | 非 secret entry ID → identity 映射 JSON；可较长，缺失或空白会使启动失败，错误不泄露 JSON 内容。当 `EXECUTOR_JWT_PUBLIC_KEY_FILE` 已设置时此项变为 optional。 |
 | `EXECUTOR_JWT_PUBLIC_KEY_FILE` | （optional） | PKIX PEM 编码的 Ed25519 公钥文件路径；设置后启用 JWT 验证作为首选 identity source，identityenv 降为 fallback。公钥文件缺失或格式错误导致启动拒绝。 |
 | `EXECUTOR_JWT_ISSUER` | `tokenmp-auth` | JWT `iss` claim 期望值。 |
 | `EXECUTOR_JWT_AUDIENCE` | `tokenmp-web` | JWT `aud` claim 期望值。 |
-| `EXECUTOR_CONFIG_RELOAD_INTERVAL` | `0`（禁用） | stat-based 文件变更轮询间隔（正 duration）；默认 0 禁用轮询，仅 SIGHUP 触发 reload。非负 duration，0 或空值禁用轮询。 |
+| `EXECUTOR_CONFIG_RELOAD_INTERVAL` | `0`（禁用） | file source 时按 mtime/size stat 轮询；Config Service source 时按该间隔重新拉取并由 revision no-op 去重。默认 0 禁用轮询，仅 SIGHUP 触发 reload。非负 duration，0 或空值禁用轮询。 |
 | `EXECUTOR_METRICS_ENABLED` | `true` | 是否启用 `/metrics` Prometheus 端点；设为 `false`/`0`/`no`/`off` 禁用，禁用时 `/metrics` 返回 404。 |
 | `EXECUTOR_METRICS_PATH` | `/metrics` | Prometheus 端点 URL 路径；必须非空且以 `/` 开头。 |
 | `EXECUTOR_HEALTHCHECK_ADDR` | `http://127.0.0.1:8081/healthz` | Docker HEALTHCHECK 探测地址；仅由独立 healthcheck 二进制使用，不影响服务本身。 |
@@ -90,9 +91,9 @@ Responses non-stream+stream 已 runtime 启用；Images legacy non-stream 已执
 Executor 支持运行时配置热重载，无需重启进程：
 
 1. **SIGHUP**：发送 `SIGHUP` 信号触发 on-demand reload。进程加载、编译、验证新配置，验证通过后发布为 next generation；失败保留旧 generation，进程不退出。
-2. **Stat 轮询**：设置 `EXECUTOR_CONFIG_RELOAD_INTERVAL` 为正 duration（如 `30s`）后，Executor 以该间隔 stat 配置文件的 mtime 和 size，变化时触发 reload。默认 0 禁用轮询。
+2. **轮询**：设置 `EXECUTOR_CONFIG_RELOAD_INTERVAL` 为正 duration（如 `30s`）后，file source 以该间隔 stat 配置文件的 mtime 和 size，变化时触发 reload；Config Service source 则每个 interval 拉取 latest snapshot，revision 不变时 no-op。默认 0 禁用轮询。
 
-重载流程：LoadFile → Compile → validate（`rejectUnsupportedEnabledRoutes` + `credentialenv.ValidateCompiled`）→ Publish。验证在发布前执行，失败不修改 store。不可变快照天然保证 in-flight 请求安全。日志不泄 path/content/secret。
+重载流程：selected source（`LoadFile` 或 `LoadFromConfigService`）→ Compile → validate（`rejectUnsupportedEnabledRoutes` + `credentialenv.ValidateCompiled`）→ Publish。验证在发布前执行，失败不修改 store。Config Service response 经与文件相同的 strict JSON/secret scan pipeline；不可变快照天然保证 in-flight 请求安全。日志不泄 path/URL/content/secret。
 
 ```sh
 # On-demand reload

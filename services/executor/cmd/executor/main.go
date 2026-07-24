@@ -102,6 +102,10 @@ func reloadLoop(ctx context.Context, reloader *configreload.Reloader, cfg config
 			if cfg.ConfigReloadInterval <= 0 {
 				continue
 			}
+			if cfg.ConfigServiceURL != "" {
+				_ = reloader.Reload(ctx)
+				continue
+			}
 			info, err := os.Stat(cfg.ConfigFile)
 			if err != nil {
 				continue

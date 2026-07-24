@@ -6,6 +6,66 @@ import (
 	"time"
 )
 
+func TestLoadConfigServiceURL(t *testing.T) {
+	base := map[string]string{
+		"EXECUTOR_CREDENTIAL_REF_MAP_JSON": "{}",
+		"EXECUTOR_IDENTITY_MAP_JSON":       "{}",
+	}
+	tests := []struct {
+		name, value string
+		wantErr     bool
+	}{
+		{name: "http", value: "http://config.example/v1/config/snapshots/latest"},
+		{name: "https", value: "https://config.example/v1/config/snapshots/latest"},
+		{name: "query", value: "https://config.example/v1/config/snapshots/latest?token=x", wantErr: true},
+		{name: "fragment", value: "https://config.example/v1/config/snapshots/latest#x", wantErr: true},
+		{name: "userinfo", value: "https://user@example/v1/config/snapshots/latest", wantErr: true},
+		{name: "invalid scheme", value: "file:///v1/config/snapshots/latest", wantErr: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			env := make(map[string]string, len(base)+1)
+			for k, v := range base {
+				env[k] = v
+			}
+			env[EnvConfigServiceURL] = tc.value
+			got, err := Load(func(key string) (string, bool) { v, ok := env[key]; return v, ok })
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("Load() error = nil, want error")
+				}
+				if strings.Contains(err.Error(), tc.value) {
+					t.Errorf("error leaks URL: %q", err.Error())
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Load(): %v", err)
+			}
+			if got.ConfigServiceURL != tc.value || got.ConfigFile != "" {
+				t.Errorf("config source = URL %q file %q", got.ConfigServiceURL, got.ConfigFile)
+			}
+		})
+	}
+
+	_, err := Load(func(key string) (string, bool) { v, ok := base[key]; return v, ok })
+	if err == nil || !strings.Contains(err.Error(), EnvConfigServiceURL) || !strings.Contains(err.Error(), EnvConfigFile) {
+		t.Errorf("missing sources error = %v", err)
+	}
+
+	env := map[string]string{
+		EnvConfigFile: "/fallback/config.json", EnvConfigServiceURL: "https://config.example/v1/config/snapshots/latest",
+		EnvCredentialRefMapJSON: "{}", EnvIdentityMapJSON: "{}",
+	}
+	got, err := Load(func(key string) (string, bool) { v, ok := env[key]; return v, ok })
+	if err != nil {
+		t.Fatalf("file fallback plus URL: %v", err)
+	}
+	if got.ConfigServiceURL == "" || got.ConfigFile == "" {
+		t.Errorf("both configured source values were not retained: %+v", got)
+	}
+}
+
 func TestLoadDefaults(t *testing.T) {
 	t.Parallel()
 

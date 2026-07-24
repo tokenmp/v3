@@ -7,8 +7,8 @@
 // http.Handler ready to be served by app.Run.
 //
 // Build is fail-closed: any missing, invalid, or unsupported configuration
-// returns an error and no handler. It performs no network I/O and reads no
-// secrets; secrets remain call-local to the SDK adapters. Errors never wrap
+// returns an error and no handler. It fetches Config Service only when selected
+// as the configured source and reads no secrets; secrets remain call-local to the SDK adapters. Errors never wrap
 // raw JSON, filesystem paths, or secret material: the config source and the
 // credential/identity resolvers return stable, redacted sentinels, and this
 // package wraps only those sentinels (or its own generic, non-leaking
@@ -122,11 +122,17 @@ var supportedSDKPairs = map[execution.SDKClientKey]struct{}{
 // accessor (typically os.LookupEnv); it is retained by the credential and
 // identity resolvers so per-attempt/per-request secret rotation is observed.
 //
-// Build performs no network I/O. All errors are fail-closed and non-leaking.
+// Build performs Config Service fetch I/O only when ConfigServiceURL is configured. All errors are fail-closed and non-leaking.
 func Build(ctx context.Context, cfg config.Config, lookupEnv func(string) (string, bool)) (*App, error) {
-	// ── Snapshot store + initial bootstrap from the strict file source ──
+	// ── Snapshot store + initial bootstrap from the selected config source ──
 	store := &snapshot.Store{}
-	if _, err := configsource.CompileAndPublishInitial(ctx, store, cfg.ConfigFile); err != nil {
+	var bootstrapErr error
+	if cfg.ConfigServiceURL != "" {
+		_, bootstrapErr = configsource.CompileAndPublishInitialFromConfigService(ctx, store, cfg.ConfigServiceURL)
+	} else {
+		_, bootstrapErr = configsource.CompileAndPublishInitial(ctx, store, cfg.ConfigFile)
+	}
+	if bootstrapErr != nil {
 		return nil, ErrConfigSource
 	}
 	current, err := store.Current()
@@ -279,7 +285,7 @@ func Build(ctx context.Context, cfg config.Config, lookupEnv func(string) (strin
 		return nil
 	}
 
-	reloader := configreload.NewReloader(store, cfg.ConfigFile, validate, nil)
+	reloader := configreload.NewReloader(store, cfg.ConfigFile, cfg.ConfigServiceURL, validate, nil)
 
 	return &App{Handler: handler, Reloader: reloader, MetricsEnabled: cfg.MetricsEnabled, MetricsPath: cfg.MetricsPath}, nil
 }
