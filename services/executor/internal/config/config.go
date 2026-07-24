@@ -55,6 +55,12 @@ const (
 	// EnvMetricsPath is the URL path for the metrics endpoint.
 	// Defaults to /metrics when unset or empty.
 	EnvMetricsPath = "EXECUTOR_METRICS_PATH"
+	// EnvLoggingServiceURL is the optional Logging Service base URL. When
+	// set, the runtime composition wraps the in-memory execution log with a
+	// remote sink that best-effort forwards lifecycle events to the Logging
+	// Service ingest endpoint. When unset or empty, only the local
+	// in-memory log is used and no remote forwarding occurs.
+	EnvLoggingServiceURL = "EXECUTOR_LOGGING_SERVICE_URL"
 )
 
 // Config is the validated runtime configuration for Executor.
@@ -93,6 +99,13 @@ type Config struct {
 	// MetricsPath is the URL path for the metrics endpoint. Must be
 	// non-empty and start with '/'. Defaults to /metrics.
 	MetricsPath string
+	// LoggingServiceURL is the optional Logging Service base URL
+	// (http(s)://host[:port] with no userinfo, query, or fragment, and path
+	// empty or "/"). When non-empty, the runtime composition wraps the
+	// in-memory execution log with a remote sink that best-effort forwards
+	// lifecycle events to the Logging Service /v1/logs/ingest endpoint. When
+	// empty, only the local in-memory execution log is used.
+	LoggingServiceURL string
 }
 
 // Load reads Executor configuration from lookupEnv. An unset value uses its
@@ -205,6 +218,15 @@ func Load(lookupEnv func(string) (string, bool)) (Config, error) {
 		config.MetricsPath = path
 	}
 
+	// Logging Service URL is optional. When set it must be a valid http(s)
+	// base URL without userinfo, query, or fragment so the remote sink cannot
+	// be pointed at an unexpected resource or carry embedded credentials.
+	config.LoggingServiceURL, _ = lookupEnv(EnvLoggingServiceURL)
+	config.LoggingServiceURL = strings.TrimSpace(config.LoggingServiceURL)
+	if config.LoggingServiceURL != "" && !validLoggingServiceURL(config.LoggingServiceURL) {
+		return Config{}, fmt.Errorf("%s must be an http(s) base url without userinfo, query, or fragment", EnvLoggingServiceURL)
+	}
+
 	return config, nil
 }
 
@@ -246,4 +268,17 @@ func validConfigServiceURL(raw string) bool {
 		return false
 	}
 	return (u.Scheme == "http" || u.Scheme == "https") && u.Host != "" && u.User == nil && u.RawQuery == "" && !u.ForceQuery && u.Fragment == "" && u.Path == "/v1/config/snapshots/latest"
+}
+
+// validLoggingServiceURL accepts only an absolute http(s):// base URL with a
+// non-empty host and no userinfo, query, or fragment. The path must be empty
+// or "/"; the runtime composition appends the fixed /v1/logs/ingest path.
+// This mirrors the strictness of validConfigServiceURL but for the Logging
+// Service base URL rather than a fixed snapshot endpoint.
+func validLoggingServiceURL(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil || u == nil {
+		return false
+	}
+	return (u.Scheme == "http" || u.Scheme == "https") && u.Host != "" && u.User == nil && u.RawQuery == "" && !u.ForceQuery && u.Fragment == "" && (u.Path == "" || u.Path == "/")
 }
