@@ -5,6 +5,9 @@ import type { ApiErrorBody, TokenResponse } from '@/types';
 /** Base URL of the auth service. Empty string => relative to current origin (same-origin proxy). */
 export const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? '';
 
+/** Base URL of the notice service. Empty string => relative to current origin (same-origin proxy). */
+export const NOTICE_BASE = process.env.NEXT_PUBLIC_NOTICE_API_BASE ?? '';
+
 let refreshing: Promise<boolean> | null = null;
 
 async function refreshTokens(): Promise<boolean> {
@@ -48,6 +51,8 @@ interface RequestOptions {
   auth?: boolean;
   /** Expect 204 no-content. */
   noContent?: boolean;
+  /** Override the API base (default API_BASE). Used by the notice service calls. */
+  baseUrl?: string;
   signal?: AbortSignal;
 }
 
@@ -55,15 +60,16 @@ export async function request<T>(
   path: string,
   opts: RequestOptions = {},
 ): Promise<T> {
-  const { method = 'GET', body, auth = true, noContent = false, signal } = opts;
+  const { method = 'GET', body, auth = true, noContent = false, baseUrl, signal } = opts;
   const { accessToken } = useAuthStore.getState();
+  const base = baseUrl ?? API_BASE;
 
   const headers: Record<string, string> = {};
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   if (auth && accessToken) headers.Authorization = `Bearer ${accessToken}`;
 
   const doFetch = (token: string | null): Promise<Response> =>
-    fetch(`${API_BASE}${path}`, {
+    fetch(`${base}${path}`, {
       method,
       headers: {
         ...headers,

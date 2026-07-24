@@ -5,7 +5,7 @@
  *  fully exercised without a backend. */
 
 import type { Announcement, Changelog, Notification } from '@/types';
-import { request } from './core';
+import { request, NOTICE_BASE } from './core';
 
 const useMock = process.env.NEXT_PUBLIC_USE_MOCK_NOTICE !== '0';
 
@@ -100,11 +100,11 @@ const notifications: Notification[] = [
 ];
 
 async function realGet<T>(path: string): Promise<T> {
-  return request<T>(path);
+  return request<T>(path, { baseUrl: NOTICE_BASE });
 }
 
 async function realPost(path: string): Promise<void> {
-  await request<void>(path, { method: 'POST', noContent: true });
+  await request<void>(path, { method: 'POST', noContent: true, baseUrl: NOTICE_BASE });
 }
 
 export const noticeApi = {

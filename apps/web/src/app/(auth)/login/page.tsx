@@ -56,10 +56,13 @@ function LoginForm() {
         password: values.password,
       });
 
+      // Store tokens before fetching /me so the authed request carries the Bearer.
+      useAuthStore.getState().setTokens(tokens);
+
       // login returns tokens only; fetch user separately
       const user = await authApi.me();
 
-      useAuthStore.getState().login(tokens, user);
+      useAuthStore.getState().updateUser(user);
       router.push('/panel');
     } catch (err: unknown) {
       if (err instanceof ApiError) {
