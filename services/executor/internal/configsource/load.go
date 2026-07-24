@@ -47,8 +47,11 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net/http"
+	neturl "net/url"
 	"os"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/tokenmp/v3/services/executor/internal/snapshot"
@@ -57,6 +60,11 @@ import (
 // MaxConfigBytes bounds the size of a single raw configuration file. A file
 // larger than this is rejected before its content is fully read.
 const MaxConfigBytes int64 = 1 << 20 // 1 MiB
+
+// MaxConfigServiceResponseBytes bounds a Config Service HTTP response. The
+// envelope contains the raw snapshot plus safe metadata, so it has a separate
+// cap from a raw config file.
+const MaxConfigServiceResponseBytes int64 = 2 << 20 // 2 MiB
 
 // Structural decode limits applied before schema decoding. They bound the work
 // of the streaming structural walk so a hostile or pathological document cannot
@@ -101,6 +109,14 @@ var (
 	// ErrConfigCompileFailed is returned when the decoded snapshot fails
 	// compiler validation/normalization.
 	ErrConfigCompileFailed = errors.New("config source: config failed to compile")
+	// ErrConfigServiceUnavailable is returned when the Config Service request
+	// cannot be made. It never exposes the configured URL or transport error.
+	ErrConfigServiceUnavailable = errors.New("config source: config service unavailable")
+	// ErrConfigServiceStatus is returned when Config Service does not return OK.
+	ErrConfigServiceStatus = errors.New("config source: config service returned non-success status")
+	// ErrConfigServiceEmpty is returned when the response omits or nulls its
+	// snapshot field.
+	ErrConfigServiceEmpty = errors.New("config source: config service snapshot is empty")
 	// ErrConfigPublishFailed is returned when the initial snapshot cannot be
 	// atomically published (for example because the store already holds a
 	// snapshot at generation >= the bootstrap generation, or the store is nil).
@@ -182,6 +198,87 @@ func LoadFile(ctx context.Context, path string) (snapshot.ConfigSnapshot, error)
 		return snapshot.ConfigSnapshot{}, err
 	}
 	return parseConfig(raw)
+}
+
+// configServiceResponse mirrors the Config Service /v1/config/snapshots/latest
+// response. Only Revision and Snapshot are consumed; SHA256 and CreatedAt are
+// retained as response metadata for future verification/logging.
+type configServiceResponse struct {
+	Revision     string          `json:"revision"`
+	Snapshot     json.RawMessage `json:"snapshot"`
+	SHA256       string          `json:"sha256"`
+	CompiledMeta json.RawMessage `json:"compiled_meta"`
+	CreatedAt    time.Time       `json:"created_at"`
+}
+
+// LoadFromConfigService fetches the latest raw configuration snapshot over HTTP
+// and passes its snapshot field through the same strict parseConfig pipeline as
+// LoadFile. Transport, status, and decode failures are stable non-leaking
+// sentinels; the response URL and body are never surfaced.
+func LoadFromConfigService(ctx context.Context, url string) (snapshot.ConfigSnapshot, error) {
+	if err := ctx.Err(); err != nil {
+		return snapshot.ConfigSnapshot{}, err
+	}
+	url = strings.TrimSpace(url)
+	if url == "" {
+		return snapshot.ConfigSnapshot{}, ErrConfigBlankPath
+	}
+	parsedURL, err := neturl.Parse(url)
+	if err != nil || parsedURL == nil || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") || parsedURL.Host == "" || parsedURL.User != nil || parsedURL.RawQuery != "" || parsedURL.ForceQuery || parsedURL.Fragment != "" || parsedURL.Path != "/v1/config/snapshots/latest" {
+		return snapshot.ConfigSnapshot{}, ErrConfigServiceUnavailable
+	}
+
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return snapshot.ConfigSnapshot{}, ErrConfigServiceUnavailable
+	}
+	req.Header.Set("Accept", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return snapshot.ConfigSnapshot{}, ErrConfigServiceUnavailable
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return snapshot.ConfigSnapshot{}, ErrConfigServiceStatus
+	}
+
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, MaxConfigServiceResponseBytes+1))
+	if err != nil {
+		return snapshot.ConfigSnapshot{}, ErrConfigServiceUnavailable
+	}
+	if int64(len(raw)) > MaxConfigServiceResponseBytes {
+		return snapshot.ConfigSnapshot{}, ErrConfigTooLarge
+	}
+	if err := ctx.Err(); err != nil {
+		return snapshot.ConfigSnapshot{}, err
+	}
+
+	var serviceResp configServiceResponse
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&serviceResp); err != nil {
+		return snapshot.ConfigSnapshot{}, ErrConfigMalformed
+	}
+	if hasTrailingData(raw[dec.InputOffset():]) {
+		return snapshot.ConfigSnapshot{}, ErrConfigMalformed
+	}
+	if len(serviceResp.Snapshot) == 0 || bytes.Equal(bytes.TrimSpace(serviceResp.Snapshot), []byte("null")) {
+		return snapshot.ConfigSnapshot{}, ErrConfigServiceEmpty
+	}
+	cfg, err := parseConfig(serviceResp.Snapshot)
+	if err != nil {
+		return snapshot.ConfigSnapshot{}, err
+	}
+	// Config Service's outer revision is authoritative. Apply the same trim
+	// semantics used before compilation so all published revision views agree.
+	cfg.Revision = strings.TrimSpace(serviceResp.Revision)
+	return cfg, nil
 }
 
 // readConfigFile opens and reads a regular configuration file, bounded by
@@ -492,42 +589,48 @@ func CompileAndPublishNext(ctx context.Context, store *snapshot.Store, path stri
 	if store == nil {
 		return NextSnapshotMeta{}, ErrConfigPublishFailed
 	}
-	current, err := store.Current()
-	if err != nil {
-		return NextSnapshotMeta{}, ErrConfigNoInitialSnapshot
-	}
-
 	cfg, err := LoadFile(ctx, path)
 	if err != nil {
 		return NextSnapshotMeta{}, err
 	}
-	cfg.Revision = strings.TrimSpace(cfg.Revision)
+	return compileAndPublishNext(ctx, store, cfg)
+}
 
-	// Skip publish if revision is unchanged.
+// CompileAndPublishNextFromConfigService fetches, compiles, and publishes the
+// next generation from the Config Service latest snapshot endpoint.
+func CompileAndPublishNextFromConfigService(ctx context.Context, store *snapshot.Store, url string) (NextSnapshotMeta, error) {
+	if store == nil {
+		return NextSnapshotMeta{}, ErrConfigPublishFailed
+	}
+	cfg, err := LoadFromConfigService(ctx, url)
+	if err != nil {
+		return NextSnapshotMeta{}, err
+	}
+	return compileAndPublishNext(ctx, store, cfg)
+}
+
+func compileAndPublishNext(ctx context.Context, store *snapshot.Store, cfg snapshot.ConfigSnapshot) (NextSnapshotMeta, error) {
+	if store == nil {
+		return NextSnapshotMeta{}, ErrConfigPublishFailed
+	}
+	current, err := store.Current()
+	if err != nil {
+		return NextSnapshotMeta{}, ErrConfigNoInitialSnapshot
+	}
+	cfg.Revision = strings.TrimSpace(cfg.Revision)
 	if cfg.Revision == current.Revision() {
-		view := current.Value()
-		if view != nil {
-			return NextSnapshotMeta{
-				revision:   current.Revision(),
-				generation: current.Generation(),
-				models:     len(view.Models),
-				providers:  len(view.Providers),
-				routes:     len(view.Routes),
-				adapters:   len(view.Adapters),
-			}, nil
+		if view := current.Value(); view != nil {
+			return NextSnapshotMeta{revision: current.Revision(), generation: current.Generation(), models: len(view.Models), providers: len(view.Providers), routes: len(view.Routes), adapters: len(view.Adapters)}, nil
 		}
 	}
-
 	if err := ctx.Err(); err != nil {
 		return NextSnapshotMeta{}, err
 	}
-
 	compiled, err := snapshot.Compile(cfg)
 	if err != nil {
 		return NextSnapshotMeta{}, ErrConfigCompileFailed
 	}
-	nextGeneration := store.Generation() + 1
-	frozen, err := snapshot.NewCompiledSnapshotWithTime(cfg.Revision, &compiled, nextGeneration, cfg.CreatedAt)
+	frozen, err := snapshot.NewCompiledSnapshotWithTime(cfg.Revision, &compiled, store.Generation()+1, cfg.CreatedAt)
 	if err != nil {
 		return NextSnapshotMeta{}, ErrConfigCompileFailed
 	}
@@ -537,14 +640,7 @@ func CompileAndPublishNext(ctx context.Context, store *snapshot.Store, path stri
 	if err := store.Publish(frozen); err != nil {
 		return NextSnapshotMeta{}, ErrConfigPublishFailed
 	}
-	return NextSnapshotMeta{
-		revision:   frozen.Revision(),
-		generation: frozen.Generation(),
-		models:     len(compiled.Models),
-		providers:  len(compiled.Providers),
-		routes:     len(compiled.Routes),
-		adapters:   len(compiled.Adapters),
-	}, nil
+	return NextSnapshotMeta{revision: frozen.Revision(), generation: frozen.Generation(), models: len(compiled.Models), providers: len(compiled.Providers), routes: len(compiled.Routes), adapters: len(compiled.Adapters)}, nil
 }
 
 // InitialSnapshotMeta is the package-owned, safe metadata returned after
@@ -607,15 +703,29 @@ func CompileAndPublishInitial(ctx context.Context, store *snapshot.Store, path s
 	if err != nil {
 		return InitialSnapshotMeta{}, err
 	}
-	// Trim the revision on the loaded snapshot copy before compilation so the
-	// compiled config value, the published snapshot, and the store entry all
-	// carry the identical trimmed revision. The global compiler only requires
-	// a non-blank revision (it does not trim); NewCompiledSnapshot trims its
-	// external revision argument and would otherwise disagree with the
-	// untrimmed compiled.Revision value. Trimming here keeps the compiler's
-	// semantics unchanged while guaranteeing meta/store/value agreement.
+	return compileAndPublishInitial(ctx, store, cfg)
+}
+
+// CompileAndPublishInitialFromConfigService fetches, compiles, and publishes
+// the initial generation from the Config Service latest snapshot endpoint.
+func CompileAndPublishInitialFromConfigService(ctx context.Context, store *snapshot.Store, url string) (InitialSnapshotMeta, error) {
+	if store == nil {
+		return InitialSnapshotMeta{}, ErrConfigPublishFailed
+	}
+	cfg, err := LoadFromConfigService(ctx, url)
+	if err != nil {
+		return InitialSnapshotMeta{}, err
+	}
+	return compileAndPublishInitial(ctx, store, cfg)
+}
+
+// compileAndPublishInitial compiles a loaded ConfigSnapshot and publishes it
+// as the initial generation. It is shared by file and Config Service sources.
+func compileAndPublishInitial(ctx context.Context, store *snapshot.Store, cfg snapshot.ConfigSnapshot) (InitialSnapshotMeta, error) {
+	if store == nil {
+		return InitialSnapshotMeta{}, ErrConfigPublishFailed
+	}
 	cfg.Revision = strings.TrimSpace(cfg.Revision)
-	// Honor cancellation between the load and compile stages of bootstrap.
 	if err := ctx.Err(); err != nil {
 		return InitialSnapshotMeta{}, err
 	}
@@ -627,20 +737,11 @@ func CompileAndPublishInitial(ctx context.Context, store *snapshot.Store, path s
 	if err != nil {
 		return InitialSnapshotMeta{}, ErrConfigCompileFailed
 	}
-	// Honor cancellation between compile and publish so a caller who canceled
-	// mid-bootstrap does not publish a snapshot they no longer want.
 	if err := ctx.Err(); err != nil {
 		return InitialSnapshotMeta{}, err
 	}
 	if err := store.Publish(frozen); err != nil {
 		return InitialSnapshotMeta{}, ErrConfigPublishFailed
 	}
-	return InitialSnapshotMeta{
-		revision:   frozen.Revision(),
-		generation: frozen.Generation(),
-		models:     len(compiled.Models),
-		providers:  len(compiled.Providers),
-		routes:     len(compiled.Routes),
-		adapters:   len(compiled.Adapters),
-	}, nil
+	return InitialSnapshotMeta{revision: frozen.Revision(), generation: frozen.Generation(), models: len(compiled.Models), providers: len(compiled.Providers), routes: len(compiled.Routes), adapters: len(compiled.Adapters)}, nil
 }

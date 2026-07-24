@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"sync"
@@ -92,17 +94,50 @@ func mutateRevision(t *testing.T, raw []byte, newRevision string) []byte {
 	return out
 }
 
+func configServiceSnapshotServer(t *testing.T, revision string, raw []byte) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"revision": revision, "snapshot": json.RawMessage(raw), "sha256": "test-sha",
+			"compiled_meta": nil, "created_at": "2026-07-24T00:00:00Z",
+		})
+	}))
+}
+
+func TestReloadFromConfigService(t *testing.T) {
+	path := writeReloadConfig(t, minimalEmptyConfig)
+	store := bootstrapStore(t, path)
+	server := configServiceSnapshotServer(t, "service-reload-v2", []byte(minimalEmptyConfig))
+	defer server.Close()
+
+	r := NewReloader(store, path, server.URL+"/v1/config/snapshots/latest", nil, nil)
+	if err := r.Reload(context.Background()); err != nil {
+		t.Fatalf("Reload(): %v", err)
+	}
+	if got := store.Generation(); got != 2 {
+		t.Errorf("generation = %d, want 2", got)
+	}
+	current, err := store.Current()
+	if err != nil {
+		t.Fatalf("Current(): %v", err)
+	}
+	if got := current.Revision(); got != "service-reload-v2" {
+		t.Errorf("revision = %q, want service-reload-v2", got)
+	}
+}
+
 func TestReloadSuccess(t *testing.T) {
 	path := writeReloadConfig(t, minimalEmptyConfig)
 	store := bootstrapStore(t, path)
 	logger := &testLogger{}
-	_ = NewReloader(store, path, nil, logger)
+	_ = NewReloader(store, path, "", nil, logger)
 
 	// Write a new config with a different revision.
 	newConfig := string(mutateRevision(t, []byte(minimalEmptyConfig), "reload-v2"))
 	newPath := writeReloadConfig(t, newConfig)
 
-	r2 := NewReloader(store, newPath, nil, logger)
+	r2 := NewReloader(store, newPath, "", nil, logger)
 	if err := r2.Reload(context.Background()); err != nil {
 		t.Fatalf("Reload: %v", err)
 	}
@@ -119,7 +154,7 @@ func TestReloadUnchangedRevision(t *testing.T) {
 	path := writeReloadConfig(t, minimalEmptyConfig)
 	store := bootstrapStore(t, path)
 	logger := &testLogger{}
-	r := NewReloader(store, path, nil, logger)
+	r := NewReloader(store, path, "", nil, logger)
 
 	err := r.Reload(context.Background())
 	if !errors.Is(err, ErrReloadUnchanged) {
@@ -133,7 +168,7 @@ func TestReloadUnchangedRevision(t *testing.T) {
 func TestReloadNoInitialSnapshot(t *testing.T) {
 	var store snapshot.Store
 	logger := &testLogger{}
-	r := NewReloader(&store, "/nonexistent", nil, logger)
+	r := NewReloader(&store, "/nonexistent", "", nil, logger)
 
 	err := r.Reload(context.Background())
 	if !errors.Is(err, ErrReloadFailed) {
@@ -145,7 +180,7 @@ func TestReloadLoadFailure(t *testing.T) {
 	path := writeReloadConfig(t, minimalEmptyConfig)
 	store := bootstrapStore(t, path)
 	logger := &testLogger{}
-	r := NewReloader(store, filepath.Join(t.TempDir(), "missing.json"), nil, logger)
+	r := NewReloader(store, filepath.Join(t.TempDir(), "missing.json"), "", nil, logger)
 
 	err := r.Reload(context.Background())
 	if !errors.Is(err, ErrReloadFailed) {
@@ -171,7 +206,7 @@ func TestReloadCompileFailure(t *testing.T) {
   "Adapters": {}
 }`
 	badPath := writeReloadConfig(t, malformed)
-	r := NewReloader(store, badPath, nil, logger)
+	r := NewReloader(store, badPath, "", nil, logger)
 
 	err := r.Reload(context.Background())
 	if !errors.Is(err, ErrReloadFailed) {
@@ -195,7 +230,7 @@ func TestReloadValidationRejects(t *testing.T) {
 
 	newConfig := string(mutateRevision(t, []byte(minimalEmptyConfig), "reload-v2"))
 	newPath := writeReloadConfig(t, newConfig)
-	r := NewReloader(store, newPath, validator, logger)
+	r := NewReloader(store, newPath, "", validator, logger)
 
 	err := r.Reload(context.Background())
 	if !errors.Is(err, ErrReloadValidationFailed) {
@@ -218,7 +253,7 @@ func TestReloadValidationPasses(t *testing.T) {
 
 	newConfig := string(mutateRevision(t, []byte(minimalEmptyConfig), "reload-v2"))
 	newPath := writeReloadConfig(t, newConfig)
-	r := NewReloader(store, newPath, validator, logger)
+	r := NewReloader(store, newPath, "", validator, logger)
 
 	if err := r.Reload(context.Background()); err != nil {
 		t.Fatalf("Reload with passing validation: %v", err)
@@ -235,7 +270,7 @@ func TestReloadNilValidator(t *testing.T) {
 
 	newConfig := string(mutateRevision(t, []byte(minimalEmptyConfig), "reload-v2"))
 	newPath := writeReloadConfig(t, newConfig)
-	r := NewReloader(store, newPath, nil, logger)
+	r := NewReloader(store, newPath, "", nil, logger)
 
 	if err := r.Reload(context.Background()); err != nil {
 		t.Fatalf("Reload nil validator: %v", err)
@@ -251,7 +286,7 @@ func TestReloadNilLogger(t *testing.T) {
 
 	newConfig := string(mutateRevision(t, []byte(minimalEmptyConfig), "reload-v2"))
 	newPath := writeReloadConfig(t, newConfig)
-	r := NewReloader(store, newPath, nil, nil)
+	r := NewReloader(store, newPath, "", nil, nil)
 
 	if err := r.Reload(context.Background()); err != nil {
 		t.Fatalf("Reload nil logger: %v", err)
@@ -276,7 +311,7 @@ func TestReloadConcurrent(t *testing.T) {
 	var failedCount atomic.Int64
 
 	for i := 0; i < 10; i++ {
-		r := NewReloader(store, newPath, nil, logger)
+		r := NewReloader(store, newPath, "", nil, logger)
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -313,7 +348,7 @@ func TestReloadDoesNotLeakPathInLogs(t *testing.T) {
 	logger := &testLogger{}
 
 	missingPath := filepath.Join(t.TempDir(), "unique-leak-marker-reload-99999", "config.json")
-	r := NewReloader(store, missingPath, nil, logger)
+	r := NewReloader(store, missingPath, "", nil, logger)
 
 	_ = r.Reload(context.Background())
 

@@ -3,6 +3,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -28,6 +29,9 @@ const (
 	// EnvConfigFile names the strict secret-free configuration file path
 	// consumed by the config source at composition time.
 	EnvConfigFile = "EXECUTOR_CONFIG_FILE"
+	// EnvConfigServiceURL is the optional Config Service latest-snapshot URL.
+	// When set it is preferred over EnvConfigFile.
+	EnvConfigServiceURL = "EXECUTOR_CONFIG_SERVICE_URL"
 	// EnvCredentialRefMapJSON is the non-secret vault credential-ref →
 	// EXECUTOR_CREDENTIAL_* environment-name JSON mapping consumed by the
 	// credential environment resolver.
@@ -59,9 +63,12 @@ type Config struct {
 	ShutdownTimeout   time.Duration
 	ReadHeaderTimeout time.Duration
 	IdleTimeout       time.Duration
-	// ConfigFile is the validated, non-empty configuration file path. The
-	// composition root loads, scans, and compiles it at startup.
+	// ConfigFile is the optional fallback configuration file path. It is used
+	// when ConfigServiceURL is empty.
 	ConfigFile string
+	// ConfigServiceURL is an optional validated HTTP(S) Config Service latest
+	// snapshot endpoint. When non-empty it takes precedence over ConfigFile.
+	ConfigServiceURL string
 	// CredentialRefMapJSON is the non-secret credential-ref mapping JSON. It
 	// is retained verbatim for the composition root; its contents are never
 	// surfaced through formatting or errors.
@@ -93,7 +100,7 @@ type Config struct {
 // address containing only whitespace is rejected. Explicitly empty, invalid,
 // and non-positive durations are rejected.
 //
-// EXECUTOR_CONFIG_FILE and EXECUTOR_CREDENTIAL_REF_MAP_JSON are required.
+// At least one of EXECUTOR_CONFIG_FILE and EXECUTOR_CONFIG_SERVICE_URL is required; the service URL takes precedence when both are set. EXECUTOR_CREDENTIAL_REF_MAP_JSON is required.
 // EXECUTOR_IDENTITY_MAP_JSON is required when EXECUTOR_JWT_PUBLIC_KEY_FILE is
 // not set; when JWT is configured, identityenv becomes optional fallback.
 // Values are never included in error messages.
@@ -131,8 +138,16 @@ func Load(lookupEnv func(string) (string, bool)) (Config, error) {
 		return Config{}, err
 	}
 
-	if config.ConfigFile, err = requireNonEmpty(lookupEnv, EnvConfigFile); err != nil {
-		return Config{}, err
+	config.ConfigFile, _ = lookupEnv(EnvConfigFile)
+	config.ConfigFile = strings.TrimSpace(config.ConfigFile)
+	config.ConfigServiceURL, _ = lookupEnv(EnvConfigServiceURL)
+	config.ConfigServiceURL = strings.TrimSpace(config.ConfigServiceURL)
+	if config.ConfigServiceURL != "" {
+		if !validConfigServiceURL(config.ConfigServiceURL) {
+			return Config{}, fmt.Errorf("%s must be the http(s) latest snapshot endpoint without query, fragment, or userinfo", EnvConfigServiceURL)
+		}
+	} else if config.ConfigFile == "" {
+		return Config{}, fmt.Errorf("%s or %s must be set", EnvConfigServiceURL, EnvConfigFile)
 	}
 	if config.CredentialRefMapJSON, err = requireNonEmpty(lookupEnv, EnvCredentialRefMapJSON); err != nil {
 		return Config{}, err
@@ -221,4 +236,14 @@ func loadPositiveDuration(lookupEnv func(string) (string, bool), key string, def
 		return 0, fmt.Errorf("%s must be a positive duration", key)
 	}
 	return duration, nil
+}
+
+// validConfigServiceURL accepts only absolute HTTP(S) endpoints without URL
+// components that could carry credentials or alter the requested resource.
+func validConfigServiceURL(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil || u == nil {
+		return false
+	}
+	return (u.Scheme == "http" || u.Scheme == "https") && u.Host != "" && u.User == nil && u.RawQuery == "" && !u.ForceQuery && u.Fragment == "" && u.Path == "/v1/config/snapshots/latest"
 }

@@ -53,39 +53,42 @@ type Logger interface {
 // is safe to call Reload concurrently from multiple goroutines; the underlying
 // Store provides atomic publication with generation ordering.
 type Reloader struct {
-	store    *snapshot.Store
-	path     string
-	validate CompiledValidator
-	logger   Logger
+	store     *snapshot.Store
+	path      string
+	sourceURL string
+	validate  CompiledValidator
+	logger    Logger
 }
 
-// NewReloader creates a Reloader that will reload from path into store, with
-// an optional validation callback. If validate is nil, no validation is
+// NewReloader creates a Reloader that reloads from sourceURL when non-empty,
+// otherwise from path, into store with an optional validation callback. If validate is nil, no validation is
 // performed (the snapshot is published directly after compilation).
-func NewReloader(store *snapshot.Store, path string, validate CompiledValidator, logger Logger) *Reloader {
+func NewReloader(store *snapshot.Store, path, sourceURL string, validate CompiledValidator, logger Logger) *Reloader {
 	return &Reloader{
-		store:    store,
-		path:     strings.TrimSpace(path),
-		validate: validate,
-		logger:   logger,
+		store:     store,
+		path:      strings.TrimSpace(path),
+		sourceURL: strings.TrimSpace(sourceURL),
+		validate:  validate,
+		logger:    logger,
 	}
 }
 
-// WithLogger returns a new Reloader with the same store, path, and validator
+// WithLogger returns a new Reloader with the same store, source, and validator
 // but with the given logger. The original Reloader is not modified.
 func (r *Reloader) WithLogger(logger Logger) *Reloader {
 	if r == nil {
 		return nil
 	}
 	return &Reloader{
-		store:    r.store,
-		path:     r.path,
-		validate: r.validate,
-		logger:   logger,
+		store:     r.store,
+		path:      r.path,
+		sourceURL: r.sourceURL,
+		validate:  r.validate,
+		logger:    logger,
 	}
 }
 
-// Reload loads the configuration file, compiles it, optionally validates the
+// Reload loads the selected configuration source, compiles it, optionally validates the
 // compiled snapshot, and publishes it as the next generation. On success it
 // logs the generation transition and returns nil. On failure the old
 // generation is preserved, a sentinel error is returned, and the failure is
@@ -107,8 +110,13 @@ func (r *Reloader) Reload(ctx context.Context) error {
 	oldGen := current.Generation()
 	oldRev := current.Revision()
 
-	// Load the config file.
-	cfg, err := configsource.LoadFile(ctx, r.path)
+	// Load from Config Service when configured; otherwise use the file source.
+	var cfg snapshot.ConfigSnapshot
+	if r.sourceURL != "" {
+		cfg, err = configsource.LoadFromConfigService(ctx, r.sourceURL)
+	} else {
+		cfg, err = configsource.LoadFile(ctx, r.path)
+	}
 	if err != nil {
 		if r.logger != nil {
 			r.logger.Errorf("config reload: %s", ErrReloadFailed)
