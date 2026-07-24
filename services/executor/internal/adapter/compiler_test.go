@@ -876,6 +876,44 @@ func TestDSL01ToDSL12SecurityMatrix(t *testing.T) {
 	})
 }
 
+func TestCompileSetIfMissing(t *testing.T) {
+	compileRule := func(rule RequestRule) error {
+		t.Helper()
+		in := baseInput()
+		a := in.Adapters["a"]
+		a.Request.Rules = []RequestRule{rule}
+		in.Adapters["a"] = a
+		_, err := Compile(in)
+		return err
+	}
+
+	t.Run("accepts default followed by clamp", func(t *testing.T) {
+		in := baseInput()
+		a := in.Adapters["a"]
+		a.Request.Rules = []RequestRule{
+			{ID: "default-max-tokens", Action: RequestSetIfMissing, Path: "/max_tokens", Value: []byte(`32768`)},
+			{ID: "cap-max-tokens", Action: RequestClampNumber, Path: "/max_tokens", Min: floatp(0), Max: floatp(131072)},
+		}
+		in.Adapters["a"] = a
+		mustCompile(t, in)
+	})
+	for _, tc := range []struct {
+		name string
+		rule RequestRule
+	}{
+		{"protected path", RequestRule{ID: "default", Action: RequestSetIfMissing, Path: "/model", Value: []byte(`"x"`)}},
+		{"value reference", RequestRule{ID: "default", Action: RequestSetIfMissing, Path: "/max_tokens", Value: []byte(`32768`), ValueRef: "future-resolver"}},
+		{"missing path", RequestRule{ID: "default", Action: RequestSetIfMissing, Value: []byte(`32768`)}},
+		{"missing value", RequestRule{ID: "default", Action: RequestSetIfMissing, Path: "/max_tokens"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := compileRule(tc.rule); err == nil {
+				t.Fatal("Compile succeeded")
+			}
+		})
+	}
+}
+
 func TestCompileResponseRulesRejectUnsafeMatchersAndOutputs(t *testing.T) {
 	valid := func() ResponseRule {
 		return ResponseRule{

@@ -79,6 +79,28 @@ func TestEngineApplyFiniteActionsAndAtomicity(t *testing.T) {
 	}
 }
 
+func TestEngineSetIfMissing(t *testing.T) {
+	defaultAndCap := compiledEngineAdapter(t, []RequestRule{
+		{ID: "default-max-tokens", Action: RequestSetIfMissing, Path: "/max_tokens", Value: []byte(`32768`)},
+		{ID: "cap-max-tokens", Action: RequestClampNumber, Path: "/max_tokens", Min: floatp(0), Max: floatp(131072)},
+	})
+	if got := applyBody(t, defaultAndCap, `{}`); got["max_tokens"].(float64) != 32768 {
+		t.Fatalf("missing value = %#v, want injected default", got)
+	}
+	if got := applyBody(t, defaultAndCap, `{"max_tokens":200000}`); got["max_tokens"].(float64) != 131072 {
+		t.Fatalf("client value = %#v, want preserved then clamped", got)
+	}
+
+	set := compiledEngineAdapter(t, []RequestRule{{ID: "set", Action: RequestSet, Path: "/max_tokens", Value: []byte(`32768`)}})
+	conditional := compiledEngineAdapter(t, []RequestRule{{ID: "conditional", Action: RequestSetIfMissing, Path: "/max_tokens", Value: []byte(`32768`)}})
+	if got := applyBody(t, set, `{"max_tokens":99}`); got["max_tokens"].(float64) != 32768 {
+		t.Fatalf("set value = %#v, want unconditional replacement", got)
+	}
+	if got := applyBody(t, conditional, `{"max_tokens":99}`); got["max_tokens"].(float64) != 99 {
+		t.Fatalf("set_if_missing value = %#v, want client value", got)
+	}
+}
+
 func TestEngineAtomicityReturnsZeroResultOnAnyFailure(t *testing.T) {
 	// A set that succeeds followed by a clamp on a missing path must fail
 	// closed: the caller must never observe the partial /temperature set.
@@ -575,6 +597,7 @@ func TestEngineRuntimeDefendsProtectedBodyPaths(t *testing.T) {
 	// protected request channels, including escaped path tokens.
 	for _, rule := range []RequestRule{
 		{ID: "set", Action: RequestSet, Path: "/model", Value: []byte(`"x"`)},
+		{ID: "set-if-missing", Action: RequestSetIfMissing, Path: "/model", Value: []byte(`"x"`)},
 		{ID: "remove", Action: RequestRemove, Path: "/messages/0"},
 		{ID: "map", Action: RequestMapEnum, Path: "/input", EnumMap: map[string]string{"a": "b"}},
 		{ID: "clamp", Action: RequestClampNumber, Path: "/prompt", Min: floatp(0), Max: floatp(1)},
@@ -603,12 +626,12 @@ func TestEngineDefendsProtectedHeadersQueryAndValueRef(t *testing.T) {
 	if _, err := (Engine{}).Apply(context.Background(), ApplyInput{Adapter: badQuery, Body: []byte(`{}`)}); err == nil {
 		t.Fatal("Apply wrote unsafe query name")
 	}
-	for _, action := range []RequestAction{RequestSet, RequestCopy, RequestRemove, RequestRename, RequestMapEnum, RequestClampNumber, RequestSetHeader, RequestSetQuery} {
+	for _, action := range []RequestAction{RequestSet, RequestSetIfMissing, RequestCopy, RequestRemove, RequestRename, RequestMapEnum, RequestClampNumber, RequestSetHeader, RequestSetQuery} {
 		rule := RequestRule{ID: "v", Action: action, ValueRef: "future-resolver"}
 		switch action {
-		case RequestSet, RequestMapEnum, RequestClampNumber:
+		case RequestSet, RequestSetIfMissing, RequestMapEnum, RequestClampNumber:
 			rule.Path = "/n"
-			if action == RequestSet {
+			if action == RequestSet || action == RequestSetIfMissing {
 				rule.Value = []byte(`1`)
 			}
 			if action == RequestMapEnum {

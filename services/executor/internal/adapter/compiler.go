@@ -709,6 +709,7 @@ func requestPolicy(p RequestPolicy) error {
 	}
 	ids := map[string]bool{}
 	var reads, writes []string
+	conditionalDefaults := map[string]bool{}
 	for _, r := range p.Rules {
 		if !safeSegment(r.ID) || ids[r.ID] || !r.Action.Valid() {
 			return fmt.Errorf("invalid or duplicate request rule %q", r.ID)
@@ -717,7 +718,7 @@ func requestPolicy(p RequestPolicy) error {
 			return fmt.Errorf("request rule %q uses unsupported value reference", r.ID)
 		}
 		ids[r.ID] = true
-		write := func(path string, allowAppend bool) error {
+		write := func(path string, allowAppend, allowPriorConditionalDefault bool) error {
 			if err := validateWritablePath(path); err != nil {
 				return err
 			}
@@ -726,6 +727,13 @@ func requestPolicy(p RequestPolicy) error {
 			}
 			for _, prior := range writes {
 				if pointerOverlaps(path, prior) {
+					// A clamp after a conditional default at the same path is the
+					// one intentional ordered composition: it supplies a default,
+					// then bounds either that default or the caller-supplied value.
+					// All other overlaps remain forbidden.
+					if allowPriorConditionalDefault && conditionalDefaults[prior] && path == prior {
+						continue
+					}
 					return fmt.Errorf("request rule write conflict")
 				}
 			}
@@ -773,15 +781,18 @@ func requestPolicy(p RequestPolicy) error {
 			if err := validateJSONStringLiteral(r.Value); err != nil {
 				return fmt.Errorf("invalid query value")
 			}
-		case RequestSet:
+		case RequestSet, RequestSetIfMissing:
 			if r.From != "" || r.To != "" || r.Name != "" || len(r.EnumMap) != 0 || r.Min != nil || r.Max != nil {
 				return fmt.Errorf("set action has inapplicable fields")
 			}
 			if err := validateJSONLiteral(r.Value); err != nil {
 				return fmt.Errorf("invalid set value")
 			}
-			if err := write(r.Path, true); err != nil {
+			if err := write(r.Path, r.Action == RequestSet, false); err != nil {
 				return err
+			}
+			if r.Action == RequestSetIfMissing {
+				conditionalDefaults[r.Path] = true
 			}
 		case RequestCopy:
 			if r.Path != "" || r.Name != "" || len(r.Value) != 0 || len(r.EnumMap) != 0 || r.Min != nil || r.Max != nil {
@@ -790,7 +801,7 @@ func requestPolicy(p RequestPolicy) error {
 			if err := read(r.From); err != nil {
 				return err
 			}
-			if err := write(r.To, true); err != nil {
+			if err := write(r.To, true, false); err != nil {
 				return err
 			}
 		case RequestRename:
@@ -803,33 +814,36 @@ func requestPolicy(p RequestPolicy) error {
 			if pointerTerminal(r.From) == "-" {
 				return fmt.Errorf("invalid JSON pointer source")
 			}
-			if err := write(r.From, false); err != nil {
+			if err := write(r.From, false, false); err != nil {
 				return err
 			}
-			if err := write(r.To, true); err != nil {
+			if err := write(r.To, true, false); err != nil {
 				return err
 			}
 		case RequestRemove:
 			if r.From != "" || r.To != "" || r.Name != "" || len(r.Value) != 0 || len(r.EnumMap) != 0 || r.Min != nil || r.Max != nil {
 				return fmt.Errorf("remove action has inapplicable fields")
 			}
-			if err := write(r.Path, false); err != nil {
+			if err := write(r.Path, false, false); err != nil {
 				return err
 			}
 		case RequestMapEnum:
 			if r.From != "" || r.To != "" || r.Name != "" || len(r.Value) != 0 || r.Min != nil || r.Max != nil || len(r.EnumMap) == 0 || len(r.EnumMap) > maxEnumEntries {
 				return fmt.Errorf("invalid enum map")
 			}
-			if err := write(r.Path, false); err != nil {
+			if err := write(r.Path, false, false); err != nil {
 				return err
 			}
 		case RequestClampNumber:
 			if r.From != "" || r.To != "" || r.Name != "" || len(r.Value) != 0 || len(r.EnumMap) != 0 || r.Min == nil || r.Max == nil || math.IsNaN(*r.Min) || math.IsNaN(*r.Max) || math.IsInf(*r.Min, 0) || math.IsInf(*r.Max, 0) || *r.Min > *r.Max {
 				return fmt.Errorf("invalid clamp")
 			}
-			if err := write(r.Path, false); err != nil {
+			if err := write(r.Path, false, true); err != nil {
 				return err
 			}
+			// Consume the sole permitted overlap, keeping any later writer at
+			// this path subject to the normal conflict rejection.
+			delete(conditionalDefaults, r.Path)
 		}
 	}
 	return nil

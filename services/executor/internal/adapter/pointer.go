@@ -1,11 +1,14 @@
 package adapter
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 	"unicode/utf8"
 )
+
+var errPointerNotFound = errors.New("JSON pointer does not exist")
 
 func pointerGet(document any, pointer string) (any, error) {
 	parts, err := pointerParts(pointer)
@@ -19,7 +22,7 @@ func pointerGet(document any, pointer string) (any, error) {
 			var ok bool
 			current, ok = node[part]
 			if !ok {
-				return nil, fmt.Errorf("JSON pointer does not exist")
+				return nil, errPointerNotFound
 			}
 		case []any:
 			index, err := arrayIndex(part, len(node), false)
