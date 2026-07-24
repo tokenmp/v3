@@ -33,37 +33,129 @@ export interface ApiErrorBody {
   error: { code: ErrorCode; message: string };
 }
 
-// ---- Mock-domain types (Panel pages). Backend endpoints not yet implemented. ----
+// ---- Business domain types (aligned to packages/contracts/openapi/api/v1.yaml). ----
+// camelCase matches the contract field names exactly. The mock layer returns
+// the same shape so swapping to the real API is transparent to components.
+
+export type ApiKeyStatus = 'active' | 'disabled';
 
 export interface ApiKey {
   id: string;
   name: string;
-  /** Masked display, e.g. "sk-***abcd". */
-  masked: string;
-  /** Full key, only present once right after creation. */
-  full_key?: string;
-  created_at: string;
-  last_used_at: string | null;
-  status: 'active' | 'revoked';
+  /** Display prefix, e.g. "tmp_abcd". */
+  keyPrefix: string;
+  /** Display suffix, e.g. "wxyz". */
+  keySuffix: string;
+  status: ApiKeyStatus;
+  lastUsedAt: string | null;
+  expiresAt: string | null;
+  createdAt: string;
 }
+
+/** Returned only once on create/rotate; carries the full secret. */
+export interface ApiKeyCreated extends ApiKey {
+  /** Full secret, shown once. e.g. "tmp_<32 chars>". */
+  secret: string;
+}
+
+export interface CreateKeyInput {
+  name?: string;
+  expiresAt?: string;
+}
+
+export interface UpdateKeyInput {
+  name?: string;
+  status?: ApiKeyStatus;
+}
+
+export type PlanType = 'coding' | 'token';
+export type PlanStatus = 'active' | 'disabled';
+
+export interface Plan {
+  id: string;
+  name: string;
+  planType: PlanType;
+  price: number;
+  durationDays: number;
+  /** Decimal quota as a string to preserve precision. */
+  totalQuota: string;
+  allowedModels: string[];
+  status: PlanStatus;
+}
+
+export type UserPlanStatus = 'active' | 'expired' | 'disabled';
+
+export interface UserPlan {
+  id: string;
+  planId: string;
+  planType: PlanType;
+  totalQuota: string;
+  remainingQuota: string;
+  priority: number | null;
+  status: UserPlanStatus;
+  activatedAt: string;
+  expiresAt: string | null;
+}
+
+/** Decimal amounts as strings to preserve precision. */
+export interface UserBalance {
+  codingRemaining: string;
+  tokenRemaining: string;
+}
+
+export type RequestLogStatus = 'success' | 'error';
 
 export interface RequestLog {
-  id: string;
-  created_at: string;
+  requestId: string;
   model: string;
-  provider: string;
-  status: number;
-  duration_ms: number;
-  tokens_input: number;
-  tokens_output: number;
+  status: RequestLogStatus;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  /** Decimal cost as a string. */
+  cost: string | null;
+  durationMs: number | null;
+  createdAt: string;
 }
 
-export interface QuotaSummary {
-  plan_name: string;
-  used_tokens: number;
-  total_tokens: number;
-  reserved_tokens: number;
-  expires_at: string | null;
+export interface RequestLogDetail extends RequestLog {
+  provider: string;
+  errorMessage: string | null;
+  attempts: RequestLogAttempt[];
+}
+
+export interface RequestLogAttempt {
+  // The contract leaves attempt item fields open; the backend fills them.
+  // Kept as a loose record so the detail view can render whatever is present.
+  [key: string]: unknown;
+}
+
+export interface UsageStatsByModel {
+  model: string;
+  requests: number;
+  inputTokens: string;
+  outputTokens: string;
+  cost: string;
+}
+
+export interface UsageStats {
+  days: number;
+  totalRequests: number;
+  totalInputTokens: string;
+  totalOutputTokens: string;
+  totalCost: string;
+  byModel: UsageStatsByModel[];
+}
+
+export type PreferredBilling = 'coding' | 'token';
+
+export interface UserSettings {
+  preferredBilling: PreferredBilling;
+  fallbackEnabled: boolean;
+}
+
+export interface UserSettingsUpdate {
+  preferredBilling?: PreferredBilling;
+  fallbackEnabled?: boolean;
 }
 
 // ---- Notice domain types (aligned to packages/contracts/openapi/notice/v1.yaml). ----

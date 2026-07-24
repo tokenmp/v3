@@ -17,10 +17,8 @@ import {
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import type { RequestLog } from '@/types';
 
-function statusVariant(status: number) {
-  if (status >= 200 && status < 300) return 'success' as const;
-  if (status >= 400 && status < 500) return 'warning' as const;
-  return 'destructive' as const;
+function statusVariant(status: string) {
+  return status === 'success' ? ('success' as const) : ('destructive' as const);
 }
 
 function formatTime(iso: string) {
@@ -50,7 +48,6 @@ export default function RequestsPage() {
             <TableHeader>
               <TableRow>
                 <TableHead>时间</TableHead>
-                <TableHead>Provider</TableHead>
                 <TableHead>模型</TableHead>
                 <TableHead>状态</TableHead>
                 <TableHead>耗时</TableHead>
@@ -60,23 +57,22 @@ export default function RequestsPage() {
             </TableHeader>
             <TableBody>
               {items.map((r: RequestLog) => (
-                <TableRow key={r.id}>
+                <TableRow key={r.requestId}>
                   <TableCell className="text-xs text-muted-foreground">
-                    {formatTime(r.created_at)}
+                    {formatTime(r.createdAt)}
                   </TableCell>
-                  <TableCell className="text-sm">{r.provider}</TableCell>
                   <TableCell className="text-sm">{r.model}</TableCell>
                   <TableCell>
-                    <Badge variant={statusVariant(r.status)}>{r.status}</Badge>
+                    <Badge variant={statusVariant(r.status)}>{r.status === 'success' ? '成功' : '失败'}</Badge>
                   </TableCell>
-                  <TableCell className="text-sm">{r.duration_ms}ms</TableCell>
-                  <TableCell className="text-sm">{r.tokens_input.toLocaleString()}</TableCell>
-                  <TableCell className="text-sm">{r.tokens_output.toLocaleString()}</TableCell>
+                  <TableCell className="text-sm">{r.durationMs ?? '—'}ms</TableCell>
+                  <TableCell className="text-sm">{(r.inputTokens ?? 0).toLocaleString()}</TableCell>
+                  <TableCell className="text-sm">{(r.outputTokens ?? 0).toLocaleString()}</TableCell>
                 </TableRow>
               ))}
               {items.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
+                  <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
                     暂无请求记录
                   </TableCell>
                 </TableRow>
@@ -89,17 +85,16 @@ export default function RequestsPage() {
       {/* Mobile card list */}
       <div className="md:hidden space-y-3">
         {items.map((r: RequestLog) => (
-          <Card key={r.id}>
+          <Card key={r.requestId}>
             <CardContent className="p-4 space-y-2">
               <div className="flex items-center justify-between">
                 <span className="font-medium text-sm">{r.model}</span>
-                <Badge variant={statusVariant(r.status)}>{r.status}</Badge>
+                <Badge variant={statusVariant(r.status)}>{r.status === 'success' ? '成功' : '失败'}</Badge>
               </div>
               <div className="text-xs text-muted-foreground space-y-0.5">
-                <p>Provider：{r.provider}</p>
-                <p>时间：{formatTime(r.created_at)}</p>
-                <p>耗时：{r.duration_ms}ms</p>
-                <p>Token：{r.tokens_input} / {r.tokens_output}</p>
+                <p>时间：{formatTime(r.createdAt)}</p>
+                <p>耗时：{r.durationMs ?? '—'}ms</p>
+                <p>Token：{r.inputTokens ?? '—'} / {r.outputTokens ?? '—'}</p>
               </div>
             </CardContent>
           </Card>

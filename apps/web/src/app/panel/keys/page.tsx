@@ -23,9 +23,9 @@ import {
   DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog';
-import { Plus, Copy, Trash2 } from 'lucide-react';
+import { Plus, Copy, Trash2, RotateCw } from 'lucide-react';
 import { toast } from 'sonner';
-import type { ApiKey } from '@/types';
+import type { ApiKey, ApiKeyCreated } from '@/types';
 
 function formatTime(iso: string) {
   return new Date(iso).toLocaleString('zh-CN');
@@ -43,7 +43,7 @@ export default function KeysPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [keyName, setKeyName] = useState('');
   const createMutation = useMutation({
-    mutationFn: (name: string) => userApi.createKey(name),
+    mutationFn: (name: string) => userApi.createKey({ name }),
     onSuccess: (newKey) => {
       setCreateOpen(false);
       setKeyName('');
@@ -53,8 +53,8 @@ export default function KeysPage() {
     onError: () => toast.error('创建密钥失败'),
   });
 
-  // Reveal dialog
-  const [revealKey, setRevealKey] = useState<ApiKey | null>(null);
+  // Reveal dialog (ApiKeyCreated carries the one-time secret)
+  const [revealKey, setRevealKey] = useState<ApiKeyCreated | null>(null);
 
   // Revoke dialog
   const [revokeTarget, setRevokeTarget] = useState<ApiKey | null>(null);
@@ -66,6 +66,19 @@ export default function KeysPage() {
       toast.success('密钥已撤销');
     },
     onError: () => toast.error('撤销密钥失败'),
+  });
+
+  // Rotate
+  const [rotateTarget, setRotateTarget] = useState<ApiKey | null>(null);
+  const rotateMutation = useMutation({
+    mutationFn: (id: string) => userApi.rotateKey(id),
+    onSuccess: (newKey) => {
+      setRotateTarget(null);
+      setRevealKey(newKey);
+      queryClient.invalidateQueries({ queryKey: ['keys'] });
+      toast.success('密钥已轮换');
+    },
+    onError: () => toast.error('轮换密钥失败'),
   });
 
   const copyToClipboard = (text: string, label: string) => {
@@ -101,22 +114,30 @@ export default function KeysPage() {
               {(keys ?? []).map((k: ApiKey) => (
                 <TableRow key={k.id}>
                   <TableCell className="font-medium">{k.name}</TableCell>
-                  <TableCell className="font-mono text-xs">{k.masked}</TableCell>
+                  <TableCell className="font-mono text-xs">{k.keyPrefix}…{k.keySuffix}</TableCell>
                   <TableCell className="text-xs text-muted-foreground">
-                    {formatTime(k.created_at)}
+                    {formatTime(k.createdAt)}
                   </TableCell>
                   <TableCell className="text-xs text-muted-foreground">
-                    {k.last_used_at ? formatTime(k.last_used_at) : '—'}
+                    {k.lastUsedAt ? formatTime(k.lastUsedAt) : '—'}
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-1">
                       <Button
                         variant="ghost"
                         size="icon"
-                        onClick={() => copyToClipboard(k.masked, '密钥')}
+                        onClick={() => copyToClipboard(`${k.keyPrefix}…${k.keySuffix}`, '密钥')}
                         title="复制密钥"
                       >
                         <Copy className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => setRotateTarget(k)}
+                        title="轮换密钥"
+                      >
+                        <RotateCw className="h-4 w-4" />
                       </Button>
                       <Button
                         variant="ghost"
@@ -151,20 +172,29 @@ export default function KeysPage() {
                 <span className="font-medium text-sm">{k.name}</span>
                 <Badge variant="success">活跃</Badge>
               </div>
-              <p className="font-mono text-xs text-muted-foreground">{k.masked}</p>
+              <p className="font-mono text-xs text-muted-foreground">{k.keyPrefix}…{k.keySuffix}</p>
               <div className="flex items-center justify-between text-xs text-muted-foreground">
-                <span>创建：{formatTime(k.created_at)}</span>
-                <span>使用：{k.last_used_at ? formatTime(k.last_used_at) : '—'}</span>
+                <span>创建：{formatTime(k.createdAt)}</span>
+                <span>使用：{k.lastUsedAt ? formatTime(k.lastUsedAt) : '—'}</span>
               </div>
               <div className="flex gap-2 pt-1">
                 <Button
                   variant="outline"
                   size="sm"
                   className="flex-1"
-                  onClick={() => copyToClipboard(k.masked, '密钥')}
+                  onClick={() => copyToClipboard(`${k.keyPrefix}…${k.keySuffix}`, '密钥')}
                 >
                   <Copy className="h-3.5 w-3.5" />
                   复制
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="flex-1"
+                  onClick={() => setRotateTarget(k)}
+                >
+                  <RotateCw className="h-3.5 w-3.5" />
+                  轮换
                 </Button>
                 <Button
                   variant="outline"
@@ -224,7 +254,7 @@ export default function KeysPage() {
           </DialogDescription>
         </DialogHeader>
         <div className="rounded-md border bg-muted/50 p-3 mt-2">
-          <code className="break-all text-xs font-mono">{revealKey?.full_key ?? ''}</code>
+          <code className="break-all text-xs font-mono">{revealKey?.secret ?? ''}</code>
         </div>
         <DialogFooter>
           <Button
@@ -235,8 +265,8 @@ export default function KeysPage() {
           </Button>
           <Button
             onClick={() => {
-              if (revealKey?.full_key) {
-                copyToClipboard(revealKey.full_key, '完整密钥');
+              if (revealKey?.secret) {
+                copyToClipboard(revealKey.secret, '完整密钥');
               }
             }}
           >
@@ -267,6 +297,30 @@ export default function KeysPage() {
             disabled={revokeMutation.isPending}
           >
             确认撤销
+          </Button>
+        </DialogFooter>
+      </Dialog>
+
+      {/* Rotate confirmation dialog */}
+      <Dialog
+        open={!!rotateTarget}
+        onOpenChange={(open) => !open && setRotateTarget(null)}
+      >
+        <DialogHeader>
+          <DialogTitle>轮换密钥</DialogTitle>
+          <DialogDescription>
+            确定要轮换密钥「{rotateTarget?.name}」吗？将生成新密钥，旧密钥立即失效。新密钥仅显示一次。
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setRotateTarget(null)}>
+            取消
+          </Button>
+          <Button
+            onClick={() => rotateTarget && rotateMutation.mutate(rotateTarget.id)}
+            disabled={rotateMutation.isPending}
+          >
+            确认轮换
           </Button>
         </DialogFooter>
       </Dialog>

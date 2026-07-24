@@ -16,10 +16,8 @@ import {
 import { User, Zap, ShieldCheck } from 'lucide-react';
 import type { RequestLog } from '@/types';
 
-function statusVariant(status: number) {
-  if (status >= 200 && status < 300) return 'success' as const;
-  if (status >= 400 && status < 500) return 'warning' as const;
-  return 'destructive' as const;
+function statusVariant(status: string) {
+  return status === 'success' ? ('success' as const) : ('destructive' as const);
 }
 
 function formatTime(iso: string) {
@@ -29,9 +27,14 @@ function formatTime(iso: string) {
 export default function OverviewPage() {
   const user = useAuthStore((s) => s.user);
 
-  const { data: quota } = useQuery({
-    queryKey: ['quota'],
-    queryFn: userApi.getQuota,
+  const { data: balance } = useQuery({
+    queryKey: ['balance'],
+    queryFn: () => userApi.getBalance(),
+  });
+
+  const { data: userPlans } = useQuery({
+    queryKey: ['userPlans'],
+    queryFn: userApi.getUserPlans,
   });
 
   const { data: recentRequests } = useQuery({
@@ -39,7 +42,11 @@ export default function OverviewPage() {
     queryFn: () => userApi.getRecentRequests(5),
   });
 
-  const usedPct = quota ? Math.round((quota.used_tokens / quota.total_tokens) * 100) : 0;
+  const activePlan = userPlans?.find((p) => p.status === 'active');
+  const total = activePlan ? Number(activePlan.totalQuota) : Number(balance?.tokenRemaining ?? 0);
+  const remaining = activePlan ? Number(activePlan.remainingQuota) : Number(balance?.tokenRemaining ?? 0);
+  const used = Math.max(0, total - remaining);
+  const usedPct = total > 0 ? Math.round((used / total) * 100) : 0;
 
   return (
     <div className="space-y-6">
@@ -77,10 +84,10 @@ export default function OverviewPage() {
             <CardTitle className="text-base">配额</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2 text-sm">
-            <p className="text-muted-foreground">{quota?.plan_name ?? '—'}</p>
+            <p className="text-muted-foreground">{activePlan ? `${activePlan.planType === 'coding' ? '编程' : 'Token'} 套餐` : '—'}</p>
             <div className="flex items-center justify-between text-xs">
               <span>
-                已用 {(quota?.used_tokens ?? 0).toLocaleString()} / {(quota?.total_tokens ?? 0).toLocaleString()} tokens
+                已用 {used.toLocaleString()} / {total.toLocaleString()} tokens
               </span>
               <span className="text-muted-foreground">{usedPct}%</span>
             </div>
@@ -90,6 +97,9 @@ export default function OverviewPage() {
                 style={{ width: `${usedPct}%` }}
               />
             </div>
+            {activePlan?.expiresAt && (
+              <p className="text-xs text-muted-foreground">到期：{formatTime(activePlan.expiresAt)}</p>
+            )}
           </CardContent>
         </Card>
 
@@ -127,17 +137,17 @@ export default function OverviewPage() {
               </TableHeader>
               <TableBody>
                 {(recentRequests ?? []).map((r: RequestLog) => (
-                  <TableRow key={r.id}>
+                  <TableRow key={r.requestId}>
                     <TableCell className="text-xs text-muted-foreground">
-                      {formatTime(r.created_at)}
+                      {formatTime(r.createdAt)}
                     </TableCell>
                     <TableCell className="text-sm">{r.model}</TableCell>
                     <TableCell>
-                      <Badge variant={statusVariant(r.status)}>{r.status}</Badge>
+                      <Badge variant={statusVariant(r.status)}>{r.status === 'success' ? '成功' : '失败'}</Badge>
                     </TableCell>
-                    <TableCell className="text-sm">{r.duration_ms}ms</TableCell>
+                    <TableCell className="text-sm">{r.durationMs ?? '—'}ms</TableCell>
                     <TableCell className="text-sm">
-                      {r.tokens_input}/{r.tokens_output}
+                      {r.inputTokens ?? '—'}/{r.outputTokens ?? '—'}
                     </TableCell>
                   </TableRow>
                 ))}
@@ -156,16 +166,16 @@ export default function OverviewPage() {
           <div className="md:hidden space-y-3">
             {(recentRequests ?? []).map((r: RequestLog) => (
               <div
-                key={r.id}
+                key={r.requestId}
                 className="flex items-center justify-between rounded-lg border p-3"
               >
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium truncate">{r.model}</p>
                   <p className="text-xs text-muted-foreground">
-                    {formatTime(r.created_at)} · {r.duration_ms}ms
+                    {formatTime(r.createdAt)} · {r.durationMs ?? '—'}ms
                   </p>
                 </div>
-                <Badge variant={statusVariant(r.status)}>{r.status}</Badge>
+                <Badge variant={statusVariant(r.status)}>{r.status === 'success' ? '成功' : '失败'}</Badge>
               </div>
             ))}
             {(!recentRequests || recentRequests.length === 0) && (
