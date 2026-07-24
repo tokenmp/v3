@@ -113,7 +113,6 @@ export default function AnnouncementsPage() {
 
   return (
     <div className="space-y-6">
-      <h2 className="text-2xl font-bold">公告</h2>
 
       {isLoading && (
         <Card>

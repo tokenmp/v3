@@ -117,8 +117,7 @@ export default function NotificationsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold">通知</h2>
+      <div className="flex items-center justify-end">
         {hasUnread && (
           <Button
             size="sm"

@@ -43,7 +43,6 @@ export default function OverviewPage() {
 
   return (
     <div className="space-y-6">
-      <h2 className="text-2xl font-bold">概览</h2>
 
       {/* Stat cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">

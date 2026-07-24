@@ -1,14 +1,15 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { useMutation } from '@tanstack/react-query';
-import { Sun, Moon, ChevronDown, KeyRound, Laptop, LogOut } from 'lucide-react';
+import { Sun, Moon, ChevronDown, KeyRound, Laptop, LogOut, ChevronRight } from 'lucide-react';
 import { toast } from 'sonner';
 import { TokenMPLogoMark } from '@/components/tokenmp-logo';
 import { useTheme } from '@/components/theme-provider';
 import { useAuthStore } from '@/lib/auth';
 import { authApi } from '@/lib/api/auth';
+import { navGroups } from '@/lib/nav';
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -25,9 +26,23 @@ interface HeaderProps {
   title?: string;
 }
 
-export function Header({ title = 'TokenMP' }: HeaderProps) {
+/** Resolve the current page label from the nav config based on the pathname. */
+function useCurrentLabel(pathname: string): string {
+  for (const group of navGroups) {
+    for (const item of group.items) {
+      // Exact match for the overview route; prefix match for the rest so
+      // nested paths still surface their top-level section label.
+      if (item.href === pathname) return item.label;
+      if (item.href !== '/panel' && pathname.startsWith(item.href + '/')) return item.label;
+    }
+  }
+  return '';
+}
+
+export function Header({ title: _title = 'TokenMP' }: HeaderProps) {
   const { theme, toggleTheme } = useTheme();
   const router = useRouter();
+  const pathname = usePathname();
   const user = useAuthStore((s) => s.user);
   const refreshToken = useAuthStore((s) => s.refreshToken);
   const logout = useAuthStore((s) => s.logout);
@@ -38,6 +53,7 @@ export function Header({ title = 'TokenMP' }: HeaderProps) {
 
   const email = user?.email ?? '';
   const initial = email.charAt(0).toUpperCase() || '?';
+  const currentLabel = useCurrentLabel(pathname);
 
   const logoutMutation = useMutation({
     mutationFn: () => (refreshToken ? authApi.logout(refreshToken) : Promise.resolve()),
@@ -63,12 +79,18 @@ export function Header({ title = 'TokenMP' }: HeaderProps) {
 
   return (
     <header className="flex h-16 items-center justify-between border-b bg-card px-4 sm:px-6">
-      {/* Left */}
-      <div className="flex items-center gap-3">
+      {/* Left: logo (mobile) + breadcrumb */}
+      <div className="flex items-center gap-2 min-w-0">
         <div className="md:hidden">
           <TokenMPLogoMark className="h-7 w-7" />
         </div>
-        <h1 className="hidden md:block font-semibold text-lg">{title}</h1>
+        <nav aria-label="面包屑" className="flex items-center gap-1.5 text-sm min-w-0">
+          <span className="hidden sm:inline font-semibold text-foreground/80">TokenMP</span>
+          <ChevronRight className="hidden sm:block h-3.5 w-3.5 text-muted-foreground shrink-0" />
+          <span className="font-semibold text-foreground truncate" title={currentLabel}>
+            {currentLabel || 'TokenMP'}
+          </span>
+        </nav>
       </div>
 
       {/* Right */}

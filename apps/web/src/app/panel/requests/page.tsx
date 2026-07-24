@@ -42,7 +42,6 @@ export default function RequestsPage() {
 
   return (
     <div className="space-y-6">
-      <h2 className="text-2xl font-bold">请求日志</h2>
 
       {/* Desktop table */}
       <div className="hidden md:block">

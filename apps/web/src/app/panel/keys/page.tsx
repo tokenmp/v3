@@ -77,8 +77,7 @@ export default function KeysPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold">API 密钥</h2>
+      <div className="flex items-center justify-end">
         <Button onClick={() => setCreateOpen(true)} size="sm">
           <Plus className="h-4 w-4" />
           创建密钥
