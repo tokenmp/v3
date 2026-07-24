@@ -30,12 +30,16 @@ type Server = authv1api.Server
 // request.
 type UserStore = authv1api.UserStore
 
+// APIKeyStore is the persistence port for API key management endpoints.
+type APIKeyStore = authv1api.APIKeyStore
+
 // New builds a Chi router and the configured http.Server. The router exposes
 // the health endpoints plus the auth identity flow routes, all registered by
 // the generated Chi strict handler from the OpenAPI contract.
 // jwtVerifier and userStore are wired for the authenticated
 // routes (me / password / logout-all); authService backs all routes.
-func New(addr string, pinger Pinger, jwtVerifier *jwt.Verifier, authService *auth.Service, userStore UserStore) *Server {
+// apiKeyStore 启用 /api/v1/auth/keys* 管理端点；nil 时这些端点返回 500。
+func New(addr string, pinger Pinger, jwtVerifier *jwt.Verifier, authService *auth.Service, userStore UserStore, apiKeyStore APIKeyStore) *Server {
 	return authv1api.NewServer(authv1api.ServerConfig{
 		Addr:        addr,
 		Pinger:      pinger,
@@ -43,5 +47,6 @@ func New(addr string, pinger Pinger, jwtVerifier *jwt.Verifier, authService *aut
 		UserStore:   userStore,
 		AuthService: authService,
 		AccessTTL:   15 * time.Minute,
+		APIKeyStore: apiKeyStore,
 	})
 }

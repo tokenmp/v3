@@ -264,3 +264,132 @@ func TestAPIKeyRepository_Flow(t *testing.T) {
 		t.Errorf("Create duplicate key hash = %v, want ErrConstraint", err)
 	}
 }
+
+// TestAPIKeyRepository_Management 覆盖密钥管理方法：FindByIDForUser、
+// UpdateFields、Rotate，以及跨用户隔离与已吊销可见性。仅在 CI 集成环境运行。
+func TestAPIKeyRepository_Management(t *testing.T) {
+	dsn := os.Getenv("AUTH_REPOSITORY_TEST_DSN")
+	if dsn == "" {
+		t.Skip("AUTH_REPOSITORY_TEST_DSN not set; skipping repository integration test")
+	}
+
+	ctx := context.Background()
+	db, err := database.Open(ctx, database.Config{
+		DatabaseURL:     dsn,
+		MaxOpenConns:    5,
+		MaxIdleConns:    1,
+		ConnMaxLifetime: time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("database.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close(db) })
+
+	users := NewUserRepository(db)
+	keys := NewAPIKeyRepository(db)
+	stamp := time.Now().UTC().Format("20060102150405.000000000")
+
+	mkUser := func(email string) *models.User {
+		u := &models.User{
+			Email:        email + stamp + "@example.com",
+			PasswordHash: "test-password-hash",
+			Role:         models.RoleUser,
+			Status:       models.StatusActive,
+			TokenVersion: 1,
+		}
+		if err := users.Create(ctx, u); err != nil {
+			t.Fatalf("create user: %v", err)
+		}
+		return u
+	}
+	owner := mkUser("apikey-mgmt-owner-")
+	other := mkUser("apikey-mgmt-other-")
+
+	fullKey, hash, err := apikey.Generate()
+	if err != nil {
+		t.Fatalf("apikey.Generate: %v", err)
+	}
+	key := &models.APIKey{
+		UserID:    owner.ID,
+		Name:      "manage me",
+		KeyHash:   hash,
+		KeyPrefix: apikey.Prefix(fullKey),
+		KeySuffix: apikey.Suffix(fullKey),
+		Role:      models.RoleUser,
+		Status:    "active",
+	}
+	if err := keys.Create(ctx, key); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// FindByIDForUser：属主可见，他人不可见。
+	got, err := keys.FindByIDForUser(ctx, key.ID, owner.ID)
+	if err != nil {
+		t.Fatalf("FindByIDForUser owner: %v", err)
+	}
+	if got.ID != key.ID {
+		t.Errorf("FindByIDForUser = %s, want %s", got.ID, key.ID)
+	}
+	if _, err := keys.FindByIDForUser(ctx, key.ID, other.ID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("FindByIDForUser other user = %v, want ErrNotFound", err)
+	}
+
+	// UpdateFields：改名 + 禁用，再回读校验。
+	if err := keys.UpdateFields(ctx, key.ID, owner.ID, map[string]any{
+		"name":   "renamed",
+		"status": "disabled",
+	}); err != nil {
+		t.Fatalf("UpdateFields: %v", err)
+	}
+	got, err = keys.FindByIDForUser(ctx, key.ID, owner.ID)
+	if err != nil {
+		t.Fatalf("FindByIDForUser after update: %v", err)
+	}
+	if got.Name != "renamed" || got.Status != "disabled" {
+		t.Errorf("after update = name %q status %q, want renamed/disabled", got.Name, got.Status)
+	}
+
+	// UpdateFields：跨用户失败。
+	if err := keys.UpdateFields(ctx, key.ID, other.ID, map[string]any{"name": "stolen"}); !errors.Is(err, ErrNotFound) {
+		t.Errorf("UpdateFields other user = %v, want ErrNotFound", err)
+	}
+
+	// Rotate：新哈希/前缀/后缀，状态重激活。
+	newFull, newHash, err := apikey.Generate()
+	if err != nil {
+		t.Fatalf("apikey.Generate rotate: %v", err)
+	}
+	if err := keys.Rotate(ctx, key.ID, owner.ID, newHash, apikey.Prefix(newFull), apikey.Suffix(newFull)); err != nil {
+		t.Fatalf("Rotate: %v", err)
+	}
+	rotated, err := keys.FindByHash(ctx, newHash)
+	if err != nil {
+		t.Fatalf("FindByHash after rotate: %v", err)
+	}
+	if rotated.ID != key.ID || rotated.Status != "active" {
+		t.Errorf("rotated = id %s status %q, want %s/active", rotated.ID, rotated.Status, key.ID)
+	}
+	if rotated.KeyPrefix != apikey.Prefix(newFull) || rotated.KeySuffix != apikey.Suffix(newFull) {
+		t.Errorf("rotated prefix/suffix = %q/%q, want new material", rotated.KeyPrefix, rotated.KeySuffix)
+	}
+	// 旧哈希失效。
+	if _, err := keys.FindByHash(ctx, hash); !errors.Is(err, ErrNotFound) {
+		t.Errorf("FindByHash old hash after rotate = %v, want ErrNotFound", err)
+	}
+
+	// Rotate 跨用户失败。
+	if err := keys.Rotate(ctx, key.ID, other.ID, hash, "p", "s"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("Rotate other user = %v, want ErrNotFound", err)
+	}
+
+	// 已吊销不可见。
+	if err := keys.Revoke(ctx, key.ID, owner.ID); err != nil {
+		t.Fatalf("Revoke: %v", err)
+	}
+	if _, err := keys.FindByIDForUser(ctx, key.ID, owner.ID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("FindByIDForUser revoked = %v, want ErrNotFound", err)
+	}
+	if err := keys.UpdateFields(ctx, key.ID, owner.ID, map[string]any{"name": "x"}); !errors.Is(err, ErrNotFound) {
+		t.Errorf("UpdateFields revoked = %v, want ErrNotFound", err)
+	}
+}

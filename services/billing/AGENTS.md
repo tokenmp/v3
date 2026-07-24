@@ -18,7 +18,7 @@ Billing Service 是 TokenMP V3 分层架构的**业务平面**计费服务：
 - `internal/database`：GORM 连接，AutoMigrate 禁止，schema 由 `migrations/` 版本化 SQL 管理（golang-migrate）。classified sentinel 不泄漏 DSN。
 - `internal/repository`：
   - 结构体 `Plan`/`User`/`UserPlan`/`QuotaReservation`/`UsageLedgerEntry` 对齐表字段。
-  - 端口 `PlanReader`（GetPlan/ListPlans）、`UserPlanReader`（GetActiveUserPlan）、`QuotaManager`（Reserve/Finalize/Release，单事务 + ON CONFLICT DO NOTHING 幂等）、`LedgerReader`（ListLedger）。
+  - 端口 `PlanReader`（GetPlan/ListPlans）、`UserPlanReader`（GetActiveUserPlan）、`QuotaManager`（Reserve/Finalize/Release，单事务 + ON CONFLICT DO NOTHING 幂等）、`LedgerReader`（ListLedger）、`BalanceReader`（GetBalance）。
   - `GormRepository` 实现。reserve/charge/refund 用 ledger delta 有符号方向（reserve/charge 负、refund 正）。idempotency_key UNIQUE 保证账本幂等。
   - sentinel：`ErrNotFound`/`ErrQueryFailed`/`ErrInsertFailed`/`ErrConflict`，不泄漏 DSN/SQL。
 - `internal/server`：HTTP（chi）。
@@ -27,6 +27,7 @@ Billing Service 是 TokenMP V3 分层架构的**业务平面**计费服务：
   - `GET /v1/billing/users/{user_id}/plan`。
   - `POST /v1/billing/quota/reserve`、`/finalize`、`/release`（2 MiB body 限，幂等冲突映射 200）。
   - `GET /v1/billing/users/{user_id}/ledger`。
+  - `GET /v1/billing/users/{user_id}/balance`：返回 `{coding_remaining, token_remaining}` 十进制字符串。Coding=active coding 套餐月配额减本月已 charge 请求数；Token=active token 套餐 token_limit 加 net token_delta（全期），二者均钳到 >=0；无套餐/无账本返回 0，永不 ErrNotFound。
   - 协议原生 JSON 错误，不泄漏 DSN/SQL/凭据；所有响应 `Cache-Control: no-store`。
 - `migrations/000001_init.{up,down}.sql`：Billing DB schema（从 `infra/db/migrations/billing/0001_init.sql` 转换为 golang-migrate 格式）。
 

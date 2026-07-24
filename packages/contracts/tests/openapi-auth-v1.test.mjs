@@ -90,6 +90,12 @@ describe("Auth v1 OpenAPI contract", () => {
     ];
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
+      // Only check description/summary field values, not HTTP method keywords
+      // (delete:, patch:, etc.) or operationId/schema names.
+      const trimmed = line.trimStart();
+      if (!trimmed.startsWith("description:") && !trimmed.startsWith("summary:")) {
+        continue;
+      }
       for (const { term, pattern } of forbiddenWithPattern) {
         if (pattern.test(line)) {
           violations.push(`line ${i + 1}: '${term}'`);

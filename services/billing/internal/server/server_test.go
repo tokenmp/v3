@@ -77,8 +77,23 @@ func (f *fakeLedgerReader) ListLedger(_ context.Context, _ string, limit int) ([
 	return f.entries, f.err
 }
 
+type fakeBalanceReader struct {
+	balance repository.Balance
+	err     error
+	user    string
+}
+
+func (f *fakeBalanceReader) GetBalance(_ context.Context, userID string) (repository.Balance, error) {
+	f.user = userID
+	return f.balance, f.err
+}
+
 func newServer(plans *fakePlanReader, userPlans *fakeUserPlanReader, quota *fakeQuotaManager, ledger *fakeLedgerReader, pinger fakePinger) *Server {
-	return New(plans, userPlans, quota, ledger, pinger, nil)
+	return New(plans, userPlans, quota, ledger, &fakeBalanceReader{}, pinger, nil)
+}
+
+func newServerWithBalance(plans *fakePlanReader, userPlans *fakeUserPlanReader, quota *fakeQuotaManager, ledger *fakeLedgerReader, balance *fakeBalanceReader, pinger fakePinger) *Server {
+	return New(plans, userPlans, quota, ledger, balance, pinger, nil)
 }
 
 func do(t *testing.T, s *Server, method, target string, body string) *httptest.ResponseRecorder {
@@ -283,5 +298,36 @@ func TestListLedger(t *testing.T) {
 	decode(t, rec, &out)
 	if len(out.Entries) != 1 || out.Entries[0].LedgerType != "charge" {
 		t.Errorf("entries = %+v", out.Entries)
+	}
+}
+
+func TestGetBalance_OK(t *testing.T) {
+	bal := &fakeBalanceReader{balance: repository.Balance{CodingRemaining: 42, TokenRemaining: 1000}}
+	s := newServerWithBalance(&fakePlanReader{}, &fakeUserPlanReader{}, &fakeQuotaManager{}, &fakeLedgerReader{}, bal, fakePinger{})
+	rec := do(t, s, http.MethodGet, "/v1/billing/users/u1/balance", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	var out balanceResponse
+	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.CodingRemaining != "42" || out.TokenRemaining != "1000" {
+		t.Errorf("balance = %+v", out)
+	}
+	if bal.user != "u1" {
+		t.Errorf("user = %q", bal.user)
+	}
+}
+
+func TestGetBalance_QueryError(t *testing.T) {
+	bal := &fakeBalanceReader{err: repository.ErrQueryFailed}
+	s := newServerWithBalance(&fakePlanReader{}, &fakeUserPlanReader{}, &fakeQuotaManager{}, &fakeLedgerReader{}, bal, fakePinger{})
+	rec := do(t, s, http.MethodGet, "/v1/billing/users/u1/balance", "")
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+	if containsLeak(rec.Body.String()) {
+		t.Errorf("body leaked: %s", rec.Body.String())
 	}
 }

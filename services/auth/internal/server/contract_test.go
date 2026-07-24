@@ -199,7 +199,7 @@ func buildServerWithFakes(t *testing.T) *Server {
 	)
 
 	userStore := authv1api.NewUserRepoAdapter(contractUserRepo{})
-	return New("127.0.0.1:0", contractPinger{}, verifier, svc, userStore)
+	return New("127.0.0.1:0", contractPinger{}, verifier, svc, userStore, nil)
 }
 
 // ---------------------------------------------------------------------------

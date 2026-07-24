@@ -151,6 +151,24 @@ type LedgerReader interface {
 	ListLedger(ctx context.Context, userID string, limit int) ([]UsageLedgerEntry, error)
 }
 
+// Balance is the user's remaining quota snapshot derived from active
+// plan limits and the usage ledger. CodingRemaining is requests remaining
+// in the current calendar month; TokenRemaining is the all-time token
+// balance (token plans are total-quota, not periodic). Both are clamped
+// to >=0 so a user who overspent never reports a negative balance.
+type Balance struct {
+	CodingRemaining int64
+	TokenRemaining  int64
+}
+
+// BalanceReader computes a user's current balance.
+type BalanceReader interface {
+	// GetBalance returns the user's remaining coding-request and token
+	// quotas. A user with no active plans and no ledger returns zeros; it
+	// is never an error (ErrNotFound is reserved for the user-plan lookup).
+	GetBalance(ctx context.Context, userID string) (Balance, error)
+}
+
 // Stable classified errors. They do not wrap the driver error so DSN/SQL
 // fragments never reach logs through Error().
 var (
@@ -178,6 +196,7 @@ var (
 	_ UserPlanReader = (*GormRepository)(nil)
 	_ QuotaManager   = (*GormRepository)(nil)
 	_ LedgerReader   = (*GormRepository)(nil)
+	_ BalanceReader  = (*GormRepository)(nil)
 )
 
 // ----------------------------------------------------------------------------
@@ -472,4 +491,69 @@ LIMIT ?`
 		return nil, ErrQueryFailed
 	}
 	return rows, nil
+}
+
+// ----------------------------------------------------------------------------
+// BalanceReader
+// ----------------------------------------------------------------------------
+
+// GetBalance computes the user's remaining coding-request and token quotas.
+//
+// Token balance: SUM(token_limit) over active token-type user_plans joined to
+// plans, plus the net token_delta across the user's entire usage_ledger
+// (reserve/charge carry negative deltas, refund carries the positive reversal;
+// net = -total_consumed_tokens). Resulting remaining = token_limit + net_delta.
+//
+// Coding balance: SUM(monthly_limit) over active coding-type user_plans, minus
+// the requests consumed this calendar month (=-SUM(request_delta) over
+// 'charge' ledger entries with created_at >= month start). Periodic, because
+// coding plans are request-rate-based (hourly/weekly/monthly).
+//
+// Both results are clamped to >=0. A user with no plans and no ledger returns
+// zeros; this is never ErrNotFound (the user-plan endpoint owns that case).
+// Any query error is ErrQueryFailed, which never leaks SQL/DSN.
+func (r *GormRepository) GetBalance(ctx context.Context, userID string) (Balance, error) {
+	// Token: plan limits + net ledger delta.
+	const tokenLimitQ = `SELECT COALESCE(SUM(p.token_limit), 0)
+FROM user_plans up JOIN plans p ON p.id = up.plan_id
+WHERE up.user_id = ? AND up.status = 'active' AND p.plan_type = 'token'`
+	var tokenLimit int64
+	if err := r.db.WithContext(ctx).Raw(tokenLimitQ, userID).Scan(&tokenLimit).Error; err != nil {
+		return Balance{}, ErrQueryFailed
+	}
+	const tokenDeltaQ = `SELECT COALESCE(SUM(token_delta), 0) FROM usage_ledger WHERE user_id = ? AND billing_plan = 'token'`
+	var tokenDelta int64
+	if err := r.db.WithContext(ctx).Raw(tokenDeltaQ, userID).Scan(&tokenDelta).Error; err != nil {
+		return Balance{}, ErrQueryFailed
+	}
+	tokenRemaining := tokenLimit + tokenDelta // tokenDelta <= 0 for consumption
+	if tokenRemaining < 0 {
+		tokenRemaining = 0
+	}
+
+	// Coding: monthly limit - consumed requests this calendar month.
+	const codingLimitQ = `SELECT COALESCE(SUM(p.monthly_limit), 0)
+FROM user_plans up JOIN plans p ON p.id = up.plan_id
+WHERE up.user_id = ? AND up.status = 'active' AND p.plan_type = 'coding'`
+	var codingLimit int64
+	if err := r.db.WithContext(ctx).Raw(codingLimitQ, userID).Scan(&codingLimit).Error; err != nil {
+		return Balance{}, ErrQueryFailed
+	}
+	const codingConsumedQ = `SELECT COALESCE(-SUM(request_delta), 0)
+FROM usage_ledger
+WHERE user_id = ? AND billing_plan = 'coding' AND ledger_type = 'charge'
+  AND created_at >= date_trunc('month', now())`
+	var codingConsumed int64
+	if err := r.db.WithContext(ctx).Raw(codingConsumedQ, userID).Scan(&codingConsumed).Error; err != nil {
+		return Balance{}, ErrQueryFailed
+	}
+	codingRemaining := codingLimit - codingConsumed
+	if codingRemaining < 0 {
+		codingRemaining = 0
+	}
+
+	return Balance{
+		CodingRemaining: codingRemaining,
+		TokenRemaining:  tokenRemaining,
+	}, nil
 }

@@ -12,6 +12,39 @@ import (
 	uuid "github.com/google/uuid"
 )
 
+// Defines values for ApiKeyStatus.
+const (
+	ApiKeyStatusActive   ApiKeyStatus = "active"
+	ApiKeyStatusDisabled ApiKeyStatus = "disabled"
+)
+
+// Valid indicates whether the value is a known member of the ApiKeyStatus enum.
+func (e ApiKeyStatus) Valid() bool {
+	switch e {
+	case ApiKeyStatusActive:
+		return true
+	case ApiKeyStatusDisabled:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ApiKeyCreatedStatus.
+const (
+	ApiKeyCreatedStatusActive ApiKeyCreatedStatus = "active"
+)
+
+// Valid indicates whether the value is a known member of the ApiKeyCreatedStatus enum.
+func (e ApiKeyCreatedStatus) Valid() bool {
+	switch e {
+	case ApiKeyCreatedStatusActive:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ErrorErrorCode.
 const (
 	BadRequest          ErrorErrorCode = "bad_request"
@@ -21,6 +54,7 @@ const (
 	InvalidEmail        ErrorErrorCode = "invalid_email"
 	InvalidRefreshToken ErrorErrorCode = "invalid_refresh_token"
 	InvalidToken        ErrorErrorCode = "invalid_token"
+	NotFound            ErrorErrorCode = "not_found"
 	PasswordTooWeak     ErrorErrorCode = "password_too_weak"
 	Unauthorized        ErrorErrorCode = "unauthorized"
 )
@@ -41,6 +75,8 @@ func (e ErrorErrorCode) Valid() bool {
 	case InvalidRefreshToken:
 		return true
 	case InvalidToken:
+		return true
+	case NotFound:
 		return true
 	case PasswordTooWeak:
 		return true
@@ -104,16 +140,16 @@ func (e PublicUserRole) Valid() bool {
 
 // Defines values for PublicUserStatus.
 const (
-	Active   PublicUserStatus = "active"
-	Disabled PublicUserStatus = "disabled"
+	PublicUserStatusActive   PublicUserStatus = "active"
+	PublicUserStatusDisabled PublicUserStatus = "disabled"
 )
 
 // Valid indicates whether the value is a known member of the PublicUserStatus enum.
 func (e PublicUserStatus) Valid() bool {
 	switch e {
-	case Active:
+	case PublicUserStatusActive:
 		return true
-	case Disabled:
+	case PublicUserStatusDisabled:
 		return true
 	default:
 		return false
@@ -135,10 +171,82 @@ func (e TokenResponseTokenType) Valid() bool {
 	}
 }
 
+// Defines values for UpdateApiKeyRequestStatus.
+const (
+	UpdateApiKeyRequestStatusActive   UpdateApiKeyRequestStatus = "active"
+	UpdateApiKeyRequestStatusDisabled UpdateApiKeyRequestStatus = "disabled"
+)
+
+// Valid indicates whether the value is a known member of the UpdateApiKeyRequestStatus enum.
+func (e UpdateApiKeyRequestStatus) Valid() bool {
+	switch e {
+	case UpdateApiKeyRequestStatusActive:
+		return true
+	case UpdateApiKeyRequestStatusDisabled:
+		return true
+	default:
+		return false
+	}
+}
+
+// ApiKey Public API key view. The full secret is never returned; only
+// `key_prefix` and `key_suffix` are exposed for identification.
+type ApiKey struct {
+	CreatedAt time.Time `json:"created_at"`
+
+	// ExpiresAt Optional expiration time, or null if the key never expires.
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	Id        uuid.UUID  `json:"id"`
+
+	// KeyPrefix First characters of the key for display.
+	KeyPrefix string `json:"key_prefix"`
+
+	// KeySuffix Last characters of the key for display.
+	KeySuffix string `json:"key_suffix"`
+
+	// LastUsedAt Last successful verification, or null if never used.
+	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
+
+	// Name Human-readable key name.
+	Name string `json:"name"`
+
+	// Status Lifecycle status. `revoked` is never exposed to owners.
+	Status ApiKeyStatus `json:"status"`
+}
+
+// ApiKeyStatus Lifecycle status. `revoked` is never exposed to owners.
+type ApiKeyStatus string
+
+// ApiKeyCreated API key with its full secret. Returned only on create and rotate;
+// the secret is never retrievable again.
+type ApiKeyCreated struct {
+	CreatedAt time.Time `json:"created_at"`
+	Id        uuid.UUID `json:"id"`
+	KeyPrefix string    `json:"key_prefix"`
+	KeySuffix string    `json:"key_suffix"`
+	Name      string    `json:"name"`
+
+	// Secret Full API key secret — only returned on create/rotate.
+	Secret string              `json:"secret"`
+	Status ApiKeyCreatedStatus `json:"status"`
+}
+
+// ApiKeyCreatedStatus defines model for ApiKeyCreated.Status.
+type ApiKeyCreatedStatus string
+
 // ChangePasswordRequest defines model for ChangePasswordRequest.
 type ChangePasswordRequest struct {
 	CurrentPassword string `json:"current_password"`
 	NewPassword     string `json:"new_password"`
+}
+
+// CreateApiKeyRequest defines model for CreateApiKeyRequest.
+type CreateApiKeyRequest struct {
+	// ExpiresAt Optional expiration time.
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+
+	// Name Optional human-readable key name.
+	Name *string `json:"name,omitempty"`
 }
 
 // Error Uniform error body. `code` is a stable machine-readable identifier;
@@ -230,6 +338,27 @@ type TokenResponse struct {
 
 // TokenResponseTokenType defines model for TokenResponse.TokenType.
 type TokenResponseTokenType string
+
+// UpdateApiKeyRequest defines model for UpdateApiKeyRequest.
+type UpdateApiKeyRequest struct {
+	// Name New human-readable key name.
+	Name *string `json:"name,omitempty"`
+
+	// Status New lifecycle status.
+	Status *UpdateApiKeyRequestStatus `json:"status,omitempty"`
+}
+
+// UpdateApiKeyRequestStatus New lifecycle status.
+type UpdateApiKeyRequestStatus string
+
+// KeyId defines model for KeyId.
+type KeyId = uuid.UUID
+
+// AuthCreateApiKeyJSONRequestBody defines body for AuthCreateApiKey for application/json ContentType.
+type AuthCreateApiKeyJSONRequestBody = CreateApiKeyRequest
+
+// AuthUpdateApiKeyJSONRequestBody defines body for AuthUpdateApiKey for application/json ContentType.
+type AuthUpdateApiKeyJSONRequestBody = UpdateApiKeyRequest
 
 // LoginJSONRequestBody defines body for Login for application/json ContentType.
 type LoginJSONRequestBody = LoginRequest

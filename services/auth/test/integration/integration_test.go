@@ -495,7 +495,7 @@ func TestReadyz_HTTPReadyAndUnready(t *testing.T) {
 	t.Cleanup(func() { _ = database.Close(gormDB) })
 
 	pinger := database.PingerFromDB(gormDB)
-	srv := server.New("127.0.0.1:0", pinger, nil, nil, nil)
+	srv := server.New("127.0.0.1:0", pinger, nil, nil, nil, nil)
 	ts := httptest.NewServer(srv.Router())
 	t.Cleanup(ts.Close)
 
@@ -628,9 +628,11 @@ func newAuthStack(t *testing.T, dsn string) (*httptest.Server, *auth.Service, *j
 	clock := realClockUTC{}
 	svc := auth.NewService(userRepo, sessionRepo, txRunner, issuer, clock, 15*time.Minute, 30*24*time.Hour)
 	userStore := authv1api.NewUserRepoAdapter(userRepo)
+	apiKeyRepo := repository.NewAPIKeyRepository(gdb)
+	apiKeyStore := authv1api.NewAPIKeyRepoAdapter(apiKeyRepo)
 
 	pinger := database.PingerFromDB(gdb)
-	srv := server.New("127.0.0.1:0", pinger, verifier, svc, userStore)
+	srv := server.New("127.0.0.1:0", pinger, verifier, svc, userStore, apiKeyStore)
 	ts := httptest.NewServer(srv.Router())
 	t.Cleanup(ts.Close)
 	return ts, svc, issuer, verifier

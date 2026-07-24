@@ -16,7 +16,7 @@ type fakePinger struct {
 func (f fakePinger) Ping(ctx context.Context) error { return f.err }
 
 func TestServer_Routes(t *testing.T) {
-	s := New("127.0.0.1:0", fakePinger{nil}, nil, nil, nil)
+	s := New("127.0.0.1:0", fakePinger{nil}, nil, nil, nil, nil)
 	router := s.Router()
 
 	cases := []struct {
@@ -46,7 +46,7 @@ func TestServer_Routes(t *testing.T) {
 }
 
 func TestServer_Readyz503OnPingError(t *testing.T) {
-	s := New("127.0.0.1:0", fakePinger{err: errors.New("db down")}, nil, nil, nil)
+	s := New("127.0.0.1:0", fakePinger{err: errors.New("db down")}, nil, nil, nil, nil)
 	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
 	rec := httptest.NewRecorder()
 	s.Router().ServeHTTP(rec, req)
@@ -56,7 +56,7 @@ func TestServer_Readyz503OnPingError(t *testing.T) {
 }
 
 func TestServer_RecovererNoPanic(t *testing.T) {
-	s := New("127.0.0.1:0", fakePinger{nil}, nil, nil, nil)
+	s := New("127.0.0.1:0", fakePinger{nil}, nil, nil, nil, nil)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	s.Router().ServeHTTP(rec, req)
@@ -66,7 +66,7 @@ func TestServer_RecovererNoPanic(t *testing.T) {
 }
 
 func TestServer_ShutdownReturnsErrorOrNil(t *testing.T) {
-	s := New("127.0.0.1:0", fakePinger{nil}, nil, nil, nil)
+	s := New("127.0.0.1:0", fakePinger{nil}, nil, nil, nil, nil)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	if err := s.Shutdown(ctx); err != nil {

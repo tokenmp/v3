@@ -18,13 +18,15 @@ Logging Service 是 TokenMP V3 分层架构的**业务平面**日志服务：
 - `internal/database`：GORM 连接，AutoMigrate 禁止，schema 由 `migrations/` 版本化 SQL 管理（golang-migrate）。`Open` 返回稳定 classified sentinel 错误，driver 错误（可能含 DSN）绝不经 `Error()`/`Unwrap()` 暴露。
 - `internal/repository`：
   - 结构体 `RequestLog`/`Attempt`/`Event` 对齐 `request_logs`/`request_attempts`/`request_log_events` 表字段，**无明文 body 字段**。
-  - 端口 `Writer`（InsertRequestLog/InsertAttempt/InsertEvent）+ `Reader`（GetRequestLog/ListAttempts/ListEvents）+ `BatchIngestor`（IngestBatch 单事务批量插入，任一失败回滚）。
+  - 端口 `Writer`（InsertRequestLog/InsertAttempt/InsertEvent）+ `Reader`（GetRequestLog/ListAttempts/ListEvents + ListRequestLogs/GetStats）+ `BatchIngestor`（IngestBatch 单事务批量插入，任一失败回滚）。
   - `GormRepository` 实现。写入用 Raw SQL `INSERT ... RETURNING id`；`created_at` 零值时默认 `now()` 以路由到正确日分区；CHECK 约束的可空列（usage_status/retry_classified）用 `NULLIF` 映射。跨分区查询 by `request_id`。
   - sentinel：`ErrNotFound`/`ErrQueryFailed`/`ErrInsertFailed`，不泄漏 DSN/SQL。
 - `internal/server`：HTTP（chi）。
   - `GET /healthz`（liveness）、`GET /readyz`（DB ping）。
   - `POST /v1/logs/ingest`：接收 `{log, attempts[], events[]}`，2 MiB body 限，单事务批量插入，返回 `{request_id, accepted}`。
   - `GET /v1/logs/{request_id}`：返回 `{log, attempts, events}`，不存在 404。
+  - `GET /v1/logs`：分页列表（query：user_id/page/page_size/model/status/start_date/end_date），返回 `{logs, total, page, page_size}`；status 是逗号分隔的 final_status 枚举，未知值静默丢弃。
+  - `GET /v1/logs/stats`：用量统计（query：user_id/days，默认 7，上限 90），返回 `{days, total_requests, total_input_tokens, total_output_tokens, by_model[]}`，by_model 按 requests 降序。
   - 协议原生 JSON 错误，不泄漏 DSN/SQL/凭据；所有响应 `Cache-Control: no-store`。
 - `migrations/000001_init.{up,down}.sql`：Log DB schema（从 `infra/db/migrations/log/0001_init.sql` 转换为 golang-migrate up/down 格式，含 3 张分区表的日分区 + default 分区）。
 

@@ -40,6 +40,13 @@ type Config struct {
 	// push is skipped.
 	LoggingURL string
 
+	// AuthURL is the base URL of the Auth service
+	// (e.g. "http://127.0.0.1:8080"). Optional; when empty, API key
+	// management endpoints (/api/v1/keys*) return 503 because the edge
+	// cannot reach Auth. When set, the edge forwards the client Bearer
+	// token to Auth's /api/v1/auth/keys* management API.
+	AuthURL string
+
 	// JWTPublicKeyFile is the path to the Ed25519 public key PEM file used
 	// to verify client JWTs. Optional; when empty, JWT verification is
 	// disabled (dev-only; production must set this).
@@ -129,6 +136,11 @@ func Load() (*Config, error) {
 	cfg.LoggingURL = strings.TrimSpace(os.Getenv("API_LOGGING_URL"))
 	if cfg.LoggingURL != "" && !validHTTPBaseURL(cfg.LoggingURL) {
 		return nil, errors.New("API_LOGGING_URL must be an http(s) base URL without query or fragment")
+	}
+
+	cfg.AuthURL = strings.TrimSpace(os.Getenv("API_AUTH_URL"))
+	if cfg.AuthURL != "" && !validHTTPBaseURL(cfg.AuthURL) {
+		return nil, errors.New("API_AUTH_URL must be an http(s) base URL without query or fragment")
 	}
 
 	cfg.JWTPublicKeyFile = strings.TrimSpace(os.Getenv("API_JWT_PUBLIC_KEY_FILE"))

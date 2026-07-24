@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/tokenmp/v3/services/logging/internal/repository"
 )
@@ -31,6 +32,17 @@ type fakeRepo struct {
 	ingestErr  error
 	ingested   repository.Batch
 	ingestCall int
+
+	// list path
+	listLogs   []repository.RequestLog
+	listTotal  int
+	listFilter repository.ListFilter
+	listErr    error
+
+	// stats path
+	stats       repository.Stats
+	statsErr    error
+	statsFilter repository.StatsFilter
 }
 
 func (f *fakeRepo) InsertRequestLog(ctx context.Context, log repository.RequestLog) (int64, error) {
@@ -47,6 +59,25 @@ func (f *fakeRepo) ListAttempts(ctx context.Context, requestID string) ([]reposi
 }
 func (f *fakeRepo) ListEvents(ctx context.Context, requestID string) ([]repository.Event, error) {
 	return f.events, f.eventErr
+}
+
+func (f *fakeRepo) ListRequestLogs(_ context.Context, filter repository.ListFilter) ([]repository.RequestLog, int, error) {
+	f.listFilter = filter
+	if f.listErr != nil {
+		return nil, 0, f.listErr
+	}
+	if f.listLogs == nil {
+		return []repository.RequestLog{}, f.listTotal, nil
+	}
+	return f.listLogs, f.listTotal, nil
+}
+
+func (f *fakeRepo) GetStats(_ context.Context, filter repository.StatsFilter) (repository.Stats, error) {
+	f.statsFilter = filter
+	if f.statsErr != nil {
+		return repository.Stats{}, f.statsErr
+	}
+	return f.stats, nil
 }
 
 func (f *fakeRepo) IngestBatch(ctx context.Context, batch repository.Batch) error {
@@ -300,4 +331,138 @@ func TestGetLog_QueryError(t *testing.T) {
 		t.Errorf("body leaked driver detail: %s", rec.Body.String())
 	}
 	assertCacheControl(t, rec)
+}
+
+// TestListLogs_OK verifies the list endpoint returns a paginated payload with
+// the filter echoed back and the user_id/model/status filters forwarded to
+// the repository.
+func TestListLogs_OK(t *testing.T) {
+	now := time.Now().UTC()
+	repo := &fakeRepo{
+		listLogs: []repository.RequestLog{
+			{RequestID: "req-2", UserID: "u1", ModelName: "gpt-4", FinalStatus: "success", CreatedAt: now},
+			{RequestID: "req-1", UserID: "u1", ModelName: "gpt-4", FinalStatus: "client_error", CreatedAt: now.Add(-time.Minute)},
+		},
+		listTotal: 42,
+	}
+	s := newServer(repo, fakePinger{})
+	rec := do(t, s, http.MethodGet, "/v1/logs?user_id=u1&page=2&page_size=5&model=gpt-4&status=success,error,client_error&start_date=2026-01-01T00:00:00Z", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	var out listLogsResponse
+	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.Total != 42 || out.Page != 2 || out.PageSize != 5 || len(out.Logs) != 2 {
+		t.Fatalf("payload = %+v", out)
+	}
+	// status=error is dropped (not a DB enum); success+client_error kept.
+	want := []string{"success", "client_error"}
+	if len(repo.listFilter.Statuses) != len(want) {
+		t.Fatalf("statuses = %v", repo.listFilter.Statuses)
+	}
+	for i, s := range want {
+		if repo.listFilter.Statuses[i] != s {
+			t.Errorf("status[%d] = %q, want %q", i, repo.listFilter.Statuses[i], s)
+		}
+	}
+	if repo.listFilter.UserID != "u1" || repo.listFilter.Model != "gpt-4" {
+		t.Errorf("filter = %+v", repo.listFilter)
+	}
+	if !repo.listFilter.StartTime.Equal(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)) {
+		t.Errorf("start time = %v", repo.listFilter.StartTime)
+	}
+	assertCacheControl(t, rec)
+}
+
+// TestListLogs_Defaults verifies missing pagination params fall back to the
+// documented defaults (page=1, pageSize=20).
+func TestListLogs_Defaults(t *testing.T) {
+	repo := &fakeRepo{listTotal: 0}
+	s := newServer(repo, fakePinger{})
+	rec := do(t, s, http.MethodGet, "/v1/logs", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	var out listLogsResponse
+	_ = json.NewDecoder(rec.Body).Decode(&out)
+	if out.Page != 1 || out.PageSize != 20 {
+		t.Errorf("defaults = page %d size %d", out.Page, out.PageSize)
+	}
+	if repo.listFilter.Statuses != nil {
+		t.Errorf("expected no status filter, got %v", repo.listFilter.Statuses)
+	}
+}
+
+// TestListLogs_InvalidStartDate verifies a malformed date is a 400.
+func TestListLogs_InvalidStartDate(t *testing.T) {
+	repo := &fakeRepo{}
+	s := newServer(repo, fakePinger{})
+	rec := do(t, s, http.MethodGet, "/v1/logs?start_date=not-a-date", nil)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
+// TestListLogs_QueryError verifies a non-not-found read error is a safe 500.
+func TestListLogs_QueryError(t *testing.T) {
+	repo := &fakeRepo{listErr: repository.ErrQueryFailed}
+	s := newServer(repo, fakePinger{})
+	rec := do(t, s, http.MethodGet, "/v1/logs", nil)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+	if containsLeak(rec.Body.String()) {
+		t.Errorf("body leaked: %s", rec.Body.String())
+	}
+}
+
+// TestStats_OK verifies the stats endpoint forwards the days filter and
+// returns the aggregated payload.
+func TestStats_OK(t *testing.T) {
+	repo := &fakeRepo{
+		stats: repository.Stats{
+			TotalRequests:     10,
+			TotalInputTokens:  100,
+			TotalOutputTokens: 200,
+			ByModel: []repository.ModelStat{
+				{Model: "gpt-4", Requests: 8, InputTokens: 80, OutputTokens: 160},
+				{Model: "claude", Requests: 2, InputTokens: 20, OutputTokens: 40},
+			},
+		},
+	}
+	s := newServer(repo, fakePinger{})
+	rec := do(t, s, http.MethodGet, "/v1/logs/stats?user_id=u1&days=30", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	var out statsResponse
+	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.Days != 30 || out.TotalRequests != 10 || out.TotalInputTokens != 100 || out.TotalOutputTokens != 200 {
+		t.Fatalf("payload = %+v", out)
+	}
+	if len(out.ByModel) != 2 || out.ByModel[0].Model != "gpt-4" {
+		t.Errorf("byModel = %+v", out.ByModel)
+	}
+	if repo.statsFilter.UserID != "u1" || repo.statsFilter.Days != 30 {
+		t.Errorf("filter = %+v", repo.statsFilter)
+	}
+	assertCacheControl(t, rec)
+}
+
+// TestStats_RouteWinsOverParam verifies /v1/logs/stats is not shadowed by
+// the /v1/logs/{request_id} param route.
+func TestStats_RouteWinsOverParam(t *testing.T) {
+	repo := &fakeRepo{stats: repository.Stats{}}
+	s := newServer(repo, fakePinger{})
+	rec := do(t, s, http.MethodGet, "/v1/logs/stats", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("stats route shadowed: status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if repo.statsFilter.Days != 7 {
+		t.Errorf("stats handler not invoked (filter=%+v)", repo.statsFilter)
+	}
 }
