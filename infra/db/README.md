@@ -12,9 +12,9 @@ infra/db/
     ├── config/                    # Config DB
     │   └── 0001_init.sql          # 初始化（15 张表）
     ├── log/                       # Log DB（按天分区）
-    │   └── 0001_init.sql          # 待生成
+    │   └── 0001_init.sql          # 初始化（4 张表，分区）
     └── billing/                   # Billing DB
-        └── 0001_init.sql          # 待生成
+        └── 0001_init.sql          # 初始化（5 张表）
 ```
 
 ## 三库职责

@@ -8,7 +8,7 @@
 
 ## 已实施模块
 
-- **DB Schema 迁移**：`infra/db/AGENTS.md`（三库物理分离的中立基建层。Config DB 初始化迁移 `migrations/config/0001_init.sql` 已实施：providers/models/route_mappings/adapters/config_revisions 等 15 张表，含 is_default 部分唯一索引、FK VALID、软删除 status、updated_at 触发器，经 PostgreSQL 17/18 语法与约束校验。Log DB 与 Billing DB 迁移待生成。）
+- **DB Schema 迁移**：`infra/db/AGENTS.md`（三库物理分离的中立基建层。三库初始化迁移均已实施并经 PostgreSQL 17/18 语法与约束校验：Config DB `migrations/config/0001_init.sql`（providers/models/route_mappings/adapters/config_revisions 等 15 张表，含 is_default 部分唯一索引、FK VALID、软删除 status、updated_at 触发器）；Log DB `migrations/log/0001_init.sql`（request_logs/request_attempts/request_log_events 按天 RANGE 分区 + log_archive_runs，不存明文）；Billing DB `migrations/billing/0001_init.sql`（plans/users/user_plans/quota_reservations/usage_ledger，含幂等唯一约束、先预留后结算）。）
 
 ## 新增模块准入
 
