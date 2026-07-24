@@ -21,6 +21,14 @@ coverage/
 **/coverage/
 *.tsbuildinfo
 
+# Next.js build output
+**/.next/
+**/.turbo/
+**/out/
+
+# Vercel
+.vercel/
+
 # Local environment files
 .env
 .env.*
