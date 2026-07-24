@@ -121,6 +121,8 @@ jobs:
       CONFIG_REPO_TEST_DSN: postgres://tokenmp:tokenmp@localhost:5432/tokenmp_config?sslmode=disable
       LOGGING_DATABASE_URL: postgres://tokenmp:tokenmp@localhost:5432/tokenmp_logging?sslmode=disable
       LOGGING_REPO_TEST_DSN: postgres://tokenmp:tokenmp@localhost:5432/tokenmp_logging?sslmode=disable
+      BILLING_DATABASE_URL: postgres://tokenmp:tokenmp@localhost:5432/tokenmp_billing?sslmode=disable
+      BILLING_REPO_TEST_DSN: postgres://tokenmp:tokenmp@localhost:5432/tokenmp_billing?sslmode=disable
     steps:
       - name: Checkout
         # actions/checkout v5
@@ -136,6 +138,7 @@ jobs:
             services/executor/go.sum
             services/config/go.sum
             services/logging/go.sum
+            services/billing/go.sum
 
       - name: Generated code freshness check (Auth)
         run: |
@@ -350,6 +353,55 @@ jobs:
         working-directory: services/logging
         env:
           LOGGING_REPO_TEST_DSN: postgres://tokenmp:tokenmp@localhost:5432/tokenmp_logging?sslmode=disable
+        run: go test -race ./internal/repository/...
+
+      # ------------------------------------------------------------------
+      # Billing service (skeleton): gofmt / vet / build / unit test / migration
+      # cycle / repository integration test. Reuses this job's Postgres 17
+      # service via a separate tokenmp_billing database created below.
+      # ------------------------------------------------------------------
+      - name: Create tokenmp_billing database
+        env:
+          PGPASSWORD: tokenmp
+        run: |
+          psql -h localhost -U tokenmp -d postgres -c "CREATE DATABASE tokenmp_billing;" || true
+
+      - name: gofmt (billing)
+        working-directory: services/billing
+        run: |
+          out="$(gofmt -l .)"
+          if [ -n "$out" ]; then
+            echo "gofmt found unformatted files:" >&2
+            echo "$out" >&2
+            exit 1
+          fi
+
+      - name: go vet (billing)
+        working-directory: services/billing
+        run: go vet ./...
+
+      - name: go build (billing)
+        working-directory: services/billing
+        run: |
+          go build ./...
+          go build -o /tmp/billing-bin ./cmd/billing
+
+      - name: go test -race (billing unit)
+        working-directory: services/billing
+        run: go test -race ./internal/config/... ./internal/database/... ./internal/server/...
+
+      - name: Billing migration cycle (up/down/up)
+        working-directory: services/billing
+        run: |
+          set -euo pipefail
+          migrate -path migrations -database "$BILLING_DATABASE_URL" up
+          migrate -path migrations -database "$BILLING_DATABASE_URL" down -all
+          migrate -path migrations -database "$BILLING_DATABASE_URL" up
+
+      - name: go test -race (billing repository integration)
+        working-directory: services/billing
+        env:
+          BILLING_REPO_TEST_DSN: postgres://tokenmp:tokenmp@localhost:5432/tokenmp_billing?sslmode=disable
         run: go test -race ./internal/repository/...
 
       - name: Migration cycle (up/down/up)
