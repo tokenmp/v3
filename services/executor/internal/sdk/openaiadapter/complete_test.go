@@ -112,6 +112,68 @@ func TestComplete_EnvironmentCannotOverrideCallLocalTargetOrHeaders(t *testing.T
 	}
 }
 
+func TestComplete_AuthoritativeEffectiveThinkingOnWire(t *testing.T) {
+	const body = `{"model":"caller","messages":[{"role":"user","content":"hi"}]}`
+
+	mapped, err := (adapter.Engine{}).Apply(context.Background(), adapter.ApplyInput{
+		Adapter: adapter.CompiledAdapter{Thinking: adapter.ThinkingPolicy{
+			Supported:      true,
+			DefaultEffort:  adapter.ThinkingMax,
+			EffortMapping:  map[adapter.ThinkingEffort]adapter.ThinkingEffort{adapter.ThinkingMax: adapter.ThinkingHigh},
+			BudgetMapping:  map[adapter.ThinkingEffort]int{adapter.ThinkingHigh: 1},
+			MinBudgetToken: 1,
+			MaxBudgetToken: 1,
+		}},
+		ModelThinking: adapter.ThinkingInput{Supported: true, DefaultEffort: adapter.ThinkingHigh, MaxEffort: adapter.ThinkingHigh, MinBudgetToken: 1, MaxBudgetToken: 1},
+		Body:          json.RawMessage(body),
+		Thinking:      adapter.ThinkingRequest{Enabled: true, Effort: adapter.ThinkingMax},
+	})
+	if err != nil || mapped.Thinking.EffectiveEffort != adapter.ThinkingHigh || !mapped.Thinking.Degraded {
+		t.Fatalf("mapped thinking = %#v, %v", mapped.Thinking, err)
+	}
+
+	cases := []struct {
+		name       string
+		thinking   adapter.EffectiveThinking
+		body       string
+		wantEffort string
+	}{
+		{"mapped max degrades to high", mapped.Thinking, `{"model":"caller","reasoning_effort":"max","messages":[{"role":"user","content":"hi"}]}`, "high"},
+		{"effective effort injects absent caller value", adapter.EffectiveThinking{EffectiveEffort: adapter.ThinkingHigh}, body, "high"},
+		{"none removes caller value", adapter.EffectiveThinking{EffectiveEffort: adapter.ThinkingNone}, `{"model":"caller","reasoning_effort":"low","messages":[{"role":"user","content":"hi"}]}`, ""},
+		{"none leaves effort absent", adapter.EffectiveThinking{EffectiveEffort: adapter.ThinkingNone}, body, ""},
+		{"effective effort overrides caller value", adapter.EffectiveThinking{EffectiveEffort: adapter.ThinkingHigh}, `{"model":"caller","reasoning_effort":"low","messages":[{"role":"user","content":"hi"}]}`, "high"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var received map[string]any
+			ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+					t.Errorf("decode request: %v", err)
+				}
+				success(w)
+			}))
+			defer ts.Close()
+			call := testCall(ts.URL, "key")
+			call.Request.Body = json.RawMessage(tc.body)
+			call.Request.Thinking = tc.thinking
+			if _, err := newTestClient(t, ts, nil).Complete(context.Background(), call); err != nil {
+				t.Fatalf("Complete: %v", err)
+			}
+			got, exists := received["reasoning_effort"]
+			if tc.wantEffort == "" {
+				if exists {
+					t.Fatalf("reasoning_effort = %v, want absent", got)
+				}
+				return
+			}
+			if !exists || got != tc.wantEffort {
+				t.Fatalf("reasoning_effort = %v (present %t), want %q", got, exists, tc.wantEffort)
+			}
+		})
+	}
+}
+
 func TestComplete_InvalidChatParamsMakeNoHTTP(t *testing.T) {
 	var n atomic.Int32
 	ts := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { n.Add(1) }))

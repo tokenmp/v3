@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/openai/openai-go/v3"
+	"github.com/tokenmp/v3/services/executor/internal/adapter"
 )
 
 const (
@@ -30,20 +31,36 @@ var (
 
 // decodeChatParams first parses and validates the whole JSON tree. The SDK is
 // deliberately only the final typed decode: its union unmarshallers do not form
-// this service's input security boundary.
-func decodeChatParams(ctx context.Context, body []byte) (openai.ChatCompletionNewParams, error) {
+// this service's input security boundary. Effective thinking is execution-
+// authoritative: unsupported thinking is omitted, and a supported effective
+// effort replaces any caller-provided reasoning_effort.
+func decodeChatParams(ctx context.Context, body []byte, effectiveThinking adapter.EffectiveThinking) (openai.ChatCompletionNewParams, error) {
 	var params openai.ChatCompletionNewParams
 	if len(body) == 0 || len(body) > maxParamBodyBytes || !utf8.Valid(body) {
 		return params, errInvalidChatParams
 	}
 	value, err := parseStrictJSON(ctx, body)
-	if err != nil || validateChatRequest(value) != nil {
+	root, ok := value.(map[string]any)
+	if err != nil || !ok || validateChatRequest(root) != nil || reconcileEffectiveThinking(root, effectiveThinking) != nil {
 		return params, errInvalidChatParams
 	}
-	if err := json.Unmarshal(body, &params); err != nil || len(params.Messages) == 0 {
+	canonical, err := json.Marshal(root)
+	if err != nil || json.Unmarshal(canonical, &params) != nil || len(params.Messages) == 0 {
 		return params, errInvalidChatParams
 	}
 	return params, nil
+}
+
+func reconcileEffectiveThinking(root map[string]any, effective adapter.EffectiveThinking) error {
+	switch effort := effective.EffectiveEffort; {
+	case effort == "" || effort == adapter.ThinkingNone:
+		delete(root, "reasoning_effort")
+	case !effort.Valid():
+		return errInvalidChatParams
+	default:
+		root["reasoning_effort"] = string(effort)
+	}
+	return nil
 }
 
 // parseStrictJSON rejects duplicate keys at every object depth, unsafe
