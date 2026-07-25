@@ -120,26 +120,26 @@ const mockSettings: UserSettings = { preferredBilling: 'token', fallbackEnabled:
 // ---------------------------------------------------------------------------
 
 async function realGetKeys(): Promise<ApiKey[]> {
-  const r = await request<{ keys: ApiKey[] }>(`${BIZ_BASE}/api/v1/keys`, { baseUrl: BIZ_BASE });
+  const r = await request<{ keys: ApiKey[] }>(`/api/v1/keys`, { baseUrl: BIZ_BASE });
   return r.keys;
 }
 async function realCreateKey(input: CreateKeyInput): Promise<ApiKeyCreated> {
-  const r = await request<{ key: ApiKeyCreated }>(`${BIZ_BASE}/api/v1/keys`, {
+  const r = await request<{ key: ApiKeyCreated }>(`/api/v1/keys`, {
     method: 'POST', body: input, baseUrl: BIZ_BASE,
   });
   return r.key;
 }
 async function realUpdateKey(id: string, input: UpdateKeyInput): Promise<ApiKey> {
-  const r = await request<{ key: ApiKey }>(`${BIZ_BASE}/api/v1/keys/${id}`, {
+  const r = await request<{ key: ApiKey }>(`/api/v1/keys/${id}`, {
     method: 'PATCH', body: input, baseUrl: BIZ_BASE,
   });
   return r.key;
 }
 async function realDeleteKey(id: string): Promise<void> {
-  await request<void>(`${BIZ_BASE}/api/v1/keys/${id}`, { method: 'DELETE', noContent: true, baseUrl: BIZ_BASE });
+  await request<void>(`/api/v1/keys/${id}`, { method: 'DELETE', noContent: true, baseUrl: BIZ_BASE });
 }
 async function realRotateKey(id: string): Promise<ApiKeyCreated> {
-  const r = await request<{ key: ApiKeyCreated }>(`${BIZ_BASE}/api/v1/keys/${id}/rotate`, {
+  const r = await request<{ key: ApiKeyCreated }>(`/api/v1/keys/${id}/rotate`, {
     method: 'POST', baseUrl: BIZ_BASE,
   });
   return r.key;
@@ -149,29 +149,29 @@ async function realListLogs(
 ): Promise<{ items: RequestLog[]; total: number; page: number; pageSize: number }> {
   const qs = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
   const r = await request<{ logs: RequestLog[]; total: number; page: number; pageSize: number }>(
-    `${BIZ_BASE}/api/v1/request-logs?${qs}`, { baseUrl: BIZ_BASE },
+    `/api/v1/request-logs?${qs}`, { baseUrl: BIZ_BASE },
   );
   return { items: r.logs, total: r.total, page: r.page, pageSize: r.pageSize };
 }
 async function realBalance(): Promise<UserBalance> {
-  return request<UserBalance>(`${BIZ_BASE}/api/v1/user/balance`, { baseUrl: BIZ_BASE });
+  return request<UserBalance>(`/api/v1/user/balance`, { baseUrl: BIZ_BASE });
 }
 async function realPlans(): Promise<Plan[]> {
-  const r = await request<{ plans: Plan[] }>(`${BIZ_BASE}/api/v1/plans`, { baseUrl: BIZ_BASE });
+  const r = await request<{ plans: Plan[] }>(`/api/v1/plans`, { baseUrl: BIZ_BASE });
   return r.plans;
 }
 async function realUserPlans(): Promise<UserPlan[]> {
-  const r = await request<{ plans: UserPlan[] }>(`${BIZ_BASE}/api/v1/user/plans`, { baseUrl: BIZ_BASE });
+  const r = await request<{ plans: UserPlan[] }>(`/api/v1/user/plans`, { baseUrl: BIZ_BASE });
   return r.plans;
 }
 async function realUsageStats(days = 7): Promise<UsageStats> {
-  return request<UsageStats>(`${BIZ_BASE}/api/v1/request-logs/stats?days=${days}`, { baseUrl: BIZ_BASE });
+  return request<UsageStats>(`/api/v1/request-logs/stats?days=${days}`, { baseUrl: BIZ_BASE });
 }
 async function realGetSettings(): Promise<UserSettings> {
-  return request<UserSettings>(`${BIZ_BASE}/api/v1/user/settings`, { baseUrl: BIZ_BASE });
+  return request<UserSettings>(`/api/v1/user/settings`, { baseUrl: BIZ_BASE });
 }
 async function realUpdateSettings(input: UserSettingsUpdate): Promise<UserSettings> {
-  return request<UserSettings>(`${BIZ_BASE}/api/v1/user/settings`, {
+  return request<UserSettings>(`/api/v1/user/settings`, {
     method: 'PATCH', body: input, baseUrl: BIZ_BASE,
   });
 }

@@ -27,10 +27,23 @@ export type ErrorCode =
   | 'invalid_email'
   | 'bad_request'
   | 'unauthorized'
-  | 'internal_error';
+  | 'internal_error'
+  // Edge/BFF business endpoints (services/api)
+  | 'billing_unavailable'
+  | 'logging_unavailable'
+  | 'auth_unavailable'
+  | 'auth_error'
+  | 'quota_unavailable'
+  | 'not_found'
+  | 'missing_request_id'
+  | 'invalid_json'
+  | 'invalid_preferred_billing';
 
+/** Error envelope. Two wire shapes are supported:
+ *  - contract: `{error:{code,message}}` (keys handler / Auth)
+ *  - simplified: `{error:"code"}` (panel handlers in services/api) */
 export interface ApiErrorBody {
-  error: { code: ErrorCode; message: string };
+  error: { code: ErrorCode; message: string } | string;
 }
 
 // ---- Business domain types (aligned to packages/contracts/openapi/api/v1.yaml). ----
