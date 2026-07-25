@@ -12,6 +12,8 @@ WORKDIR /workspace
 # Cache module layer. go.mod/go.sum are copied before the rest of the source
 # so dependency downloads are cached across source changes.
 COPY services/auth/go.mod services/auth/go.sum ./services/auth/
+# Copy the shared httpresp package (replace directive points to this path).
+COPY packages/go/httpresp ./packages/go/httpresp
 
 # Build the independently deployable Auth module outside the repository
 # workspace. Copying go.work would require copying every workspace module into
@@ -23,6 +25,8 @@ RUN cd services/auth && GOWORK=off go mod download
 # Copy the rest of the auth service source. Build context is the repo root so
 # migrations and source paths remain stable.
 COPY services/auth ./services/auth
+# Ensure the shared httpresp package is present for the replace directive.
+COPY packages/go/httpresp ./packages/go/httpresp
 
 # TARGETOS/TARGETARCH are injected automatically by BuildKit for multi-arch
 # builds (e.g. `docker buildx build --platform linux/amd64,linux/arm64`).
