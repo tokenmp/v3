@@ -37,7 +37,9 @@ export type ErrorCode =
   | 'not_found'
   | 'missing_request_id'
   | 'invalid_json'
-  | 'invalid_preferred_billing';
+  | 'invalid_preferred_billing'
+  | 'forbidden'
+  | 'service_unavailable';
 
 /** Error envelope. Two wire shapes are supported:
  *  - contract: `{error:{code,message}}` (keys handler / Auth)

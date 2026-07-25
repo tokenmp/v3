@@ -107,10 +107,26 @@ func do(t *testing.T, s *Server, method, target string, body string) *httptest.R
 	return rec
 }
 
+type testEnvelope struct {
+	Code    int             `json:"code"`
+	Data    json.RawMessage `json:"data"`
+	Message string          `json:"message"`
+}
+
 func decode(t *testing.T, rec *httptest.ResponseRecorder, dst any) {
 	t.Helper()
-	if err := json.NewDecoder(rec.Body).Decode(dst); err != nil {
-		t.Fatalf("decode response: %v (body=%s)", err, rec.Body.String())
+	var env testEnvelope
+	if err := json.NewDecoder(rec.Body).Decode(&env); err != nil {
+		t.Fatalf("decode envelope: %v (body=%s)", err, rec.Body.String())
+	}
+	if env.Code != 0 {
+		t.Fatalf("envelope code = %d, want 0 (body=%s)", env.Code, rec.Body.String())
+	}
+	if len(env.Data) == 0 || string(env.Data) == "null" {
+		return
+	}
+	if err := json.Unmarshal(env.Data, dst); err != nil {
+		t.Fatalf("decode data: %v (data=%s)", err, string(env.Data))
 	}
 }
 
@@ -189,7 +205,7 @@ func TestGetPlan_OK(t *testing.T) {
 func TestGetPlan_NotFound(t *testing.T) {
 	s := newServer(&fakePlanReader{getErr: repository.ErrNotFound}, &fakeUserPlanReader{}, &fakeQuotaManager{}, &fakeLedgerReader{}, fakePinger{})
 	rec := do(t, s, http.MethodGet, "/v1/billing/plans/7", "")
-	if rec.Code != http.StatusNotFound || !contains(rec.Body.String(), "not_found") {
+	if rec.Code != http.StatusNotFound || !contains(rec.Body.String(), "not found") {
 		t.Fatalf("status/body = %d/%s", rec.Code, rec.Body.String())
 	}
 }
@@ -309,9 +325,7 @@ func TestGetBalance_OK(t *testing.T) {
 		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
 	}
 	var out balanceResponse
-	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	decode(t, rec, &out)
 	if out.CodingRemaining != "42" || out.TokenRemaining != "1000" {
 		t.Errorf("balance = %+v", out)
 	}

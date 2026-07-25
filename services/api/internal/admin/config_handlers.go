@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/tokenmp/v3/packages/go/httpresp"
 	"github.com/tokenmp/v3/services/api/internal/config"
 )
 
@@ -103,7 +104,7 @@ func (h *ConfigHandlers) handleProxyRoute(r chi.Router, method, edgePath, cfgPat
 // chi URL params ({id}, {eid}, {cid}) with the actual values.
 func (h *ConfigHandlers) proxyToConfig(w http.ResponseWriter, r *http.Request, cfgPath string) {
 	if h.cfg == nil {
-		writeJSONErr(w, http.StatusServiceUnavailable, "config_service_not_configured")
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "config service not configured")
 		return
 	}
 	// Substitute path params.
@@ -125,11 +126,11 @@ func (h *ConfigHandlers) proxyToConfig(w http.ResponseWriter, r *http.Request, c
 	}
 	data, status, err := h.cfg.Proxy(r.Context(), r.Method, path, body)
 	if err != nil && status >= 500 {
-		writeJSONErr(w, http.StatusBadGateway, "config_service_unavailable")
+		httpresp.Error(w, httpresp.CodeBadGateway, "config service unavailable")
 		return
 	}
 	if err != nil && status == 0 {
-		writeJSONErr(w, http.StatusBadGateway, "config_service_unavailable")
+		httpresp.Error(w, httpresp.CodeBadGateway, "config service unavailable")
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -141,37 +142,13 @@ func (h *ConfigHandlers) proxyToConfig(w http.ResponseWriter, r *http.Request, c
 func (h *ConfigHandlers) handleModelsCatalog(w http.ResponseWriter, r *http.Request) {
 	if h.cfg == nil {
 		// Fallback: return empty list instead of erroring.
-		writeJSONOK(w, []string{})
+		httpresp.OK(w, []string{})
 		return
 	}
 	ids, err := h.cfg.GetModelIDs(r.Context())
 	if err != nil {
-		writeJSONErr(w, http.StatusBadGateway, "config_service_unavailable")
+		httpresp.Error(w, httpresp.CodeBadGateway, "config service unavailable")
 		return
 	}
-	writeJSONOK(w, ids)
-}
-
-func writeJSONOK(w http.ResponseWriter, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`[`))
-	// Simple: marshal the value.
-	if arr, ok := v.([]string); ok {
-		for i, id := range arr {
-			if i > 0 {
-				w.Write([]byte(","))
-			}
-			w.Write([]byte(`"`))
-			w.Write([]byte(id))
-			w.Write([]byte(`"`))
-		}
-	}
-	w.Write([]byte(`]`))
-}
-
-func writeJSONErr(w http.ResponseWriter, status int, code string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_, _ = w.Write([]byte(`{"error":{"code":"` + code + `"}}`))
+	httpresp.OK(w, ids)
 }

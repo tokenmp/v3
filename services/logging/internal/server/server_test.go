@@ -114,10 +114,26 @@ func assertCacheControl(t *testing.T, rec *httptest.ResponseRecorder) {
 	}
 }
 
+type testEnvelope struct {
+	Code    int             `json:"code"`
+	Data    json.RawMessage `json:"data"`
+	Message string          `json:"message"`
+}
+
 func decodeBody(t *testing.T, rec *httptest.ResponseRecorder, v any) {
 	t.Helper()
-	if err := json.NewDecoder(rec.Body).Decode(v); err != nil {
-		t.Fatalf("decode body: %v (body=%s)", err, rec.Body.String())
+	var env testEnvelope
+	if err := json.NewDecoder(rec.Body).Decode(&env); err != nil {
+		t.Fatalf("decode envelope: %v (body=%s)", err, rec.Body.String())
+	}
+	if env.Code != 0 {
+		t.Fatalf("envelope code = %d, want 0 (body=%s)", env.Code, rec.Body.String())
+	}
+	if len(env.Data) == 0 || string(env.Data) == "null" {
+		return // no data payload (e.g. 204-like)
+	}
+	if err := json.Unmarshal(env.Data, v); err != nil {
+		t.Fatalf("decode data: %v (data=%s)", err, string(env.Data))
 	}
 }
 
@@ -214,7 +230,7 @@ func TestIngest_MissingRequestID(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", rec.Code)
 	}
-	if !contains(rec.Body.String(), "missing_request_id") {
+	if !contains(rec.Body.String(), "missing request id") {
 		t.Errorf("expected missing_request_id, got %s", rec.Body.String())
 	}
 	if repo.ingestCall != 0 {
@@ -233,7 +249,7 @@ func TestIngest_InvalidJSON(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", rec.Code)
 	}
-	if !contains(rec.Body.String(), "invalid_json") {
+	if !contains(rec.Body.String(), "invalid JSON") {
 		t.Errorf("expected invalid_json, got %s", rec.Body.String())
 	}
 	if repo.ingestCall != 0 {
@@ -253,7 +269,7 @@ func TestIngest_WriteError(t *testing.T) {
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500", rec.Code)
 	}
-	if !contains(rec.Body.String(), "ingest_failed") {
+	if !contains(rec.Body.String(), "ingest failed") {
 		t.Errorf("expected ingest_failed, got %s", rec.Body.String())
 	}
 	if containsLeak(rec.Body.String()) {
@@ -276,7 +292,7 @@ func TestIngest_BodyLimit(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400 for oversized body", rec.Code)
 	}
-	if !contains(rec.Body.String(), "invalid_json") {
+	if !contains(rec.Body.String(), "invalid JSON") {
 		t.Errorf("expected invalid_json, got %s", rec.Body.String())
 	}
 }
@@ -313,7 +329,7 @@ func TestGetLog_NotFound(t *testing.T) {
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", rec.Code)
 	}
-	if !contains(rec.Body.String(), "not_found") {
+	if !contains(rec.Body.String(), "not found") {
 		t.Errorf("expected not_found, got %s", rec.Body.String())
 	}
 	if containsLeak(rec.Body.String()) {
@@ -355,10 +371,8 @@ func TestListLogs_OK(t *testing.T) {
 		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
 	}
 	var out listLogsResponse
-	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if out.Total != 42 || out.Page != 2 || out.PageSize != 5 || len(out.Logs) != 2 {
+	decodeBody(t, rec, &out)
+	if out.Total != 42 || out.Page != 2 || out.PageSize != 5 || len(out.Items) != 2 {
 		t.Fatalf("payload = %+v", out)
 	}
 	// status=error is dropped (not a DB enum); success+client_error kept.
@@ -390,7 +404,7 @@ func TestListLogs_Defaults(t *testing.T) {
 		t.Fatalf("status = %d", rec.Code)
 	}
 	var out listLogsResponse
-	_ = json.NewDecoder(rec.Body).Decode(&out)
+	decodeBody(t, rec, &out)
 	if out.Page != 1 || out.PageSize != 20 {
 		t.Errorf("defaults = page %d size %d", out.Page, out.PageSize)
 	}
@@ -442,9 +456,7 @@ func TestStats_OK(t *testing.T) {
 		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
 	}
 	var out statsResponse
-	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	decodeBody(t, rec, &out)
 	if out.Days != 30 || out.TotalRequests != 10 || out.TotalInputTokens != 100 || out.TotalOutputTokens != 200 {
 		t.Fatalf("payload = %+v", out)
 	}

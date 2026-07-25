@@ -18,6 +18,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/tokenmp/v3/packages/go/httpresp"
 	"github.com/tokenmp/v3/services/billing/internal/database"
 	"github.com/tokenmp/v3/services/billing/internal/repository"
 )
@@ -109,7 +110,7 @@ func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
 func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 	if err := s.pinger.Ping(r.Context()); err != nil {
 		s.logger.Warn("readyz ping failed", "error", err)
-		writeError(w, http.StatusServiceUnavailable, "not_ready")
+		httpresp.Error(w, httpresp.CodeNotReady, "not ready")
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -124,13 +125,13 @@ func (s *Server) handleListPlans(w http.ResponseWriter, r *http.Request) {
 	plans, err := s.plans.ListPlans(r.Context(), status)
 	if err != nil {
 		s.logger.Warn("plan list failed", "error", err)
-		writeError(w, http.StatusInternalServerError, "plans_unavailable")
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "plans unavailable")
 		return
 	}
 	if plans == nil {
 		plans = []repository.Plan{}
 	}
-	writeJSON(w, http.StatusOK, struct {
+	httpresp.OK(w, struct {
 		Plans []repository.Plan `json:"plans"`
 	}{Plans: plans})
 }
@@ -138,34 +139,34 @@ func (s *Server) handleListPlans(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleGetPlan(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil || id <= 0 {
-		writeError(w, http.StatusNotFound, "not_found")
+		httpresp.Error(w, httpresp.CodeNotFound, "not found")
 		return
 	}
 	plan, err := s.plans.GetPlan(r.Context(), id)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "not_found")
+			httpresp.Error(w, httpresp.CodeNotFound, "not found")
 			return
 		}
 		s.logger.Warn("plan query failed", "error", err)
-		writeError(w, http.StatusInternalServerError, "plan_unavailable")
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "plan unavailable")
 		return
 	}
-	writeJSON(w, http.StatusOK, plan)
+	httpresp.OK(w, plan)
 }
 
 func (s *Server) handleGetUserPlan(w http.ResponseWriter, r *http.Request) {
 	plan, err := s.userPlans.GetActiveUserPlan(r.Context(), chi.URLParam(r, "user_id"))
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "not_found")
+			httpresp.Error(w, httpresp.CodeNotFound, "not found")
 			return
 		}
 		s.logger.Warn("user plan query failed", "error", err)
-		writeError(w, http.StatusInternalServerError, "plan_unavailable")
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "plan unavailable")
 		return
 	}
-	writeJSON(w, http.StatusOK, plan)
+	httpresp.OK(w, plan)
 }
 
 type reserveRequest struct {
@@ -184,15 +185,15 @@ func (s *Server) handleReserve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.ReservationID == "" || req.UserID == "" || req.RequestID == "" || req.BillingPlan == "" || req.ReservedRequests == nil || req.ReservedTokens == nil {
-		writeError(w, http.StatusBadRequest, "missing_field")
+		httpresp.Error(w, httpresp.CodeMissingField, "missing field")
 		return
 	}
 	if err := s.quota.Reserve(r.Context(), req.ReservationID, req.UserID, req.RequestID, req.BillingPlan, *req.ReservedRequests, *req.ReservedTokens, req.ExpiresAt); err != nil && !errors.Is(err, repository.ErrConflict) {
 		s.logger.Warn("quota reserve failed", "error", err)
-		writeError(w, http.StatusInternalServerError, "reserve_failed")
+		httpresp.Error(w, httpresp.CodeInternalError, "reserve failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, struct {
+	httpresp.OK(w, struct {
 		ReservationID string `json:"reservation_id"`
 		Status        string `json:"status"`
 	}{ReservationID: req.ReservationID, Status: "reserved"})
@@ -210,19 +211,19 @@ func (s *Server) handleFinalize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.ReservationID == "" || req.FinalRequests == nil || req.FinalTokens == nil {
-		writeError(w, http.StatusBadRequest, "missing_field")
+		httpresp.Error(w, httpresp.CodeMissingField, "missing field")
 		return
 	}
 	if err := s.quota.Finalize(r.Context(), req.ReservationID, *req.FinalRequests, *req.FinalTokens); err != nil && !errors.Is(err, repository.ErrConflict) {
 		if errors.Is(err, repository.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "not_found")
+			httpresp.Error(w, httpresp.CodeNotFound, "not found")
 			return
 		}
 		s.logger.Warn("quota finalize failed", "error", err)
-		writeError(w, http.StatusInternalServerError, "finalize_failed")
+		httpresp.Error(w, httpresp.CodeInternalError, "finalize failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "finalized"})
+	httpresp.OK(w, map[string]string{"status": "finalized"})
 }
 
 type releaseRequest struct {
@@ -235,19 +236,19 @@ func (s *Server) handleRelease(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.ReservationID == "" {
-		writeError(w, http.StatusBadRequest, "missing_field")
+		httpresp.Error(w, httpresp.CodeMissingField, "missing field")
 		return
 	}
 	if err := s.quota.Release(r.Context(), req.ReservationID); err != nil && !errors.Is(err, repository.ErrConflict) {
 		if errors.Is(err, repository.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "not_found")
+			httpresp.Error(w, httpresp.CodeNotFound, "not found")
 			return
 		}
 		s.logger.Warn("quota release failed", "error", err)
-		writeError(w, http.StatusInternalServerError, "release_failed")
+		httpresp.Error(w, httpresp.CodeInternalError, "release failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "released"})
+	httpresp.OK(w, map[string]string{"status": "released"})
 }
 
 func (s *Server) handleListLedger(w http.ResponseWriter, r *http.Request) {
@@ -255,7 +256,7 @@ func (s *Server) handleListLedger(w http.ResponseWriter, r *http.Request) {
 	if raw := r.URL.Query().Get("limit"); raw != "" {
 		parsed, err := strconv.Atoi(raw)
 		if err != nil || parsed <= 0 {
-			writeError(w, http.StatusBadRequest, "invalid_limit")
+			httpresp.Error(w, httpresp.CodeBadRequest, "invalid limit")
 			return
 		}
 		limit = parsed
@@ -263,13 +264,13 @@ func (s *Server) handleListLedger(w http.ResponseWriter, r *http.Request) {
 	entries, err := s.ledger.ListLedger(r.Context(), chi.URLParam(r, "user_id"), limit)
 	if err != nil {
 		s.logger.Warn("ledger query failed", "error", err)
-		writeError(w, http.StatusInternalServerError, "ledger_unavailable")
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "ledger unavailable")
 		return
 	}
 	if entries == nil {
 		entries = []repository.UsageLedgerEntry{}
 	}
-	writeJSON(w, http.StatusOK, struct {
+	httpresp.OK(w, struct {
 		Entries []repository.UsageLedgerEntry `json:"entries"`
 	}{Entries: entries})
 }
@@ -284,16 +285,16 @@ type balanceResponse struct {
 
 func (s *Server) handleGetBalance(w http.ResponseWriter, r *http.Request) {
 	if s.balance == nil {
-		writeError(w, http.StatusServiceUnavailable, "balance_unavailable")
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "balance unavailable")
 		return
 	}
 	bal, err := s.balance.GetBalance(r.Context(), chi.URLParam(r, "user_id"))
 	if err != nil {
 		s.logger.Warn("balance query failed", "error", err)
-		writeError(w, http.StatusInternalServerError, "balance_unavailable")
+		httpresp.Error(w, httpresp.CodeInternalError, "balance unavailable")
 		return
 	}
-	writeJSON(w, http.StatusOK, balanceResponse{
+	httpresp.OK(w, balanceResponse{
 		CodingRemaining: strconv.FormatInt(bal.CodingRemaining, 10),
 		TokenRemaining:  strconv.FormatInt(bal.TokenRemaining, 10),
 	})
@@ -304,11 +305,11 @@ func decodeBoundedJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(dst); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_json")
+		httpresp.Error(w, httpresp.CodeInvalidJSON, "invalid JSON")
 		return false
 	}
 	if err := ensureEOF(dec); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_json")
+		httpresp.Error(w, httpresp.CodeInvalidJSON, "invalid JSON")
 		return false
 	}
 	return true
@@ -320,20 +321,4 @@ func ensureEOF(dec *json.Decoder) error {
 		return errors.New("trailing JSON data")
 	}
 	return nil
-}
-
-func writeJSON(w http.ResponseWriter, status int, value any) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(value); err != nil {
-		// Response encoding failures cannot be rendered safely after headers
-		// have been committed; retain only a safe server-side log record.
-		slog.Default().Error("response encode failed", "error", err)
-	}
-}
-
-func writeError(w http.ResponseWriter, status int, code string) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": code})
 }

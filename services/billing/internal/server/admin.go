@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/tokenmp/v3/packages/go/httpresp"
 	"github.com/tokenmp/v3/services/billing/internal/repository"
 )
 
@@ -24,16 +25,16 @@ type createPlanBody struct {
 
 func (s *Server) handleAdminCreatePlan(w http.ResponseWriter, r *http.Request) {
 	if s.admin == nil {
-		writeBillingErr(w, http.StatusServiceUnavailable, "admin_not_configured")
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "admin not configured")
 		return
 	}
 	var body createPlanBody
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxQuotaBodyBytes)).Decode(&body); err != nil {
-		writeBillingErr(w, http.StatusBadRequest, "invalid_body")
+		httpresp.Error(w, httpresp.CodeInvalidJSON, "invalid body")
 		return
 	}
 	if body.Name == "" || body.PlanType == "" {
-		writeBillingErr(w, http.StatusBadRequest, "name_and_plan_type_required")
+		httpresp.Error(w, httpresp.CodeMissingField, "name and plan type required")
 		return
 	}
 	plan := &repository.Plan{
@@ -48,25 +49,25 @@ func (s *Server) handleAdminCreatePlan(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := s.admin.CreatePlan(r.Context(), plan); err != nil {
 		s.logger.Warn("admin create plan failed", "error", err)
-		writeBillingErr(w, http.StatusInternalServerError, "internal_error")
+		httpresp.Error(w, httpresp.CodeInternalError, "internal error")
 		return
 	}
-	writeJSON(w, http.StatusCreated, plan)
+	httpresp.Created(w, plan)
 }
 
 func (s *Server) handleAdminUpdatePlan(w http.ResponseWriter, r *http.Request) {
 	if s.admin == nil {
-		writeBillingErr(w, http.StatusServiceUnavailable, "admin_not_configured")
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "admin not configured")
 		return
 	}
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil || id <= 0 {
-		writeBillingErr(w, http.StatusBadRequest, "invalid_plan_id")
+		httpresp.Error(w, httpresp.CodeBadRequest, "invalid plan id")
 		return
 	}
 	var body map[string]any
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxQuotaBodyBytes)).Decode(&body); err != nil {
-		writeBillingErr(w, http.StatusBadRequest, "invalid_body")
+		httpresp.Error(w, httpresp.CodeInvalidJSON, "invalid body")
 		return
 	}
 	// Only allow mutable fields.
@@ -79,43 +80,43 @@ func (s *Server) handleAdminUpdatePlan(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := s.admin.UpdatePlan(r.Context(), id, fields); err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
-			writeBillingErr(w, http.StatusNotFound, "plan_not_found")
+			httpresp.Error(w, httpresp.CodeNotFound, "plan not found")
 			return
 		}
 		s.logger.Warn("admin update plan failed", "error", err)
-		writeBillingErr(w, http.StatusInternalServerError, "internal_error")
+		httpresp.Error(w, httpresp.CodeInternalError, "internal error")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"id": id})
+	httpresp.OK(w, map[string]any{"id": id})
 }
 
 func (s *Server) handleAdminDeletePlan(w http.ResponseWriter, r *http.Request) {
 	if s.admin == nil {
-		writeBillingErr(w, http.StatusServiceUnavailable, "admin_not_configured")
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "admin not configured")
 		return
 	}
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil || id <= 0 {
-		writeBillingErr(w, http.StatusBadRequest, "invalid_plan_id")
+		httpresp.Error(w, httpresp.CodeBadRequest, "invalid plan id")
 		return
 	}
 	if err := s.admin.DeletePlan(r.Context(), id); err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
-			writeBillingErr(w, http.StatusNotFound, "plan_not_found")
+			httpresp.Error(w, httpresp.CodeNotFound, "plan not found")
 			return
 		}
 		s.logger.Warn("admin delete plan failed", "error", err)
-		writeBillingErr(w, http.StatusInternalServerError, "internal_error")
+		httpresp.Error(w, httpresp.CodeInternalError, "internal error")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"id": id, "status": "deleted"})
+	httpresp.OK(w, map[string]any{"id": id, "status": "deleted"})
 }
 
 // ---- User Plans (cross-user) ----
 
 func (s *Server) handleAdminListUserPlans(w http.ResponseWriter, r *http.Request) {
 	if s.admin == nil {
-		writeBillingErr(w, http.StatusServiceUnavailable, "admin_not_configured")
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "admin not configured")
 		return
 	}
 	q := r.URL.Query()
@@ -127,10 +128,10 @@ func (s *Server) handleAdminListUserPlans(w http.ResponseWriter, r *http.Request
 	ups, total, err := s.admin.ListAllUserPlans(r.Context(), pageSize, (page-1)*pageSize)
 	if err != nil {
 		s.logger.Warn("admin list user plans failed", "error", err)
-		writeBillingErr(w, http.StatusInternalServerError, "internal_error")
+		httpresp.Error(w, httpresp.CodeInternalError, "internal error")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpresp.OK(w, map[string]any{
 		"userPlans": ups,
 		"total":     total,
 		"page":      page,
@@ -146,16 +147,16 @@ type assignUserPlanBody struct {
 
 func (s *Server) handleAdminAssignUserPlan(w http.ResponseWriter, r *http.Request) {
 	if s.admin == nil {
-		writeBillingErr(w, http.StatusServiceUnavailable, "admin_not_configured")
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "admin not configured")
 		return
 	}
 	var body assignUserPlanBody
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxQuotaBodyBytes)).Decode(&body); err != nil {
-		writeBillingErr(w, http.StatusBadRequest, "invalid_body")
+		httpresp.Error(w, httpresp.CodeInvalidJSON, "invalid body")
 		return
 	}
 	if body.UserID == "" || body.PlanID <= 0 {
-		writeBillingErr(w, http.StatusBadRequest, "user_id_and_plan_id_required")
+		httpresp.Error(w, httpresp.CodeMissingField, "user id and plan id required")
 		return
 	}
 	up := &repository.UserPlan{
@@ -165,43 +166,43 @@ func (s *Server) handleAdminAssignUserPlan(w http.ResponseWriter, r *http.Reques
 	}
 	if err := s.admin.AssignUserPlan(r.Context(), up); err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
-			writeBillingErr(w, http.StatusNotFound, "plan_not_found")
+			httpresp.Error(w, httpresp.CodeNotFound, "plan not found")
 			return
 		}
 		s.logger.Warn("admin assign user plan failed", "error", err)
-		writeBillingErr(w, http.StatusInternalServerError, "internal_error")
+		httpresp.Error(w, httpresp.CodeInternalError, "internal error")
 		return
 	}
-	writeJSON(w, http.StatusCreated, up)
+	httpresp.Created(w, up)
 }
 
 func (s *Server) handleAdminCancelUserPlan(w http.ResponseWriter, r *http.Request) {
 	if s.admin == nil {
-		writeBillingErr(w, http.StatusServiceUnavailable, "admin_not_configured")
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "admin not configured")
 		return
 	}
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil || id <= 0 {
-		writeBillingErr(w, http.StatusBadRequest, "invalid_user_plan_id")
+		httpresp.Error(w, httpresp.CodeBadRequest, "invalid user plan id")
 		return
 	}
 	if err := s.admin.CancelUserPlan(r.Context(), id); err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
-			writeBillingErr(w, http.StatusNotFound, "user_plan_not_found")
+			httpresp.Error(w, httpresp.CodeNotFound, "user plan not found")
 			return
 		}
 		s.logger.Warn("admin cancel user plan failed", "error", err)
-		writeBillingErr(w, http.StatusInternalServerError, "internal_error")
+		httpresp.Error(w, httpresp.CodeInternalError, "internal error")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"id": id, "status": "cancelled"})
+	httpresp.OK(w, map[string]any{"id": id, "status": "cancelled"})
 }
 
 // ---- Usage Stats ----
 
 func (s *Server) handleAdminUsageStats(w http.ResponseWriter, r *http.Request) {
 	if s.admin == nil {
-		writeBillingErr(w, http.StatusServiceUnavailable, "admin_not_configured")
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "admin not configured")
 		return
 	}
 	q := r.URL.Query()
@@ -210,10 +211,10 @@ func (s *Server) handleAdminUsageStats(w http.ResponseWriter, r *http.Request) {
 	rows, err := s.admin.GetUsageStats(r.Context(), days, groupBy)
 	if err != nil {
 		s.logger.Warn("admin usage stats failed", "error", err)
-		writeBillingErr(w, http.StatusInternalServerError, "internal_error")
+		httpresp.Error(w, httpresp.CodeInternalError, "internal error")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpresp.OK(w, map[string]any{
 		"days":    days,
 		"groupBy": groupBy,
 		"rows":    rows,
@@ -221,14 +222,6 @@ func (s *Server) handleAdminUsageStats(w http.ResponseWriter, r *http.Request) {
 }
 
 // ---- helpers ----
-
-func writeBillingErr(w http.ResponseWriter, status int, code string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"error": map[string]any{"code": code},
-	})
-}
 
 func parsePositiveInt(s string, def int) int {
 	n, err := strconv.Atoi(s)

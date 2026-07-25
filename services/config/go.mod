@@ -20,3 +20,5 @@ require (
 	golang.org/x/sync v0.21.0 // indirect
 	golang.org/x/text v0.38.0 // indirect
 )
+
+replace github.com/tokenmp/v3/packages/go/httpresp => ../../packages/go/httpresp

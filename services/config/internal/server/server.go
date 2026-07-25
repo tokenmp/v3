@@ -21,6 +21,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/tokenmp/v3/packages/go/httpresp"
 	"github.com/tokenmp/v3/services/config/internal/database"
 	"github.com/tokenmp/v3/services/config/internal/repository"
 )
@@ -94,7 +95,7 @@ func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
 func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 	if err := s.pinger.Ping(r.Context()); err != nil {
 		s.logger.Warn("readyz ping failed", "error", err)
-		writeError(w, http.StatusServiceUnavailable, "not_ready")
+		httpresp.Error(w, httpresp.CodeNotReady, "not ready")
 		return
 	}
 	w.WriteHeader(http.StatusOK)
@@ -106,13 +107,15 @@ func (s *Server) handleLatestSnapshot(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch {
 		case errors.Is(err, repository.ErrNotFound):
-			writeError(w, http.StatusNotFound, "no_published_snapshot")
+			httpresp.Error(w, httpresp.CodeNotFound, "no published snapshot")
 		default:
 			s.logger.Error("snapshot query failed", "error", err)
-			writeError(w, http.StatusInternalServerError, "snapshot_unavailable")
+			httpresp.Error(w, httpresp.CodeInternalError, "snapshot unavailable")
 		}
 		return
 	}
+	// This endpoint serves raw ConfigSnapshot JSON consumed by the executor's
+	// config source — it must NOT be wrapped in the {code,data,message} envelope.
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("X-Config-Revision", snap.Revision)
 	w.Header().Set("X-Config-SHA256", snap.SHA256)
@@ -120,12 +123,6 @@ func (s *Server) handleLatestSnapshot(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(snap); err != nil {
 		s.logger.Error("snapshot encode failed", "error", err)
 	}
-}
-
-func writeError(w http.ResponseWriter, status int, code string) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": code})
 }
 
 func (s *Server) logMiddleware(next http.Handler) http.Handler {

@@ -8,7 +8,6 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -16,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tokenmp/v3/packages/go/httpresp"
 	"github.com/tokenmp/v3/services/notice/internal/jwtverifier"
 	"github.com/tokenmp/v3/services/notice/internal/models"
 	"github.com/tokenmp/v3/services/notice/internal/repository"
@@ -188,15 +188,41 @@ func (s *Server) adminMiddleware(h http.Handler) http.Handler {
 // ---- Helpers ----
 
 func writeJSON(w http.ResponseWriter, status int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(body)
+	// All success responses use the httpresp envelope.
+	httpresp.OK(w, body)
+}
+
+func writeJSONStatus(w http.ResponseWriter, status int, body any) {
+	// For non-200 success (e.g. 201 Created, 202 Accepted).
+	switch status {
+	case http.StatusCreated:
+		httpresp.Created(w, body)
+	default:
+		// 202 Accepted and others — use OK with the body.
+		httpresp.OK(w, body)
+	}
 }
 
 func writeError(w http.ResponseWriter, status int, code, message string) {
-	writeJSON(w, status, map[string]any{
-		"error": map[string]any{"code": code, "message": message},
-	})
+	// Map string code to numeric httpresp.Code based on HTTP status.
+	var c httpresp.Code
+	switch status {
+	case http.StatusBadRequest:
+		c = httpresp.CodeBadRequest
+	case http.StatusUnauthorized:
+		c = httpresp.CodeUnauthorized
+	case http.StatusForbidden:
+		c = httpresp.CodeForbidden
+	case http.StatusNotFound:
+		c = httpresp.CodeNotFound
+	case http.StatusConflict:
+		c = httpresp.CodeConflict
+	case http.StatusServiceUnavailable:
+		c = httpresp.CodeServiceUnavailable
+	default:
+		c = httpresp.CodeInternalError
+	}
+	httpresp.ErrorWithStatus(w, status, c, message)
 }
 
 func parsePaging(r *http.Request) (int, int) {

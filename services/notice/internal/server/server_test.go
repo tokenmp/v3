@@ -14,6 +14,28 @@ import (
 	"github.com/tokenmp/v3/services/notice/internal/repository"
 )
 
+// decodeData extracts the .data field from the {code,data,message} envelope.
+func decodeData(t *testing.T, rec *httptest.ResponseRecorder, v any) {
+	t.Helper()
+	var env struct {
+		Code    int             `json:"code"`
+		Data    json.RawMessage `json:"data"`
+		Message string          `json:"message"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &env); err != nil {
+		t.Fatalf("decode envelope: %v (body=%s)", err, rec.Body.String())
+	}
+	if env.Code != 0 {
+		t.Fatalf("envelope code = %d, want 0 (body=%s)", env.Code, rec.Body.String())
+	}
+	if len(env.Data) == 0 || string(env.Data) == "null" {
+		return
+	}
+	if err := json.Unmarshal(env.Data, v); err != nil {
+		t.Fatalf("decode data: %v (data=%s)", err, string(env.Data))
+	}
+}
+
 // --- fakes ---
 
 type fakeVerifier struct {
@@ -186,7 +208,7 @@ func TestHealthzAndReadyz(t *testing.T) {
 		t.Errorf("Cache-Control = %q", got)
 	}
 	var body map[string]any
-	_ = json.Unmarshal(rec.Body.Bytes(), &body)
+	decodeData(t, rec, &body)
 	if body["service"] != "notice" || body["status"] != "ok" {
 		t.Errorf("healthz body = %v", body)
 	}
@@ -203,7 +225,7 @@ func TestAnnouncements_Unauth(t *testing.T) {
 	if rec.Code != 401 {
 		t.Fatalf("got %d, want 401", rec.Code)
 	}
-	if !strings.Contains(rec.Body.String(), "unauthorized") {
+	if !strings.Contains(rec.Body.String(), "1007") {
 		t.Errorf("body = %s", rec.Body.String())
 	}
 }
@@ -221,9 +243,7 @@ func TestAnnouncements_OK(t *testing.T) {
 		Items []models.Announcement `json:"items"`
 		Total int                   `json:"total"`
 	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
-		t.Fatal(err)
-	}
+	decodeData(t, rec, &page)
 	if page.Total != 1 || len(page.Items) != 1 {
 		t.Fatalf("page = %+v", page)
 	}
@@ -260,7 +280,7 @@ func TestChangelogs_OK(t *testing.T) {
 		Items []models.Changelog `json:"items"`
 		Total int                `json:"total"`
 	}
-	_ = json.Unmarshal(rec.Body.Bytes(), &page)
+	decodeData(t, rec, &page)
 	if page.Items[0].Version != "v3.2.0" {
 		t.Errorf("version = %q", page.Items[0].Version)
 	}
@@ -308,7 +328,7 @@ func TestUnreadCount(t *testing.T) {
 		t.Fatalf("got %d", rec.Code)
 	}
 	var body map[string]any
-	_ = json.Unmarshal(rec.Body.Bytes(), &body)
+	decodeData(t, rec, &body)
 	if int(body["count"].(float64)) != 7 {
 		t.Errorf("count = %v", body["count"])
 	}

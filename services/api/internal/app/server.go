@@ -22,6 +22,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/tokenmp/v3/packages/go/httpresp/envelope"
 	"github.com/tokenmp/v3/services/api/internal/admin"
 	"github.com/tokenmp/v3/services/api/internal/billing"
 	"github.com/tokenmp/v3/services/api/internal/config"
@@ -77,7 +78,10 @@ func NewServer(deps Deps, readHeaderTimeout, idleTimeout time.Duration) *http.Se
 	r.Group(func(r chi.Router) {
 		r.Use(identity.Middleware(deps.Verifier, deps.Logger))
 		if deps.KeysHandler != nil {
-			deps.KeysHandler.Routes(r)
+			r.Group(func(r chi.Router) {
+				r.Use(envelope.Wrap)
+				deps.KeysHandler.Routes(r)
+			})
 		}
 		r.Get("/api/v1/user/balance", panelHandlers.GetUserBalance)
 		r.Get("/api/v1/user/plans", panelHandlers.ListUserPlans)

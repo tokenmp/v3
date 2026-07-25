@@ -2,6 +2,13 @@ import { useAuthStore } from '@/lib/auth';
 import { networkError, parseApiError } from '@/lib/api-error';
 import type { ApiErrorBody, TokenResponse } from '@/types';
 
+/** Envelope error response: {code: number, data: null, message: string}. */
+interface EnvelopeError {
+  code: number;
+  data: null;
+  message: string;
+}
+
 /** Base URL of the auth service. Empty string => relative to current origin (same-origin proxy). */
 export const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? '';
 
@@ -24,10 +31,12 @@ async function refreshTokens(): Promise<boolean> {
         body: JSON.stringify({ refresh_token: refreshToken }),
       });
       if (!res.ok) {
-        const body = (await res.json().catch(() => null)) as ApiErrorBody | null;
+        const body = (await res.json().catch(() => null));
         throw parseApiError(res, body);
       }
-      const tokens = (await res.json()) as TokenResponse;
+      const json = await res.json();
+      // Unwrap {code, data, message} envelope.
+      const tokens = (json?.code === 0 ? json.data : json) as TokenResponse;
       setTokens(tokens);
       return true;
     } catch {
@@ -93,10 +102,18 @@ export async function request<T>(
   }
 
   if (!res.ok) {
-    const errBody = (await res.json().catch(() => null)) as ApiErrorBody | null;
-    throw parseApiError(res, errBody);
+    const body = (await res.json().catch(() => null)) as EnvelopeError | ApiErrorBody | null;
+    throw parseApiError(res, body);
   }
 
   if (noContent || res.status === 204) return undefined as T;
-  return (await res.json()) as T;
+  const json = await res.json();
+  // Unwrap {code, data, message} envelope.
+  if (json && typeof json === 'object' && 'code' in json && 'data' in json) {
+    if (json.code !== 0) {
+      throw parseApiError(res, json as EnvelopeError);
+    }
+    return json.data as T;
+  }
+  return json as T;
 }
