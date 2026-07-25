@@ -26,6 +26,9 @@
   --brand-solid: #111827;
   /* shadcn base radius (used by ui components via calc) */
   --radius: var(--tmp-radius-lg);
+  /* control heights (aligned with july design system) */
+  --control-height-sm: 32px;
+  --control-height-md: 40px;
 }
 
 @layer base {
