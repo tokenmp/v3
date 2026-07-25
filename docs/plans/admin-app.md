@@ -1,6 +1,7 @@
 # TokenMP v3 后台管理（Admin）设计
 
-> 状态：方案设计 · 待评审
+> 状态：前端 Phase 1-4 已实现（mock 驱动） · 后端 admin 端点待实现
+> 分支：`feat/admin-dashboard-v2`
 > 作者：pi · 日期：2026-07-25
 > 参考：旧版 july `admin/`、executor `dashboard/` 的成熟实践
 
@@ -295,30 +296,41 @@ keys/codes/errors/models/plans/providers，recharts 用量图表。
 | Notice | admin announcements/changelogs CRUD + notifications **异步发送**（队列/后台 worker） | 中 |
 | Config | **写路径 draft/publish**（当前只读）+ admin providers/credentials/models/routes CRUD | 低（但 Phase 4 前置） |
 
-## 六、实施分期建议
+## 六、实施进度
 
-### Phase 1（MVP，可独立交付）
+### Phase 1（MVP）✅ 前端已完成
 - Admin 布局 + 鉴权守卫 + 侧边栏
-- 控制台（今日快照 + 趋势图）
+- 控制台（今日快照 + recharts 趋势图）
 - 用户管理（列表 + 禁用/启用 + 详情聚合）
 - 请求日志（全局列表 + 详情）
+- API 密钥（全局列表 + 撤销）
 
-### Phase 2（内容运营）
+### Phase 2（内容运营）✅ 前端已完成
 - 公告管理 CRUD
 - 版本日志 CRUD
-- 通知发送
+- 通知发送（异步设计，前端 mock 同步）
 
-### Phase 3（套餐计费）
+### Phase 3（套餐计费）✅ 前端已完成
 - 套餐 CRUD
-- 用户套餐分配
-- 用量统计
+- 用户套餐分配/撤销
+- 用量统计（BarChart + AreaChart）
 
-### Phase 4（执行配置 + 凭据）
-- **前置**：Config Service 实现写路径（draft/publish），这是本阶段一切 CRUD 的基础
-- Provider CRUD + 上游凭据元数据管理（不含明文）
-- 模型配置 CRUD（经 Config Service）
-- 路由配置 CRUD（经 Config Service）
-- 系统设置
+### Phase 4（执行配置）✅ 前端已完成（只读）
+- Provider 只读列表
+- 模型配置只读列表
+- 路由配置只读列表
+- 系统设置占位
+- **前置**：Config Service 实现写路径（draft/publish）后可加 CRUD
+
+### 后端待实现（issue 跟踪）
+| 服务 | 需新增端点 | 对应前端 |
+|---|---|---|
+| Edge `services/api` | admin handler 聚合层（全部 admin 端点 + RequireAdmin 中间件） | 全部 |
+| Auth | admin users list/patch + admin keys 跨用户 list | Phase 1 |
+| Billing | admin plans CRUD + user-plans CRUD + 跨用户 usage stats | Phase 3 |
+| Logging | 跨用户 request-logs（已支持，去掉 user_id 过滤）+ admin stats 聚合 | Phase 1 |
+| Notice | admin announcements/changelogs CRUD + notifications 异步发送 | Phase 2 |
+| Config | 写路径 draft/publish + admin providers/models/routes CRUD | Phase 4 |
 
 ## 七、已决策
 
