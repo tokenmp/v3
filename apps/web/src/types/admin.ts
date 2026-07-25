@@ -197,3 +197,37 @@ export interface AdminUserPlanInput {
   planId: string;
   expiresAt: string | null;
 }
+
+// ---- Provider config (read-only for now, write TBD via Config Service) ----
+
+export interface AdminProvider {
+  id: string;
+  name: string;
+  displayLabel: string;
+  selector: string;
+  baseURL: string;
+  sdkKind: 'openai' | 'anthropic';
+  protocol: string;
+  status: 'active' | 'disabled' | 'deleted';
+  credentialCount: number;
+  routeCount: number;
+}
+
+export interface AdminModelConfig {
+  id: string;
+  displayName: string;
+  capabilities: string[]; // text|tools|vision|thinking|image
+  thinkingSupported: boolean;
+  routeCount: number;
+}
+
+export interface AdminRouteConfig {
+  id: string;
+  modelId: string;
+  providerId: string;
+  upstreamModel: string;
+  protocol: string;
+  priority: number;
+  enabled: boolean;
+  quarantined: boolean;
+}

@@ -453,3 +453,47 @@ export const adminUserPlanApi = {
     await request<void>(`/api/v1/admin/user-plans/${id}/cancel`, { method: 'POST', noContent: true, baseUrl: ADMIN_BASE });
   },
 };
+
+// ---------------------------------------------------------------------------
+// Executor config: providers, models, routes (Phase 4 — read-only,
+// mock-backed; write paths depend on Config Service draft/publish TBD)
+// ---------------------------------------------------------------------------
+
+import type { AdminProvider, AdminModelConfig, AdminRouteConfig } from '@/types/admin';
+
+const mockProviders: AdminProvider[] = [
+  { id: 'openai-default', name: 'OpenAI Default', displayLabel: 'a', selector: 'openai', baseURL: 'https://api.openai.example/v1', sdkKind: 'openai', protocol: 'openai_chat', status: 'active', credentialCount: 2, routeCount: 3 },
+  { id: 'anthropic-default', name: 'Anthropic Default', displayLabel: 'b', selector: 'anthropic', baseURL: 'https://api.anthropic.example', sdkKind: 'anthropic', protocol: 'anthropic_messages', status: 'active', credentialCount: 1, routeCount: 2 },
+  { id: 'deepseek-default', name: 'DeepSeek', displayLabel: 'c', selector: 'deepseek', baseURL: 'https://api.deepseek.example/v1', sdkKind: 'openai', protocol: 'openai_chat', status: 'active', credentialCount: 1, routeCount: 1 },
+  { id: 'xfyun-default', name: '讯飞星火', displayLabel: 'd', selector: 'xfyun', baseURL: 'https://spark-api.example', sdkKind: 'openai', protocol: 'openai_chat', status: 'disabled', credentialCount: 0, routeCount: 0 },
+];
+
+const mockModelConfigs: AdminModelConfig[] = [
+  { id: 'chat-default', displayName: 'Default Chat', capabilities: ['text', 'tools', 'vision', 'thinking'], thinkingSupported: true, routeCount: 3 },
+  { id: 'chat-fast', displayName: 'Fast Chat', capabilities: ['text'], thinkingSupported: false, routeCount: 1 },
+  { id: 'chat-reasoning', displayName: 'Reasoning Chat', capabilities: ['text', 'tools', 'thinking'], thinkingSupported: true, routeCount: 2 },
+  { id: 'image-gen', displayName: 'Image Gen', capabilities: ['image'], thinkingSupported: false, routeCount: 1 },
+];
+
+const mockRouteConfigs: AdminRouteConfig[] = [
+  { id: 'route-chat-default', modelId: 'chat-default', providerId: 'openai-default', upstreamModel: 'gpt-4o', protocol: 'openai_chat', priority: 100, enabled: true, quarantined: false },
+  { id: 'route-chat-anthropic', modelId: 'chat-default', providerId: 'anthropic-default', upstreamModel: 'claude-3-5-sonnet', protocol: 'anthropic_messages', priority: 90, enabled: true, quarantined: false },
+  { id: 'route-chat-deepseek', modelId: 'chat-default', providerId: 'deepseek-default', upstreamModel: 'deepseek-chat', protocol: 'openai_chat', priority: 80, enabled: true, quarantined: true },
+  { id: 'route-chat-fast', modelId: 'chat-fast', providerId: 'openai-default', upstreamModel: 'gpt-4o-mini', protocol: 'openai_chat', priority: 100, enabled: true, quarantined: false },
+  { id: 'route-image-gen', modelId: 'image-gen', providerId: 'openai-default', upstreamModel: 'dall-e-3', protocol: 'openai_images', priority: 100, enabled: false, quarantined: false },
+];
+
+export const adminConfigApi = {
+  listProviders: async (): Promise<AdminProvider[]> => {
+    if (useMock) { await delay(280); return [...mockProviders]; }
+    return request<AdminProvider[]>('/api/v1/admin/providers', { baseUrl: ADMIN_BASE });
+  },
+  listModels: async (): Promise<AdminModelConfig[]> => {
+    if (useMock) { await delay(280); return [...mockModelConfigs]; }
+    return request<AdminModelConfig[]>('/api/v1/admin/models-config', { baseUrl: ADMIN_BASE });
+  },
+  listRoutes: async (): Promise<AdminRouteConfig[]> => {
+    if (useMock) { await delay(280); return [...mockRouteConfigs]; }
+    return request<AdminRouteConfig[]>('/api/v1/admin/routes-config', { baseUrl: ADMIN_BASE });
+  },
+};
