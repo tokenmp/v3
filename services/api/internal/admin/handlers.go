@@ -8,10 +8,11 @@
 //   - GET /api/v1/admin/request-logs/stats → Logging
 //   - GET /api/v1/admin/plans             → Billing
 //   - GET /api/v1/admin/user-plans        → Billing (cross-user)
-//   - GET /api/v1/admin/user/balance      → Billing (cross-user, by query user_id)
+//   - GET /api/v1/admin/users             → Auth (list)
+//   - GET /api/v1/admin/users/{id}        → Auth + Billing + Logging (aggregated detail)
+//   - GET /api/v1/admin/keys              → Auth (cross-user)
 //
-// Users/keys management endpoints proxy to Auth (TBD: Auth has no admin list
-// endpoint yet). Config endpoints proxy to Config Service (TBD: write path).
+// Config endpoints proxy to Config Service.
 package admin
 
 import (
@@ -223,12 +224,7 @@ func (h *Handlers) AdminGetUser(w http.ResponseWriter, r *http.Request) {
 		httpresp.Error(w, httpresp.CodeMissingField, "missing user id")
 		return
 	}
-	result, err := h.Auth.GetUser(r.Context(), bearer, userID)
-	if err != nil {
-		h.handleAuthErr(w, err)
-		return
-	}
-	httpresp.OK(w, result)
+	h.adminGetUserDetail(w, r, bearer, userID)
 }
 
 func (h *Handlers) AdminUpdateUser(w http.ResponseWriter, r *http.Request) {
