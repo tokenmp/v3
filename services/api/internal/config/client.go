@@ -2,13 +2,14 @@ package config
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
+
+	"github.com/tokenmp/v3/packages/go/httpresp"
 )
 
 // Client calls the Config Service admin API.
@@ -60,7 +61,7 @@ func (c *Client) GetModelIDs(ctx context.Context) ([]string, error) {
 		return nil, err
 	}
 	var ids []string
-	if err := json.Unmarshal(data, &ids); err != nil {
+	if err := httpresp.UnwrapData(data, &ids); err != nil {
 		return nil, fmt.Errorf("config client: decode model ids: %w", err)
 	}
 	return ids, nil

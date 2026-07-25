@@ -17,6 +17,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/tokenmp/v3/packages/go/httpresp"
 )
 
 // ErrUnavailable 表示 Billing Service 不可达或返回错误，绝不携带 URL 或响应体。
@@ -152,7 +154,7 @@ func (c *Client) get(ctx context.Context, path string, dst any) error {
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return ErrUnavailable
 	}
-	if err := json.Unmarshal(data, dst); err != nil {
+	if err := httpresp.UnwrapData(data, dst); err != nil {
 		return ErrUnavailable
 	}
 	return nil
