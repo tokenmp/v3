@@ -65,9 +65,9 @@ func TestWrap_Error(t *testing.T) {
 		t.Fatalf("status = %d, want 401", rec.Code)
 	}
 	var env struct {
-		Code    int         `json:"code"`
-		Data    interface{} `json:"data"`
-		Message string      `json:"message"`
+		Code    int             `json:"code"`
+		Data    json.RawMessage `json:"data"`
+		Message string          `json:"message"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &env); err != nil {
 		t.Fatalf("decode: %v (body=%s)", err, rec.Body.String())
@@ -75,8 +75,23 @@ func TestWrap_Error(t *testing.T) {
 	if env.Code != 1007 {
 		t.Errorf("code = %d, want 1007", env.Code)
 	}
+	if env.Message != "wrong password" {
+		t.Errorf("message = %q, want 'wrong password'", env.Message)
+	}
 	if env.Data != nil {
-		t.Errorf("data = %v, want nil", env.Data)
+		// For error responses, data preserves the original body as raw JSON.
+		var d struct {
+			Error struct {
+				Code    string `json:"code"`
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal(env.Data, &d); err != nil {
+			t.Fatalf("decode data: %v (data=%s)", err, string(env.Data))
+		}
+		if d.Error.Message != "wrong password" {
+			t.Errorf("data.error.message = %q, want 'wrong password'", d.Error.Message)
+		}
 	}
 	if env.Message != "wrong password" {
 		t.Errorf("message = %q, want 'wrong password'", env.Message)

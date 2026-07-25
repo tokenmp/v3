@@ -151,13 +151,22 @@ func Wrap(next http.Handler) http.Handler {
 				"message": "success",
 			})
 		} else {
-			// Error: wrap in {code:<mapped>, data:null, message:<extracted>}.
-			msg := extractErrorMessage(cw.buf.Bytes())
-			envBody, _ = json.Marshal(map[string]any{
-				"code":    codeFromStatus(status),
-				"data":    nil,
-				"message": msg,
-			})
+			// Error: wrap in {code:<mapped>, data:<original body>, message:<extracted>}.
+			// Preserve original body as data so clients can access error details.
+			var raw json.RawMessage
+			if json.Unmarshal(cw.buf.Bytes(), &raw) == nil {
+				envBody, _ = json.Marshal(map[string]any{
+					"code":    codeFromStatus(status),
+					"data":    raw,
+					"message": extractErrorMessage(cw.buf.Bytes()),
+				})
+			} else {
+				envBody, _ = json.Marshal(map[string]any{
+					"code":    codeFromStatus(status),
+					"data":    nil,
+					"message": "error",
+				})
+			}
 		}
 
 		// Write wrapped response.
