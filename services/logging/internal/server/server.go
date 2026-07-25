@@ -24,6 +24,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/tokenmp/v3/packages/go/httpresp"
 	"github.com/tokenmp/v3/services/logging/internal/database"
 	"github.com/tokenmp/v3/services/logging/internal/repository"
 )
@@ -104,7 +105,7 @@ func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
 func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 	if err := s.pinger.Ping(r.Context()); err != nil {
 		s.logger.Warn("readyz ping failed", "error", err)
-		writeError(w, http.StatusServiceUnavailable, "not_ready")
+		httpresp.Error(w, httpresp.CodeNotReady, "not ready")
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -134,22 +135,22 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_json")
+		httpresp.Error(w, httpresp.CodeInvalidJSON, "invalid JSON")
 		return
 	}
 	if _, err := io.Copy(io.Discard, r.Body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_json")
+		httpresp.Error(w, httpresp.CodeInvalidJSON, "invalid JSON")
 		return
 	}
 	if req.Log.RequestID == "" {
-		writeError(w, http.StatusBadRequest, "missing_request_id")
+		httpresp.Error(w, httpresp.CodeMissingField, "missing request id")
 		return
 	}
 
 	ingestor, ok := s.writer.(repository.BatchIngestor)
 	if !ok {
 		s.logger.Error("writer does not implement BatchIngestor")
-		writeError(w, http.StatusInternalServerError, "ingest_failed")
+		httpresp.Error(w, httpresp.CodeInternalError, "ingest failed")
 		return
 	}
 	if err := ingestor.IngestBatch(r.Context(), repository.Batch{
@@ -158,13 +159,11 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 		Events:   req.Events,
 	}); err != nil {
 		s.logger.Warn("ingest failed", "error", err)
-		writeError(w, http.StatusInternalServerError, "ingest_failed")
+		httpresp.Error(w, httpresp.CodeInternalError, "ingest failed")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(ingestResponse{
+	httpresp.OK(w, ingestResponse{
 		RequestID: req.Log.RequestID,
 		Accepted:  1 + len(req.Attempts) + len(req.Events),
 	})
@@ -183,23 +182,23 @@ func (s *Server) handleGetLog(w http.ResponseWriter, r *http.Request) {
 	log, err := s.reader.GetRequestLog(r.Context(), requestID)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "not_found")
+			httpresp.Error(w, httpresp.CodeNotFound, "not found")
 			return
 		}
 		s.logger.Warn("request log query failed", "error", err)
-		writeError(w, http.StatusInternalServerError, "query_failed")
+		httpresp.Error(w, httpresp.CodeInternalError, "query failed")
 		return
 	}
 	attempts, err := s.reader.ListAttempts(r.Context(), requestID)
 	if err != nil {
 		s.logger.Warn("attempts query failed", "error", err)
-		writeError(w, http.StatusInternalServerError, "query_failed")
+		httpresp.Error(w, httpresp.CodeInternalError, "query failed")
 		return
 	}
 	events, err := s.reader.ListEvents(r.Context(), requestID)
 	if err != nil {
 		s.logger.Warn("events query failed", "error", err)
-		writeError(w, http.StatusInternalServerError, "query_failed")
+		httpresp.Error(w, httpresp.CodeInternalError, "query failed")
 		return
 	}
 	if attempts == nil {
@@ -208,18 +207,16 @@ func (s *Server) handleGetLog(w http.ResponseWriter, r *http.Request) {
 	if events == nil {
 		events = []repository.Event{}
 	}
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(logResponse{Log: log, Attempts: attempts, Events: events})
+	httpresp.OK(w, logResponse{Log: log, Attempts: attempts, Events: events})
 }
 
 // listLogsResponse is the wire shape of GET /v1/logs: a page of request-level
 // summaries with the total match count and pagination echo.
 type listLogsResponse struct {
-	Logs     []repository.RequestLog `json:"logs"`
+	Items    []repository.RequestLog `json:"items"`
 	Total    int                     `json:"total"`
 	Page     int                     `json:"page"`
-	PageSize int                     `json:"page_size"`
+	PageSize int                     `json:"pageSize"`
 }
 
 // validFinalStatuses is the set of request_logs.final_status CHECK values. A
@@ -251,7 +248,7 @@ func (s *Server) handleListLogs(w http.ResponseWriter, r *http.Request) {
 	if raw := q.Get("start_date"); raw != "" {
 		t, err := time.Parse(time.RFC3339, raw)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_start_date")
+			httpresp.Error(w, httpresp.CodeBadRequest, "invalid start date")
 			return
 		}
 		filter.StartTime = t
@@ -259,7 +256,7 @@ func (s *Server) handleListLogs(w http.ResponseWriter, r *http.Request) {
 	if raw := q.Get("end_date"); raw != "" {
 		t, err := time.Parse(time.RFC3339, raw)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_end_date")
+			httpresp.Error(w, httpresp.CodeBadRequest, "invalid end date")
 			return
 		}
 		filter.EndTime = t
@@ -267,14 +264,14 @@ func (s *Server) handleListLogs(w http.ResponseWriter, r *http.Request) {
 	logs, total, err := s.reader.ListRequestLogs(r.Context(), filter)
 	if err != nil {
 		s.logger.Warn("log list query failed", "error", err)
-		writeError(w, http.StatusInternalServerError, "query_failed")
+		httpresp.Error(w, httpresp.CodeInternalError, "query failed")
 		return
 	}
 	if logs == nil {
 		logs = []repository.RequestLog{}
 	}
-	writeJSON(w, http.StatusOK, listLogsResponse{
-		Logs:     logs,
+	httpresp.OK(w, listLogsResponse{
+		Items:    logs,
 		Total:    total,
 		Page:     filter.Page,
 		PageSize: filter.PageSize,
@@ -299,13 +296,13 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	stats, err := s.reader.GetStats(r.Context(), filter)
 	if err != nil {
 		s.logger.Warn("stats query failed", "error", err)
-		writeError(w, http.StatusInternalServerError, "query_failed")
+		httpresp.Error(w, httpresp.CodeInternalError, "query failed")
 		return
 	}
 	if stats.ByModel == nil {
 		stats.ByModel = []repository.ModelStat{}
 	}
-	writeJSON(w, http.StatusOK, statsResponse{
+	httpresp.OK(w, statsResponse{
 		Days:              filter.Days,
 		TotalRequests:     stats.TotalRequests,
 		TotalInputTokens:  stats.TotalInputTokens,
@@ -323,18 +320,10 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	stats, err := s.reader.GetDashboardStats(r.Context(), days)
 	if err != nil {
 		s.logger.Warn("dashboard query failed", "error", err)
-		writeError(w, http.StatusInternalServerError, "query_failed")
+		httpresp.Error(w, httpresp.CodeInternalError, "query failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, stats)
-}
-
-func writeJSON(w http.ResponseWriter, status int, value any) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(value); err != nil {
-		slog.Default().Error("response encode failed", "error", err)
-	}
+	httpresp.OK(w, stats)
 }
 
 // parsePositiveInt parses a query int, falling back to def when missing or
@@ -365,13 +354,4 @@ func splitAndTrim(s, sep string) []string {
 		}
 	}
 	return out
-}
-
-// writeError emits a protocol-native JSON error body with a stable code. It
-// must never echo SQL, DSN, driver text or credentials — callers only pass
-// fixed code strings derived from classified sentinels.
-func writeError(w http.ResponseWriter, status int, code string) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": code})
 }

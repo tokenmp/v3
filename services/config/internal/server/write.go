@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/tokenmp/v3/packages/go/httpresp"
 	"github.com/tokenmp/v3/services/config/internal/repository"
 )
 
@@ -22,26 +23,26 @@ type createDraftBody struct {
 
 func (s *Server) handleCreateDraft(w http.ResponseWriter, r *http.Request) {
 	if s.writer == nil {
-		writeConfigErr(w, http.StatusServiceUnavailable, "write_not_configured")
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "write not configured")
 		return
 	}
 	var body createDraftBody
 	if err := json.NewDecoder(io.LimitReader(r.Body, maxConfigBodyBytes)).Decode(&body); err != nil {
-		writeConfigErr(w, http.StatusBadRequest, "invalid_body")
+		httpresp.Error(w, httpresp.CodeInvalidJSON, "invalid body")
 		return
 	}
 	if body.Revision == "" {
-		writeConfigErr(w, http.StatusBadRequest, "revision_required")
+		httpresp.Error(w, httpresp.CodeMissingField, "revision required")
 		return
 	}
 	id, err := s.writer.CreateDraft(r.Context(), body.Revision, body.CreatedBy, body.ChangeLog, nil)
 	if err != nil {
 		if errors.Is(err, repository.ErrConflict) {
-			writeConfigErr(w, http.StatusConflict, "revision_exists")
+			httpresp.Error(w, httpresp.CodeConflict, "revision exists")
 			return
 		}
 		s.logger.Warn("create draft failed", "error", err)
-		writeConfigErr(w, http.StatusInternalServerError, "internal_error")
+		httpresp.Error(w, httpresp.CodeInternalError, "internal error")
 		return
 	}
 	// If snapshot JSON was provided, store it immediately.
@@ -50,111 +51,111 @@ func (s *Server) handleCreateDraft(w http.ResponseWriter, r *http.Request) {
 			s.logger.Warn("update draft json failed", "error", err)
 		}
 	}
-	writeConfigJSON(w, http.StatusCreated, map[string]any{"id": id, "revision": body.Revision, "status": "draft"})
+	httpresp.Created(w, map[string]any{"id": id, "revision": body.Revision, "status": "draft"})
 }
 
 func (s *Server) handleGetDraft(w http.ResponseWriter, r *http.Request) {
 	if s.writer == nil {
-		writeConfigErr(w, http.StatusServiceUnavailable, "write_not_configured")
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "write not configured")
 		return
 	}
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil || id <= 0 {
-		writeConfigErr(w, http.StatusBadRequest, "invalid_id")
+		httpresp.Error(w, httpresp.CodeBadRequest, "invalid id")
 		return
 	}
 	dr, err := s.writer.GetDraft(r.Context(), id)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
-			writeConfigErr(w, http.StatusNotFound, "not_found")
+			httpresp.Error(w, httpresp.CodeNotFound, "not found")
 			return
 		}
-		writeConfigErr(w, http.StatusInternalServerError, "internal_error")
+		httpresp.Error(w, httpresp.CodeInternalError, "internal error")
 		return
 	}
-	writeConfigJSON(w, http.StatusOK, dr)
+	httpresp.OK(w, dr)
 }
 
 func (s *Server) handleUpdateDraft(w http.ResponseWriter, r *http.Request) {
 	if s.writer == nil {
-		writeConfigErr(w, http.StatusServiceUnavailable, "write_not_configured")
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "write not configured")
 		return
 	}
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil || id <= 0 {
-		writeConfigErr(w, http.StatusBadRequest, "invalid_id")
+		httpresp.Error(w, httpresp.CodeBadRequest, "invalid id")
 		return
 	}
 	raw, err := io.ReadAll(io.LimitReader(r.Body, maxConfigBodyBytes))
 	if err != nil {
-		writeConfigErr(w, http.StatusBadRequest, "invalid_body")
+		httpresp.Error(w, httpresp.CodeBadRequest, "invalid body")
 		return
 	}
 	if err := s.writer.UpdateDraftJSON(r.Context(), id, json.RawMessage(raw)); err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
-			writeConfigErr(w, http.StatusNotFound, "not_found")
+			httpresp.Error(w, httpresp.CodeNotFound, "not found")
 			return
 		}
 		if errors.Is(err, repository.ErrConflict) {
-			writeConfigErr(w, http.StatusConflict, "not_draft")
+			httpresp.Error(w, httpresp.CodeConflict, "not draft")
 			return
 		}
-		writeConfigErr(w, http.StatusInternalServerError, "internal_error")
+		httpresp.Error(w, httpresp.CodeInternalError, "internal error")
 		return
 	}
-	writeConfigJSON(w, http.StatusOK, map[string]any{"id": id, "updated": true})
+	httpresp.OK(w, map[string]any{"id": id, "updated": true})
 }
 
 func (s *Server) handlePublishRevision(w http.ResponseWriter, r *http.Request) {
 	if s.writer == nil {
-		writeConfigErr(w, http.StatusServiceUnavailable, "write_not_configured")
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "write not configured")
 		return
 	}
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil || id <= 0 {
-		writeConfigErr(w, http.StatusBadRequest, "invalid_id")
+		httpresp.Error(w, httpresp.CodeBadRequest, "invalid id")
 		return
 	}
 	if err := s.writer.PublishRevision(r.Context(), id); err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
-			writeConfigErr(w, http.StatusNotFound, "not_found")
+			httpresp.Error(w, httpresp.CodeNotFound, "not found")
 			return
 		}
 		if errors.Is(err, repository.ErrConflict) {
-			writeConfigErr(w, http.StatusConflict, "not_draft_or_empty")
+			httpresp.Error(w, httpresp.CodeConflict, "not draft or empty")
 			return
 		}
-		writeConfigErr(w, http.StatusInternalServerError, "internal_error")
+		httpresp.Error(w, httpresp.CodeInternalError, "internal error")
 		return
 	}
-	writeConfigJSON(w, http.StatusOK, map[string]any{"id": id, "published": true})
+	httpresp.OK(w, map[string]any{"id": id, "published": true})
 }
 
 func (s *Server) handleRollbackRevision(w http.ResponseWriter, r *http.Request) {
 	if s.writer == nil {
-		writeConfigErr(w, http.StatusServiceUnavailable, "write_not_configured")
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "write not configured")
 		return
 	}
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil || id <= 0 {
-		writeConfigErr(w, http.StatusBadRequest, "invalid_id")
+		httpresp.Error(w, httpresp.CodeBadRequest, "invalid id")
 		return
 	}
 	newID, err := s.writer.RollbackRevision(r.Context(), id)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
-			writeConfigErr(w, http.StatusNotFound, "not_found")
+			httpresp.Error(w, httpresp.CodeNotFound, "not found")
 			return
 		}
-		writeConfigErr(w, http.StatusInternalServerError, "internal_error")
+		httpresp.Error(w, httpresp.CodeInternalError, "internal error")
 		return
 	}
-	writeConfigJSON(w, http.StatusOK, map[string]any{"id": newID, "rolled_back_from": id, "published": true})
+	httpresp.OK(w, map[string]any{"id": newID, "rolled_back_from": id, "published": true})
 }
 
 func (s *Server) handleListRevisions(w http.ResponseWriter, r *http.Request) {
 	if s.writer == nil {
-		writeConfigErr(w, http.StatusServiceUnavailable, "write_not_configured")
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "write not configured")
 		return
 	}
 	q := r.URL.Query()
@@ -171,24 +172,8 @@ func (s *Server) handleListRevisions(w http.ResponseWriter, r *http.Request) {
 	}
 	revs, total, err := s.writer.ListRevisions(r.Context(), limit, offset)
 	if err != nil {
-		writeConfigErr(w, http.StatusInternalServerError, "internal_error")
+		httpresp.Error(w, httpresp.CodeInternalError, "internal error")
 		return
 	}
-	writeConfigJSON(w, http.StatusOK, map[string]any{"items": revs, "total": total})
-}
-
-// ---- helpers ----
-
-func writeConfigJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
-}
-
-func writeConfigErr(w http.ResponseWriter, status int, code string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"error": map[string]any{"code": code},
-	})
+	httpresp.OK(w, map[string]any{"items": revs, "total": total})
 }

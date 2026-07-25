@@ -16,6 +16,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	openapi_types "github.com/oapi-codegen/runtime/types"
+	"github.com/tokenmp/v3/packages/go/httpresp"
 	"github.com/tokenmp/v3/services/api/internal/billing"
 	apiv1 "github.com/tokenmp/v3/services/api/internal/contract/apiv1"
 	"github.com/tokenmp/v3/services/api/internal/identity"
@@ -48,13 +49,13 @@ func New(lg *logging.Client, bg *billing.Client, st *settings.Store, logger *slo
 // ListPlans 返回可用套餐列表（公开端点，无需身份）。
 func (h *Handlers) ListPlans(w http.ResponseWriter, r *http.Request) {
 	if h.Billing == nil || !h.Billing.Available() {
-		writeError(w, http.StatusServiceUnavailable, "billing_unavailable")
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "billing unavailable")
 		return
 	}
 	plans, err := h.Billing.ListPlans(r.Context())
 	if err != nil {
 		h.logger().Warn("list plans failed", "error", err)
-		writeError(w, http.StatusServiceUnavailable, "billing_unavailable")
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "billing unavailable")
 		return
 	}
 	out := make([]apiv1.Plan, 0, len(plans))
@@ -65,7 +66,7 @@ func (h *Handlers) ListPlans(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, mapPlan(p))
 	}
-	writeJSON(w, http.StatusOK, plansResponse{Plans: out})
+	httpresp.OK(w, plansResponse{Plans: out})
 }
 
 // ---- 用户套餐与余额 ----
@@ -74,21 +75,21 @@ func (h *Handlers) ListPlans(w http.ResponseWriter, r *http.Request) {
 func (h *Handlers) ListUserPlans(w http.ResponseWriter, r *http.Request) {
 	claims, ok := identity.FromContext(r.Context())
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "unauthorized")
+		httpresp.Error(w, httpresp.CodeUnauthorized, "unauthorized")
 		return
 	}
 	if h.Billing == nil || !h.Billing.Available() {
-		writeError(w, http.StatusServiceUnavailable, "billing_unavailable")
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "billing unavailable")
 		return
 	}
 	userPlans, err := h.Billing.ListUserPlans(r.Context(), claims.Subject)
 	if err != nil {
 		if errors.Is(err, billing.NotFound) {
-			writeJSON(w, http.StatusOK, userPlansResponse{Plans: []apiv1.UserPlan{}})
+			httpresp.OK(w, userPlansResponse{Plans: []apiv1.UserPlan{}})
 			return
 		}
 		h.logger().Warn("list user plans failed", "error", err)
-		writeError(w, http.StatusServiceUnavailable, "billing_unavailable")
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "billing unavailable")
 		return
 	}
 	// 取余额用于填充 remainingQuota；余额失败时不阻塞套餐列表，remainingQuota 降级为 "0"。
@@ -97,28 +98,28 @@ func (h *Handlers) ListUserPlans(w http.ResponseWriter, r *http.Request) {
 	for _, up := range userPlans {
 		plans = append(plans, mapUserPlan(up, bal, balErr))
 	}
-	writeJSON(w, http.StatusOK, userPlansResponse{Plans: plans})
+	httpresp.OK(w, userPlansResponse{Plans: plans})
 }
 
 // GetUserBalance 返回当前用户的余额（十进制字符串）。
 func (h *Handlers) GetUserBalance(w http.ResponseWriter, r *http.Request) {
 	claims, ok := identity.FromContext(r.Context())
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "unauthorized")
+		httpresp.Error(w, httpresp.CodeUnauthorized, "unauthorized")
 		return
 	}
 	if h.Billing == nil || !h.Billing.Available() {
 		// 降级模式返回 0 余额，便于前端在无 Billing 时仍可渲染。
-		writeJSON(w, http.StatusOK, apiv1.UserBalance{CodingRemaining: "0", TokenRemaining: "0"})
+		httpresp.OK(w, apiv1.UserBalance{CodingRemaining: "0", TokenRemaining: "0"})
 		return
 	}
 	bal, err := h.Billing.GetBalance(r.Context(), claims.Subject)
 	if err != nil {
 		h.logger().Warn("get balance failed", "error", err)
-		writeJSON(w, http.StatusOK, apiv1.UserBalance{CodingRemaining: "0", TokenRemaining: "0"})
+		httpresp.OK(w, apiv1.UserBalance{CodingRemaining: "0", TokenRemaining: "0"})
 		return
 	}
-	writeJSON(w, http.StatusOK, apiv1.UserBalance{
+	httpresp.OK(w, apiv1.UserBalance{
 		CodingRemaining: bal.CodingRemaining,
 		TokenRemaining:  bal.TokenRemaining,
 	})
@@ -130,11 +131,11 @@ func (h *Handlers) GetUserBalance(w http.ResponseWriter, r *http.Request) {
 func (h *Handlers) ListRequestLogs(w http.ResponseWriter, r *http.Request) {
 	claims, ok := identity.FromContext(r.Context())
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "unauthorized")
+		httpresp.Error(w, httpresp.CodeUnauthorized, "unauthorized")
 		return
 	}
 	if h.Logging == nil || !h.Logging.Available() {
-		writeError(w, http.StatusServiceUnavailable, "logging_unavailable")
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "logging unavailable")
 		return
 	}
 	q := r.URL.Query()
@@ -167,14 +168,14 @@ func (h *Handlers) ListRequestLogs(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		h.logger().Warn("list logs failed", "error", err)
-		writeError(w, http.StatusServiceUnavailable, "logging_unavailable")
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "logging unavailable")
 		return
 	}
 	logs := make([]apiv1.RequestLog, 0, len(result.Logs))
 	for _, l := range result.Logs {
 		logs = append(logs, mapRequestLog(l))
 	}
-	writeJSON(w, http.StatusOK, requestLogsResponse{
+	httpresp.OK(w, requestLogsResponse{
 		Logs: logs, Total: result.Total, Page: result.Page, PageSize: result.PageSize,
 	})
 }
@@ -183,45 +184,45 @@ func (h *Handlers) ListRequestLogs(w http.ResponseWriter, r *http.Request) {
 func (h *Handlers) GetRequestLog(w http.ResponseWriter, r *http.Request) {
 	claims, ok := identity.FromContext(r.Context())
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "unauthorized")
+		httpresp.Error(w, httpresp.CodeUnauthorized, "unauthorized")
 		return
 	}
 	if h.Logging == nil || !h.Logging.Available() {
-		writeError(w, http.StatusServiceUnavailable, "logging_unavailable")
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "logging unavailable")
 		return
 	}
 	requestID := chi.URLParam(r, "requestId")
 	if requestID == "" {
-		writeError(w, http.StatusBadRequest, "missing_request_id")
+		httpresp.Error(w, httpresp.CodeMissingField, "missing request id")
 		return
 	}
 	detail, err := h.Logging.GetLog(r.Context(), requestID)
 	if err != nil {
 		if errors.Is(err, logging.NotFound) {
-			writeError(w, http.StatusNotFound, "not_found")
+			httpresp.Error(w, httpresp.CodeNotFound, "not found")
 			return
 		}
 		h.logger().Warn("get log failed", "error", err)
-		writeError(w, http.StatusServiceUnavailable, "logging_unavailable")
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "logging unavailable")
 		return
 	}
 	// 防越权：仅允许用户查看自己的日志（admin 可放宽，当前实现按 subject 校验）。
 	if detail.Log.UserID != "" && detail.Log.UserID != claims.Subject && claims.Role != "admin" {
-		writeError(w, http.StatusNotFound, "not_found")
+		httpresp.Error(w, httpresp.CodeNotFound, "not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, mapRequestLogDetail(detail))
+	httpresp.OK(w, mapRequestLogDetail(detail))
 }
 
 // GetRequestLogStats 返回当前用户的用量统计。
 func (h *Handlers) GetRequestLogStats(w http.ResponseWriter, r *http.Request) {
 	claims, ok := identity.FromContext(r.Context())
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "unauthorized")
+		httpresp.Error(w, httpresp.CodeUnauthorized, "unauthorized")
 		return
 	}
 	if h.Logging == nil || !h.Logging.Available() {
-		writeError(w, http.StatusServiceUnavailable, "logging_unavailable")
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "logging unavailable")
 		return
 	}
 	days := parseIntDefault(r.URL.Query().Get("days"), 7)
@@ -231,7 +232,7 @@ func (h *Handlers) GetRequestLogStats(w http.ResponseWriter, r *http.Request) {
 	stats, err := h.Logging.GetStats(r.Context(), claims.Subject, days)
 	if err != nil {
 		h.logger().Warn("get stats failed", "error", err)
-		writeError(w, http.StatusServiceUnavailable, "logging_unavailable")
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "logging unavailable")
 		return
 	}
 	byModel := make([]modelStatRow, 0, len(stats.ByModel))
@@ -247,7 +248,7 @@ func (h *Handlers) GetRequestLogStats(w http.ResponseWriter, r *http.Request) {
 		totalInput += m.InputTokens
 		totalOutput += m.OutputTokens
 	}
-	writeJSON(w, http.StatusOK, usageStatsResponse{
+	httpresp.OK(w, usageStatsResponse{
 		Days:              stats.Days,
 		TotalRequests:     int(stats.TotalRequests),
 		TotalInputTokens:  strconv.FormatInt(totalInput, 10),
@@ -263,11 +264,11 @@ func (h *Handlers) GetRequestLogStats(w http.ResponseWriter, r *http.Request) {
 func (h *Handlers) GetUserSettings(w http.ResponseWriter, r *http.Request) {
 	claims, ok := identity.FromContext(r.Context())
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "unauthorized")
+		httpresp.Error(w, httpresp.CodeUnauthorized, "unauthorized")
 		return
 	}
 	s := h.Settings.Get(claims.Subject)
-	writeJSON(w, http.StatusOK, apiv1.UserSettings{
+	httpresp.OK(w, apiv1.UserSettings{
 		PreferredBilling: apiv1.UserSettingsPreferredBilling(s.PreferredBilling),
 		FallbackEnabled:  s.FallbackEnabled,
 	})
@@ -277,14 +278,14 @@ func (h *Handlers) GetUserSettings(w http.ResponseWriter, r *http.Request) {
 func (h *Handlers) UpdateUserSettings(w http.ResponseWriter, r *http.Request) {
 	claims, ok := identity.FromContext(r.Context())
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "unauthorized")
+		httpresp.Error(w, httpresp.CodeUnauthorized, "unauthorized")
 		return
 	}
 	var body apiv1.UserSettingsUpdate
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_json")
+		httpresp.Error(w, httpresp.CodeInvalidJSON, "invalid JSON")
 		return
 	}
 	// 校验 preferredBilling 枚举（coding/token）。
@@ -292,13 +293,13 @@ func (h *Handlers) UpdateUserSettings(w http.ResponseWriter, r *http.Request) {
 	if body.PreferredBilling != nil {
 		v := string(*body.PreferredBilling)
 		if v != "coding" && v != "token" {
-			writeError(w, http.StatusBadRequest, "invalid_preferred_billing")
+			httpresp.Error(w, httpresp.CodeBadRequest, "invalid preferred billing")
 			return
 		}
 		pb = &v
 	}
 	s := h.Settings.Snapshot(claims.Subject, pb, body.FallbackEnabled)
-	writeJSON(w, http.StatusOK, apiv1.UserSettings{
+	httpresp.OK(w, apiv1.UserSettings{
 		PreferredBilling: apiv1.UserSettingsPreferredBilling(s.PreferredBilling),
 		FallbackEnabled:  s.FallbackEnabled,
 	})
@@ -374,20 +375,6 @@ func (h *Handlers) logger() *slog.Logger {
 		return h.Logger
 	}
 	return slog.Default()
-}
-
-func writeJSON(w http.ResponseWriter, status int, value any) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(value)
-}
-
-func writeError(w http.ResponseWriter, status int, code string) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": code})
 }
 
 func parseIntDefault(raw string, def int) int {

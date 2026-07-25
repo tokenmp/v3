@@ -18,6 +18,28 @@ import (
 	"github.com/tokenmp/v3/services/api/internal/settings"
 )
 
+// decodeData extracts .data from the {code,data,message} envelope.
+func decodeData(t *testing.T, rec *httptest.ResponseRecorder, v any) {
+	t.Helper()
+	var env struct {
+		Code    int             `json:"code"`
+		Data    json.RawMessage `json:"data"`
+		Message string          `json:"message"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&env); err != nil {
+		t.Fatalf("decode envelope: %v (body=%s)", err, rec.Body.String())
+	}
+	if env.Code != 0 {
+		t.Fatalf("envelope code = %d, want 0 (body=%s)", env.Code, rec.Body.String())
+	}
+	if len(env.Data) == 0 || string(env.Data) == "null" {
+		return
+	}
+	if err := json.Unmarshal(env.Data, v); err != nil {
+		t.Fatalf("decode data: %v (data=%s)", err, string(env.Data))
+	}
+}
+
 // stubBackend 是一个可编程的 httptest 后端，按 path 返回固定响应体。
 type stubBackend struct {
 	srv *httptest.Server
@@ -122,7 +144,7 @@ func TestListPlans_OK(t *testing.T) {
 	var out struct {
 		Plans []apiv1.Plan `json:"plans"`
 	}
-	_ = json.NewDecoder(rec.Body).Decode(&out)
+	decodeData(t, rec, &out)
 	if len(out.Plans) != 1 {
 		t.Fatalf("expected 1 plan (image filtered), got %d", len(out.Plans))
 	}
@@ -155,7 +177,7 @@ func TestGetUserBalance_OK(t *testing.T) {
 		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
 	}
 	var bal apiv1.UserBalance
-	_ = json.NewDecoder(rec.Body).Decode(&bal)
+	decodeData(t, rec, &bal)
 	if bal.CodingRemaining != "42" || bal.TokenRemaining != "1000" {
 		t.Errorf("balance = %+v", bal)
 	}
@@ -168,7 +190,7 @@ func TestGetUserBalance_DegradedReturnsZeros(t *testing.T) {
 		t.Fatalf("status = %d", rec.Code)
 	}
 	var bal apiv1.UserBalance
-	_ = json.NewDecoder(rec.Body).Decode(&bal)
+	decodeData(t, rec, &bal)
 	if bal.CodingRemaining != "0" || bal.TokenRemaining != "0" {
 		t.Errorf("degraded balance = %+v", bal)
 	}
@@ -193,7 +215,7 @@ func TestListUserPlans_OK(t *testing.T) {
 	var out struct {
 		Plans []apiv1.UserPlan `json:"plans"`
 	}
-	_ = json.NewDecoder(rec.Body).Decode(&out)
+	decodeData(t, rec, &out)
 	if len(out.Plans) != 1 || out.Plans[0].RemainingQuota != "7" {
 		t.Errorf("plans = %+v", out)
 	}
@@ -219,7 +241,7 @@ func TestListRequestLogs_OK(t *testing.T) {
 		Page     int                `json:"page"`
 		PageSize int                `json:"pageSize"`
 	}
-	_ = json.NewDecoder(rec.Body).Decode(&out)
+	decodeData(t, rec, &out)
 	if out.Total != 1 || len(out.Logs) != 1 || out.Logs[0].Status != "success" {
 		t.Errorf("out = %+v", out)
 	}
@@ -273,7 +295,7 @@ func TestGetRequestLogStats_OK(t *testing.T) {
 			Requests int    `json:"requests"`
 		} `json:"byModel"`
 	}
-	_ = json.NewDecoder(rec.Body).Decode(&out)
+	decodeData(t, rec, &out)
 	if out.Days != 7 || out.TotalRequests != 5 || len(out.ByModel) != 1 {
 		t.Errorf("out = %+v", out)
 	}
@@ -288,7 +310,7 @@ func TestUserSettings_GetDefaults(t *testing.T) {
 		t.Fatalf("status = %d", rec.Code)
 	}
 	var s apiv1.UserSettings
-	_ = json.NewDecoder(rec.Body).Decode(&s)
+	decodeData(t, rec, &s)
 	if string(s.PreferredBilling) != "coding" || s.FallbackEnabled != false {
 		t.Errorf("defaults = %+v", s)
 	}

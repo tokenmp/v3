@@ -22,6 +22,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/tokenmp/v3/packages/go/httpresp/envelope"
 	"github.com/tokenmp/v3/services/auth/internal/auth"
 	"github.com/tokenmp/v3/services/auth/internal/contract/authv1"
 	"github.com/tokenmp/v3/services/auth/internal/database/models"
@@ -965,6 +966,7 @@ func NewServer(cfg ServerConfig) *Server {
 	})
 
 	r := chi.NewRouter()
+	r.Use(envelope.Wrap)
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)

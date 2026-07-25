@@ -21,6 +21,8 @@ const CODE_MESSAGES: Record<ErrorCode, string> = {
   missing_request_id: '缺少请求 ID',
   invalid_json: '请求数据格式不正确',
   invalid_preferred_billing: '计费偏好设置无效',
+  forbidden: '权限不足',
+  service_unavailable: '服务暂时不可用，请稍后重试',
 };
 
 export class ApiError extends Error {
@@ -36,6 +38,13 @@ export class ApiError extends Error {
 }
 
 export function parseApiError(res: Response, body: unknown): ApiError {
+  // New envelope format: {code: number, data: null, message: string}
+  const env = body as EnvelopeLike | null;
+  if (env && typeof env === 'object' && 'code' in env && typeof env.code === 'number') {
+    // Map numeric code to string ErrorCode for CODE_MESSAGES lookup.
+    const codeStr = numericToCodeString(env.code);
+    return new ApiError(codeStr, CODE_MESSAGES[codeStr] ?? env.message ?? '请求失败', res.status);
+  }
   const rawErr = (body as ApiErrorBody | null)?.error;
   // Simplified wire shape: {error: "code_string"} (panel handlers).
   if (typeof rawErr === 'string') {
@@ -56,6 +65,36 @@ export function parseApiError(res: Response, body: unknown): ApiError {
   if (res.status >= 500)
     return new ApiError('internal_error', CODE_MESSAGES.internal_error, res.status);
   return new ApiError('bad_request', '请求失败', res.status);
+}
+
+interface EnvelopeLike {
+  code: number;
+  data: unknown;
+  message: string;
+}
+
+/** Map numeric envelope code to string ErrorCode. */
+function numericToCodeString(code: number): ErrorCode {
+  switch (code) {
+    case 1000: return 'bad_request';
+    case 1001: return 'invalid_credentials';
+    case 1002: return 'email_taken';
+    case 1003: return 'password_too_weak';
+    case 1004: return 'invalid_email';
+    case 1005: return 'invalid_token';
+    case 1006: return 'invalid_refresh_token';
+    case 1007: return 'unauthorized';
+    case 1008: return 'forbidden';
+    case 1009: return 'not_found';
+    case 1010: return 'email_taken'; // conflict
+    case 1011: return 'internal_error';
+    case 1012: return 'billing_unavailable'; // service_unavailable
+    case 1013: return 'internal_error'; // not_ready
+    case 1014: return 'invalid_json';
+    case 1015: return 'missing_request_id';
+    case 1016: return 'auth_error'; // bad gateway
+    default: return 'internal_error';
+  }
 }
 
 export function networkError(): ApiError {

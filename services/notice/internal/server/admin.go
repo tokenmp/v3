@@ -51,7 +51,7 @@ func (s *Server) handleAdminCreateAnnouncement(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusInternalServerError, "internal_error", "Internal error.")
 		return
 	}
-	writeJSON(w, http.StatusCreated, a)
+	writeJSONStatus(w, http.StatusCreated, a)
 }
 
 func (s *Server) handleAdminUpdateAnnouncement(w http.ResponseWriter, r *http.Request) {
@@ -154,7 +154,7 @@ func (s *Server) handleAdminCreateChangelog(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusInternalServerError, "internal_error", "Internal error.")
 		return
 	}
-	writeJSON(w, http.StatusCreated, c)
+	writeJSONStatus(w, http.StatusCreated, c)
 }
 
 func (s *Server) handleAdminUpdateChangelog(w http.ResponseWriter, r *http.Request) {
@@ -269,7 +269,7 @@ func (s *Server) handleAdminSendNotification(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusInternalServerError, "internal_error", "Internal error.")
 		return
 	}
-	writeJSON(w, http.StatusAccepted, map[string]any{
+	writeJSONStatus(w, http.StatusAccepted, map[string]any{
 		"id":       n.ID,
 		"accepted": true,
 		"queuedAt": time.Now().UTC(),

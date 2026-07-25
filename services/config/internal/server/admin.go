@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/tokenmp/v3/packages/go/httpresp"
 	"github.com/tokenmp/v3/services/config/internal/repository"
 )
 
@@ -68,10 +69,10 @@ func (s *Server) handleAdminListModels(w http.ResponseWriter, r *http.Request) {
 	limit, offset := parseAdminPaging(r)
 	items, total, err := s.adminReader.ListModels(r.Context(), limit, offset)
 	if err != nil {
-		writeConfigErr(w, http.StatusInternalServerError, "internal_error")
+		httpresp.Error(w, httpresp.CodeInternalError, "internal error")
 		return
 	}
-	writeConfigJSON(w, http.StatusOK, map[string]any{"items": items, "total": total})
+	httpresp.OK(w, map[string]any{"items": items, "total": total})
 }
 
 func (s *Server) handleAdminCreateModel(w http.ResponseWriter, r *http.Request) {
@@ -80,14 +81,14 @@ func (s *Server) handleAdminCreateModel(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if m.ID == "" || m.DisplayName == "" {
-		writeConfigErr(w, http.StatusBadRequest, "id_and_display_name_required")
+		httpresp.Error(w, httpresp.CodeBadRequest, "id and display name required")
 		return
 	}
 	if err := s.adminWriter.CreateModel(r.Context(), &m); err != nil {
 		writeAdminWriteErr(w, err)
 		return
 	}
-	writeConfigJSON(w, http.StatusCreated, m)
+	httpresp.Created(w, m)
 }
 
 func (s *Server) handleAdminGetModel(w http.ResponseWriter, r *http.Request) {
@@ -96,7 +97,7 @@ func (s *Server) handleAdminGetModel(w http.ResponseWriter, r *http.Request) {
 		writeAdminReadErr(w, err)
 		return
 	}
-	writeConfigJSON(w, http.StatusOK, m)
+	httpresp.OK(w, m)
 }
 
 func (s *Server) handleAdminUpdateModel(w http.ResponseWriter, r *http.Request) {
@@ -108,7 +109,7 @@ func (s *Server) handleAdminUpdateModel(w http.ResponseWriter, r *http.Request) 
 		writeAdminWriteErr(w, err)
 		return
 	}
-	writeConfigJSON(w, http.StatusOK, map[string]any{"id": chi.URLParam(r, "id"), "updated": true})
+	httpresp.OK(w, map[string]any{"id": chi.URLParam(r, "id"), "updated": true})
 }
 
 func (s *Server) handleAdminDeleteModel(w http.ResponseWriter, r *http.Request) {
@@ -116,7 +117,7 @@ func (s *Server) handleAdminDeleteModel(w http.ResponseWriter, r *http.Request) 
 		writeAdminWriteErr(w, err)
 		return
 	}
-	writeConfigJSON(w, http.StatusOK, map[string]any{"id": chi.URLParam(r, "id"), "deleted": true})
+	httpresp.OK(w, map[string]any{"id": chi.URLParam(r, "id"), "deleted": true})
 }
 
 // ---- Providers ----
@@ -125,10 +126,10 @@ func (s *Server) handleAdminListProviders(w http.ResponseWriter, r *http.Request
 	limit, offset := parseAdminPaging(r)
 	items, total, err := s.adminReader.ListProviders(r.Context(), limit, offset)
 	if err != nil {
-		writeConfigErr(w, http.StatusInternalServerError, "internal_error")
+		httpresp.Error(w, httpresp.CodeInternalError, "internal error")
 		return
 	}
-	writeConfigJSON(w, http.StatusOK, map[string]any{"items": items, "total": total})
+	httpresp.OK(w, map[string]any{"items": items, "total": total})
 }
 
 func (s *Server) handleAdminCreateProvider(w http.ResponseWriter, r *http.Request) {
@@ -137,14 +138,14 @@ func (s *Server) handleAdminCreateProvider(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if p.ID == "" || p.Name == "" || p.BaseURL == "" || p.SDKKind == "" || p.Protocol == "" {
-		writeConfigErr(w, http.StatusBadRequest, "missing_required_fields")
+		httpresp.Error(w, httpresp.CodeBadRequest, "missing required fields")
 		return
 	}
 	if err := s.adminWriter.CreateProvider(r.Context(), &p); err != nil {
 		writeAdminWriteErr(w, err)
 		return
 	}
-	writeConfigJSON(w, http.StatusCreated, p)
+	httpresp.Created(w, p)
 }
 
 func (s *Server) handleAdminGetProvider(w http.ResponseWriter, r *http.Request) {
@@ -153,7 +154,7 @@ func (s *Server) handleAdminGetProvider(w http.ResponseWriter, r *http.Request) 
 		writeAdminReadErr(w, err)
 		return
 	}
-	writeConfigJSON(w, http.StatusOK, p)
+	httpresp.OK(w, p)
 }
 
 func (s *Server) handleAdminUpdateProvider(w http.ResponseWriter, r *http.Request) {
@@ -165,7 +166,7 @@ func (s *Server) handleAdminUpdateProvider(w http.ResponseWriter, r *http.Reques
 		writeAdminWriteErr(w, err)
 		return
 	}
-	writeConfigJSON(w, http.StatusOK, map[string]any{"id": chi.URLParam(r, "id"), "updated": true})
+	httpresp.OK(w, map[string]any{"id": chi.URLParam(r, "id"), "updated": true})
 }
 
 func (s *Server) handleAdminDeleteProvider(w http.ResponseWriter, r *http.Request) {
@@ -173,7 +174,7 @@ func (s *Server) handleAdminDeleteProvider(w http.ResponseWriter, r *http.Reques
 		writeAdminWriteErr(w, err)
 		return
 	}
-	writeConfigJSON(w, http.StatusOK, map[string]any{"id": chi.URLParam(r, "id"), "deleted": true})
+	httpresp.OK(w, map[string]any{"id": chi.URLParam(r, "id"), "deleted": true})
 }
 
 // ---- Adapters ----
@@ -182,10 +183,10 @@ func (s *Server) handleAdminListAdapters(w http.ResponseWriter, r *http.Request)
 	limit, offset := parseAdminPaging(r)
 	items, total, err := s.adminReader.ListAdapters(r.Context(), limit, offset)
 	if err != nil {
-		writeConfigErr(w, http.StatusInternalServerError, "internal_error")
+		httpresp.Error(w, httpresp.CodeInternalError, "internal error")
 		return
 	}
-	writeConfigJSON(w, http.StatusOK, map[string]any{"items": items, "total": total})
+	httpresp.OK(w, map[string]any{"items": items, "total": total})
 }
 
 func (s *Server) handleAdminCreateAdapter(w http.ResponseWriter, r *http.Request) {
@@ -194,14 +195,14 @@ func (s *Server) handleAdminCreateAdapter(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if a.ID == "" || a.Name == "" || a.SDKKind == "" || a.Protocol == "" {
-		writeConfigErr(w, http.StatusBadRequest, "missing_required_fields")
+		httpresp.Error(w, httpresp.CodeBadRequest, "missing required fields")
 		return
 	}
 	if err := s.adminWriter.CreateAdapter(r.Context(), &a); err != nil {
 		writeAdminWriteErr(w, err)
 		return
 	}
-	writeConfigJSON(w, http.StatusCreated, a)
+	httpresp.Created(w, a)
 }
 
 func (s *Server) handleAdminGetAdapter(w http.ResponseWriter, r *http.Request) {
@@ -210,7 +211,7 @@ func (s *Server) handleAdminGetAdapter(w http.ResponseWriter, r *http.Request) {
 		writeAdminReadErr(w, err)
 		return
 	}
-	writeConfigJSON(w, http.StatusOK, a)
+	httpresp.OK(w, a)
 }
 
 func (s *Server) handleAdminUpdateAdapter(w http.ResponseWriter, r *http.Request) {
@@ -222,7 +223,7 @@ func (s *Server) handleAdminUpdateAdapter(w http.ResponseWriter, r *http.Request
 		writeAdminWriteErr(w, err)
 		return
 	}
-	writeConfigJSON(w, http.StatusOK, map[string]any{"id": chi.URLParam(r, "id"), "updated": true})
+	httpresp.OK(w, map[string]any{"id": chi.URLParam(r, "id"), "updated": true})
 }
 
 func (s *Server) handleAdminDeleteAdapter(w http.ResponseWriter, r *http.Request) {
@@ -230,7 +231,7 @@ func (s *Server) handleAdminDeleteAdapter(w http.ResponseWriter, r *http.Request
 		writeAdminWriteErr(w, err)
 		return
 	}
-	writeConfigJSON(w, http.StatusOK, map[string]any{"id": chi.URLParam(r, "id"), "deleted": true})
+	httpresp.OK(w, map[string]any{"id": chi.URLParam(r, "id"), "deleted": true})
 }
 
 // ---- Endpoints ----
@@ -238,10 +239,10 @@ func (s *Server) handleAdminDeleteAdapter(w http.ResponseWriter, r *http.Request
 func (s *Server) handleAdminListEndpoints(w http.ResponseWriter, r *http.Request) {
 	items, err := s.adminReader.ListEndpoints(r.Context(), chi.URLParam(r, "id"))
 	if err != nil {
-		writeConfigErr(w, http.StatusInternalServerError, "internal_error")
+		httpresp.Error(w, httpresp.CodeInternalError, "internal error")
 		return
 	}
-	writeConfigJSON(w, http.StatusOK, map[string]any{"items": items})
+	httpresp.OK(w, map[string]any{"items": items})
 }
 
 func (s *Server) handleAdminCreateEndpoint(w http.ResponseWriter, r *http.Request) {
@@ -251,20 +252,20 @@ func (s *Server) handleAdminCreateEndpoint(w http.ResponseWriter, r *http.Reques
 	}
 	e.ProviderID = chi.URLParam(r, "id")
 	if e.Path == "" || e.Protocol == "" || e.AuthKind == "" {
-		writeConfigErr(w, http.StatusBadRequest, "missing_required_fields")
+		httpresp.Error(w, httpresp.CodeBadRequest, "missing required fields")
 		return
 	}
 	if err := s.adminWriter.CreateEndpoint(r.Context(), &e); err != nil {
 		writeAdminWriteErr(w, err)
 		return
 	}
-	writeConfigJSON(w, http.StatusCreated, e)
+	httpresp.Created(w, e)
 }
 
 func (s *Server) handleAdminUpdateEndpoint(w http.ResponseWriter, r *http.Request) {
 	eid, err := strconv.ParseInt(chi.URLParam(r, "eid"), 10, 64)
 	if err != nil {
-		writeConfigErr(w, http.StatusBadRequest, "invalid_id")
+		httpresp.Error(w, httpresp.CodeBadRequest, "invalid id")
 		return
 	}
 	fields, err := decodeAdminFields(w, r)
@@ -275,20 +276,20 @@ func (s *Server) handleAdminUpdateEndpoint(w http.ResponseWriter, r *http.Reques
 		writeAdminWriteErr(w, err)
 		return
 	}
-	writeConfigJSON(w, http.StatusOK, map[string]any{"id": eid, "updated": true})
+	httpresp.OK(w, map[string]any{"id": eid, "updated": true})
 }
 
 func (s *Server) handleAdminDeleteEndpoint(w http.ResponseWriter, r *http.Request) {
 	eid, err := strconv.ParseInt(chi.URLParam(r, "eid"), 10, 64)
 	if err != nil {
-		writeConfigErr(w, http.StatusBadRequest, "invalid_id")
+		httpresp.Error(w, httpresp.CodeBadRequest, "invalid id")
 		return
 	}
 	if err := s.adminWriter.DeleteEndpoint(r.Context(), eid); err != nil {
 		writeAdminWriteErr(w, err)
 		return
 	}
-	writeConfigJSON(w, http.StatusOK, map[string]any{"id": eid, "deleted": true})
+	httpresp.OK(w, map[string]any{"id": eid, "deleted": true})
 }
 
 // ---- Credentials ----
@@ -296,10 +297,10 @@ func (s *Server) handleAdminDeleteEndpoint(w http.ResponseWriter, r *http.Reques
 func (s *Server) handleAdminListCredentials(w http.ResponseWriter, r *http.Request) {
 	items, err := s.adminReader.ListCredentials(r.Context(), chi.URLParam(r, "id"))
 	if err != nil {
-		writeConfigErr(w, http.StatusInternalServerError, "internal_error")
+		httpresp.Error(w, httpresp.CodeInternalError, "internal error")
 		return
 	}
-	writeConfigJSON(w, http.StatusOK, map[string]any{"items": items})
+	httpresp.OK(w, map[string]any{"items": items})
 }
 
 func (s *Server) handleAdminCreateCredential(w http.ResponseWriter, r *http.Request) {
@@ -309,14 +310,14 @@ func (s *Server) handleAdminCreateCredential(w http.ResponseWriter, r *http.Requ
 	}
 	c.ProviderID = chi.URLParam(r, "id")
 	if c.ID == "" || c.CredentialRef == "" {
-		writeConfigErr(w, http.StatusBadRequest, "id_and_credential_ref_required")
+		httpresp.Error(w, httpresp.CodeBadRequest, "id and credential ref required")
 		return
 	}
 	if err := s.adminWriter.CreateCredential(r.Context(), &c); err != nil {
 		writeAdminWriteErr(w, err)
 		return
 	}
-	writeConfigJSON(w, http.StatusCreated, c)
+	httpresp.Created(w, c)
 }
 
 func (s *Server) handleAdminUpdateCredential(w http.ResponseWriter, r *http.Request) {
@@ -328,7 +329,7 @@ func (s *Server) handleAdminUpdateCredential(w http.ResponseWriter, r *http.Requ
 		writeAdminWriteErr(w, err)
 		return
 	}
-	writeConfigJSON(w, http.StatusOK, map[string]any{"id": chi.URLParam(r, "cid"), "updated": true})
+	httpresp.OK(w, map[string]any{"id": chi.URLParam(r, "cid"), "updated": true})
 }
 
 func (s *Server) handleAdminDeleteCredential(w http.ResponseWriter, r *http.Request) {
@@ -336,7 +337,7 @@ func (s *Server) handleAdminDeleteCredential(w http.ResponseWriter, r *http.Requ
 		writeAdminWriteErr(w, err)
 		return
 	}
-	writeConfigJSON(w, http.StatusOK, map[string]any{"id": chi.URLParam(r, "cid"), "deleted": true})
+	httpresp.OK(w, map[string]any{"id": chi.URLParam(r, "cid"), "deleted": true})
 }
 
 // ---- Routes ----
@@ -345,10 +346,10 @@ func (s *Server) handleAdminListRoutes(w http.ResponseWriter, r *http.Request) {
 	limit, offset := parseAdminPaging(r)
 	items, total, err := s.adminReader.ListRoutes(r.Context(), limit, offset)
 	if err != nil {
-		writeConfigErr(w, http.StatusInternalServerError, "internal_error")
+		httpresp.Error(w, httpresp.CodeInternalError, "internal error")
 		return
 	}
-	writeConfigJSON(w, http.StatusOK, map[string]any{"items": items, "total": total})
+	httpresp.OK(w, map[string]any{"items": items, "total": total})
 }
 
 func (s *Server) handleAdminCreateRoute(w http.ResponseWriter, r *http.Request) {
@@ -357,14 +358,14 @@ func (s *Server) handleAdminCreateRoute(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if rm.ID == "" || rm.ModelID == "" || rm.ProviderID == "" || rm.UpstreamModel == "" || rm.Protocol == "" {
-		writeConfigErr(w, http.StatusBadRequest, "missing_required_fields")
+		httpresp.Error(w, httpresp.CodeBadRequest, "missing required fields")
 		return
 	}
 	if err := s.adminWriter.CreateRoute(r.Context(), &rm); err != nil {
 		writeAdminWriteErr(w, err)
 		return
 	}
-	writeConfigJSON(w, http.StatusCreated, rm)
+	httpresp.Created(w, rm)
 }
 
 func (s *Server) handleAdminGetRoute(w http.ResponseWriter, r *http.Request) {
@@ -373,7 +374,7 @@ func (s *Server) handleAdminGetRoute(w http.ResponseWriter, r *http.Request) {
 		writeAdminReadErr(w, err)
 		return
 	}
-	writeConfigJSON(w, http.StatusOK, rm)
+	httpresp.OK(w, rm)
 }
 
 func (s *Server) handleAdminUpdateRoute(w http.ResponseWriter, r *http.Request) {
@@ -385,7 +386,7 @@ func (s *Server) handleAdminUpdateRoute(w http.ResponseWriter, r *http.Request) 
 		writeAdminWriteErr(w, err)
 		return
 	}
-	writeConfigJSON(w, http.StatusOK, map[string]any{"id": chi.URLParam(r, "id"), "updated": true})
+	httpresp.OK(w, map[string]any{"id": chi.URLParam(r, "id"), "updated": true})
 }
 
 func (s *Server) handleAdminDeleteRoute(w http.ResponseWriter, r *http.Request) {
@@ -393,16 +394,16 @@ func (s *Server) handleAdminDeleteRoute(w http.ResponseWriter, r *http.Request) 
 		writeAdminWriteErr(w, err)
 		return
 	}
-	writeConfigJSON(w, http.StatusOK, map[string]any{"id": chi.URLParam(r, "id"), "deleted": true})
+	httpresp.OK(w, map[string]any{"id": chi.URLParam(r, "id"), "deleted": true})
 }
 
 func (s *Server) handleAdminListRouteCredentials(w http.ResponseWriter, r *http.Request) {
 	items, err := s.adminReader.ListRouteCredentials(r.Context(), chi.URLParam(r, "id"))
 	if err != nil {
-		writeConfigErr(w, http.StatusInternalServerError, "internal_error")
+		httpresp.Error(w, httpresp.CodeInternalError, "internal error")
 		return
 	}
-	writeConfigJSON(w, http.StatusOK, map[string]any{"items": items})
+	httpresp.OK(w, map[string]any{"items": items})
 }
 
 func (s *Server) handleAdminSetRouteCredentials(w http.ResponseWriter, r *http.Request) {
@@ -416,7 +417,7 @@ func (s *Server) handleAdminSetRouteCredentials(w http.ResponseWriter, r *http.R
 		writeAdminWriteErr(w, err)
 		return
 	}
-	writeConfigJSON(w, http.StatusOK, map[string]any{"route_id": chi.URLParam(r, "id"), "set": true})
+	httpresp.OK(w, map[string]any{"route_id": chi.URLParam(r, "id"), "set": true})
 }
 
 // ---- shared helpers ----
@@ -438,7 +439,7 @@ func parseAdminPaging(r *http.Request) (int, int) {
 
 func decodeAdminBody(w http.ResponseWriter, r *http.Request, v any) error {
 	if err := json.NewDecoder(io.LimitReader(r.Body, maxAdminJSON)).Decode(v); err != nil {
-		writeConfigErr(w, http.StatusBadRequest, "invalid_body")
+		httpresp.Error(w, httpresp.CodeInvalidJSON, "invalid JSON body")
 		return err
 	}
 	return nil
@@ -447,7 +448,7 @@ func decodeAdminBody(w http.ResponseWriter, r *http.Request, v any) error {
 func decodeAdminFields(w http.ResponseWriter, r *http.Request) (map[string]any, error) {
 	var fields map[string]any
 	if err := json.NewDecoder(io.LimitReader(r.Body, maxAdminJSON)).Decode(&fields); err != nil {
-		writeConfigErr(w, http.StatusBadRequest, "invalid_body")
+		httpresp.Error(w, httpresp.CodeInvalidJSON, "invalid JSON body")
 		return nil, err
 	}
 	return fields, nil
@@ -455,34 +456,34 @@ func decodeAdminFields(w http.ResponseWriter, r *http.Request) (map[string]any, 
 
 func writeAdminReadErr(w http.ResponseWriter, err error) {
 	if errors.Is(err, repository.ErrNotFound) {
-		writeConfigErr(w, http.StatusNotFound, "not_found")
+		httpresp.Error(w, httpresp.CodeNotFound, "not found")
 		return
 	}
-	writeConfigErr(w, http.StatusInternalServerError, "internal_error")
+	httpresp.Error(w, httpresp.CodeInternalError, "internal error")
 }
 
 func writeAdminWriteErr(w http.ResponseWriter, err error) {
 	if errors.Is(err, repository.ErrNotFound) {
-		writeConfigErr(w, http.StatusNotFound, "not_found")
+		httpresp.Error(w, httpresp.CodeNotFound, "not found")
 		return
 	}
 	if errors.Is(err, repository.ErrConflict) {
-		writeConfigErr(w, http.StatusConflict, "conflict")
+		httpresp.Error(w, httpresp.CodeConflict, "conflict")
 		return
 	}
-	writeConfigErr(w, http.StatusInternalServerError, "internal_error")
+	httpresp.Error(w, httpresp.CodeInternalError, "internal error")
 }
 
 // handleModelsCatalog returns active model IDs for plan allowedModels selector.
 func (s *Server) handleModelsCatalog(w http.ResponseWriter, r *http.Request) {
 	if s.adminReader == nil {
-		writeConfigErr(w, http.StatusServiceUnavailable, "admin_not_configured")
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "admin not configured")
 		return
 	}
 	ids, err := s.adminReader.ListModelIDs(r.Context())
 	if err != nil {
-		writeConfigErr(w, http.StatusInternalServerError, "internal_error")
+		httpresp.Error(w, httpresp.CodeInternalError, "internal error")
 		return
 	}
-	writeConfigJSON(w, http.StatusOK, ids)
+	httpresp.OK(w, ids)
 }

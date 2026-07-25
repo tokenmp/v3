@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/tokenmp/v3/packages/go/httpresp"
 	"github.com/tokenmp/v3/services/api/internal/billing"
 	"github.com/tokenmp/v3/services/api/internal/logging"
 )
@@ -69,7 +70,7 @@ func (h *Handlers) Routes(r chi.Router) {
 
 func (h *Handlers) ListRequestLogs(w http.ResponseWriter, r *http.Request) {
 	if h.Logging == nil || !h.Logging.Available() {
-		writeErr(w, http.StatusServiceUnavailable, "logging_unavailable")
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "logging unavailable")
 		return
 	}
 	q := r.URL.Query()
@@ -87,33 +88,33 @@ func (h *Handlers) ListRequestLogs(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		h.logger().Warn("admin list logs failed", "error", err)
-		writeErr(w, http.StatusServiceUnavailable, "logging_unavailable")
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "logging unavailable")
 		return
 	}
-	writeJSON(w, http.StatusOK, result)
+	httpresp.OK(w, result)
 }
 
 func (h *Handlers) GetRequestLog(w http.ResponseWriter, r *http.Request) {
 	if h.Logging == nil || !h.Logging.Available() {
-		writeErr(w, http.StatusServiceUnavailable, "logging_unavailable")
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "logging unavailable")
 		return
 	}
 	id := chi.URLParam(r, "requestId")
 	if id == "" {
-		writeErr(w, http.StatusBadRequest, "missing_request_id")
+		httpresp.Error(w, httpresp.CodeMissingField, "missing request id")
 		return
 	}
 	detail, err := h.Logging.GetLog(r.Context(), id)
 	if err != nil {
-		writeErr(w, http.StatusNotFound, "not_found")
+		httpresp.Error(w, httpresp.CodeNotFound, "not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, detail)
+	httpresp.OK(w, detail)
 }
 
 func (h *Handlers) GetRequestLogStats(w http.ResponseWriter, r *http.Request) {
 	if h.Logging == nil || !h.Logging.Available() {
-		writeErr(w, http.StatusServiceUnavailable, "logging_unavailable")
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "logging unavailable")
 		return
 	}
 	days := parsePositiveInt(r.URL.Query().Get("days"), 7)
@@ -123,31 +124,31 @@ func (h *Handlers) GetRequestLogStats(w http.ResponseWriter, r *http.Request) {
 	stats, err := h.Logging.GetStats(r.Context(), "", days)
 	if err != nil {
 		h.logger().Warn("admin stats failed", "error", err)
-		writeErr(w, http.StatusServiceUnavailable, "logging_unavailable")
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "logging unavailable")
 		return
 	}
-	writeJSON(w, http.StatusOK, stats)
+	httpresp.OK(w, stats)
 }
 
 // ---- Plans (cross-user) ----
 
 func (h *Handlers) ListPlans(w http.ResponseWriter, r *http.Request) {
 	if h.Billing == nil || !h.Billing.Available() {
-		writeErr(w, http.StatusServiceUnavailable, "billing_unavailable")
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "billing unavailable")
 		return
 	}
 	plans, err := h.Billing.ListPlans(r.Context())
 	if err != nil {
 		h.logger().Warn("admin list plans failed", "error", err)
-		writeErr(w, http.StatusServiceUnavailable, "billing_unavailable")
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "billing unavailable")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"plans": plans})
+	httpresp.OK(w, map[string]any{"plans": plans})
 }
 
 func (h *Handlers) ListUserPlans(w http.ResponseWriter, r *http.Request) {
 	if h.Billing == nil || !h.Billing.Available() {
-		writeErr(w, http.StatusServiceUnavailable, "billing_unavailable")
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "billing unavailable")
 		return
 	}
 	// Billing has no cross-user list endpoint yet; return empty for now.
@@ -156,10 +157,10 @@ func (h *Handlers) ListUserPlans(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// Graceful degradation: return empty list instead of 503 when the
 		// cross-user endpoint is not available.
-		writeJSON(w, http.StatusOK, map[string]any{"plans": []any{}})
+		httpresp.OK(w, map[string]any{"plans": []any{}})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"plans": userPlans})
+	httpresp.OK(w, map[string]any{"plans": userPlans})
 }
 
 // ---- helpers ----
@@ -169,20 +170,6 @@ func (h *Handlers) logger() *slog.Logger {
 		return h.Logger
 	}
 	return slog.Default()
-}
-
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
-}
-
-func writeErr(w http.ResponseWriter, status int, code string) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": code})
 }
 
 func parsePositiveInt(s string, def int) int {
@@ -211,7 +198,7 @@ func mapStatusFilter(status string) []string {
 
 func (h *Handlers) AdminListUsers(w http.ResponseWriter, r *http.Request) {
 	if h.Auth == nil || !h.Auth.Available() {
-		writeErr(w, http.StatusServiceUnavailable, "auth_unavailable")
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "auth unavailable")
 		return
 	}
 	bearer := bearerFromRequest(r)
@@ -222,18 +209,18 @@ func (h *Handlers) AdminListUsers(w http.ResponseWriter, r *http.Request) {
 		h.handleAuthErr(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, result)
+	httpresp.OK(w, result)
 }
 
 func (h *Handlers) AdminGetUser(w http.ResponseWriter, r *http.Request) {
 	if h.Auth == nil || !h.Auth.Available() {
-		writeErr(w, http.StatusServiceUnavailable, "auth_unavailable")
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "auth unavailable")
 		return
 	}
 	bearer := bearerFromRequest(r)
 	userID := chi.URLParam(r, "userId")
 	if userID == "" {
-		writeErr(w, http.StatusBadRequest, "missing_user_id")
+		httpresp.Error(w, httpresp.CodeMissingField, "missing user id")
 		return
 	}
 	result, err := h.Auth.GetUser(r.Context(), bearer, userID)
@@ -241,23 +228,23 @@ func (h *Handlers) AdminGetUser(w http.ResponseWriter, r *http.Request) {
 		h.handleAuthErr(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, result)
+	httpresp.OK(w, result)
 }
 
 func (h *Handlers) AdminUpdateUser(w http.ResponseWriter, r *http.Request) {
 	if h.Auth == nil || !h.Auth.Available() {
-		writeErr(w, http.StatusServiceUnavailable, "auth_unavailable")
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "auth unavailable")
 		return
 	}
 	bearer := bearerFromRequest(r)
 	userID := chi.URLParam(r, "userId")
 	if userID == "" {
-		writeErr(w, http.StatusBadRequest, "missing_user_id")
+		httpresp.Error(w, httpresp.CodeMissingField, "missing user id")
 		return
 	}
 	var body UpdateUserRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid_body")
+		httpresp.Error(w, httpresp.CodeInvalidJSON, "invalid body")
 		return
 	}
 	result, err := h.Auth.UpdateUser(r.Context(), bearer, userID, body)
@@ -265,12 +252,12 @@ func (h *Handlers) AdminUpdateUser(w http.ResponseWriter, r *http.Request) {
 		h.handleAuthErr(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, result)
+	httpresp.OK(w, result)
 }
 
 func (h *Handlers) AdminListKeys(w http.ResponseWriter, r *http.Request) {
 	if h.Auth == nil || !h.Auth.Available() {
-		writeErr(w, http.StatusServiceUnavailable, "auth_unavailable")
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "auth unavailable")
 		return
 	}
 	bearer := bearerFromRequest(r)
@@ -281,7 +268,7 @@ func (h *Handlers) AdminListKeys(w http.ResponseWriter, r *http.Request) {
 		h.handleAuthErr(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, result)
+	httpresp.OK(w, result)
 }
 
 // handleAuthErr maps Auth client errors to HTTP responses.
@@ -289,21 +276,21 @@ func (h *Handlers) handleAuthErr(w http.ResponseWriter, err error) {
 	if se, ok := err.(*StatusError); ok {
 		switch se.StatusCode {
 		case http.StatusUnauthorized:
-			writeErr(w, http.StatusUnauthorized, "unauthorized")
+			httpresp.Error(w, httpresp.CodeUnauthorized, "unauthorized")
 		case http.StatusForbidden:
-			writeErr(w, http.StatusForbidden, "forbidden")
+			httpresp.Error(w, httpresp.CodeForbidden, "forbidden")
 		case http.StatusNotFound:
-			writeErr(w, http.StatusNotFound, "not_found")
+			httpresp.Error(w, httpresp.CodeNotFound, "not found")
 		case http.StatusBadRequest:
-			writeErr(w, http.StatusBadRequest, "bad_request")
+			httpresp.Error(w, httpresp.CodeBadRequest, "bad request")
 		default:
 			h.logger().Warn("admin auth error", "status", se.StatusCode)
-			writeErr(w, http.StatusServiceUnavailable, "auth_unavailable")
+			httpresp.Error(w, httpresp.CodeServiceUnavailable, "auth unavailable")
 		}
 		return
 	}
 	h.logger().Warn("admin auth call failed", "error", err)
-	writeErr(w, http.StatusServiceUnavailable, "auth_unavailable")
+	httpresp.Error(w, httpresp.CodeServiceUnavailable, "auth unavailable")
 }
 
 // bearerFromRequest extracts the Bearer token from the Authorization header.
@@ -325,7 +312,7 @@ func (h *Handlers) AdminCreatePlan(w http.ResponseWriter, r *http.Request) {
 func (h *Handlers) AdminUpdatePlan(w http.ResponseWriter, r *http.Request) {
 	planID := chi.URLParam(r, "planId")
 	if planID == "" {
-		writeErr(w, http.StatusBadRequest, "missing_plan_id")
+		httpresp.Error(w, httpresp.CodeMissingField, "missing plan id")
 		return
 	}
 	h.proxyBillingAdmin(w, r, http.MethodPatch, "/v1/billing/admin/plans/"+planID)
@@ -334,7 +321,7 @@ func (h *Handlers) AdminUpdatePlan(w http.ResponseWriter, r *http.Request) {
 func (h *Handlers) AdminDeletePlan(w http.ResponseWriter, r *http.Request) {
 	planID := chi.URLParam(r, "planId")
 	if planID == "" {
-		writeErr(w, http.StatusBadRequest, "missing_plan_id")
+		httpresp.Error(w, httpresp.CodeMissingField, "missing plan id")
 		return
 	}
 	h.proxyBillingAdmin(w, r, http.MethodDelete, "/v1/billing/admin/plans/"+planID)
@@ -347,7 +334,7 @@ func (h *Handlers) AdminAssignUserPlan(w http.ResponseWriter, r *http.Request) {
 func (h *Handlers) AdminCancelUserPlan(w http.ResponseWriter, r *http.Request) {
 	upID := chi.URLParam(r, "userPlanId")
 	if upID == "" {
-		writeErr(w, http.StatusBadRequest, "missing_user_plan_id")
+		httpresp.Error(w, httpresp.CodeMissingField, "missing user plan id")
 		return
 	}
 	h.proxyBillingAdmin(w, r, http.MethodPost, "/v1/billing/admin/user-plans/"+upID+"/cancel")
@@ -363,14 +350,14 @@ func (h *Handlers) AdminUsageStats(w http.ResponseWriter, r *http.Request) {
 // endpoint and relays the response. It is a transparent proxy.
 func (h *Handlers) proxyBillingAdmin(w http.ResponseWriter, r *http.Request, method, path string) {
 	if h.Billing == nil || !h.Billing.Available() {
-		writeErr(w, http.StatusServiceUnavailable, "billing_unavailable")
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "billing unavailable")
 		return
 	}
 	body, _ := io.ReadAll(io.LimitReader(r.Body, 2<<20))
 	status, respBody, err := h.Billing.ProxyAdmin(r.Context(), method, path, body)
 	if err != nil {
 		h.logger().Warn("admin billing proxy failed", "error", err)
-		writeErr(w, http.StatusServiceUnavailable, "billing_unavailable")
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "billing unavailable")
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -459,7 +446,7 @@ func (h *Handlers) AdminDashboardStats(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpresp.OK(w, map[string]any{
 		"totalUsers":       totalUsers,
 		"totalRequests":    dash.TotalRequests,
 		"todayRequests":    dash.TodayRequests,

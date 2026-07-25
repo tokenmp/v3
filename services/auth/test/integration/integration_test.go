@@ -670,8 +670,19 @@ func authJSON(t *testing.T, ts *httptest.Server, method, path, bearer string, bo
 	}
 	if out != nil && resp.Body != nil {
 		defer func() { _, _ = io.Copy(io.Discard, resp.Body) }()
-		if err := json.NewDecoder(resp.Body).Decode(out); err != nil && err != io.EOF {
-			t.Fatalf("decode body: %v", err)
+		// Unwrap {code, data, message} envelope.
+		var env struct {
+			Code    int             `json:"code"`
+			Data    json.RawMessage `json:"data"`
+			Message string          `json:"message"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&env); err != nil && err != io.EOF {
+			t.Fatalf("decode envelope: %v", err)
+		}
+		if len(env.Data) > 0 && string(env.Data) != "null" {
+			if err := json.Unmarshal(env.Data, out); err != nil {
+				t.Fatalf("decode data: %v", err)
+			}
 		}
 	}
 	return resp

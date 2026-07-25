@@ -6,9 +6,13 @@ FROM --platform=$BUILDPLATFORM golang:1.26.5-alpine AS builder
 WORKDIR /workspace
 
 COPY services/notice/go.mod services/notice/go.sum ./services/notice/
+# Copy the shared httpresp package (replace directive points to this path).
+COPY packages/go/httpresp ./packages/go/httpresp
 
 RUN cd services/notice && GOWORK=off go mod download
 
+# Ensure the shared httpresp package is present for the replace directive.
+COPY packages/go/httpresp ./packages/go/httpresp
 COPY services/notice ./services/notice
 
 ARG TARGETOS=linux
