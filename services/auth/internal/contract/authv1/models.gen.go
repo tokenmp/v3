@@ -282,6 +282,42 @@ func (e UpdateApiKeyRequestStatus) Valid() bool {
 	}
 }
 
+// Defines values for VerifiedIdentityRole.
+const (
+	VerifiedIdentityRoleAdmin VerifiedIdentityRole = "admin"
+	VerifiedIdentityRoleUser  VerifiedIdentityRole = "user"
+)
+
+// Valid indicates whether the value is a known member of the VerifiedIdentityRole enum.
+func (e VerifiedIdentityRole) Valid() bool {
+	switch e {
+	case VerifiedIdentityRoleAdmin:
+		return true
+	case VerifiedIdentityRoleUser:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for VerifiedIdentityStatus.
+const (
+	VerifiedIdentityStatusActive   VerifiedIdentityStatus = "active"
+	VerifiedIdentityStatusDisabled VerifiedIdentityStatus = "disabled"
+)
+
+// Valid indicates whether the value is a known member of the VerifiedIdentityStatus enum.
+func (e VerifiedIdentityStatus) Valid() bool {
+	switch e {
+	case VerifiedIdentityStatusActive:
+		return true
+	case VerifiedIdentityStatusDisabled:
+		return true
+	default:
+		return false
+	}
+}
+
 // AdminApiKey Admin API key view (cross-user). Includes `user_id` for ownership.
 // Key secrets are never returned.
 type AdminApiKey struct {
@@ -488,6 +524,29 @@ type UpdateApiKeyRequest struct {
 // UpdateApiKeyRequestStatus New lifecycle status.
 type UpdateApiKeyRequestStatus string
 
+// VerifiedIdentity defines model for VerifiedIdentity.
+type VerifiedIdentity struct {
+	Email *string `json:"email,omitempty"`
+
+	// KeyId The verified API key ID.
+	KeyId  *string                `json:"key_id,omitempty"`
+	Role   VerifiedIdentityRole   `json:"role"`
+	Status VerifiedIdentityStatus `json:"status"`
+	UserId string                 `json:"user_id"`
+}
+
+// VerifiedIdentityRole defines model for VerifiedIdentity.Role.
+type VerifiedIdentityRole string
+
+// VerifiedIdentityStatus defines model for VerifiedIdentity.Status.
+type VerifiedIdentityStatus string
+
+// VerifyKeyRequest defines model for VerifyKeyRequest.
+type VerifyKeyRequest struct {
+	// ApiKey Opaque API key with `tmp_` prefix.
+	ApiKey string `json:"api_key"`
+}
+
 // KeyId defines model for KeyId.
 type KeyId = uuid.UUID
 
@@ -531,3 +590,6 @@ type RefreshJSONRequestBody = RefreshRequest
 
 // RegisterJSONRequestBody defines body for Register for application/json ContentType.
 type RegisterJSONRequestBody = RegisterRequest
+
+// AuthVerifyKeyJSONRequestBody defines body for AuthVerifyKey for application/json ContentType.
+type AuthVerifyKeyJSONRequestBody = VerifyKeyRequest

@@ -1,0 +1,312 @@
+package repository
+
+import (
+	"context"
+	"errors"
+
+	"gorm.io/gorm"
+)
+
+// ---- AdminReader implementation ----
+
+func (r *GormRepository) ListProviders(ctx context.Context, limit, offset int) ([]Provider, int64, error) {
+	limit = clampLimit(limit)
+	offset = clampOffset(offset)
+	var total int64
+	if err := r.db.WithContext(ctx).Model(&Provider{}).Where("status <> ?", "deleted").Count(&total).Error; err != nil {
+		return nil, 0, classifyReadErr(err)
+	}
+	var items []Provider
+	if err := r.db.WithContext(ctx).Where("status <> ?", "deleted").Order("id ASC").Limit(limit).Offset(offset).Find(&items).Error; err != nil {
+		return nil, 0, classifyReadErr(err)
+	}
+	return items, total, nil
+}
+
+func (r *GormRepository) GetProvider(ctx context.Context, id string) (Provider, error) {
+	var p Provider
+	if err := r.db.WithContext(ctx).Where("id = ? AND status <> ?", id, "deleted").First(&p).Error; err != nil {
+		return Provider{}, classifyReadErr(err)
+	}
+	return p, nil
+}
+
+func (r *GormRepository) ListModels(ctx context.Context, limit, offset int) ([]Model, int64, error) {
+	limit = clampLimit(limit)
+	offset = clampOffset(offset)
+	var total int64
+	if err := r.db.WithContext(ctx).Model(&Model{}).Where("status <> ?", "deleted").Count(&total).Error; err != nil {
+		return nil, 0, classifyReadErr(err)
+	}
+	var items []Model
+	if err := r.db.WithContext(ctx).Where("status <> ?", "deleted").Order("id ASC").Limit(limit).Offset(offset).Find(&items).Error; err != nil {
+		return nil, 0, classifyReadErr(err)
+	}
+	return items, total, nil
+}
+
+func (r *GormRepository) GetModel(ctx context.Context, id string) (Model, error) {
+	var m Model
+	if err := r.db.WithContext(ctx).Where("id = ? AND status <> ?", id, "deleted").First(&m).Error; err != nil {
+		return Model{}, classifyReadErr(err)
+	}
+	return m, nil
+}
+
+func (r *GormRepository) ListModelIDs(ctx context.Context) ([]string, error) {
+	var ids []string
+	if err := r.db.WithContext(ctx).Model(&Model{}).Where("status = ?", "active").Pluck("id", &ids).Error; err != nil {
+		return nil, classifyReadErr(err)
+	}
+	return ids, nil
+}
+
+func (r *GormRepository) ListAdapters(ctx context.Context, limit, offset int) ([]Adapter, int64, error) {
+	limit = clampLimit(limit)
+	offset = clampOffset(offset)
+	var total int64
+	if err := r.db.WithContext(ctx).Model(&Adapter{}).Where("status <> ?", "deleted").Count(&total).Error; err != nil {
+		return nil, 0, classifyReadErr(err)
+	}
+	var items []Adapter
+	if err := r.db.WithContext(ctx).Where("status <> ?", "deleted").Order("id ASC").Limit(limit).Offset(offset).Find(&items).Error; err != nil {
+		return nil, 0, classifyReadErr(err)
+	}
+	return items, total, nil
+}
+
+func (r *GormRepository) GetAdapter(ctx context.Context, id string) (Adapter, error) {
+	var a Adapter
+	if err := r.db.WithContext(ctx).Where("id = ? AND status <> ?", id, "deleted").First(&a).Error; err != nil {
+		return Adapter{}, classifyReadErr(err)
+	}
+	return a, nil
+}
+
+func (r *GormRepository) ListEndpoints(ctx context.Context, providerID string) ([]UpstreamEndpoint, error) {
+	var items []UpstreamEndpoint
+	if err := r.db.WithContext(ctx).Where("provider_id = ? AND status <> ?", providerID, "deleted").Order("id ASC").Find(&items).Error; err != nil {
+		return nil, classifyReadErr(err)
+	}
+	return items, nil
+}
+
+func (r *GormRepository) ListCredentials(ctx context.Context, providerID string) ([]UpstreamCredential, error) {
+	var items []UpstreamCredential
+	if err := r.db.WithContext(ctx).Where("provider_id = ? AND status <> ?", providerID, "deleted").Order("priority DESC, id ASC").Find(&items).Error; err != nil {
+		return nil, classifyReadErr(err)
+	}
+	return items, nil
+}
+
+func (r *GormRepository) ListRoutes(ctx context.Context, limit, offset int) ([]RouteMapping, int64, error) {
+	limit = clampLimit(limit)
+	offset = clampOffset(offset)
+	var total int64
+	if err := r.db.WithContext(ctx).Model(&RouteMapping{}).Where("status <> ?", "deleted").Count(&total).Error; err != nil {
+		return nil, 0, classifyReadErr(err)
+	}
+	var items []RouteMapping
+	if err := r.db.WithContext(ctx).Where("status <> ?", "deleted").Order("model_id ASC, priority DESC, id ASC").Limit(limit).Offset(offset).Find(&items).Error; err != nil {
+		return nil, 0, classifyReadErr(err)
+	}
+	return items, total, nil
+}
+
+func (r *GormRepository) GetRoute(ctx context.Context, id string) (RouteMapping, error) {
+	var rm RouteMapping
+	if err := r.db.WithContext(ctx).Where("id = ? AND status <> ?", id, "deleted").First(&rm).Error; err != nil {
+		return RouteMapping{}, classifyReadErr(err)
+	}
+	return rm, nil
+}
+
+func (r *GormRepository) ListRouteCredentials(ctx context.Context, routeID string) ([]RouteCredential, error) {
+	var items []RouteCredential
+	if err := r.db.WithContext(ctx).Where("route_id = ?", routeID).Order("priority DESC, credential_id ASC").Find(&items).Error; err != nil {
+		return nil, classifyReadErr(err)
+	}
+	return items, nil
+}
+
+// ---- AdminWriter implementation ----
+
+// AdminWriter is the write contract for config admin data.
+type AdminWriter interface {
+	CreateProvider(ctx context.Context, p *Provider) error
+	UpdateProvider(ctx context.Context, id string, fields map[string]any) error
+	DeleteProvider(ctx context.Context, id string) error
+
+	CreateModel(ctx context.Context, m *Model) error
+	UpdateModel(ctx context.Context, id string, fields map[string]any) error
+	DeleteModel(ctx context.Context, id string) error
+
+	CreateAdapter(ctx context.Context, a *Adapter) error
+	UpdateAdapter(ctx context.Context, id string, fields map[string]any) error
+	DeleteAdapter(ctx context.Context, id string) error
+
+	CreateEndpoint(ctx context.Context, e *UpstreamEndpoint) error
+	UpdateEndpoint(ctx context.Context, id int64, fields map[string]any) error
+	DeleteEndpoint(ctx context.Context, id int64) error
+
+	CreateCredential(ctx context.Context, c *UpstreamCredential) error
+	UpdateCredential(ctx context.Context, id string, fields map[string]any) error
+	DeleteCredential(ctx context.Context, id string) error
+
+	CreateRoute(ctx context.Context, rm *RouteMapping) error
+	UpdateRoute(ctx context.Context, id string, fields map[string]any) error
+	DeleteRoute(ctx context.Context, id string) error
+	SetRouteCredentials(ctx context.Context, routeID string, creds []RouteCredential) error
+}
+
+func (r *GormRepository) CreateProvider(ctx context.Context, p *Provider) error {
+	if err := r.db.WithContext(ctx).Create(p).Error; err != nil {
+		return classifyWriteErr(err)
+	}
+	return nil
+}
+
+func (r *GormRepository) UpdateProvider(ctx context.Context, id string, fields map[string]any) error {
+	return updateByID(ctx, r.db, &Provider{}, "id", id, fields)
+}
+
+func (r *GormRepository) DeleteProvider(ctx context.Context, id string) error {
+	return softDeleteByID(ctx, r.db, &Provider{}, "id", id)
+}
+
+func (r *GormRepository) CreateModel(ctx context.Context, m *Model) error {
+	if err := r.db.WithContext(ctx).Create(m).Error; err != nil {
+		return classifyWriteErr(err)
+	}
+	return nil
+}
+
+func (r *GormRepository) UpdateModel(ctx context.Context, id string, fields map[string]any) error {
+	return updateByID(ctx, r.db, &Model{}, "id", id, fields)
+}
+
+func (r *GormRepository) DeleteModel(ctx context.Context, id string) error {
+	return softDeleteByID(ctx, r.db, &Model{}, "id", id)
+}
+
+func (r *GormRepository) CreateAdapter(ctx context.Context, a *Adapter) error {
+	if err := r.db.WithContext(ctx).Create(a).Error; err != nil {
+		return classifyWriteErr(err)
+	}
+	return nil
+}
+
+func (r *GormRepository) UpdateAdapter(ctx context.Context, id string, fields map[string]any) error {
+	return updateByID(ctx, r.db, &Adapter{}, "id", id, fields)
+}
+
+func (r *GormRepository) DeleteAdapter(ctx context.Context, id string) error {
+	return softDeleteByID(ctx, r.db, &Adapter{}, "id", id)
+}
+
+func (r *GormRepository) CreateEndpoint(ctx context.Context, e *UpstreamEndpoint) error {
+	if err := r.db.WithContext(ctx).Create(e).Error; err != nil {
+		return classifyWriteErr(err)
+	}
+	return nil
+}
+
+func (r *GormRepository) UpdateEndpoint(ctx context.Context, id int64, fields map[string]any) error {
+	return updateByID(ctx, r.db, &UpstreamEndpoint{}, "id", id, fields)
+}
+
+func (r *GormRepository) DeleteEndpoint(ctx context.Context, id int64) error {
+	return softDeleteByID(ctx, r.db, &UpstreamEndpoint{}, "id", id)
+}
+
+func (r *GormRepository) CreateCredential(ctx context.Context, c *UpstreamCredential) error {
+	if err := r.db.WithContext(ctx).Create(c).Error; err != nil {
+		return classifyWriteErr(err)
+	}
+	return nil
+}
+
+func (r *GormRepository) UpdateCredential(ctx context.Context, id string, fields map[string]any) error {
+	return updateByID(ctx, r.db, &UpstreamCredential{}, "id", id, fields)
+}
+
+func (r *GormRepository) DeleteCredential(ctx context.Context, id string) error {
+	return softDeleteByID(ctx, r.db, &UpstreamCredential{}, "id", id)
+}
+
+func (r *GormRepository) CreateRoute(ctx context.Context, rm *RouteMapping) error {
+	if err := r.db.WithContext(ctx).Create(rm).Error; err != nil {
+		return classifyWriteErr(err)
+	}
+	return nil
+}
+
+func (r *GormRepository) UpdateRoute(ctx context.Context, id string, fields map[string]any) error {
+	return updateByID(ctx, r.db, &RouteMapping{}, "id", id, fields)
+}
+
+func (r *GormRepository) DeleteRoute(ctx context.Context, id string) error {
+	return softDeleteByID(ctx, r.db, &RouteMapping{}, "id", id)
+}
+
+func (r *GormRepository) SetRouteCredentials(ctx context.Context, routeID string, creds []RouteCredential) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("route_id = ?", routeID).Delete(&RouteCredential{}).Error; err != nil {
+			return classifyWriteErr(err)
+		}
+		if len(creds) == 0 {
+			return nil
+		}
+		for i := range creds {
+			creds[i].RouteID = routeID
+		}
+		if err := tx.Create(&creds).Error; err != nil {
+			return classifyWriteErr(err)
+		}
+		return nil
+	})
+}
+
+// ---- helpers ----
+
+func updateByID(ctx context.Context, db *gorm.DB, model any, col string, id any, fields map[string]any) error {
+	if len(fields) == 0 {
+		return nil
+	}
+	fields["updated_at"] = nil // let DB set now()
+	res := db.WithContext(ctx).Model(model).Where(col+" = ?", id).Updates(fields)
+	if res.Error != nil {
+		return classifyWriteErr(res.Error)
+	}
+	if res.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	// updated_at=nil causes GORM to skip it; set explicitly.
+	_ = db.WithContext(ctx).Model(model).Where(col+" = ?", id).Update("updated_at", gorm.Expr("now()")).Error
+	return nil
+}
+
+func softDeleteByID(ctx context.Context, db *gorm.DB, model any, col string, id any) error {
+	res := db.WithContext(ctx).Model(model).Where(col+" = ?", id).Updates(map[string]any{
+		"status":     "deleted",
+		"updated_at": gorm.Expr("now()"),
+	})
+	if res.Error != nil {
+		return classifyWriteErr(res.Error)
+	}
+	if res.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func classifyReadErr(err error) error {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return ErrNotFound
+	}
+	return ErrQueryFailed
+}
+
+func classifyWriteErr(err error) error {
+	return ErrInsertFailed
+}

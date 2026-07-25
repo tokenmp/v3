@@ -27,19 +27,40 @@ import (
 
 // Server holds the shared dependencies for the config service HTTP handlers.
 type Server struct {
-	reader repository.Reader
-	writer repository.Writer
-	pinger database.Pinger
-	logger *slog.Logger
+	reader      repository.Reader
+	writer      repository.Writer
+	adminReader repository.AdminReader
+	adminWriter repository.AdminWriter
+	pinger      database.Pinger
+	logger      *slog.Logger
 }
 
 // New returns a Server wired with the given reader (snapshot source), writer
 // (draft/publish lifecycle) and pinger (DB readiness). logger must be non-nil.
+// adminReader/adminWriter can be the same *GormRepository.
 func New(reader repository.Reader, writer repository.Writer, pinger database.Pinger, logger *slog.Logger) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Server{reader: reader, writer: writer, pinger: pinger, logger: logger}
+	s := &Server{reader: reader, writer: writer, pinger: pinger, logger: logger}
+	if ar, ok := writer.(repository.AdminReader); ok {
+		s.adminReader = ar
+	}
+	if aw, ok := writer.(repository.AdminWriter); ok {
+		s.adminWriter = aw
+	}
+	// Also try reader for admin interfaces (GormRepository implements all).
+	if s.adminReader == nil {
+		if ar, ok := reader.(repository.AdminReader); ok {
+			s.adminReader = ar
+		}
+	}
+	if s.adminWriter == nil {
+		if aw, ok := reader.(repository.AdminWriter); ok {
+			s.adminWriter = aw
+		}
+	}
+	return s
 }
 
 // Router returns the configured chi router.
@@ -58,6 +79,10 @@ func (s *Server) Router() http.Handler {
 	r.Post("/v1/config/revisions/{id}/publish", s.handlePublishRevision)
 	r.Post("/v1/config/revisions/{id}/rollback", s.handleRollbackRevision)
 	r.Get("/v1/config/revisions", s.handleListRevisions)
+	// Admin CRUD for config tables (providers/models/routes/...)
+	s.registerAdminRoutes(r)
+	// Models catalog (model IDs for plan allowedModels selector)
+	r.Get("/v1/config/models/catalog", s.handleModelsCatalog)
 	return r
 }
 

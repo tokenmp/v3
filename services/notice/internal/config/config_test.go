@@ -14,6 +14,7 @@ func setEnv(t *testing.T, kvs map[string]string) {
 
 func TestLoad_MissingDatabaseURL(t *testing.T) {
 	t.Setenv("NOTICE_JWT_PUBLIC_KEY_FILE", "/tmp/pub.pem")
+	t.Setenv("NOTICE_DATABASE_URL", "")
 	_, err := Load()
 	if err != ErrMissingDatabaseURL {
 		t.Fatalf("got %v, want ErrMissingDatabaseURL", err)

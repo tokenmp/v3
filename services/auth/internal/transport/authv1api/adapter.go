@@ -159,12 +159,13 @@ func UserIDFromContext(ctx context.Context) string {
 // It owns request validation, body-size limits, trailing-JSON rejection,
 // error mapping and response shaping.
 type StrictAdapter struct {
-	svc        *auth.Service
-	pinger     Pinger
-	accessTTL  int // seconds, for expires_in
-	keys       APIKeyStore
-	adminUsers AdminUserStore
-	adminKeys  AdminKeyStore
+	svc         *auth.Service
+	pinger      Pinger
+	accessTTL   int // seconds, for expires_in
+	keys        APIKeyStore
+	adminUsers  AdminUserStore
+	adminKeys   AdminKeyStore
+	keyVerifier KeyVerifier
 }
 
 // NewStrictAdapter builds a StrictAdapter.
@@ -930,6 +931,7 @@ type ServerConfig struct {
 	APIKeyStore    APIKeyStore
 	AdminUserStore AdminUserStore
 	AdminKeyStore  AdminKeyStore
+	KeyVerifier    KeyVerifier
 }
 
 // NewServer builds a Chi HTTP server with generated routes, strict handler,
@@ -947,6 +949,9 @@ func NewServer(cfg ServerConfig) *Server {
 	}
 	if cfg.AdminUserStore != nil || cfg.AdminKeyStore != nil {
 		adapter = adapter.WithAdminStores(cfg.AdminUserStore, cfg.AdminKeyStore)
+	}
+	if cfg.KeyVerifier != nil {
+		adapter = adapter.WithKeyVerifier(cfg.KeyVerifier)
 	}
 
 	middlewares := []authv1.StrictMiddlewareFunc{}

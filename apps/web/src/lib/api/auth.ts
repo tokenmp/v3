@@ -1,5 +1,4 @@
 import { request } from '@/lib/api/core';
-import { mockAuthApi } from '@/lib/api/mock-auth';
 import type { TokenResponse, User } from '@/types';
 
 export interface RegisterInput {
@@ -17,11 +16,7 @@ export interface ChangePasswordInput {
   new_password: string;
 }
 
-/** Use mock auth when no real backend is reachable (default for local dev).
- *  Set NEXT_PUBLIC_USE_MOCK_AUTH=0 to use the real fetch client. */
-const USE_MOCK = process.env.NEXT_PUBLIC_USE_MOCK_AUTH !== '0';
-
-const realAuthApi = {
+export const authApi = {
   register: (input: RegisterInput) =>
     request<TokenResponse>('/api/v1/auth/register', {
       method: 'POST',
@@ -55,17 +50,3 @@ const realAuthApi = {
       noContent: true,
     }),
 };
-
-/** Unified auth API surface. Mock-backed by default. */
-export const authApi = USE_MOCK
-  ? {
-      login: mockAuthApi.login,
-      register: mockAuthApi.register,
-      me: mockAuthApi.me,
-      logout: mockAuthApi.logout,
-      logoutAll: mockAuthApi.logoutAll,
-      changePassword: mockAuthApi.changePassword,
-      /** Mock-only helper to resolve the user after login. */
-      getUserByEmail: mockAuthApi.getUserByEmail,
-    }
-  : realAuthApi;

@@ -72,6 +72,9 @@ type ServerInterface interface {
 	// Register Register a new user
 	// (POST /api/v1/auth/register)
 	Register(w http.ResponseWriter, r *http.Request)
+	// AuthVerifyKey Verify an API key
+	// (POST /api/v1/auth/verify-key)
+	AuthVerifyKey(w http.ResponseWriter, r *http.Request)
 	// GetHealthz Liveness probe
 	// (GET /healthz)
 	GetHealthz(w http.ResponseWriter, r *http.Request)
@@ -189,6 +192,12 @@ func (_ Unimplemented) Refresh(w http.ResponseWriter, r *http.Request) {
 // Register Register a new user
 // (POST /api/v1/auth/register)
 func (_ Unimplemented) Register(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// AuthVerifyKey Verify an API key
+// (POST /api/v1/auth/verify-key)
+func (_ Unimplemented) AuthVerifyKey(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -612,6 +621,20 @@ func (siw *ServerInterfaceWrapper) Register(w http.ResponseWriter, r *http.Reque
 	handler.ServeHTTP(w, r)
 }
 
+// AuthVerifyKey operation middleware
+func (siw *ServerInterfaceWrapper) AuthVerifyKey(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AuthVerifyKey(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetHealthz operation middleware
 func (siw *ServerInterfaceWrapper) GetHealthz(w http.ResponseWriter, r *http.Request) {
 
@@ -798,6 +821,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/api/v1/auth/login", wrapper.Login)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/auth/verify-key", wrapper.AuthVerifyKey)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/api/v1/auth/refresh", wrapper.Refresh)
@@ -2823,6 +2849,126 @@ func (response Register500JSONResponse) VisitRegisterResponse(w http.ResponseWri
 	return err
 }
 
+type AuthVerifyKeyRequestObject struct {
+	Body *AuthVerifyKeyJSONRequestBody
+}
+
+type AuthVerifyKeyResponseObject interface {
+	VisitAuthVerifyKeyResponse(w http.ResponseWriter) error
+}
+
+type AuthVerifyKey200ResponseHeaders struct {
+	CacheControl *string
+	ContentType  *string
+}
+
+type AuthVerifyKey200JSONResponse struct {
+	Body    VerifiedIdentity
+	Headers AuthVerifyKey200ResponseHeaders
+}
+
+func (response AuthVerifyKey200JSONResponse) VisitAuthVerifyKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	if response.Headers.ContentType != nil {
+		w.Header().Set("Content-Type", fmt.Sprint(*response.Headers.ContentType))
+	}
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AuthVerifyKey400ResponseHeaders struct {
+	CacheControl *string
+	ContentType  *string
+}
+
+type AuthVerifyKey400JSONResponse struct {
+	Body    Error
+	Headers AuthVerifyKey400ResponseHeaders
+}
+
+func (response AuthVerifyKey400JSONResponse) VisitAuthVerifyKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	if response.Headers.ContentType != nil {
+		w.Header().Set("Content-Type", fmt.Sprint(*response.Headers.ContentType))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AuthVerifyKey401ResponseHeaders struct {
+	CacheControl *string
+	ContentType  *string
+}
+
+type AuthVerifyKey401JSONResponse struct {
+	Body    Error
+	Headers AuthVerifyKey401ResponseHeaders
+}
+
+func (response AuthVerifyKey401JSONResponse) VisitAuthVerifyKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	if response.Headers.ContentType != nil {
+		w.Header().Set("Content-Type", fmt.Sprint(*response.Headers.ContentType))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AuthVerifyKey500ResponseHeaders struct {
+	CacheControl *string
+	ContentType  *string
+}
+
+type AuthVerifyKey500JSONResponse struct {
+	Body    Error
+	Headers AuthVerifyKey500ResponseHeaders
+}
+
+func (response AuthVerifyKey500JSONResponse) VisitAuthVerifyKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	if response.Headers.ContentType != nil {
+		w.Header().Set("Content-Type", fmt.Sprint(*response.Headers.ContentType))
+	}
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type GetHealthzRequestObject struct {
 }
 
@@ -3112,6 +3258,9 @@ type StrictServerInterface interface {
 	// Register Register a new user
 	// (POST /api/v1/auth/register)
 	Register(ctx context.Context, request RegisterRequestObject) (RegisterResponseObject, error)
+	// AuthVerifyKey Verify an API key
+	// (POST /api/v1/auth/verify-key)
+	AuthVerifyKey(ctx context.Context, request AuthVerifyKeyRequestObject) (AuthVerifyKeyResponseObject, error)
 	// GetHealthz Liveness probe
 	// (GET /healthz)
 	GetHealthz(ctx context.Context, request GetHealthzRequestObject) (GetHealthzResponseObject, error)
@@ -3641,6 +3790,37 @@ func (sh *strictHandler) Register(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(RegisterResponseObject); ok {
 		if err := validResponse.VisitRegisterResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// AuthVerifyKey operation middleware
+func (sh *strictHandler) AuthVerifyKey(w http.ResponseWriter, r *http.Request) {
+	var request AuthVerifyKeyRequestObject
+
+	var body AuthVerifyKeyJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.AuthVerifyKey(ctx, request.(AuthVerifyKeyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "AuthVerifyKey")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(AuthVerifyKeyResponseObject); ok {
+		if err := validResponse.VisitAuthVerifyKeyResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

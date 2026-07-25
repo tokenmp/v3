@@ -24,6 +24,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/tokenmp/v3/services/api/internal/admin"
 	"github.com/tokenmp/v3/services/api/internal/billing"
+	"github.com/tokenmp/v3/services/api/internal/config"
 	"github.com/tokenmp/v3/services/api/internal/identity"
 	"github.com/tokenmp/v3/services/api/internal/keys"
 	"github.com/tokenmp/v3/services/api/internal/logging"
@@ -42,6 +43,7 @@ type Deps struct {
 	Logging   *logging.Client
 	Billing   *billing.Client
 	AdminAuth *admin.AuthClient
+	ConfigCfg *config.Client
 	Settings  *settings.Store
 	// KeysHandler 注册 /api/v1/keys* 路由（鉴权但不走配额）；nil 时不注册。
 	KeysHandler *keys.Handler
@@ -57,6 +59,7 @@ func NewServer(deps Deps, readHeaderTimeout, idleTimeout time.Duration) *http.Se
 	}
 	panelHandlers := panel.New(deps.Logging, deps.Billing, deps.Settings, deps.Logger)
 	adminHandlers := admin.New(deps.Logging, deps.Billing, deps.AdminAuth, deps.Logger)
+	configHandlers := admin.NewConfigHandlers(deps.ConfigCfg)
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -91,6 +94,7 @@ func NewServer(deps Deps, readHeaderTimeout, idleTimeout time.Duration) *http.Se
 		r.Use(identity.Middleware(deps.Verifier, deps.Logger))
 		r.Use(identity.RequireAdmin(deps.Logger))
 		adminHandlers.Routes(r)
+		configHandlers.Routes(r)
 	})
 
 	// Authenticated executor proxy routes (identity → quota → proxy).

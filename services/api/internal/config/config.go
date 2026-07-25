@@ -47,6 +47,12 @@ type Config struct {
 	// token to Auth's /api/v1/auth/keys* management API.
 	AuthURL string
 
+	// ConfigServiceURL is the base URL of the Config Service
+	// (e.g. "http://127.0.0.1:8082"). Optional; when empty, admin config
+	// CRUD endpoints return 503. When set, the edge proxies admin config
+	// management routes to the Config Service.
+	ConfigServiceURL string
+
 	// JWTPublicKeyFile is the path to the Ed25519 public key PEM file used
 	// to verify client JWTs. Optional; when empty, JWT verification is
 	// disabled (dev-only; production must set this).
@@ -141,6 +147,11 @@ func Load() (*Config, error) {
 	cfg.AuthURL = strings.TrimSpace(os.Getenv("API_AUTH_URL"))
 	if cfg.AuthURL != "" && !validHTTPBaseURL(cfg.AuthURL) {
 		return nil, errors.New("API_AUTH_URL must be an http(s) base URL without query or fragment")
+	}
+
+	cfg.ConfigServiceURL = strings.TrimSpace(os.Getenv("API_CONFIG_SERVICE_URL"))
+	if cfg.ConfigServiceURL != "" && !validHTTPBaseURL(cfg.ConfigServiceURL) {
+		return nil, errors.New("API_CONFIG_SERVICE_URL must be an http(s) base URL without query or fragment")
 	}
 
 	cfg.JWTPublicKeyFile = strings.TrimSpace(os.Getenv("API_JWT_PUBLIC_KEY_FILE"))

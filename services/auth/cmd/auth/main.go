@@ -111,6 +111,7 @@ func run() error {
 		APIKeyStore:    apiKeyStore,
 		AdminUserStore: adminUserStore,
 		AdminKeyStore:  adminKeyStore,
+		KeyVerifier:    authv1api.NewKeyVerifierAdapter(apiKeyRepo, userStore),
 	})
 
 	errCh := make(chan error, 1)
