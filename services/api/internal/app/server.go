@@ -22,6 +22,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/tokenmp/v3/services/api/internal/admin"
 	"github.com/tokenmp/v3/services/api/internal/billing"
 	"github.com/tokenmp/v3/services/api/internal/identity"
 	"github.com/tokenmp/v3/services/api/internal/keys"
@@ -54,6 +55,7 @@ func NewServer(deps Deps, readHeaderTimeout, idleTimeout time.Duration) *http.Se
 		deps.Logger = slog.Default()
 	}
 	panelHandlers := panel.New(deps.Logging, deps.Billing, deps.Settings, deps.Logger)
+	adminHandlers := admin.New(deps.Logging, deps.Billing, deps.Logger)
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -80,6 +82,14 @@ func NewServer(deps Deps, readHeaderTimeout, idleTimeout time.Duration) *http.Se
 		r.Get("/api/v1/request-logs", panelHandlers.ListRequestLogs)
 		r.Get("/api/v1/request-logs/stats", panelHandlers.GetRequestLogStats)
 		r.Get("/api/v1/request-logs/{requestId}", panelHandlers.GetRequestLog)
+	})
+
+	// Admin routes (identity → RequireAdmin). Aggregates Logging/Billing for
+	// the admin dashboard. No quota.
+	r.Group(func(r chi.Router) {
+		r.Use(identity.Middleware(deps.Verifier, deps.Logger))
+		r.Use(identity.RequireAdmin(deps.Logger))
+		adminHandlers.Routes(r)
 	})
 
 	// Authenticated executor proxy routes (identity → quota → proxy).

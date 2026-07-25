@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { ShieldCheck, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import { PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { TokenMPLogoMark } from '@/components/tokenmp-logo';
 import { useSidebarStore } from '@/lib/sidebar-store';
 import { adminNavGroups } from '@/lib/admin-nav';
@@ -66,7 +66,7 @@ export function AdminSidebar() {
                       href={item.href}
                       title={isCollapsed ? item.label : undefined}
                       className={cn(
-                        'focus-nav flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
+                        'focus-nav group relative flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
                         active
                           ? 'bg-primary/10 text-primary'
                           : 'text-muted-foreground hover:bg-accent hover:text-foreground',
@@ -75,6 +75,11 @@ export function AdminSidebar() {
                     >
                       <Icon className="h-4 w-4 shrink-0" />
                       {!isCollapsed && <span className="truncate">{item.label}</span>}
+                      {isCollapsed && (
+                        <span className="pointer-events-none absolute left-full ml-2 z-50 whitespace-nowrap rounded-md bg-popover px-2 py-1 text-xs text-popover-foreground opacity-0 shadow-md transition-opacity group-hover:opacity-100">
+                          {item.label}
+                        </span>
+                      )}
                     </Link>
                   </li>
                 );
@@ -90,10 +95,15 @@ export function AdminSidebar() {
         <button
           type="button"
           onClick={toggle}
-          className="focus-nav flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+          className="focus-nav group relative flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
         >
           {isCollapsed ? (
-            <PanelLeftOpen className="h-4 w-4" />
+            <>
+              <PanelLeftOpen className="h-4 w-4" />
+              <span className="pointer-events-none absolute left-full ml-2 z-50 whitespace-nowrap rounded-md bg-popover px-2 py-1 text-xs text-popover-foreground opacity-0 shadow-md transition-opacity group-hover:opacity-100">
+                展开侧边栏
+              </span>
+            </>
           ) : (
             <>
               <PanelLeftClose className="h-4 w-4" />
@@ -102,16 +112,6 @@ export function AdminSidebar() {
           )}
         </button>
       </div>
-
-      {/* Admin badge */}
-      {!isCollapsed && (
-        <div className="border-t px-3 py-2">
-          <div className="flex items-center gap-2 rounded-md bg-primary/5 px-3 py-1.5 text-xs text-primary">
-            <ShieldCheck className="h-3.5 w-3.5" />
-            <span>管理员模式</span>
-          </div>
-        </div>
-      )}
     </aside>
   );
 }

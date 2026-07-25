@@ -63,7 +63,7 @@ export function Sidebar() {
                   href={item.href}
                   title={isCollapsed ? item.label : undefined}
                   className={cn(
-                    'flex items-center text-sm transition-colors focus-nav',
+                    'group relative flex items-center text-sm transition-colors focus-nav',
                     isCollapsed
                       ? 'justify-center mx-2 py-2.5 rounded-md'
                       : 'gap-3 px-5 py-2.5 border-l-2',
@@ -74,6 +74,11 @@ export function Sidebar() {
                 >
                   <Icon className="h-4 w-4 shrink-0" />
                   {!isCollapsed && <span>{item.label}</span>}
+                  {isCollapsed && (
+                    <span className="pointer-events-none absolute left-full ml-2 z-50 whitespace-nowrap rounded-md bg-popover px-2 py-1 text-xs text-popover-foreground opacity-0 shadow-md transition-opacity group-hover:opacity-100">
+                      {item.label}
+                    </span>
+                  )}
                 </Link>
               );
             })}
@@ -88,14 +93,19 @@ export function Sidebar() {
           onClick={toggle}
           aria-label={isCollapsed ? '展开侧边栏' : '收起侧边栏'}
           className={cn(
-            'flex items-center text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors w-full focus-inset',
+            'group relative flex items-center text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors w-full focus-inset',
             isCollapsed
               ? 'justify-center py-3'
               : 'gap-3 px-5 py-2.5',
           )}
         >
           {isCollapsed ? (
-            <PanelLeftOpen className="h-4 w-4 shrink-0" />
+            <>
+              <PanelLeftOpen className="h-4 w-4 shrink-0" />
+              <span className="pointer-events-none absolute left-full ml-2 z-50 whitespace-nowrap rounded-md bg-popover px-2 py-1 text-xs text-popover-foreground opacity-0 shadow-md transition-opacity group-hover:opacity-100">
+                展开侧边栏
+              </span>
+            </>
           ) : (
             <>
               <PanelLeftClose className="h-4 w-4 shrink-0" />

@@ -16,6 +16,10 @@ import type {
 import { request, API_BASE } from './core';
 
 const useMock = process.env.NEXT_PUBLIC_USE_MOCK_ADMIN !== '0';
+// Sub-services that have real Edge admin endpoints implemented. These always
+// call the real API regardless of the global useMock flag.
+const useRealAdminLogs = process.env.NEXT_PUBLIC_ADMIN_REAL_LOGS === '1';
+const useRealAdminBilling = process.env.NEXT_PUBLIC_ADMIN_REAL_BILLING === '1';
 const ADMIN_BASE = process.env.NEXT_PUBLIC_BIZ_API_BASE ?? API_BASE;
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -137,11 +141,51 @@ async function realListKeys(page = 1, pageSize = 20): Promise<{ keys: AdminApiKe
   return { keys: r.keys, total: r.total };
 }
 
+interface RawLogList {
+  logs: RawRequestLog[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+interface RawRequestLog {
+  request_id: string;
+  user_id?: string;
+  model_name?: string;
+  final_status: string;
+  input_tokens?: number;
+  output_tokens?: number;
+  latency_ms?: number;
+  created_at: string;
+}
+
+function mapRequestLog(r: RawRequestLog): AdminRequestLog {
+  const ok = r.final_status === 'success';
+  return {
+    requestId: r.request_id,
+    userId: r.user_id ?? null,
+    userEmail: null, // email not in logging response
+    model: r.model_name ?? 'unknown',
+    status: ok ? 'success' : 'error',
+    inputTokens: r.input_tokens ?? null,
+    outputTokens: r.output_tokens ?? null,
+    cost: null,
+    durationMs: r.latency_ms ?? null,
+    createdAt: r.created_at,
+  };
+}
+
 async function realListLogs(
   page = 1, pageSize = 20,
 ): Promise<AdminRequestLogListResponse> {
   const qs = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
-  return request<AdminRequestLogListResponse>(`/api/v1/admin/request-logs?${qs}`, { baseUrl: ADMIN_BASE });
+  const r = await request<RawLogList>(`/api/v1/admin/request-logs?${qs}`, { baseUrl: ADMIN_BASE });
+  return {
+    logs: (r.logs ?? []).map(mapRequestLog),
+    total: r.total,
+    page: r.page,
+    pageSize: r.page_size,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -218,7 +262,7 @@ export const adminApi = {
 
   // ---- Request logs (global) ----
   listRequestLogs: async (page = 1, pageSize = 20): Promise<AdminRequestLogListResponse> => {
-    if (useMock) {
+    if (useMock && !useRealAdminLogs) {
       await delay(300);
       const total = allMockLogs.length;
       const start = (page - 1) * pageSize;
@@ -227,7 +271,7 @@ export const adminApi = {
     return realListLogs(page, pageSize);
   },
   getRequestLog: async (id: string): Promise<AdminRequestLog> => {
-    if (useMock) {
+    if (useMock && !useRealAdminLogs) {
       await delay(200);
       return allMockLogs.find((l) => l.requestId === id) ?? allMockLogs[0]!;
     }
@@ -389,8 +433,9 @@ const allModels = ['gpt-4o', 'gpt-4o-mini', 'claude-3-5-sonnet', 'deepseek-chat'
 // Plans
 export const adminPlanApi = {
   list: async (): Promise<AdminPlan[]> => {
-    if (useMock) { await delay(260); return [...mockPlans]; }
-    return request<AdminPlan[]>('/api/v1/admin/plans', { baseUrl: ADMIN_BASE });
+    if (useMock && !useRealAdminBilling) { await delay(260); return [...mockPlans]; }
+    const r = await request<{ plans: RawPlan[] }>(`/api/v1/admin/plans`, { baseUrl: ADMIN_BASE });
+    return (r.plans ?? []).map(mapPlan);
   },
   create: async (input: AdminPlanInput): Promise<AdminPlan> => {
     if (useMock) {
@@ -427,8 +472,9 @@ export const adminPlanApi = {
 // User plans
 export const adminUserPlanApi = {
   list: async (): Promise<AdminUserPlan[]> => {
-    if (useMock) { await delay(260); return [...mockUserPlans]; }
-    return request<AdminUserPlan[]>('/api/v1/admin/user-plans', { baseUrl: ADMIN_BASE });
+    if (useMock && !useRealAdminBilling) { await delay(260); return [...mockUserPlans]; }
+    const r = await request<{ plans: RawUserPlanWrap[] }>(`/api/v1/admin/user-plans`, { baseUrl: ADMIN_BASE });
+    return (r.plans ?? []).map(mapUserPlan);
   },
   assign: async (input: AdminUserPlanInput): Promise<AdminUserPlan> => {
     if (useMock) {
@@ -497,3 +543,64 @@ export const adminConfigApi = {
     return request<AdminRouteConfig[]>('/api/v1/admin/routes-config', { baseUrl: ADMIN_BASE });
   },
 };
+
+// ---------------------------------------------------------------------------
+// Raw wire types (snake_case from downstream services) + mappers to camelCase
+// admin types. Used by real (non-mock) branches.
+// ---------------------------------------------------------------------------
+
+interface RawPlan {
+  id: number;
+  name: string;
+  plan_type: string;
+  price: number;
+  category: string;
+  monthly_limit: number | null;
+  token_limit: number | null;
+  allowed_models: string[] | string;
+  status: string;
+}
+
+interface RawUserPlan {
+  id: number;
+  user_id: string;
+  plan_id: number;
+  plan_type: string;
+  status: string;
+  activated_at: string;
+  expires_at: string | null;
+}
+
+type RawUserPlanWrap = RawUserPlan;
+
+function mapPlan(r: RawPlan): AdminPlan {
+  const allowed = Array.isArray(r.allowed_models) ? r.allowed_models : [];
+  return {
+    id: String(r.id),
+    name: r.name,
+    planType: r.plan_type as AdminPlan['planType'],
+    price: r.price,
+    category: r.category as AdminPlan['category'],
+    monthlyLimit: r.monthly_limit ?? null,
+    tokenLimit: r.token_limit ?? null,
+    allowedModels: allowed,
+    status: r.status as AdminPlan['status'],
+    createdAt: '',
+    updatedAt: '',
+  };
+}
+
+function mapUserPlan(r: RawUserPlan): AdminUserPlan {
+  return {
+    id: String(r.id),
+    userId: r.user_id,
+    userEmail: r.user_id, // email not in billing response; show id until auth join
+    planId: String(r.plan_id),
+    planName: '', // not in billing response
+    planType: r.plan_type as AdminUserPlan['planType'],
+    status: r.status as AdminUserPlan['status'],
+    activatedAt: r.activated_at,
+    expiresAt: r.expires_at,
+    remainingQuota: '0',
+  };
+}
