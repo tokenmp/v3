@@ -135,6 +135,42 @@ func (r *UserRepository) FindByID(ctx context.Context, id string) (*models.User,
 	return &u, nil
 }
 
+// ListAll returns a paginated list of users optionally filtered by an email
+// substring. The search is applied as a case-insensitive ILIKE on email.
+// Results are ordered by created_at descending. total is the count before
+// pagination.
+func (r *UserRepository) ListAll(ctx context.Context, search string, limit, offset int) ([]models.User, int, error) {
+	tx := withTx(ctx, r.db).Model(&models.User{})
+	if search != "" {
+		tx = tx.Where("email ILIKE ?", "%"+search+"%")
+	}
+	var total int64
+	if err := tx.Count(&total).Error; err != nil {
+		return nil, 0, classify(err)
+	}
+	var users []models.User
+	if err := tx.Order("created_at DESC").Limit(limit).Offset(offset).Find(&users).Error; err != nil {
+		return nil, 0, classify(err)
+	}
+	return users, int(total), nil
+}
+
+// UpdateFields modifies role and/or status for the given user id. Only the
+// provided keys are applied. Returns ErrNotFound if no row matches.
+func (r *UserRepository) UpdateFields(ctx context.Context, userID string, fields map[string]any) error {
+	if len(fields) == 0 {
+		return nil
+	}
+	res := withTx(ctx, r.db).Model(&models.User{}).Where("id = ?", userID).Updates(fields)
+	if res.Error != nil {
+		return classify(res.Error)
+	}
+	if res.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // UpdatePasswordHash sets password_hash for the given user id. The caller is
 // responsible for hashing with Argon2id.
 func (r *UserRepository) UpdatePasswordHash(ctx context.Context, userID, hash string) error {
@@ -324,6 +360,21 @@ func (r *APIKeyRepository) ListByUser(ctx context.Context, userID string) ([]mod
 		return nil, classify(err)
 	}
 	return keys, nil
+}
+
+// ListAll returns all non-revoked keys across all users (admin view),
+// newest first, with pagination.
+func (r *APIKeyRepository) ListAll(ctx context.Context, limit, offset int) ([]models.APIKey, int, error) {
+	tx := withTx(ctx, r.db).Model(&models.APIKey{}).Where("status <> ?", "revoked")
+	var total int64
+	if err := tx.Count(&total).Error; err != nil {
+		return nil, 0, classify(err)
+	}
+	var keys []models.APIKey
+	if err := tx.Order("created_at DESC").Limit(limit).Offset(offset).Find(&keys).Error; err != nil {
+		return nil, 0, classify(err)
+	}
+	return keys, int(total), nil
 }
 
 // Revoke marks a key as revoked. The user constraint prevents cross-user

@@ -14,6 +14,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/tokenmp/v3/services/api/internal/admin"
 	"github.com/tokenmp/v3/services/api/internal/app"
 	"github.com/tokenmp/v3/services/api/internal/billing"
 	"github.com/tokenmp/v3/services/api/internal/config"
@@ -61,6 +62,7 @@ func run() error {
 		Quota:       quota.NewManager(cfg.BillingURL),
 		Logging:     logging.NewClient(cfg.LoggingURL),
 		Billing:     billing.NewClient(cfg.BillingURL),
+		AdminAuth:   admin.NewAuthClient(cfg.AuthURL),
 		Settings:    settings.NewStore(),
 		KeysHandler: keysHandler,
 		Logger:      logger,

@@ -1,0 +1,475 @@
+openapi: 3.0.3
+info:
+  title: TokenMP v3 Notice API
+  version: 0.1.0
+  description: |
+    TokenMP v3 Notice API contract — the single source of truth for consumers
+    of the Notice Service HTTP interface. The Notice Service provides
+    project-scoped announcements, per-user notifications (with a generic,
+    data-driven action affordance), and product changelogs.
+
+    This service is scoped to the TokenMP user panel only. It is NOT a
+    generic cross-application notification platform.
+
+    Authentication uses Ed25519 (EdDSA) JWT access tokens issued by the Auth
+    Service. The Notice Service verifies tokens with the Auth public key; it
+    does not issue tokens. Announcement and changelog endpoints are readable
+    by any authenticated user. Notification endpoints are scoped to the
+    authenticated subject (the `sub` claim).
+
+    **Rate limiting is NOT implemented.** Consumers and operators must not
+    assume the service is rate-limited.
+servers:
+  - url: http://127.0.0.1:8081
+    description: Local development
+paths:
+  /healthz:
+    get:
+      summary: Liveness probe
+      description: Reports whether the process and HTTP server are alive. Does not depend on external resources.
+      operationId: getNoticeHealthz
+      responses:
+        '200':
+          description: Service is alive.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+    head:
+      summary: Liveness probe (HEAD)
+      operationId: headNoticeHealthz
+      responses:
+        '200':
+          description: Service is alive. No body for HEAD.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+  /readyz:
+    get:
+      summary: Readiness probe
+      description: |
+        Reports whether the service is ready to serve traffic, including a
+        connectivity check to its backing store. A failure returns 503 and
+        never leaks the underlying error.
+      operationId: getNoticeReadyz
+      responses:
+        '200':
+          description: Service is ready.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+        '503':
+          description: Service is not ready. Body omits the underlying cause.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnreadyResponse'
+  /api/v1/announcements:
+    get:
+      summary: List announcements
+      description: Returns published announcements, newest first.
+      operationId: listAnnouncements
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/OffsetParam'
+      responses:
+        '200':
+          description: A page of announcements.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnnouncementPage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/v1/announcements/{id}:
+    get:
+      summary: Get an announcement
+      operationId: getAnnouncement
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200':
+          description: The announcement.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Announcement'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/changelogs:
+    get:
+      summary: List changelogs
+      description: Returns published product changelogs, newest first.
+      operationId: listChangelogs
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/OffsetParam'
+      responses:
+        '200':
+          description: A page of changelogs.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChangelogPage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/v1/changelogs/{id}:
+    get:
+      summary: Get a changelog
+      operationId: getChangelog
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200':
+          description: The changelog.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Changelog'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/notifications:
+    get:
+      summary: List notifications for the current user
+      description: |
+        Returns notifications addressed to the authenticated subject, newest
+        first. Each notification may carry a generic `action` affordance
+        whose rendering is driven entirely by data (type/label/href); the
+        client must not hardcode any specific action target.
+      operationId: listNotifications
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/OffsetParam'
+      responses:
+        '200':
+          description: A page of notifications for the current user.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationPage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/v1/notifications/unread-count:
+    get:
+      summary: Count unread notifications for the current user
+      operationId: getUnreadCount
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: The unread count.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnreadCount'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/v1/notifications/{id}/read:
+    post:
+      summary: Mark a notification as read
+      description: Idempotent — marking an already-read notification succeeds with 204.
+      operationId: markNotificationRead
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '204':
+          description: Notification marked as read (or was already read). No body.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/notifications/read-all:
+    post:
+      summary: Mark all notifications as read for the current user
+      description: Idempotent — succeeds with 204 even when there is nothing to mark.
+      operationId: markAllNotificationsRead
+      security:
+        - BearerAuth: []
+      responses:
+        '204':
+          description: All notifications marked as read. No body.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Ed25519 (EdDSA) JWT access token issued by the Auth Service.
+  headers:
+    CacheControlNoStore:
+      description: Responses are never cached.
+      schema:
+        type: string
+        const: no-store
+        example: no-store
+  parameters:
+    LimitParam:
+      name: limit
+      in: query
+      description: Maximum number of items to return (1–100).
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+    OffsetParam:
+      name: offset
+      in: query
+      description: Number of items to skip.
+      required: false
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+    IdPath:
+      name: id
+      in: path
+      description: Resource identifier.
+      required: true
+      schema:
+        type: string
+  responses:
+    Unauthorized:
+      description: Missing or invalid bearer token.
+      headers:
+        Cache-Control:
+          $ref: '#/components/headers/CacheControlNoStore'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorBody'
+    NotFound:
+      description: Resource does not exist or is not visible to the caller.
+      headers:
+        Cache-Control:
+          $ref: '#/components/headers/CacheControlNoStore'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorBody'
+  schemas:
+    HealthResponse:
+      type: object
+      required: [status, service, timestamp]
+      properties:
+        status:
+          type: string
+          enum: [ok]
+        service:
+          type: string
+          enum: [notice]
+        timestamp:
+          type: string
+          format: date-time
+    UnreadyResponse:
+      type: object
+      required: [status, service]
+      properties:
+        status:
+          type: string
+          enum: [unready]
+        service:
+          type: string
+          enum: [notice]
+    ErrorBody:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              example: unauthorized
+            message:
+              type: string
+              example: Authentication required.
+    Announcement:
+      type: object
+      required: [id, title, summary, body, severity, published_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+          maxLength: 200
+        summary:
+          type: string
+          maxLength: 500
+        body:
+          type: string
+          description: Markdown content.
+        severity:
+          type: string
+          enum: [info, warning, maintenance]
+        published_at:
+          type: string
+          format: date-time
+    AnnouncementPage:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Announcement'
+        total:
+          type: integer
+          minimum: 0
+    Changelog:
+      type: object
+      required: [id, version, title, body, published_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        version:
+          type: string
+          description: Semantic version label, e.g. "v3.2.0".
+          maxLength: 32
+        title:
+          type: string
+          maxLength: 200
+        body:
+          type: string
+          description: Markdown content describing changes per section.
+        published_at:
+          type: string
+          format: date-time
+    ChangelogPage:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Changelog'
+        total:
+          type: integer
+          minimum: 0
+    NotificationAction:
+      type: object
+      description: |
+        A generic, data-driven action affordance for a notification. The
+        client renders it from its fields; it must not hardcode any specific
+        target. A null action means the notification is purely informational.
+      nullable: true
+      required: [type, label]
+      properties:
+        type:
+          type: string
+          enum: [link]
+          description: |
+            `link` — render a button/link that navigates to `href`. Future
+            action types may be added; unknown types should be ignored
+            gracefully by the client.
+        label:
+          type: string
+          maxLength: 64
+          description: Human-readable action label, e.g. "查看套餐详情".
+        href:
+          type: string
+          description: |
+            Client-side route to navigate to, e.g.
+            "/panel/billing/plans/plan_basic". Only present for `link`.
+    Notification:
+      type: object
+      required: [id, type, title, body, action, read_at, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          description: |
+            Notification category, e.g. "plan_activated", "plan_disabled",
+            "system". The client may use this for icon/color hints but must
+            not assume a closed set.
+        title:
+          type: string
+          maxLength: 200
+        body:
+          type: string
+        action:
+          $ref: '#/components/schemas/NotificationAction'
+        read_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: null means unread.
+        created_at:
+          type: string
+          format: date-time
+    NotificationPage:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Notification'
+        total:
+          type: integer
+          minimum: 0
+    UnreadCount:
+      type: object
+      required: [count]
+      properties:
+        count:
+          type: integer
+          minimum: 0

@@ -1,0 +1,166 @@
+package repository
+
+import (
+	"context"
+	"time"
+)
+
+// AdminStore extends GormRepository with admin write/query methods.
+// These methods are used by the billing service admin endpoints.
+
+// CreatePlan inserts a new plan row. Status defaults to "active" if empty.
+func (r *GormRepository) CreatePlan(ctx context.Context, p *Plan) error {
+	if p.Status == "" {
+		p.Status = "active"
+	}
+	if err := r.db.WithContext(ctx).Create(p).Error; err != nil {
+		return ErrInsertFailed
+	}
+	return nil
+}
+
+// UpdatePlan modifies the mutable columns of a plan identified by id.
+// Only non-nil fields in the fields map are applied.
+func (r *GormRepository) UpdatePlan(ctx context.Context, id int64, fields map[string]any) error {
+	if len(fields) == 0 {
+		return nil
+	}
+	res := r.db.WithContext(ctx).Model(&Plan{}).Where("id = ?", id).Updates(fields)
+	if res.Error != nil {
+		return ErrQueryFailed
+	}
+	if res.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// DeletePlan soft-deletes a plan by setting status="deleted".
+func (r *GormRepository) DeletePlan(ctx context.Context, id int64) error {
+	res := r.db.WithContext(ctx).Model(&Plan{}).Where("id = ? AND status <> ?", id, "deleted").Update("status", "deleted")
+	if res.Error != nil {
+		return ErrQueryFailed
+	}
+	if res.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// ListAllUserPlans returns all user_plans across all users, paginated,
+// ordered by activated_at descending.
+func (r *GormRepository) ListAllUserPlans(ctx context.Context, limit, offset int) ([]UserPlan, int, error) {
+	tx := r.db.WithContext(ctx).Model(&UserPlan{})
+	var total int64
+	if err := tx.Count(&total).Error; err != nil {
+		return nil, 0, ErrQueryFailed
+	}
+	var ups []UserPlan
+	if err := tx.Order("activated_at DESC").Limit(limit).Offset(offset).Find(&ups).Error; err != nil {
+		return nil, 0, ErrQueryFailed
+	}
+	return ups, int(total), nil
+}
+
+// AssignUserPlan creates a new active user_plan binding.
+func (r *GormRepository) AssignUserPlan(ctx context.Context, up *UserPlan) error {
+	if up.Status == "" {
+		up.Status = "active"
+	}
+	if up.PlanType == "" {
+		// Look up the plan type from the plans table.
+		var p Plan
+		if err := r.db.WithContext(ctx).Where("id = ?", up.PlanID).First(&p).Error; err != nil {
+			return ErrNotFound
+		}
+		up.PlanType = p.PlanType
+	}
+	if err := r.db.WithContext(ctx).Create(up).Error; err != nil {
+		return ErrInsertFailed
+	}
+	return nil
+}
+
+// CancelUserPlan marks a user_plan as cancelled. Idempotent: cancelling an
+// already-cancelled plan is a no-op.
+func (r *GormRepository) CancelUserPlan(ctx context.Context, id int64) error {
+	res := r.db.WithContext(ctx).Model(&UserPlan{}).Where("id = ? AND status = ?", id, "active").Update("status", "cancelled")
+	if res.Error != nil {
+		return ErrQueryFailed
+	}
+	if res.RowsAffected == 0 {
+		// Check if it exists at all
+		var count int64
+		r.db.WithContext(ctx).Model(&UserPlan{}).Where("id = ?", id).Count(&count)
+		if count == 0 {
+			return ErrNotFound
+		}
+	}
+	return nil
+}
+
+// UsageStatRow is one row of aggregated usage.
+type UsageStatRow struct {
+	Period       string `json:"period"`
+	UserID       string `json:"user_id,omitempty"`
+	BillingPlan  string `json:"billing_plan,omitempty"`
+	Requests     int64  `json:"requests"`
+	InputTokens  int64  `json:"input_tokens"`
+	OutputTokens int64  `json:"output_tokens"`
+	TotalTokens  int64  `json:"total_tokens"`
+	ChargeCount  int64  `json:"charge_count"`
+}
+
+// GetUsageStats aggregates the usage_ledger over the last N days, grouped
+// by day. When groupBy="user", results are grouped by user_id instead of day.
+func (r *GormRepository) GetUsageStats(ctx context.Context, days int, groupBy string) ([]UsageStatRow, error) {
+	if days <= 0 {
+		days = 7
+	}
+	if days > 365 {
+		days = 365
+	}
+	since := time.Now().AddDate(0, 0, -days)
+
+	switch groupBy {
+	case "user":
+		const q = `SELECT
+			'' AS period,
+			user_id,
+			'' AS billing_plan,
+			COALESCE(SUM(CASE WHEN ledger_type='charge' THEN -request_delta ELSE 0 END), 0) AS requests,
+			0 AS input_tokens,
+			0 AS output_tokens,
+			COALESCE(SUM(CASE WHEN ledger_type='charge' THEN -token_delta ELSE 0 END), 0) AS total_tokens,
+			COUNT(CASE WHEN ledger_type='charge' THEN 1 END) AS charge_count
+			FROM usage_ledger
+			WHERE created_at >= ?
+			GROUP BY user_id
+			ORDER BY total_tokens DESC`
+		var rows []UsageStatRow
+		if err := r.db.WithContext(ctx).Raw(q, since).Scan(&rows).Error; err != nil {
+			return nil, ErrQueryFailed
+		}
+		return rows, nil
+
+	default: // "day" or empty
+		const q = `SELECT
+			TO_CHAR(DATE(created_at), 'YYYY-MM-DD') AS period,
+			'' AS user_id,
+			'' AS billing_plan,
+			COALESCE(SUM(CASE WHEN ledger_type='charge' THEN -request_delta ELSE 0 END), 0) AS requests,
+			0 AS input_tokens,
+			0 AS output_tokens,
+			COALESCE(SUM(CASE WHEN ledger_type='charge' THEN -token_delta ELSE 0 END), 0) AS total_tokens,
+			COUNT(CASE WHEN ledger_type='charge' THEN 1 END) AS charge_count
+			FROM usage_ledger
+			WHERE created_at >= ?
+			GROUP BY DATE(created_at)
+			ORDER BY period DESC`
+		var rows []UsageStatRow
+		if err := r.db.WithContext(ctx).Raw(q, since).Scan(&rows).Error; err != nil {
+			return nil, ErrQueryFailed
+		}
+		return rows, nil
+	}
+}

@@ -55,7 +55,8 @@ func run() error {
 	}
 	defer func() { _ = database.Close(db) }()
 
-	srv := server.New(repository.New(db), database.PingerFromDB(db), logger)
+	repo := repository.New(db)
+	srv := server.New(repo, repo, database.PingerFromDB(db), logger)
 	httpSrv := &http.Server{
 		Addr:              cfg.HTTPAddr,
 		Handler:           srv.Router(),

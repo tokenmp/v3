@@ -1,0 +1,642 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>TokenMP Panel — 原型</title>
+<style>
+/* Design Tokens（内联自 @tokenmp/ui-tokens），后续接入 apps/web 改为 @import */
+:root {
+  --tmp-ref-color-neutral-0: oklch(1 0 0); --tmp-ref-color-neutral-50: oklch(0.985 0 0);
+  --tmp-ref-color-neutral-100: oklch(0.97 0 0); --tmp-ref-color-neutral-200: oklch(0.922 0 0);
+  --tmp-ref-color-neutral-300: oklch(0.87 0 0); --tmp-ref-color-neutral-400: oklch(0.708 0 0);
+  --tmp-ref-color-neutral-500: oklch(0.556 0 0); --tmp-ref-color-neutral-600: oklch(0.439 0 0);
+  --tmp-ref-color-neutral-700: oklch(0.371 0 0); --tmp-ref-color-neutral-800: oklch(0.269 0 0);
+  --tmp-ref-color-neutral-900: oklch(0.205 0 0); --tmp-ref-color-neutral-950: oklch(0.145 0 0);
+  --tmp-ref-color-blue-100: oklch(0.97 0.014 250); --tmp-ref-color-blue-400: oklch(0.82 0.1 250);
+  --tmp-ref-color-blue-500: oklch(0.73 0.158 248); --tmp-ref-color-blue-700: oklch(0.515 0.24 258);
+  --tmp-ref-color-green-100: oklch(0.976 0.029 145); --tmp-ref-color-green-400: oklch(0.85 0.16 145);
+  --tmp-ref-color-green-700: oklch(0.646 0.175 147); --tmp-ref-color-red-100: oklch(0.965 0.022 13);
+  --tmp-ref-color-red-400: oklch(0.8 0.12 14); --tmp-ref-color-red-500: oklch(0.7 0.18 14);
+  --tmp-ref-color-red-700: oklch(0.626 0.252 23); --tmp-ref-color-amber-100: oklch(0.975 0.033 86);
+  --tmp-ref-color-amber-400: oklch(0.9 0.12 86); --tmp-ref-color-amber-500: oklch(0.85 0.15 86);
+  --tmp-ref-color-amber-700: oklch(0.819 0.197 76); --tmp-ref-color-cyan-500: oklch(0.69 0.13 210);
+  --tmp-ref-color-teal-600: oklch(0.56 0.11 185); --tmp-ref-color-orange-500: oklch(0.7 0.17 50);
+  --tmp-ref-color-rose-500: oklch(0.62 0.19 15);
+  --tmp-ref-font-family-sans: "PingFang SC", -apple-system, "Segoe UI", Roboto, sans-serif;
+  --tmp-ref-font-family-mono: ui-monospace, SFMono-Regular, monospace;
+  --tmp-ref-font-size-xs: 0.75rem; --tmp-ref-font-size-sm: 0.875rem; --tmp-ref-font-size-md: 1rem;
+  --tmp-ref-font-size-lg: 1.125rem; --tmp-ref-font-size-xl: 1.25rem; --tmp-ref-font-size-2xl: 1.5rem;
+  --tmp-ref-line-height-tight: 1.2; --tmp-ref-line-height-snug: 1.35; --tmp-ref-line-height-normal: 1.5;
+  --tmp-ref-font-weight-regular: 400; --tmp-ref-font-weight-medium: 500; --tmp-ref-font-weight-semibold: 600; --tmp-ref-font-weight-bold: 700;
+  --tmp-ref-space-0: 0; --tmp-ref-space-1: 0.25rem; --tmp-ref-space-2: 0.5rem; --tmp-ref-space-3: 0.75rem;
+  --tmp-ref-space-4: 1rem; --tmp-ref-space-5: 1.25rem; --tmp-ref-space-6: 1.5rem; --tmp-ref-space-8: 2rem;
+  --tmp-ref-space-12: 3rem; --tmp-ref-space-16: 4rem;
+  --tmp-ref-radius-sm: 0.375rem; --tmp-ref-radius-md: 0.5rem; --tmp-ref-radius-lg: 0.625rem; --tmp-ref-radius-xl: 0.875rem; --tmp-ref-radius-full: 9999px;
+  --tmp-ref-shadow-sm: 0 1px 2px 0 oklch(0 0 0 / 0.05); --tmp-ref-shadow-md: 0 2px 4px 0 oklch(0 0 0 / 0.06); --tmp-ref-shadow-lg: 0 4px 8px 0 oklch(0 0 0 / 0.08);
+  --tmp-ref-duration-fast: 150ms; --tmp-ref-duration-normal: 200ms;
+  --tmp-ref-easing-standard: cubic-bezier(0.33, 1, 0.68, 1);
+  --tmp-ref-layer-sticky: 20; --tmp-ref-layer-modal: 50; --tmp-ref-layer-toast: 9999;
+  --tmp-font-sans: var(--tmp-ref-font-family-sans); --tmp-font-mono: var(--tmp-ref-font-family-mono);
+  --tmp-radius-sm: var(--tmp-ref-radius-sm); --tmp-radius-md: var(--tmp-ref-radius-md); --tmp-radius-lg: var(--tmp-ref-radius-lg); --tmp-radius-xl: var(--tmp-ref-radius-xl);
+  --tmp-shadow-sm: var(--tmp-ref-shadow-sm); --tmp-shadow-md: var(--tmp-ref-shadow-md); --tmp-shadow-lg: var(--tmp-ref-shadow-lg);
+  --tmp-control-height-sm: 2rem; --tmp-control-height-md: 2.5rem; --tmp-control-height-lg: 3rem;
+  --tmp-page-gutter: var(--tmp-ref-space-4); --tmp-sidebar-width: 16rem; --brand-solid: #111827;
+  --tmp-duration-fast: var(--tmp-ref-duration-fast); --tmp-easing-standard: var(--tmp-ref-easing-standard);
+  --tmp-layer-sticky: var(--tmp-ref-layer-sticky); --tmp-layer-toast: var(--tmp-ref-layer-toast);
+}
+@media (min-width: 48rem) { :root { --tmp-page-gutter: var(--tmp-ref-space-6); } }
+@media (min-width: 80rem) { :root { --tmp-page-gutter: var(--tmp-ref-space-8); } }
+:root, [data-theme="light"] {
+  --tmp-color-bg-canvas: var(--tmp-ref-color-neutral-0); --tmp-color-bg-surface: var(--tmp-ref-color-neutral-50);
+  --tmp-color-bg-elevated: var(--tmp-ref-color-neutral-0); --tmp-color-bg-muted: var(--tmp-ref-color-neutral-100);
+  --tmp-color-text-primary: var(--tmp-ref-color-neutral-950); --tmp-color-text-secondary: var(--tmp-ref-color-neutral-600);
+  --tmp-color-text-muted: var(--tmp-ref-color-neutral-500); --tmp-color-text-disabled: var(--tmp-ref-color-neutral-400);
+  --tmp-color-border-subtle: var(--tmp-ref-color-neutral-100); --tmp-color-border-default: var(--tmp-ref-color-neutral-200);
+  --tmp-color-border-strong: var(--tmp-ref-color-neutral-400); --tmp-color-focus-ring: var(--tmp-ref-color-neutral-500);
+  --tmp-color-action-primary: var(--tmp-ref-color-neutral-950); --tmp-color-action-primary-hover: var(--tmp-ref-color-neutral-800);
+  --tmp-color-action-primary-foreground: var(--tmp-ref-color-neutral-0);
+  --tmp-color-action-secondary: var(--tmp-ref-color-neutral-100); --tmp-color-action-secondary-hover: var(--tmp-ref-color-neutral-200);
+  --tmp-color-action-secondary-foreground: var(--tmp-ref-color-neutral-950);
+  --tmp-color-action-destructive: var(--tmp-ref-color-red-700); --tmp-color-action-destructive-hover: var(--tmp-ref-color-red-500);
+  --tmp-color-action-destructive-foreground: var(--tmp-ref-color-neutral-0);
+  --tmp-color-status-success-bg: var(--tmp-ref-color-green-100); --tmp-color-status-success-text: var(--tmp-ref-color-green-700);
+  --tmp-color-status-warning-bg: var(--tmp-ref-color-amber-100); --tmp-color-status-warning-text: var(--tmp-ref-color-amber-700);
+  --tmp-color-status-danger-bg: var(--tmp-ref-color-red-100); --tmp-color-status-danger-text: var(--tmp-ref-color-red-700);
+  --tmp-color-status-info-bg: var(--tmp-ref-color-blue-100); --tmp-color-status-info-text: var(--tmp-ref-color-blue-700);
+}
+[data-theme="dark"] {
+  --tmp-color-bg-canvas: var(--tmp-ref-color-neutral-950); --tmp-color-bg-surface: var(--tmp-ref-color-neutral-900);
+  --tmp-color-bg-elevated: var(--tmp-ref-color-neutral-950); --tmp-color-bg-muted: var(--tmp-ref-color-neutral-800);
+  --tmp-color-text-primary: var(--tmp-ref-color-neutral-50); --tmp-color-text-secondary: var(--tmp-ref-color-neutral-400);
+  --tmp-color-text-muted: var(--tmp-ref-color-neutral-500); --tmp-color-text-disabled: var(--tmp-ref-color-neutral-600);
+  --tmp-color-border-subtle: var(--tmp-ref-color-neutral-900); --tmp-color-border-default: var(--tmp-ref-color-neutral-800);
+  --tmp-color-border-strong: var(--tmp-ref-color-neutral-600); --tmp-color-focus-ring: var(--tmp-ref-color-neutral-500);
+  --tmp-color-action-primary: var(--tmp-ref-color-neutral-50); --tmp-color-action-primary-hover: var(--tmp-ref-color-neutral-200);
+  --tmp-color-action-primary-foreground: var(--tmp-ref-color-neutral-950);
+  --tmp-color-action-secondary: var(--tmp-ref-color-neutral-800); --tmp-color-action-secondary-hover: var(--tmp-ref-color-neutral-700);
+  --tmp-color-action-secondary-foreground: var(--tmp-ref-color-neutral-50);
+  --tmp-color-action-destructive: var(--tmp-ref-color-red-400); --tmp-color-action-destructive-hover: var(--tmp-ref-color-red-200);
+  --tmp-color-action-destructive-foreground: var(--tmp-ref-color-neutral-950);
+  --tmp-color-status-success-bg: color-mix(in oklch, var(--tmp-ref-color-green-400) 15%, transparent); --tmp-color-status-success-text: var(--tmp-ref-color-green-400);
+  --tmp-color-status-warning-bg: color-mix(in oklch, var(--tmp-ref-color-amber-500) 15%, transparent); --tmp-color-status-warning-text: var(--tmp-ref-color-amber-400);
+  --tmp-color-status-danger-bg: color-mix(in oklch, var(--tmp-ref-color-red-500) 15%, transparent); --tmp-color-status-danger-text: var(--tmp-ref-color-red-400);
+  --tmp-color-status-info-bg: color-mix(in oklch, var(--tmp-ref-color-blue-500) 15%, transparent); --tmp-color-status-info-text: var(--tmp-ref-color-blue-400);
+}
+*, *::before, *::after { box-sizing: border-box; }
+body { margin: 0; font-family: var(--tmp-font-sans); font-size: var(--tmp-ref-font-size-md); line-height: var(--tmp-ref-line-height-normal); color: var(--tmp-color-text-primary); background: var(--tmp-color-bg-canvas); -webkit-font-smoothing: antialiased; transition: background var(--tmp-duration-fast) var(--tmp-easing-standard), color var(--tmp-duration-fast) var(--tmp-easing-standard); }
+button { font-family: inherit; cursor: pointer; }
+input { font-family: inherit; }
+a { color: inherit; text-decoration: none; }
+:focus-visible { outline: 2px solid var(--tmp-color-focus-ring); outline-offset: 2px; }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: var(--tmp-ref-space-2); height: var(--tmp-control-height-md); padding: 0 var(--tmp-ref-space-4); border-radius: var(--tmp-radius-md); border: 1px solid transparent; font-size: var(--tmp-ref-font-size-sm); font-weight: var(--tmp-ref-font-weight-medium); line-height: 1; white-space: nowrap; transition: all var(--tmp-duration-fast) var(--tmp-easing-standard); user-select: none; }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-primary { background: var(--tmp-color-action-primary); color: var(--tmp-color-action-primary-foreground); }
+.btn-primary:hover:not(:disabled) { background: var(--tmp-color-action-primary-hover); }
+.btn-secondary { background: var(--tmp-color-action-secondary); color: var(--tmp-color-action-secondary-foreground); border-color: var(--tmp-color-border-default); }
+.btn-secondary:hover:not(:disabled) { background: var(--tmp-color-action-secondary-hover); }
+.btn-destructive { background: var(--tmp-color-action-destructive); color: var(--tmp-color-action-destructive-foreground); }
+.btn-destructive:hover:not(:disabled) { background: var(--tmp-color-action-destructive-hover); }
+.btn-ghost { background: transparent; color: var(--tmp-color-text-secondary); }
+.btn-ghost:hover:not(:disabled) { background: var(--tmp-color-bg-muted); color: var(--tmp-color-text-primary); }
+.btn-sm { height: var(--tmp-control-height-sm); padding: 0 var(--tmp-ref-space-3); font-size: var(--tmp-ref-font-size-xs); }
+.btn-lg { height: var(--tmp-control-height-lg); font-size: var(--tmp-ref-font-size-md); }
+.btn-block { width: 100%; }
+.input { display: flex; align-items: center; gap: var(--tmp-ref-space-2); height: var(--tmp-control-height-md); width: 100%; padding: 0 var(--tmp-ref-space-3); border-radius: var(--tmp-radius-md); border: 1px solid var(--tmp-color-border-default); background: var(--tmp-color-bg-elevated); color: var(--tmp-color-text-primary); font-size: var(--tmp-ref-font-size-sm); transition: border-color var(--tmp-duration-fast) var(--tmp-easing-standard); }
+.input:focus { outline: none; border-color: var(--tmp-color-focus-ring); }
+.input::placeholder { color: var(--tmp-color-text-muted); }
+.label { display: block; font-size: var(--tmp-ref-font-size-sm); font-weight: var(--tmp-ref-font-weight-medium); margin-bottom: var(--tmp-ref-space-2); color: var(--tmp-color-text-primary); }
+.card { background: var(--tmp-color-bg-surface); border: 1px solid var(--tmp-color-border-default); border-radius: var(--tmp-radius-lg); }
+.card-pad { padding: var(--tmp-ref-space-5); }
+.badge { display: inline-flex; align-items: center; gap: var(--tmp-ref-space-1); padding: var(--tmp-ref-space-1) var(--tmp-ref-space-2); border-radius: var(--tmp-ref-radius-full); font-size: var(--tmp-ref-font-size-xs); font-weight: var(--tmp-ref-font-weight-medium); }
+.badge-success { background: var(--tmp-color-status-success-bg); color: var(--tmp-color-status-success-text); }
+.badge-warning { background: var(--tmp-color-status-warning-bg); color: var(--tmp-color-status-warning-text); }
+.badge-danger { background: var(--tmp-color-status-danger-bg); color: var(--tmp-color-status-danger-text); }
+.badge-info { background: var(--tmp-color-status-info-bg); color: var(--tmp-color-status-info-text); }
+.badge-muted { background: var(--tmp-color-bg-muted); color: var(--tmp-color-text-secondary); }
+.checkbox { width: 1rem; height: 1rem; accent-color: var(--tmp-color-action-primary); }
+.auth-page { min-height: 100dvh; display: grid; grid-template-columns: 1fr; }
+@media (min-width: 64rem) { .auth-page { grid-template-columns: 1.1fr 1fr; } }
+.auth-brand { display: none; flex-direction: column; padding: var(--tmp-ref-space-10); background: var(--tmp-color-bg-muted); border-right: 1px solid var(--tmp-color-border-default); }
+@media (min-width: 64rem) { .auth-brand { display: flex; } }
+.auth-brand-logo { display: flex; align-items: center; gap: var(--tmp-ref-space-3); }
+.auth-brand-logo .lk { width: 2.25rem; height: 2.25rem; }
+.auth-brand-title { font-size: 1.875rem; font-weight: var(--tmp-ref-font-weight-bold); line-height: var(--tmp-ref-line-height-tight); margin: auto 0 var(--tmp-ref-space-5); max-width: 28rem; }
+.auth-brand-desc { font-size: var(--tmp-ref-font-size-md); color: var(--tmp-color-text-secondary); line-height: 1.65; max-width: 26rem; margin-bottom: var(--tmp-ref-space-8); }
+.auth-brand-card { border: 1px solid var(--tmp-color-border-default); border-radius: var(--tmp-radius-xl); background: var(--tmp-color-bg-elevated); padding: var(--tmp-ref-space-5); box-shadow: 0 24px 70px rgba(15,23,42,0.08); }
+.auth-form-side { display: flex; flex-direction: column; justify-content: center; padding: var(--tmp-ref-space-6) var(--tmp-page-gutter); }
+@media (min-width: 64rem) { .auth-form-side { padding: var(--tmp-ref-space-10); } }
+.auth-card { width: 100%; max-width: 26rem; margin: 0 auto; }
+.auth-logo { display: flex; align-items: center; gap: var(--tmp-ref-space-3); margin-bottom: var(--tmp-ref-space-8); }
+@media (min-width: 64rem) { .auth-logo { display: none; } }
+.auth-logo .lk { width: 2rem; height: 2rem; }
+.auth-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: var(--tmp-ref-space-1); padding: var(--tmp-ref-space-1); border: 1px solid var(--tmp-color-border-default); border-radius: var(--tmp-radius-md); background: var(--tmp-color-bg-muted); margin-bottom: var(--tmp-ref-space-5); }
+@media (min-width: 64rem) { .auth-tabs { display: none; } }
+.auth-tab { padding: var(--tmp-ref-space-2) var(--tmp-ref-space-3); border-radius: var(--tmp-ref-radius-sm); font-size: var(--tmp-ref-font-size-sm); font-weight: var(--tmp-ref-font-weight-medium); color: var(--tmp-color-text-secondary); background: none; border: none; transition: all var(--tmp-duration-fast); }
+.auth-tab.active { background: var(--tmp-color-action-primary); color: var(--tmp-color-action-primary-foreground); }
+.auth-logo-mark, .panel-logo-mark { display: inline-flex; align-items: center; justify-content: center; } .auth-logo-mark svg, .panel-logo-mark svg { width: 100%; height: 100%; }
+.auth-logo-text { font-size: var(--tmp-ref-font-size-lg); font-weight: var(--tmp-ref-font-weight-bold); }
+.auth-title { font-size: var(--tmp-ref-font-size-xl); font-weight: var(--tmp-ref-font-weight-bold); margin: 0 0 var(--tmp-ref-space-1); }
+.auth-desc { font-size: var(--tmp-ref-font-size-sm); color: var(--tmp-color-text-secondary); margin: 0 0 var(--tmp-ref-space-6); }
+.auth-form { display: flex; flex-direction: column; gap: var(--tmp-ref-space-4); }
+.auth-field { display: flex; flex-direction: column; }
+.auth-row { display: flex; align-items: center; justify-content: space-between; gap: var(--tmp-ref-space-3); }
+.auth-link { font-size: var(--tmp-ref-font-size-sm); font-weight: var(--tmp-ref-font-weight-medium); color: var(--tmp-color-text-primary); }
+.auth-link:hover { color: var(--tmp-color-text-secondary); }
+.auth-footer { text-align: center; margin-top: var(--tmp-ref-space-6); font-size: var(--tmp-ref-font-size-sm); color: var(--tmp-color-text-secondary); }
+.auth-error { border-radius: var(--tmp-radius-md); padding: var(--tmp-ref-space-2) var(--tmp-ref-space-3); font-size: var(--tmp-ref-font-size-sm); background: var(--tmp-color-status-danger-bg); color: var(--tmp-color-status-danger-text); }
+.auth-pw-wrap { position: relative; }
+.auth-pw-toggle { position: absolute; right: var(--tmp-ref-space-1); top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--tmp-color-text-muted); padding: var(--tmp-ref-space-2); display: flex; align-items: center; }
+.auth-pw-toggle svg { width: 1rem; height: 1rem; }
+.auth-strength { display: flex; gap: var(--tmp-ref-space-1); margin-top: var(--tmp-ref-space-2); }
+.auth-strength-bar { height: 3px; flex: 1; border-radius: var(--tmp-ref-radius-full); background: var(--tmp-color-border-default); transition: background var(--tmp-duration-fast); }
+.panel-layout { min-height: 100dvh; display: flex; flex-direction: column; }
+.panel-main { flex: 1; padding: var(--tmp-ref-space-4) var(--tmp-page-gutter) calc(5rem + env(safe-area-inset-bottom)); }
+.sidebar { display: none; }
+.panel-header { position: sticky; top: 0; z-index: var(--tmp-layer-sticky); display: flex; align-items: center; justify-content: space-between; height: 3.5rem; padding: 0 var(--tmp-page-gutter); background: var(--tmp-color-bg-canvas); border-bottom: 1px solid var(--tmp-color-border-default); }
+.panel-header-left { display: flex; align-items: center; gap: var(--tmp-ref-space-3); }
+.panel-logo { display: flex; align-items: center; gap: var(--tmp-ref-space-2); font-weight: var(--tmp-ref-font-weight-semibold); }
+.panel-logo-mark { width: 1.75rem; height: 1.75rem; }
+.panel-header-right { display: flex; align-items: center; gap: var(--tmp-ref-space-2); }
+.icon-btn { display: inline-grid; place-items: center; width: 2.25rem; height: 2.25rem; border-radius: var(--tmp-radius-md); border: 1px solid transparent; background: transparent; color: var(--tmp-color-text-secondary); transition: all var(--tmp-duration-fast); }
+.icon-btn:hover { background: var(--tmp-color-bg-muted); color: var(--tmp-color-text-primary); }
+.icon-btn svg { width: 1.15rem; height: 1.15rem; }
+.user-menu-btn { display: flex; align-items: center; gap: var(--tmp-ref-space-2); padding: var(--tmp-ref-space-1) var(--tmp-ref-space-2) var(--tmp-ref-space-1) var(--tmp-ref-space-1); border-radius: var(--tmp-ref-radius-full); border: 1px solid var(--tmp-color-border-default); background: var(--tmp-color-bg-surface); }
+.header-search { display: inline-flex; align-items: center; gap: var(--tmp-ref-space-1); height: var(--tmp-control-height-md); padding: 0 var(--tmp-ref-space-3); border-radius: var(--tmp-radius-md); border: 1px solid var(--tmp-color-border-default); background: transparent; color: var(--tmp-color-text-secondary); font-size: var(--tmp-ref-font-size-xs); }
+.header-search:hover { background: var(--tmp-color-bg-muted); }
+.header-search svg { width: 0.875rem; height: 0.875rem; }
+.header-search .hs-label { display: none; }
+@media (min-width: 40rem) { .header-search .hs-label { display: inline; } }
+.hs-kbd { display: none; pointer-events: none; padding: 0 var(--tmp-ref-space-1); border: 1px solid var(--tmp-color-border-default); border-radius: var(--tmp-ref-radius-sm); background: var(--tmp-color-bg-muted); font-family: var(--tmp-font-mono); font-size: 0.625rem; }
+@media (min-width: 48rem) { .hs-kbd { display: inline; } }
+.user-menu-wrap { position: relative; }
+.user-chevron { width: 1rem; height: 1rem; color: var(--tmp-color-text-muted); }
+.user-dropdown { position: absolute; top: calc(100% + var(--tmp-ref-space-2)); right: 0; z-index: var(--tmp-ref-layer-dropdown, 50); min-width: 14rem; background: var(--tmp-color-bg-elevated); border: 1px solid var(--tmp-color-border-default); border-radius: var(--tmp-radius-md); box-shadow: var(--tmp-shadow-lg); padding: var(--tmp-ref-space-1); }
+.ud-header { display: flex; align-items: center; gap: var(--tmp-ref-space-2); padding: var(--tmp-ref-space-2) var(--tmp-ref-space-3); border-bottom: 1px solid var(--tmp-color-border-subtle); margin-bottom: var(--tmp-ref-space-1); }
+.ud-email { font-size: var(--tmp-ref-font-size-sm); font-weight: var(--tmp-ref-font-weight-medium); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ud-item { display: flex; align-items: center; gap: var(--tmp-ref-space-2); width: 100%; height: 2.25rem; padding: 0 var(--tmp-ref-space-3); border: none; background: none; border-radius: var(--tmp-ref-radius-sm); font-size: var(--tmp-ref-font-size-sm); color: var(--tmp-color-text-secondary); }
+.ud-item:hover { background: var(--tmp-color-bg-muted); color: var(--tmp-color-text-primary); }
+.ud-item svg { width: 1rem; height: 1rem; }
+.ud-danger { color: var(--tmp-color-status-danger-text); }
+.ud-danger:hover { background: var(--tmp-color-status-danger-bg); color: var(--tmp-color-status-danger-text); }
+.user-avatar { width: 1.75rem; height: 1.75rem; border-radius: var(--tmp-ref-radius-full); background: var(--tmp-color-action-secondary); color: var(--tmp-color-action-secondary-foreground); display: grid; place-items: center; font-size: var(--tmp-ref-font-size-xs); font-weight: var(--tmp-ref-font-weight-semibold); }
+.user-menu-name { font-size: var(--tmp-ref-font-size-sm); font-weight: var(--tmp-ref-font-weight-medium); }
+.bottom-nav { position: fixed; inset-inline: 0; bottom: 0; z-index: var(--tmp-layer-sticky); display: flex; height: calc(4rem + env(safe-area-inset-bottom)); padding-bottom: env(safe-area-inset-bottom); background: var(--tmp-color-bg-elevated); border-top: 1px solid var(--tmp-color-border-default); }
+.bottom-nav-item { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--tmp-ref-space-1); background: none; border: none; color: var(--tmp-color-text-muted); font-size: var(--tmp-ref-font-size-xs); transition: color var(--tmp-duration-fast); }
+.bottom-nav-item.active { color: var(--tmp-color-text-primary); }
+.bottom-nav-item svg { width: 1.25rem; height: 1.25rem; }
+@media (min-width: 48rem) {
+  .panel-layout { flex-direction: row; }
+  .sidebar { display: flex; flex-direction: column; width: var(--tmp-sidebar-width); border-right: 1px solid var(--tmp-color-border-default); background: var(--tmp-color-bg-surface); flex-shrink: 0; }
+  .sidebar-header { display: flex; align-items: center; gap: var(--tmp-ref-space-2); height: 3.5rem; padding: 0 var(--tmp-ref-space-5); border-bottom: 1px solid var(--tmp-color-border-default); font-weight: var(--tmp-ref-font-weight-semibold); }
+  .sidebar-nav { flex: 1; padding: var(--tmp-ref-space-3); overflow-y: auto; display: flex; flex-direction: column; gap: var(--tmp-ref-space-1); }
+/* sidebar 分组 */
+  .sidebar-group { margin-bottom: var(--tmp-ref-space-4); }
+  .sidebar-group-label { padding: 0 var(--tmp-ref-space-3); margin-bottom: var(--tmp-ref-space-1); font-size: var(--tmp-ref-font-size-xs); font-weight: var(--tmp-ref-font-weight-medium); color: var(--tmp-color-text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
+  .sidebar-group-items { display: flex; flex-direction: column; gap: var(--tmp-ref-space-0_5, 0.125rem); }
+  .sidebar-link { display: flex; align-items: center; gap: var(--tmp-ref-space-3); height: 2.25rem; padding: 0 var(--tmp-ref-space-3); border-radius: var(--tmp-radius-md); font-size: var(--tmp-ref-font-size-sm); font-weight: var(--tmp-ref-font-weight-medium); color: var(--tmp-color-text-secondary); transition: all var(--tmp-duration-fast); border-left: 2px solid transparent; }
+  .sidebar-link:hover { background: var(--tmp-color-bg-muted); color: var(--tmp-color-text-primary); }
+  .sidebar-link.active { background: var(--tmp-color-action-secondary); border-left-color: var(--tmp-color-action-primary); color: var(--tmp-color-text-primary); }
+  .sidebar-link svg { width: 1.25rem; height: 1.25rem; flex-shrink: 0; }
+  .sidebar-footer { padding: var(--tmp-ref-space-3); border-top: 1px solid var(--tmp-color-border-default); }
+  .sidebar-logout { width: 100%; justify-content: flex-start; color: var(--tmp-color-status-danger-text); }
+  .sidebar-logout:hover { background: var(--tmp-color-status-danger-bg); }
+  .panel-content { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .panel-main { padding: var(--tmp-ref-space-6) var(--tmp-page-gutter); padding-bottom: var(--tmp-ref-space-6); }
+  .bottom-nav { display: none; }
+}
+.page-header { display: flex; align-items: center; justify-content: space-between; gap: var(--tmp-ref-space-3); margin-bottom: var(--tmp-ref-space-5); flex-wrap: wrap; }
+.page-title { font-size: var(--tmp-ref-font-size-xl); font-weight: var(--tmp-ref-font-weight-bold); margin: 0; }
+.page-desc { font-size: var(--tmp-ref-font-size-sm); color: var(--tmp-color-text-secondary); margin: var(--tmp-ref-space-1) 0 0; }
+.overview-grid { display: grid; gap: var(--tmp-ref-space-4); grid-template-columns: 1fr; }
+@media (min-width: 48rem) { .overview-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (min-width: 64rem) { .overview-grid { grid-template-columns: repeat(3, 1fr); } }
+.stat-card { padding: var(--tmp-ref-space-5); }
+.stat-label { font-size: var(--tmp-ref-font-size-xs); color: var(--tmp-color-text-muted); text-transform: uppercase; letter-spacing: 0.04em; margin: 0 0 var(--tmp-ref-space-2); }
+.stat-value { font-size: var(--tmp-ref-font-size-2xl); font-weight: var(--tmp-ref-font-weight-bold); margin: 0; }
+.stat-sub { font-size: var(--tmp-ref-font-size-sm); color: var(--tmp-color-text-secondary); margin: var(--tmp-ref-space-1) 0 0; }
+.account-info { display: flex; flex-direction: column; gap: var(--tmp-ref-space-3); }
+.account-row { display: flex; justify-content: space-between; gap: var(--tmp-ref-space-3); font-size: var(--tmp-ref-font-size-sm); }
+.account-key { color: var(--tmp-color-text-secondary); }
+.account-val { color: var(--tmp-color-text-primary); font-weight: var(--tmp-ref-font-weight-medium); }
+.progress { height: 0.5rem; border-radius: var(--tmp-ref-radius-full); background: var(--tmp-color-bg-muted); overflow: hidden; }
+.progress-bar { height: 100%; border-radius: var(--tmp-ref-radius-full); background: var(--tmp-color-action-primary); transition: width var(--tmp-ref-duration-normal); }
+.data-list { display: flex; flex-direction: column; gap: var(--tmp-ref-space-2); }
+.data-row { padding: var(--tmp-ref-space-3); border-radius: var(--tmp-radius-md); border: 1px solid var(--tmp-color-border-default); }
+.key-card { padding: var(--tmp-ref-space-4); border-radius: var(--tmp-radius-lg); border: 1px solid var(--tmp-color-border-default); background: var(--tmp-color-bg-surface); }
+.key-card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--tmp-ref-space-2); }
+@media (min-width: 48rem) {
+  .data-list { gap: 0; }
+  .data-row { display: grid; align-items: center; padding: var(--tmp-ref-space-3) var(--tmp-ref-space-4); border: none; border-bottom: 1px solid var(--tmp-color-border-subtle); border-radius: 0; }
+  .data-row:first-child { border-top: 1px solid var(--tmp-color-border-subtle); }
+  .data-row:hover { background: var(--tmp-color-bg-muted); }
+  .table-head { display: grid; padding: var(--tmp-ref-space-2) var(--tmp-ref-space-4); font-size: var(--tmp-ref-font-size-xs); color: var(--tmp-color-text-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+}
+.table-head { display: none; }
+/* 更多菜单 bottom sheet */
+.sheet-overlay { position: fixed; inset: 0; z-index: var(--tmp-ref-layer-modal); background: oklch(0 0 0 / 0.5); display: flex; align-items: flex-end; justify-content: center; opacity: 0; transition: opacity var(--tmp-duration-fast); }
+.sheet-overlay.open { opacity: 1; }
+.sheet-panel { width: 100%; max-width: 32rem; max-height: min(80dvh, 32rem); background: var(--tmp-color-bg-elevated); border-top-left-radius: var(--tmp-radius-xl); border-top-right-radius: var(--tmp-radius-xl); border: 1px solid var(--tmp-color-border-default); border-bottom: none; box-shadow: var(--tmp-shadow-lg); transform: translateY(100%); transition: transform var(--tmp-ref-duration-normal) var(--tmp-easing-standard); overflow-y: auto; padding-bottom: env(safe-area-inset-bottom); }
+.sheet-overlay.open .sheet-panel { transform: translateY(0); }
+.sheet-handle { width: 2rem; height: 0.25rem; background: var(--tmp-color-border-strong); border-radius: var(--tmp-ref-radius-full); margin: var(--tmp-ref-space-3) auto var(--tmp-ref-space-2); }
+.sheet-title { font-size: var(--tmp-ref-font-size-sm); font-weight: var(--tmp-ref-font-weight-semibold); padding: 0 var(--tmp-ref-space-5) var(--tmp-ref-space-3); color: var(--tmp-color-text-secondary); }
+.sheet-item { display: flex; align-items: center; gap: var(--tmp-ref-space-3); min-height: 2.75rem; padding: var(--tmp-ref-space-3) var(--tmp-ref-space-5); font-size: var(--tmp-ref-font-size-sm); font-weight: var(--tmp-ref-font-weight-medium); color: var(--tmp-color-text-secondary); background: none; border: none; width: 100%; text-align: left; transition: all var(--tmp-duration-fast); }
+.sheet-item:hover, .sheet-item.active { background: var(--tmp-color-bg-muted); color: var(--tmp-color-text-primary); }
+.sheet-item.active { color: var(--tmp-color-action-primary); }
+.sheet-item svg { width: 1.25rem; height: 1.25rem; flex-shrink: 0; }
+.bottom-nav-more { background: none; border: none; }
+.pagination { display: flex; align-items: center; justify-content: center; gap: var(--tmp-ref-space-1); margin-top: var(--tmp-ref-space-5); }
+.page-btn { min-width: 2rem; height: 2rem; padding: 0 var(--tmp-ref-space-2); border-radius: var(--tmp-ref-radius-sm); border: 1px solid var(--tmp-color-border-default); background: var(--tmp-color-bg-surface); color: var(--tmp-color-text-secondary); font-size: var(--tmp-ref-font-size-sm); }
+.page-btn.active { background: var(--tmp-color-action-primary); color: var(--tmp-color-action-primary-foreground); border-color: var(--tmp-color-action-primary); }
+.page-btn:disabled { opacity: 0.4; }
+.empty { text-align: center; padding: var(--tmp-ref-space-12) var(--tmp-ref-space-4); color: var(--tmp-color-text-muted); }
+.empty svg { width: 3rem; height: 3rem; margin: 0 auto var(--tmp-ref-space-3); opacity: 0.5; }
+.modal-overlay { position: fixed; inset: 0; z-index: var(--tmp-ref-layer-modal); background: oklch(0 0 0 / 0.5); display: grid; place-items: center; padding: var(--tmp-ref-space-4); }
+.modal { width: 100%; max-width: 28rem; background: var(--tmp-color-bg-elevated); border-radius: var(--tmp-radius-lg); border: 1px solid var(--tmp-color-border-default); box-shadow: var(--tmp-shadow-lg); }
+.modal-head { padding: var(--tmp-ref-space-5) var(--tmp-ref-space-5) var(--tmp-ref-space-3); }
+.modal-title { font-size: var(--tmp-ref-font-size-lg); font-weight: var(--tmp-ref-font-weight-semibold); margin: 0; }
+.modal-body { padding: 0 var(--tmp-ref-space-5) var(--tmp-ref-space-5); }
+.modal-foot { display: flex; justify-content: flex-end; gap: var(--tmp-ref-space-2); padding: var(--tmp-ref-space-4) var(--tmp-ref-space-5); border-top: 1px solid var(--tmp-color-border-default); }
+.toast-container { position: fixed; bottom: calc(5rem + env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); z-index: var(--tmp-layer-toast); display: flex; flex-direction: column; gap: var(--tmp-ref-space-2); width: calc(100% - 2rem); max-width: 24rem; pointer-events: none; }
+@media (min-width: 48rem) { .toast-container { bottom: var(--tmp-ref-space-6); } }
+.toast { display: flex; align-items: center; gap: var(--tmp-ref-space-2); padding: var(--tmp-ref-space-3) var(--tmp-ref-space-4); border-radius: var(--tmp-radius-md); background: var(--tmp-color-bg-elevated); border: 1px solid var(--tmp-color-border-default); box-shadow: var(--tmp-shadow-lg); font-size: var(--tmp-ref-font-size-sm); pointer-events: auto; animation: toast-in var(--tmp-ref-duration-normal) var(--tmp-easing-standard); }
+.toast-success { border-color: var(--tmp-color-status-success-text); }
+.toast-error { border-color: var(--tmp-color-status-danger-text); }
+@keyframes toast-in { from { opacity: 0; transform: translateY(0.5rem); } to { opacity: 1; transform: translateY(0); } }
+.skeleton { background: linear-gradient(90deg, var(--tmp-color-bg-muted) 25%, var(--tmp-color-border-subtle) 50%, var(--tmp-color-bg-muted) 75%); background-size: 200% 100%; animation: shimmer 1.5s infinite; border-radius: var(--tmp-radius-md); }
+@keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+.mono { font-family: var(--tmp-font-mono); }
+.text-muted { color: var(--tmp-color-text-secondary); }
+.text-sm { font-size: var(--tmp-ref-font-size-sm); }
+.text-xs { font-size: var(--tmp-ref-font-size-xs); }
+.flex { display: flex; }
+.items-center { align-items: center; }
+.gap-2 { gap: var(--tmp-ref-space-2); }
+.gap-3 { gap: var(--tmp-ref-space-3); }
+.mt-4 { margin-top: var(--tmp-ref-space-4); }
+.mt-6 { margin-top: var(--tmp-ref-space-6); }
+.hidden { display: none; }
+.section-title { font-size: var(--tmp-ref-font-size-sm); font-weight: var(--tmp-ref-font-weight-semibold); margin: 0 0 var(--tmp-ref-space-3); color: var(--tmp-color-text-primary); }
+.theme-toggle .sun { display: none; }
+[data-theme="dark"] .theme-toggle .sun { display: inline-flex; }
+[data-theme="dark"] .theme-toggle .moon { display: none; }
+.spinner { width: 1rem; height: 1rem; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin 0.6s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+#app { min-height: 100dvh; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="modal-root"></div>
+<div id="toast-root" class="toast-container"></div>
+<script>
+/* ===== Mock API Layer — 后续接入真实后端时替换为 fetch 调用 ===== */
+const mockDelay=(ms=300)=>new Promise(r=>setTimeout(r,ms));
+const mockDb={
+  user:{id:"u1",email:"demo@tokenmp.dev",role:"user",status:"active",created_at:"2026-06-15T08:30:00Z"},
+  keys:[
+    {id:"k1",name:"生产环境",masked:"sk-tmp-prod••••a1b2",created_at:"2026-07-20T10:00:00Z",last_used:"2026-07-24T13:50:00Z",status:"active"},
+    {id:"k2",name:"开发测试",masked:"sk-tmp-dev••••c3d4",created_at:"2026-07-18T14:30:00Z",last_used:"2026-07-23T18:20:00Z",status:"active"},
+    {id:"k3",name:"CI/CD",masked:"sk-tmp-ci••••e5f6",created_at:"2026-07-10T09:15:00Z",last_used:null,status:"revoked"},
+  ],
+  requests:[
+    {id:"r1",time:"2026-07-24T14:00:00Z",model:"claude-sonnet-4",protocol:"Anthropic",status:200,tokens:1520,latency:1240},
+    {id:"r2",time:"2026-07-24T13:55:00Z",model:"gpt-4o",protocol:"OpenAI",status:200,tokens:890,latency:820},
+    {id:"r3",time:"2026-07-24T13:40:00Z",model:"glm-4-plus",protocol:"OpenAI",status:200,tokens:2100,latency:980},
+    {id:"r4",time:"2026-07-24T13:20:00Z",model:"claude-sonnet-4",protocol:"Anthropic",status:429,tokens:0,latency:150},
+    {id:"r5",time:"2026-07-24T12:50:00Z",model:"gpt-4o-mini",protocol:"OpenAI",status:200,tokens:450,latency:560},
+    {id:"r6",time:"2026-07-24T12:30:00Z",model:"deepseek-v3",protocol:"OpenAI",status:500,tokens:0,latency:3200},
+    {id:"r7",time:"2026-07-24T11:45:00Z",model:"claude-haiku",protocol:"Anthropic",status:200,tokens:670,latency:410},
+    {id:"r8",time:"2026-07-24T11:20:00Z",model:"gpt-4o",protocol:"OpenAI",status:200,tokens:1340,latency:1100},
+    {id:"r9",time:"2026-07-24T10:50:00Z",model:"mimo-large",protocol:"OpenAI",status:200,tokens:920,latency:750},
+    {id:"r10",time:"2026-07-24T10:30:00Z",model:"claude-sonnet-4",protocol:"Anthropic",status:200,tokens:1850,latency:1380},
+    {id:"r11",time:"2026-07-23T22:15:00Z",model:"gpt-4o",protocol:"OpenAI",status:200,tokens:720,latency:690},
+    {id:"r12",time:"2026-07-23T21:00:00Z",model:"glm-4-plus",protocol:"OpenAI",status:200,tokens:1560,latency:1020},
+  ],
+  quota:{plan:"Pro 开发者",balance_tokens:856000,total_tokens:1000000,used_today:42300,reserved:1200},
+};
+const api={
+  async login(email,password){await mockDelay(500);if(!email||!password)throw{code:"bad_request",message:"请输入邮箱和密码"};if(password.length<4)throw{code:"invalid_credentials",message:"邮箱或密码错误"};return{access_token:"mock-at-"+Date.now(),refresh_token:"mock-rt-"+Date.now(),token_type:"Bearer",expires_in:900,user:{...mockDb.user,email:email||mockDb.user.email}};},
+  async register(email,password){await mockDelay(500);if(!email||!password)throw{code:"bad_request",message:"请输入邮箱和密码"};if(password.length<12)throw{code:"password_too_weak",message:"密码至少需要 12 个字符"};return{id:"new",email,role:"user",status:"active",created_at:new Date().toISOString()};},
+  async getMe(){await mockDelay(200);return{...mockDb.user};},
+  async getQuota(){await mockDelay(300);return{...mockDb.quota};},
+  async getRecentRequests(limit=5){await mockDelay(300);return mockDb.requests.slice(0,limit).map(r=>({...r}));},
+  async getRequests(page=1,pageSize=10){await mockDelay(300);const s=(page-1)*pageSize;return{items:mockDb.requests.slice(s,s+pageSize).map(r=>({...r})),total:mockDb.requests.length,page,pageSize};},
+  async getKeys(){await mockDelay(300);return mockDb.keys.map(k=>({...k}));},
+  async createKey(name){await mockDelay(400);const id="k"+Date.now();const full="sk-tmp-"+Math.random().toString(36).slice(2,10)+Math.random().toString(36).slice(2,10);const nk={id,name:name||"未命名",masked:"sk-tmp-••••"+full.slice(-4),full_key:full,created_at:new Date().toISOString(),last_used:null,status:"active"};mockDb.keys.unshift(nk);return nk;},
+  async revokeKey(id){await mockDelay(300);const k=mockDb.keys.find(k=>k.id===id);if(k)k.status="revoked";return{ok:true};},
+  async changePassword(cur,next){await mockDelay(500);if(cur!=="demo1234")throw{code:"invalid_credentials",message:"当前密码错误"};if(next.length<12)throw{code:"password_too_weak",message:"新密码至少需要 12 个字符"};return{ok:true};},
+  async logout(){await mockDelay(100);return{ok:true};},
+};
+
+/* ===== Auth Store ===== */
+const auth={state:{token:null,user:null,isAuthenticated:false},listeners:[],subscribe(fn){this.listeners.push(fn);},notify(){this.listeners.forEach(fn=>fn(this.state));},login(t,u){this.state={token:t.access_token,user:u,isAuthenticated:true};this.notify();},logout(){this.state={token:null,user:null,isAuthenticated:false};this.notify();},setUser(u){this.state.user=u;this.notify();}};
+
+/* ===== Utils ===== */
+const $=(s,r=document)=>r.querySelector(s);
+const $$=(s,r=document)=>[...r.querySelectorAll(s)];
+function fmtDate(iso){if(!iso)return"—";const d=new Date(iso);return`${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;}
+function fmtNum(n){return n.toLocaleString("zh-CN");}
+function fmtTokens(n){return n>=1000?(n/1000).toFixed(1)+"K":String(n);}
+function statusBadge(s){const m={200:["success","200"],429:["warning","429"],500:["danger","500"]};const[c,t]=m[s]||["muted",String(s)];return`<span class="badge badge-${c}">${t}</span>`;}
+function protocolBadge(p){return p==="Anthropic"?`<span class="badge badge-info">Anthropic</span>`:`<span class="badge badge-muted">OpenAI</span>`;}
+
+/* Logo mark — 复刻生产 TokenMPLogoMark：圆角方块底 + 两白色块 + 圆 */
+const LOGO='<svg viewBox="0 0 64 64" fill="none" aria-hidden="true"><rect width="64" height="64" rx="16" fill="var(--brand-solid)"/><rect x="11" y="33" width="20" height="20" rx="6" fill="white" opacity="0.96"/><rect x="33" y="11" width="20" height="20" rx="6" fill="white" opacity="0.62"/><circle cx="32" cy="32" r="11" fill="white"/></svg>';
+
+const I={
+dashboard:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>',
+key:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>',
+fileText:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>',
+settings:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
+logout:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>',
+sun:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>',
+moon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>',
+eye:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>',
+eyeOff:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>',
+plus:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>',
+copy:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
+trash:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>',
+refresh:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>',
+inbox:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>',
+more:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>',
+megaphone:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 11 18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/></svg>',
+bell:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>',
+};
+
+function toast(msg,type="info"){const r=$("#toast-root");const e=document.createElement("div");e.className=`toast toast-${type}`;e.textContent=msg;r.appendChild(e);setTimeout(()=>{e.style.opacity="0";e.style.transform="translateY(0.5rem)";setTimeout(()=>e.remove(),200);},3000);}
+function showModal({title,body,footer}){$("#modal-root").innerHTML=`<div class="modal-overlay" id="mo"><div class="modal" role="dialog" aria-modal="true"><div class="modal-head"><h3 class="modal-title">${title}</h3></div><div class="modal-body">${body}</div><div class="modal-foot">${footer||""}</div></div></div>`;$("#mo").addEventListener("click",e=>{if(e.target.id==="mo")closeModal();});}
+function closeModal(){$("#modal-root").innerHTML="";}
+function initTheme(){const s=localStorage.getItem("tokenmp-theme");if(s)document.documentElement.setAttribute("data-theme",s);}
+function toggleTheme(){const c=document.documentElement.getAttribute("data-theme");const n=c==="dark"?"light":"dark";document.documentElement.setAttribute("data-theme",n);localStorage.setItem("tokenmp-theme",n);}
+/* ===== Router ===== */
+function renderPlaceholder(){const p=window.location.hash.slice(1);panelLayout(()=>{$("#panel-main").innerHTML=`<div class="page-header"><div><h1 class="page-title">${({"/panel/announcements":"公告","/panel/notifications":"通知"})[p]||"页面"}</h1><p class="page-desc">此页面在后续迭代中实现</p></div></div><div class="card card-pad"><div class="empty">${I.inbox}<p>暂未实现</p></div></div>`;});}
+const routes={"/login":renderLogin,"/register":renderRegister,"/forgot-password":renderForgot,"/panel":renderPanel,"/panel/keys":renderKeys,"/panel/requests":renderReqs,"/panel/settings":renderSet,"/panel/announcements":renderPlaceholder,"/panel/notifications":renderPlaceholder};
+function navigate(p){window.location.hash=p;}
+window.addEventListener("hashchange",router);
+function router(){const p=window.location.hash.slice(1)||"/login";const a=p.startsWith("/login")||p.startsWith("/register")||p.startsWith("/forgot");if(!auth.state.isAuthenticated&&!a){navigate("/login");return;}if(auth.state.isAuthenticated&&a){navigate("/panel");return;}(routes[p]||renderLogin)();}
+
+/* ===== Auth Shell ===== */
+function authShell({title,desc,children,footer,mode}){const isLogin=mode==="login";return`<main class="auth-page"><section class="auth-brand"><div class="auth-brand-logo"><span class="lk">${LOGO}</span><span class="auth-logo-text">TokenMP</span></div><h2 class="auth-brand-title">统一接入主流 AI 模型的 API 网关</h2><p class="auth-brand-desc">登录后管理 API Key、请求日志与套餐用量。OpenAI / Anthropic 双协议兼容。</p><div class="auth-brand-card"><div class="flex items-center gap-2"><span class="lk" style="width:2.5rem;height:2.5rem">${LOGO}</span><div><div class="text-xs text-muted" style="text-transform:uppercase;letter-spacing:0.05em">TokenMP</div><div class="text-sm" style="font-weight:var(--tmp-ref-font-weight-semibold)">集中管理 Key、路由和账单视图</div></div></div></div></section><section class="auth-form-side"><div class="auth-card"><div class="auth-logo"><span class="lk">${LOGO}</span><span class="auth-logo-text">TokenMP</span></div><div class="auth-tabs"><a href="#/login" class="auth-tab ${isLogin?"active":""}">登录</a><a href="#/register" class="auth-tab ${!isLogin?"active":""}">注册</a></div><h1 class="auth-title">${title}</h1><p class="auth-desc">${desc}</p>${children}<div class="auth-footer">${footer}</div></div></section></main>`;}
+
+function renderLogin(){
+  $("#app").innerHTML=authShell({mode:"login",title:"登录",desc:"输入邮箱和密码继续使用 TokenMP",footer:`还没有账号？<a class="auth-link" href="#/register">立即注册</a>`,children:`
+    <form class="auth-form" id="login-form">
+      <div class="auth-field"><label class="label" for="email">邮箱</label><input class="input" id="email" type="email" placeholder="name@example.com" autocomplete="email" required /></div>
+      <div class="auth-field"><label class="label" for="password">密码</label><div class="auth-pw-wrap"><input class="input" id="password" type="password" placeholder="••••••••" autocomplete="current-password" required style="padding-right:2.5rem" /><button type="button" class="auth-pw-toggle" id="pw-toggle" aria-label="显示密码">${I.eye}</button></div></div>
+      <div class="auth-row"><label class="flex items-center gap-2 text-sm text-muted"><input type="checkbox" class="checkbox" id="remember" /> 记住我</label><a class="auth-link" href="#/forgot-password">忘记密码？</a></div>
+      <div id="login-error"></div>
+      <button type="submit" class="btn btn-primary btn-block btn-lg" id="login-btn">登录 TokenMP</button>
+    </form>`});
+  $("#pw-toggle").onclick=()=>{const i=$("#password");const p=i.type==="password";i.type=p?"text":"password";$("#pw-toggle").innerHTML=p?I.eyeOff:I.eye;};
+  $("#login-form").onsubmit=async(e)=>{e.preventDefault();const b=$("#login-btn");const em=$("#email").value.trim();const pw=$("#password").value;b.disabled=true;b.innerHTML='<span class="spinner"></span> 登录中...';try{const t=await api.login(em,pw);auth.login(t,t.user);toast("登录成功","success");navigate("/panel");}catch(err){$("#login-error").innerHTML=`<div class="auth-error">${err.message||"登录失败"}</div>`;}finally{b.disabled=false;b.textContent="登录 TokenMP";}};
+}
+
+function renderRegister(){
+  $("#app").innerHTML=authShell({mode:"register",title:"注册",desc:"创建你的 TokenMP 账号",footer:`已有账号？<a class="auth-link" href="#/login">立即登录</a>`,children:`
+    <form class="auth-form" id="reg-form">
+      <div class="auth-field"><label class="label" for="email">邮箱</label><input class="input" id="email" type="email" placeholder="name@example.com" autocomplete="email" required /></div>
+      <div class="auth-field"><label class="label" for="password">密码</label><div class="auth-pw-wrap"><input class="input" id="password" type="password" placeholder="至少 12 个字符" autocomplete="new-password" required style="padding-right:2.5rem" /><button type="button" class="auth-pw-toggle" id="pw-toggle">${I.eye}</button></div><div class="auth-strength" id="strength"><div class="auth-strength-bar"></div><div class="auth-strength-bar"></div><div class="auth-strength-bar"></div><div class="auth-strength-bar"></div></div></div>
+      <div class="auth-field"><label class="label" for="confirm">确认密码</label><input class="input" id="confirm" type="password" placeholder="再次输入密码" autocomplete="new-password" required /></div>
+      <div id="reg-error"></div>
+      <button type="submit" class="btn btn-primary btn-block btn-lg" id="reg-btn">创建账号</button>
+    </form>`});
+  $("#pw-toggle").onclick=()=>{const i=$("#password");const p=i.type==="password";i.type=p?"text":"password";$("#pw-toggle").innerHTML=p?I.eyeOff:I.eye;};
+  $("#password").oninput=()=>{const v=$("#password").value;let s=0;if(v.length>=12)s++;if(/[A-Z]/.test(v)&&/[a-z]/.test(v))s++;if(/\d/.test(v))s++;if(/[^A-Za-z0-9]/.test(v))s++;const cols=["var(--tmp-color-action-destructive)","var(--tmp-color-status-warning-text)","var(--tmp-color-status-info-text)","var(--tmp-color-status-success-text)"];$$(".auth-strength-bar").forEach((b,i)=>{b.style.background=i<s?cols[s-1]:"var(--tmp-color-border-default)";});};
+  $("#reg-form").onsubmit=async(e)=>{e.preventDefault();const em=$("#email").value.trim();const pw=$("#password").value;const cf=$("#confirm").value;if(pw!==cf){$("#reg-error").innerHTML=`<div class="auth-error">两次输入的密码不一致</div>`;return;}const b=$("#reg-btn");b.disabled=true;b.innerHTML='<span class="spinner"></span> 创建中...';try{await api.register(em,pw);toast("注册成功，请登录","success");navigate("/login");}catch(err){$("#reg-error").innerHTML=`<div class="auth-error">${err.message||"注册失败"}</div>`;}finally{b.disabled=false;b.textContent="创建账号";}};
+}
+
+function renderForgot(){
+  $("#app").innerHTML=authShell({mode:"login",title:"忘记密码",desc:"通过邮箱验证码重置密码",footer:`<a class="auth-link" href="#/login">返回登录</a>`,children:`
+    <div class="auth-form">
+      <div class="badge badge-warning" style="align-self:flex-start;margin-bottom:var(--tmp-ref-space-2)">功能开发中</div>
+      <p class="text-sm text-muted">密码重置功能正在开发中。如需重置密码，请联系管理员：</p>
+      <div class="card card-pad" style="margin-top:var(--tmp-ref-space-2)"><div class="account-row"><span class="account-key">邮箱</span><span class="account-val mono">admin@tokenmp.dev</span></div></div>
+      <button class="btn btn-secondary btn-block btn-lg" id="back-login">返回登录</button>
+    </div>`});
+  $("#back-login").onclick=()=>navigate("/login");
+}
+/* ===== Panel Layout =====
+   nav 结构：分组数组 {label?, items[]}，参考 july PANEL_NAV。
+   主导航（业务）+ 横切组（用 label 分隔）。
+   移动端底部导航：前 3 个常用 tab 直接显示 + “更多”按钮弹 bottom sheet。 */
+const navGroups=[
+  {items:[
+    {label:"概览",path:"/panel",icon:"dashboard"},
+    {label:"API 密钥",path:"/panel/keys",icon:"key"},
+    {label:"请求",path:"/panel/requests",icon:"fileText"},
+    {label:"设置",path:"/panel/settings",icon:"settings"},
+  ]},
+  {label:"横切",items:[
+    {label:"公告",path:"/panel/announcements",icon:"megaphone"},
+    {label:"通知",path:"/panel/notifications",icon:"bell"},
+  ]},
+];
+// 扁平化供查找
+const allNav=navGroups.flatMap(g=>g.items);
+// 移动端底部直接显示的 tab（前 3 个）
+const mobileTabs=allNav.slice(0,3);
+// 其余进入“更多”
+const mobileMore=allNav.slice(3);
+function isActive(p,h){return h==="/panel"?p==="/panel":p===h||p.startsWith(h+"/");}
+function renderPanel(){panelLayout(renderOverview);}
+function renderKeys(){panelLayout(renderKeysPage);}
+function renderReqs(){panelLayout(renderReqsPage);}
+function renderSet(){panelLayout(renderSetPage);}
+
+function panelLayout(contentFn){
+  const p=window.location.hash.slice(1)||"/panel";
+  const u=auth.state.user||{};
+  const ini=(u.email||"U").charAt(0).toUpperCase();
+  const sidebarGroupsHtml=navGroups.map(g=>`<div class="sidebar-group">${g.label?`<p class="sidebar-group-label">${g.label}</p>`:""}<div class="sidebar-group-items">${g.items.map(i=>`<a href="#${i.path}" class="sidebar-link ${isActive(p,i.path)?"active":""}">${I[i.icon]} ${i.label}</a>`).join("")}</div></div>`).join("");
+  const moreActive=mobileMore.some(i=>isActive(p,i.path));
+  const mobileTabsHtml=mobileTabs.map(i=>`<button class="bottom-nav-item ${isActive(p,i.path)?"active":""}" data-path="${i.path}">${I[i.icon]}<span>${i.label}</span></button>`).join("");
+  const moreItemsHtml=mobileMore.map(i=>`<button class="sheet-item ${isActive(p,i.path)?"active":""}" data-path="${i.path}">${I[i.icon]} ${i.label}</button>`).join("");
+  $("#app").innerHTML=`<div class="panel-layout">
+    <aside class="sidebar">
+      <div class="sidebar-header"><span class="panel-logo-mark">${LOGO}</span>TokenMP</div>
+      <nav class="sidebar-nav">${sidebarGroupsHtml}</nav>
+      <div class="sidebar-footer"><button class="btn btn-ghost sidebar-logout" id="sb-logout">${I.logout} 退出登录</button></div>
+    </aside>
+    <div class="panel-content">
+      <header class="panel-header">
+        <div class="panel-header-left"><span class="panel-logo" style="display:none" id="m-logo">${LOGO}</span></div>
+        <div class="panel-header-right">
+          <button class="header-search" id="header-search" aria-label="搜索"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><span class="hs-label">搜索</span><kbd class="hs-kbd">⌘K</kbd></button>
+          <button class="icon-btn theme-toggle" id="theme-toggle" aria-label="切换主题"><span class="moon">${I.moon}</span><span class="sun">${I.sun}</span></button>
+          <div class="user-menu-wrap"><button class="user-menu-btn" id="user-btn"><div class="user-avatar">${ini}</div><span class="user-menu-name" id="user-name">${u.email||"用户"}</span><svg class="user-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></button>
+            <div class="user-dropdown" id="user-dropdown" style="display:none">
+              <div class="ud-header"><div class="user-avatar">${ini}</div><div class="ud-email">${u.email||"用户"}</div></div>
+              <button class="ud-item" id="ud-settings">${I.settings} 设置</button>
+              <button class="ud-item ud-danger" id="ud-logout">${I.logout} 退出登录</button>
+            </div></div>
+        </div>
+      </header>
+      <main class="panel-main" id="panel-main"></main>
+    </div>
+    <nav class="bottom-nav">
+      ${mobileTabsHtml}
+      <button class="bottom-nav-item bottom-nav-more ${moreActive?"active":""}" id="more-btn" aria-label="更多功能">${I.more}<span>更多</span></button>
+    </nav>
+  </div>`;
+  // mobile: show logo; desktop: hide (sidebar has it)
+  const mq=window.matchMedia("(max-width: 47.99rem)");
+  const syncLogo=()=>{$("#m-logo").style.display=mq.matches?"flex":"none";$("#user-name").style.display=mq.matches?"none":"inline";};
+  syncLogo();mq.addEventListener("change",syncLogo);
+  $("#theme-toggle").onclick=toggleTheme;
+  $("#sb-logout").onclick=async()=>{await api.logout().catch(()=>{});auth.logout();navigate("/login");};
+  $$(".bottom-nav-item[data-path]").forEach(b=>b.onclick=()=>navigate(b.dataset.path));
+  $("#more-btn").onclick=()=>openMoreSheet(moreItemsHtml);
+  // header 搜索（占位）
+  $("#header-search").onclick=()=>toast("搜索功能开发中","info");
+  // 用户下拉菜单
+  const dd=$("#user-dropdown");
+  $("#user-btn").onclick=(e)=>{e.stopPropagation();dd.style.display=dd.style.display==="none"?"block":"none";};
+  document.addEventListener("click",()=>{dd.style.display="none";});
+  $("#ud-settings").onclick=()=>{dd.style.display="none";navigate("/panel/settings");};
+  $("#ud-logout").onclick=async()=>{dd.style.display="none";await api.logout().catch(()=>{});auth.logout();navigate("/login");};
+  contentFn();
+}
+
+function openMoreSheet(itemsHtml){
+  const root=$("#modal-root");
+  root.innerHTML=`<div class="sheet-overlay" id="more-overlay"><div class="sheet-panel"><div class="sheet-handle"></div><div class="sheet-title">更多功能</div>${itemsHtml}</div></div>`;
+  requestAnimationFrame(()=>$("#more-overlay").classList.add("open"));
+  $("#more-overlay").addEventListener("click",e=>{if(e.target.id==="more-overlay")closeMoreSheet();});
+  $$("#more-overlay .sheet-item").forEach(b=>b.onclick=()=>{closeMoreSheet();navigate(b.dataset.path);});
+}
+function closeMoreSheet(){const o=$("#more-overlay");if(o){o.classList.remove("open");setTimeout(()=>{$("#modal-root").innerHTML="";},200);}}
+
+/* ===== Overview Page ===== */
+async function renderOverview(){
+  const main=$("#panel-main");
+  main.innerHTML=`<div class="page-header"><div><h1 class="page-title">概览</h1><p class="page-desc">账户、配额和最近请求</p></div><button class="btn btn-secondary btn-sm" id="refresh-ov">${I.refresh} 刷新</button></div>
+    <div class="overview-grid" id="stat-grid"><div class="card stat-card skeleton" style="height:96px"></div><div class="card stat-card skeleton" style="height:96px"></div><div class="card stat-card skeleton" style="height:96px"></div></div>
+    <div class="mt-6"><h2 class="section-title">最近请求</h2><div class="card" id="recent-list"><div class="skeleton" style="height:48px"></div></div></div>`;
+  $("#refresh-ov").onclick=()=>renderOverview();
+  try{
+    const[user,quota,recent]=await Promise.all([api.getMe(),api.getQuota(),api.getRecentRequests(5)]);
+    const pct=Math.round((quota.balance_tokens/quota.total_tokens)*100);
+    $("#stat-grid").innerHTML=`
+      <div class="card stat-card"><p class="stat-label">账户</p><p class="stat-value" style="font-size:var(--tmp-ref-font-size-md)">${user.email}</p><p class="stat-sub">${user.role==="admin"?"管理员":"普通用户"} · 注册于 ${fmtDate(user.created_at)}</p></div>
+      <div class="card stat-card"><p class="stat-label">配额余额</p><p class="stat-value">${fmtTokens(quota.balance_tokens)}</p><p class="stat-sub">共 ${fmtTokens(quota.total_tokens)} · 今日已用 ${fmtTokens(quota.used_today)}</p><div class="progress mt-4"><div class="progress-bar" style="width:${pct}%"></div></div></div>
+      <div class="card stat-card"><p class="stat-label">套餐</p><p class="stat-value" style="font-size:var(--tmp-ref-font-size-lg)">${quota.plan}</p><p class="stat-sub">预留 ${fmtNum(quota.reserved)} tokens</p></div>`;
+    $("#recent-list").innerHTML=recent.length?`<div class="data-list">${recent.map(r=>`<div class="data-row" style="grid-template-columns:2fr 2fr 1fr 1fr 1fr;gap:var(--tmp-ref-space-3)"><span class="mono text-sm">${r.id}</span><span class="text-sm">${r.model}</span>${protocolBadge(r.protocol)}${statusBadge(r.status)}<span class="text-sm text-muted">${fmtTokens(r.tokens)}</span></div>`).join("")}</div>`:`<div class="empty">${I.inbox}<p>暂无请求记录</p></div>`;
+  }catch(err){toast("加载失败: "+(err.message||err),"error");}
+}
+
+/* ===== API Keys Page ===== */
+async function renderKeysPage(){
+  const main=$("#panel-main");
+  main.innerHTML=`<div class="page-header"><div><h1 class="page-title">API 密钥</h1><p class="page-desc">管理你的 API 密钥</p></div><button class="btn btn-primary btn-sm" id="create-key">${I.plus} 创建密钥</button></div><div id="keys-list"></div>`;
+  $("#create-key").onclick=openCreateKey;
+  await loadKeys();
+}
+async function loadKeys(){
+  const list=$("#keys-list");
+  list.innerHTML=`<div class="skeleton" style="height:80px"></div>`;
+  try{
+    const keys=await api.getKeys();
+    if(!keys.length){list.innerHTML=`<div class="empty">${I.key}<p>还没有 API 密钥</p></div>`;return;}
+    list.innerHTML=`<div class="data-list">${keys.map(k=>`
+      <div class="key-card" style="margin-bottom:var(--tmp-ref-space-3)">
+        <div class="key-card-head"><div><span class="text-sm" style="font-weight:var(--tmp-ref-font-weight-semibold)">${k.name}</span> ${k.status==="active"?'<span class="badge badge-success">活跃</span>':'<span class="badge badge-muted">已撤销</span>'}</div><div class="flex gap-2">${k.status==="active"?`<button class="btn btn-ghost btn-sm" data-copy="${k.masked}">${I.copy}</button><button class="btn btn-ghost btn-sm" data-revoke="${k.id}" style="color:var(--tmp-color-status-danger-text)">${I.trash}</button>`:""}</div></div>
+        <div class="flex items-center gap-3"><span class="mono text-sm">${k.masked}</span></div>
+        <div class="flex gap-3 mt-4 text-xs text-muted"><span>创建于 ${fmtDate(k.created_at)}</span><span>·</span><span>最近使用 ${fmtDate(k.last_used)}</span></div>
+      </div>`).join("")}</div>
+      <div class="data-list" style="display:none"></div>`;
+    // desktop table view
+    const dt=window.matchMedia("(min-width:48rem)");
+    if(dt.matches){
+      list.innerHTML=`<div class="card"><div class="table-head" style="grid-template-columns:2fr 2fr 1fr 1fr 2fr 1fr"><span>名称</span><span>密钥</span><span>状态</span><span>创建于</span><span>最近使用</span><span>操作</span></div><div class="data-list" style="gap:0">${keys.map(k=>`<div class="data-row" style="grid-template-columns:2fr 2fr 1fr 1fr 2fr 1fr;align-items:center"><span class="text-sm" style="font-weight:var(--tmp-ref-font-weight-semibold)">${k.name}</span><span class="mono text-sm">${k.masked}</span>${k.status==="active"?'<span class="badge badge-success">活跃</span>':'<span class="badge badge-muted">已撤销</span>'}<span class="text-sm text-muted">${fmtDate(k.created_at)}</span><span class="text-sm text-muted">${fmtDate(k.last_used)}</span><div class="flex gap-2">${k.status==="active"?`<button class="btn btn-ghost btn-sm" data-copy="${k.masked}">${I.copy}</button><button class="btn btn-ghost btn-sm" data-revoke="${k.id}" style="color:var(--tmp-color-status-danger-text)">${I.trash}</button>`:""}</div></div>`).join("")}</div></div>`;
+    }
+    $$("[data-copy]").forEach(b=>b.onclick=()=>{navigator.clipboard?.writeText(b.dataset.copy);toast("已复制到剪贴板","success");});
+    $$("[data-revoke]").forEach(b=>b.onclick=()=>openRevoke(b.dataset.revoke));
+  }catch(err){toast("加载失败: "+(err.message||err),"error");}
+}
+function openCreateKey(){
+  showModal({title:"创建 API 密钥",body:`<div class="auth-field"><label class="label" for="key-name">名称</label><input class="input" id="key-name" placeholder="例如：生产环境" /></div>`,footer:`<button class="btn btn-secondary" id="modal-cancel">取消</button><button class="btn btn-primary" id="modal-confirm">创建</button>`});
+  $("#modal-cancel").onclick=closeModal;
+  $("#modal-confirm").onclick=async()=>{const name=$("#key-name").value.trim();const b=$("#modal-confirm");b.disabled=true;b.innerHTML='<span class="spinner"></span>';try{const k=await api.createKey(name);closeModal();showModal({title:"密钥已创建",body:`<p class="text-sm text-muted">请立即复制保存，关闭后将无法再次查看完整密钥：</p><div class="card card-pad mt-4"><div class="flex items-center gap-2"><span class="mono text-sm" style="word-break:break-all">${k.full_key}</span></div></div>`,footer:`<button class="btn btn-secondary" id="copy-new">${I.copy} 复制</button><button class="btn btn-primary" id="done">完成</button>`});$("#copy-new").onclick=()=>{navigator.clipboard?.writeText(k.full_key);toast("已复制","success");};$("#done").onclick=()=>{closeModal();loadKeys();};}catch(err){toast("创建失败: "+(err.message||err),"error");b.disabled=false;b.textContent="创建";}};
+}
+function openRevoke(id){
+  showModal({title:"撤销密钥",body:`<p class="text-sm">确定要撤销这个 API 密钥吗？此操作不可撤销，使用该密钥的请求将立即失败。</p>`,footer:`<button class="btn btn-secondary" id="modal-cancel">取消</button><button class="btn btn-destructive" id="modal-confirm">撤销</button>`});
+  $("#modal-cancel").onclick=closeModal;
+  $("#modal-confirm").onclick=async()=>{const b=$("#modal-confirm");b.disabled=true;b.innerHTML='<span class="spinner"></span>';try{await api.revokeKey(id);closeModal();toast("密钥已撤销","success");loadKeys();}catch(err){toast("撤销失败","error");b.disabled=false;b.textContent="撤销";}};
+}
+
+/* ===== Requests Page ===== */
+let reqPage=1;
+async function renderReqsPage(){
+  const main=$("#panel-main");
+  main.innerHTML=`<div class="page-header"><div><h1 class="page-title">请求日志</h1><p class="page-desc">查看最近的 API 请求</p></div><button class="btn btn-secondary btn-sm" id="refresh-req">${I.refresh} 刷新</button></div><div id="req-list"></div><div class="pagination" id="pagination"></div>`;
+  $("#refresh-req").onclick=()=>{reqPage=1;renderReqsPage();};
+  await loadRequests();
+}
+async function loadRequests(){
+  const list=$("#req-list");
+  list.innerHTML=`<div class="skeleton" style="height:48px"></div>`;
+  try{
+    const{items,total,page,pageSize}=await api.getRequests(reqPage);
+    const totalPages=Math.ceil(total/pageSize);
+    if(!items.length){list.innerHTML=`<div class="empty">${I.inbox}<p>暂无请求记录</p></div>`;return;}
+    const dt=window.matchMedia("(min-width:48rem)");
+    if(dt.matches){
+      list.innerHTML=`<div class="card"><div class="table-head" style="grid-template-columns:1.5fr 2fr 1.5fr 1fr 1fr 1fr"><span>时间</span><span>模型</span><span>协议</span><span>状态</span><span>Tokens</span><span>耗时</span></div><div class="data-list" style="gap:0">${items.map(r=>`<div class="data-row" style="grid-template-columns:1.5fr 2fr 1.5fr 1fr 1fr 1fr;align-items:center"><span class="text-sm text-muted">${fmtDate(r.time)}</span><span class="text-sm">${r.model}</span>${protocolBadge(r.protocol)}${statusBadge(r.status)}<span class="text-sm">${fmtTokens(r.tokens)}</span><span class="text-sm text-muted">${r.latency}ms</span></div>`).join("")}</div></div>`;
+    }else{
+      list.innerHTML=`<div class="data-list">${items.map(r=>`<div class="data-row"><div class="flex items-center" style="justify-content:space-between"><span class="text-sm" style="font-weight:var(--tmp-ref-font-weight-semibold)">${r.model}</span>${statusBadge(r.status)}</div><div class="flex gap-3 mt-4 text-xs text-muted"><span>${fmtDate(r.time)}</span><span>·</span>${protocolBadge(r.protocol)}<span>·</span><span>${fmtTokens(r.tokens)} tokens</span><span>·</span><span>${r.latency}ms</span></div></div>`).join("")}</div>`;
+    }
+    // pagination
+    const pg=$("#pagination");
+    if(totalPages<=1){pg.innerHTML="";return;}
+    let html="";
+    html+=`<button class="page-btn" ${page<=1?"disabled":""} data-p="${page-1}">上一页</button>`;
+    for(let i=1;i<=totalPages;i++){html+=`<button class="page-btn ${i===page?"active":""}" data-p="${i}">${i}</button>`;}
+    html+=`<button class="page-btn" ${page>=totalPages?"disabled":""} data-p="${page+1}">下一页</button>`;
+    pg.innerHTML=html;
+    $$(".page-btn").forEach(b=>b.onclick=()=>{if(!b.disabled){reqPage=parseInt(b.dataset.p);loadRequests();}});
+  }catch(err){toast("加载失败: "+(err.message||err),"error");}
+}
+
+/* ===== Settings Page ===== */
+function renderSetPage(){
+  const u=auth.state.user||{};
+  const ini=(u.email||"U").charAt(0).toUpperCase();
+  $("#panel-main").innerHTML=`<div class="page-header"><div><h1 class="page-title">设置</h1><p class="page-desc">管理账户和密码</p></div></div>
+    <div class="overview-grid" style="grid-template-columns:1fr">
+      <div class="card card-pad">
+        <h2 class="section-title">账户信息</h2>
+        <div class="account-info">
+          <div class="account-row"><span class="account-key">用户 ID</span><span class="account-val mono">${u.id||"—"}</span></div>
+          <div class="account-row"><span class="account-key">邮箱</span><span class="account-val">${u.email||"—"}</span></div>
+          <div class="account-row"><span class="account-key">角色</span><span class="account-val">${u.role==="admin"?"管理员":"普通用户"}</span></div>
+          <div class="account-row"><span class="account-key">状态</span>${u.status==="active"?'<span class="badge badge-success">活跃</span>':'<span class="badge badge-danger">禁用</span>'}</div>
+          <div class="account-row"><span class="account-key">注册时间</span><span class="account-val">${fmtDate(u.created_at)}</span></div>
+        </div>
+      </div>
+      <div class="card card-pad mt-6">
+        <h2 class="section-title">修改密码</h2>
+        <form class="auth-form" id="pw-form">
+          <div class="auth-field"><label class="label" for="cur-pw">当前密码</label><input class="input" id="cur-pw" type="password" placeholder="输入当前密码" required /></div>
+          <div class="auth-field"><label class="label" for="new-pw">新密码</label><input class="input" id="new-pw" type="password" placeholder="至少 12 个字符" required /></div>
+          <div class="auth-field"><label class="label" for="conf-pw">确认新密码</label><input class="input" id="conf-pw" type="password" placeholder="再次输入新密码" required /></div>
+          <div id="pw-error"></div>
+          <button type="submit" class="btn btn-primary" id="pw-btn">保存修改</button>
+        </form>
+      </div>
+      <div class="card card-pad mt-6">
+        <h2 class="section-title">登出所有设备</h2>
+        <p class="text-sm text-muted">撤销所有登录会话，包括当前设备。操作后需要重新登录。</p>
+        <button class="btn btn-destructive mt-4" id="logout-all">登出全部会话</button>
+      </div>
+    </div>`;
+  $("#pw-form").onsubmit=async(e)=>{e.preventDefault();const cur=$("#cur-pw").value;const nw=$("#new-pw").value;const cf=$("#conf-pw").value;if(nw!==cf){$("#pw-error").innerHTML=`<div class="auth-error">两次输入的新密码不一致</div>`;return;}const b=$("#pw-btn");b.disabled=true;b.innerHTML='<span class="spinner"></span> 保存中...';try{await api.changePassword(cur,nw);toast("密码已修改，请重新登录","success");closeModal();await api.logout().catch(()=>{});auth.logout();navigate("/login");}catch(err){$("#pw-error").innerHTML=`<div class="auth-error">${err.message||"修改失败"}</div>`;}finally{b.disabled=false;b.textContent="保存修改";}};
+  $("#logout-all").onclick=()=>{showModal({title:"登出全部会话",body:`<p class="text-sm">确定要登出所有设备吗？当前会话也会被注销。</p>`,footer:`<button class="btn btn-secondary" id="modal-cancel">取消</button><button class="btn btn-destructive" id="modal-confirm">确认登出</button>`});$("#modal-cancel").onclick=closeModal;$("#modal-confirm").onclick=async()=>{await api.logout().catch(()=>{});auth.logout();closeModal();navigate("/login");};};
+}
+
+/* ===== Init ===== */
+initTheme();
+router();
+</script>
+</body>
+</html>

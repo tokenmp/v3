@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/x509"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -87,11 +88,19 @@ func NewVerifier(keyFile, issuer, audience string, logger *slog.Logger) (Verifie
 	return &jwtVerifier{pub: edPub, issuer: issuer, audience: audience, logger: logger}, nil
 }
 
+// edgeClaims extends RegisteredClaims with the role private claim issued by
+// the Auth service. Using a typed struct (not MapClaims) prevents zero-value
+// silent pass-through.
+type edgeClaims struct {
+	jwt.RegisteredClaims
+	Role string `json:"role"`
+}
+
 func (v *jwtVerifier) Verify(ctx context.Context, tokenStr string) (Claims, error) {
 	if tokenStr == "" {
 		return Claims{}, ErrUnauthenticated
 	}
-	claims := &jwt.RegisteredClaims{}
+	claims := &edgeClaims{}
 	opts := []jwt.ParserOption{
 		jwt.WithValidMethods([]string{"EdDSA"}),
 		jwt.WithIssuer(v.issuer),
@@ -103,9 +112,14 @@ func (v *jwtVerifier) Verify(ctx context.Context, tokenStr string) (Claims, erro
 	if err != nil {
 		return Claims{}, ErrUnauthenticated
 	}
-	role := "user"
 	if claims.Subject == "" {
 		return Claims{}, ErrUnauthenticated
+	}
+	// Auth issues "user" or "admin"; default to "user" when absent so
+	// non-admin tokens are still accepted for user-scoped endpoints.
+	role := "user"
+	if claims.Role != "" {
+		role = claims.Role
 	}
 	return Claims{Subject: claims.Subject, Role: role}, nil
 }
@@ -137,6 +151,28 @@ func Middleware(v Verifier, logger *slog.Logger) func(http.Handler) http.Handler
 func FromContext(ctx context.Context) (Claims, bool) {
 	c, ok := ctx.Value(claimsKey).(Claims)
 	return c, ok
+}
+
+// RequireAdmin is a middleware that rejects requests from non-admin users
+// with 403. It must be placed after Middleware (which populates Claims in
+// context).
+func RequireAdmin(logger *slog.Logger) func(http.Handler) http.Handler {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			claims, ok := FromContext(r.Context())
+			if !ok || claims.Role != "admin" {
+				w.Header().Set("Content-Type", "application/json; charset=utf-8")
+				w.Header().Set("Cache-Control", "no-store")
+				w.WriteHeader(http.StatusForbidden)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": "forbidden"})
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 // extractBearer pulls the raw token from the Authorization header.

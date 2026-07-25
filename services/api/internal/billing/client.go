@@ -117,6 +117,16 @@ func (c *Client) GetBalance(ctx context.Context, userID string) (Balance, error)
 	return out, nil
 }
 
+// ListAllUserPlans calls GET /v1/billing/user-plans (cross-user admin list).
+// Returns ErrUnavailable if the endpoint is not implemented by Billing yet.
+func (c *Client) ListAllUserPlans(ctx context.Context) ([]UserPlan, error) {
+	var out []UserPlan
+	if err := c.get(ctx, "/v1/billing/user-plans", &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // NotFound 表示下游返回 404，便于上层区分「不存在」与「不可用」。
 var NotFound = errors.New("billing: not found")
 

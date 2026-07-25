@@ -7,6 +7,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -30,19 +31,31 @@ type Server struct {
 	quota     repository.QuotaManager
 	ledger    repository.LedgerReader
 	balance   repository.BalanceReader
+	admin     AdminStore
 	pinger    database.Pinger
 	logger    *slog.Logger
+}
+
+// AdminStore provides admin write/query methods on the billing repository.
+type AdminStore interface {
+	CreatePlan(ctx context.Context, p *repository.Plan) error
+	UpdatePlan(ctx context.Context, id int64, fields map[string]any) error
+	DeletePlan(ctx context.Context, id int64) error
+	ListAllUserPlans(ctx context.Context, limit, offset int) ([]repository.UserPlan, int, error)
+	AssignUserPlan(ctx context.Context, up *repository.UserPlan) error
+	CancelUserPlan(ctx context.Context, id int64) error
+	GetUsageStats(ctx context.Context, days int, groupBy string) ([]repository.UsageStatRow, error)
 }
 
 // New returns a billing Server. A nil logger falls back to slog.Default.
 // balance may be nil only in tests that do not exercise the balance route;
 // production wiring always supplies the GormRepository (which implements
 // BalanceReader). When nil, the balance endpoint returns 503.
-func New(plans repository.PlanReader, userPlans repository.UserPlanReader, quota repository.QuotaManager, ledger repository.LedgerReader, balance repository.BalanceReader, pinger database.Pinger, logger *slog.Logger) *Server {
+func New(plans repository.PlanReader, userPlans repository.UserPlanReader, quota repository.QuotaManager, ledger repository.LedgerReader, balance repository.BalanceReader, admin AdminStore, pinger database.Pinger, logger *slog.Logger) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Server{plans: plans, userPlans: userPlans, quota: quota, ledger: ledger, balance: balance, pinger: pinger, logger: logger}
+	return &Server{plans: plans, userPlans: userPlans, quota: quota, ledger: ledger, balance: balance, admin: admin, pinger: pinger, logger: logger}
 }
 
 // Router returns the configured chi router.
@@ -62,6 +75,14 @@ func (s *Server) Router() http.Handler {
 	r.Post("/v1/billing/quota/finalize", s.handleFinalize)
 	r.Post("/v1/billing/quota/release", s.handleRelease)
 	r.Get("/v1/billing/users/{user_id}/ledger", s.handleListLedger)
+	// Admin endpoints
+	r.Post("/v1/billing/admin/plans", s.handleAdminCreatePlan)
+	r.Patch("/v1/billing/admin/plans/{id}", s.handleAdminUpdatePlan)
+	r.Delete("/v1/billing/admin/plans/{id}", s.handleAdminDeletePlan)
+	r.Get("/v1/billing/admin/user-plans", s.handleAdminListUserPlans)
+	r.Post("/v1/billing/admin/user-plans", s.handleAdminAssignUserPlan)
+	r.Post("/v1/billing/admin/user-plans/{id}/cancel", s.handleAdminCancelUserPlan)
+	r.Get("/v1/billing/admin/usage/stats", s.handleAdminUsageStats)
 	return r
 }
 

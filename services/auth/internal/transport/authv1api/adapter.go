@@ -24,6 +24,7 @@ import (
 
 	"github.com/tokenmp/v3/services/auth/internal/auth"
 	"github.com/tokenmp/v3/services/auth/internal/contract/authv1"
+	"github.com/tokenmp/v3/services/auth/internal/database/models"
 	"github.com/tokenmp/v3/services/auth/internal/security/jwt"
 )
 
@@ -158,10 +159,12 @@ func UserIDFromContext(ctx context.Context) string {
 // It owns request validation, body-size limits, trailing-JSON rejection,
 // error mapping and response shaping.
 type StrictAdapter struct {
-	svc       *auth.Service
-	pinger    Pinger
-	accessTTL int // seconds, for expires_in
-	keys      APIKeyStore
+	svc        *auth.Service
+	pinger     Pinger
+	accessTTL  int // seconds, for expires_in
+	keys       APIKeyStore
+	adminUsers AdminUserStore
+	adminKeys  AdminKeyStore
 }
 
 // NewStrictAdapter builds a StrictAdapter.
@@ -178,6 +181,15 @@ func NewStrictAdapter(svc *auth.Service, pinger Pinger, accessTTL time.Duration)
 func (a *StrictAdapter) WithAPIKeyStore(store APIKeyStore) *StrictAdapter {
 	a2 := *a
 	a2.keys = store
+	return &a2
+}
+
+// WithAdminStores injects admin management ports. Returns a new adapter copy.
+// nil stores disable admin endpoints (they return 500).
+func (a *StrictAdapter) WithAdminStores(users AdminUserStore, keys AdminKeyStore) *StrictAdapter {
+	a2 := *a
+	a2.adminUsers = users
+	a2.adminKeys = keys
 	return &a2
 }
 
@@ -466,8 +478,16 @@ func bearerMiddleware(verifier *jwt.Verifier, store UserStore) authv1.StrictMidd
 			"AuthDeleteApiKey": true,
 			"AuthRotateApiKey": true,
 		}
+		adminOps := map[string]bool{
+			"AuthAdminListUsers":  true,
+			"AuthAdminGetUser":    true,
+			"AuthAdminUpdateUser": true,
+			"AuthAdminListKeys":   true,
+		}
 		return func(ctx context.Context, w http.ResponseWriter, r *http.Request, request any) (any, error) {
-			if !authedOps[operationID] {
+			isAuthed := authedOps[operationID]
+			isAdmin := adminOps[operationID]
+			if !isAuthed && !isAdmin {
 				return f(ctx, w, r, request)
 			}
 			raw := bearerFromHeader(r.Header)
@@ -478,7 +498,7 @@ func bearerMiddleware(verifier *jwt.Verifier, store UserStore) authv1.StrictMidd
 			if err != nil {
 				return nil, &invalidTokenErr{msg: "invalid or expired access token"}
 			}
-			status, tv, _, sErr := store.FindByID(r.Context(), claims.RegisteredClaims.Subject)
+			status, tv, role, sErr := store.FindByID(r.Context(), claims.RegisteredClaims.Subject)
 			if sErr != nil {
 				return nil, &invalidTokenErr{msg: "invalid or expired access token"}
 			}
@@ -487,6 +507,9 @@ func bearerMiddleware(verifier *jwt.Verifier, store UserStore) authv1.StrictMidd
 			}
 			if claims.TokenVersion != tv {
 				return nil, &invalidTokenErr{msg: "token has been revoked"}
+			}
+			if isAdmin && role != string(models.RoleAdmin) {
+				return nil, &forbiddenErr{msg: "admin role required"}
 			}
 			ctx = WithUserID(ctx, claims.RegisteredClaims.Subject)
 			return f(ctx, w, r, request)
@@ -508,9 +531,11 @@ func bearerFromHeader(h http.Header) string {
 // response error handler maps to the appropriate 401 response.
 type unauthorizedErr struct{ msg string }
 type invalidTokenErr struct{ msg string }
+type forbiddenErr struct{ msg string }
 
 func (e *unauthorizedErr) Error() string { return e.msg }
 func (e *invalidTokenErr) Error() string { return e.msg }
+func (e *forbiddenErr) Error() string    { return e.msg }
 
 // ---------------------------------------------------------------------------
 // Custom strict handler options
@@ -524,6 +549,8 @@ func strictResponseErrorHandler(w http.ResponseWriter, r *http.Request, err erro
 		writeErrorJSON(w, http.StatusUnauthorized, authv1.Unauthorized, e.msg)
 	case *invalidTokenErr:
 		writeErrorJSON(w, http.StatusUnauthorized, authv1.InvalidToken, e.msg)
+	case *forbiddenErr:
+		writeErrorJSON(w, http.StatusForbidden, authv1.Forbidden, e.msg)
 	default:
 		writeErrorJSON(w, http.StatusInternalServerError, authv1.InternalError, "internal error")
 	}
@@ -894,13 +921,15 @@ func clientMetaMiddleware() func(http.Handler) http.Handler {
 
 // ServerConfig holds the dependencies needed to build the HTTP server.
 type ServerConfig struct {
-	Addr        string
-	Pinger      Pinger
-	JWTVerifier *jwt.Verifier
-	UserStore   UserStore
-	AuthService *auth.Service
-	AccessTTL   time.Duration
-	APIKeyStore APIKeyStore
+	Addr           string
+	Pinger         Pinger
+	JWTVerifier    *jwt.Verifier
+	UserStore      UserStore
+	AuthService    *auth.Service
+	AccessTTL      time.Duration
+	APIKeyStore    APIKeyStore
+	AdminUserStore AdminUserStore
+	AdminKeyStore  AdminKeyStore
 }
 
 // NewServer builds a Chi HTTP server with generated routes, strict handler,
@@ -915,6 +944,9 @@ func NewServer(cfg ServerConfig) *Server {
 	adapter := NewStrictAdapter(cfg.AuthService, cfg.Pinger, cfg.AccessTTL)
 	if cfg.APIKeyStore != nil {
 		adapter = adapter.WithAPIKeyStore(cfg.APIKeyStore)
+	}
+	if cfg.AdminUserStore != nil || cfg.AdminKeyStore != nil {
+		adapter = adapter.WithAdminStores(cfg.AdminUserStore, cfg.AdminKeyStore)
 	}
 
 	middlewares := []authv1.StrictMiddlewareFunc{}
