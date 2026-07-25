@@ -25,6 +25,7 @@ import type {
   AdminModelConfig,
   AdminRouteConfig,
   AdminUpstreamCredential,
+  AdminUpstreamEndpoint,
 } from '@/types/admin';
 import { request, API_BASE, NOTICE_BASE } from './core';
 
@@ -444,6 +445,22 @@ function mapCredential(c: Record<string, unknown>): AdminUpstreamCredential {
   };
 }
 
+function mapEndpoint(e: Record<string, unknown>): AdminUpstreamEndpoint {
+  return {
+    id: Number(e.id ?? 0),
+    providerId: String(e.provider_id ?? e.providerId ?? ''),
+    path: String(e.path ?? ''),
+    protocol: String(e.protocol ?? ''),
+    authKind: (e.auth_kind ?? e.authKind ?? 'bearer_header') as AdminUpstreamEndpoint['authKind'],
+    authHeader: e.auth_header != null ? String(e.auth_header) : (e.authHeader != null ? String(e.authHeader) : null),
+    authQuery: e.auth_query != null ? String(e.auth_query) : (e.authQuery != null ? String(e.authQuery) : null),
+    authPrefix: e.auth_prefix != null ? String(e.auth_prefix) : (e.authPrefix != null ? String(e.authPrefix) : null),
+    status: (e.status ?? 'active') as AdminUpstreamEndpoint['status'],
+    createdAt: String(e.created_at ?? e.createdAt ?? ''),
+    updatedAt: String(e.updated_at ?? e.updatedAt ?? ''),
+  };
+}
+
 export const adminConfigApi = {
   // ---- Providers ----
   listProviders: async (): Promise<AdminProvider[]> => {
@@ -627,6 +644,60 @@ export const adminConfigApi = {
   },
   deleteCredential: async (id: string): Promise<void> => {
     await request<void>(`/api/v1/admin/credentials/${id}`, {
+      method: 'DELETE',
+      baseUrl: ADMIN_BASE,
+    });
+  },
+
+  // ---- Upstream Endpoints (端点) ----
+  listEndpoints: async (providerId: string): Promise<AdminUpstreamEndpoint[]> => {
+    const res = await request<{ items: AdminUpstreamEndpoint[] } | AdminUpstreamEndpoint[]>(
+      `/api/v1/admin/providers/${providerId}/endpoints`,
+      { baseUrl: ADMIN_BASE },
+    );
+    const items = Array.isArray(res) ? res : (res.items ?? []);
+    return items.map((e) => mapEndpoint(e as unknown as Record<string, unknown>));
+  },
+  createEndpoint: async (providerId: string, input: {
+    path: string;
+    protocol: string;
+    authKind: AdminUpstreamEndpoint['authKind'];
+    authHeader?: string | null;
+    authQuery?: string | null;
+    authPrefix?: string | null;
+    status?: string;
+  }): Promise<AdminUpstreamEndpoint> => {
+    return request<AdminUpstreamEndpoint>(`/api/v1/admin/providers/${providerId}/endpoints`, {
+      method: 'POST',
+      body: {
+        path: input.path,
+        protocol: input.protocol,
+        auth_kind: input.authKind,
+        auth_header: input.authHeader ?? null,
+        auth_query: input.authQuery ?? null,
+        auth_prefix: input.authPrefix ?? null,
+        status: input.status ?? 'active',
+      },
+      baseUrl: ADMIN_BASE,
+    });
+  },
+  updateEndpoint: async (id: number | string, input: Partial<AdminUpstreamEndpoint>): Promise<void> => {
+    const fields: Record<string, unknown> = {};
+    if (input.path !== undefined) fields.path = input.path;
+    if (input.protocol !== undefined) fields.protocol = input.protocol;
+    if (input.authKind !== undefined) fields.auth_kind = input.authKind;
+    if (input.authHeader !== undefined) fields.auth_header = input.authHeader;
+    if (input.authQuery !== undefined) fields.auth_query = input.authQuery;
+    if (input.authPrefix !== undefined) fields.auth_prefix = input.authPrefix;
+    if (input.status !== undefined) fields.status = input.status;
+    await request<void>(`/api/v1/admin/endpoints/${id}`, {
+      method: 'PATCH',
+      body: fields,
+      baseUrl: ADMIN_BASE,
+    });
+  },
+  deleteEndpoint: async (id: number | string): Promise<void> => {
+    await request<void>(`/api/v1/admin/endpoints/${id}`, {
       method: 'DELETE',
       baseUrl: ADMIN_BASE,
     });

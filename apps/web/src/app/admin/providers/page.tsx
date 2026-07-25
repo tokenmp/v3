@@ -2,10 +2,10 @@
 
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Pencil, Plus, Trash2 } from 'lucide-react';
+import { Network, Pencil, Plus, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { adminConfigApi } from '@/lib/api/admin';
-import type { AdminProvider } from '@/types/admin';
+import type { AdminProvider, AdminUpstreamEndpoint } from '@/types/admin';
 import { FilterChip } from '@/components/filter-chip';
 import { Modal } from '@/components/ui/modal';
 import {
@@ -38,6 +38,19 @@ const SDK_TAB_OPTIONS = [
   { value: 'openai', label: 'OpenAI' },
   { value: 'anthropic', label: 'Anthropic' },
 ];
+
+const AUTH_KIND_OPTIONS = [
+  { value: 'bearer_header', label: 'Bearer Header' },
+  { value: 'api_key_header', label: 'API Key Header' },
+  { value: 'api_key_query', label: 'API Key Query' },
+];
+
+const PROTOCOL_LABELS: Record<string, string> = {
+  openai_chat: 'Chat Completions',
+  anthropic_messages: 'Messages',
+  openai_responses: 'Responses',
+  openai_images: 'Images',
+};
 
 type StatusFilter = 'all' | 'active' | 'disabled';
 
@@ -74,6 +87,7 @@ export default function AdminProvidersPage() {
   const [statusF, setStatusF] = useState<StatusFilter>('all');
   const [createOpen, setCreateOpen] = useState(false);
   const [editItem, setEditItem] = useState<AdminProvider | null>(null);
+  const [endpointsProvider, setEndpointsProvider] = useState<AdminProvider | null>(null);
 
   const filtered = useMemo(() => {
     const kw = search.trim().toLowerCase();
@@ -190,6 +204,15 @@ export default function AdminProvidersPage() {
                       <div className="flex justify-end gap-1">
                         <button
                           type="button"
+                          onClick={() => setEndpointsProvider(p)}
+                          className="rounded-sm p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                          aria-label="端点"
+                          title="管理端点"
+                        >
+                          <Network className="size-3.5" />
+                        </button>
+                        <button
+                          type="button"
                           onClick={() => setEditItem(p)}
                           className="rounded-sm p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
                           aria-label="编辑"
@@ -229,6 +252,12 @@ export default function AdminProvidersPage() {
           item={editItem}
           onClose={() => setEditItem(null)}
           onSaved={() => setEditItem(null)}
+        />
+      ) : null}
+      {endpointsProvider ? (
+        <EndpointsModal
+          provider={endpointsProvider}
+          onClose={() => setEndpointsProvider(null)}
         />
       ) : null}
     </div>
@@ -405,6 +434,329 @@ function ProviderFormModal({
           </Field>
         </FormSection>
       </div>
+    </Modal>
+  );
+}
+
+// ---- Endpoints Modal ----
+
+const PROTOCOL_DEFAULT_PATHS: Record<string, string> = {
+  openai_chat: '/v1/chat/completions',
+  anthropic_messages: '/v1/messages',
+  openai_responses: '/v1/responses',
+  openai_images: '/v1/images/generations',
+};
+
+const DEFAULT_AUTH_HEADER: Record<string, string> = {
+  bearer_header: 'Authorization',
+  api_key_header: 'X-API-Key',
+  api_key_query: '',
+};
+
+const DEFAULT_AUTH_PREFIX: Record<string, string> = {
+  bearer_header: 'Bearer ',
+  api_key_header: '',
+  api_key_query: '',
+};
+
+type EndpointDraft = {
+  id: number | null;
+  path: string;
+  protocol: string;
+  authKind: AdminUpstreamEndpoint['authKind'];
+  authHeader: string;
+  authQuery: string;
+  authPrefix: string;
+  status: 'active' | 'disabled';
+};
+
+function emptyEndpointDraft(): EndpointDraft {
+  return {
+    id: null,
+    path: '/v1/chat/completions',
+    protocol: 'openai_chat',
+    authKind: 'bearer_header',
+    authHeader: 'Authorization',
+    authQuery: '',
+    authPrefix: 'Bearer ',
+    status: 'active',
+  };
+}
+
+function endpointToDraft(e: AdminUpstreamEndpoint): EndpointDraft {
+  return {
+    id: e.id,
+    path: e.path,
+    protocol: e.protocol,
+    authKind: e.authKind,
+    authHeader: e.authHeader ?? '',
+    authQuery: e.authQuery ?? '',
+    authPrefix: e.authPrefix ?? '',
+    status: e.status === 'active' ? 'active' : 'disabled',
+  };
+}
+
+function EndpointsModal({
+  provider,
+  onClose,
+}: {
+  provider: AdminProvider;
+  onClose: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const [editing, setEditing] = useState<EndpointDraft | null>(null);
+
+  const { data: endpoints = [], isLoading } = useQuery({
+    queryKey: ['admin', 'provider-endpoints', provider.id],
+    queryFn: () => adminConfigApi.listEndpoints(provider.id),
+  });
+
+  const createMutation = useMutation({
+    mutationFn: (d: EndpointDraft) =>
+      adminConfigApi.createEndpoint(provider.id, {
+        path: d.path,
+        protocol: d.protocol,
+        authKind: d.authKind,
+        authHeader: d.authKind === 'api_key_query' ? null : (d.authHeader || null),
+        authQuery: d.authKind === 'api_key_query' ? (d.authQuery || null) : null,
+        authPrefix: d.authKind === 'bearer_header' ? (d.authPrefix || null) : null,
+        status: d.status,
+      }),
+    onSuccess: () => {
+      toast.success('已创建端点');
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'provider-endpoints', provider.id] });
+      setEditing(null);
+    },
+    onError: (e: unknown) => {
+      toast.error('创建失败', { description: e instanceof Error ? e.message : undefined });
+    },
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: (d: EndpointDraft) =>
+      adminConfigApi.updateEndpoint(d.id!, {
+        path: d.path,
+        protocol: d.protocol,
+        authKind: d.authKind,
+        authHeader: d.authKind === 'api_key_query' ? null : (d.authHeader || null),
+        authQuery: d.authKind === 'api_key_query' ? (d.authQuery || null) : null,
+        authPrefix: d.authKind === 'bearer_header' ? (d.authPrefix || null) : null,
+        status: d.status,
+      }),
+    onSuccess: () => {
+      toast.success('已更新端点');
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'provider-endpoints', provider.id] });
+      setEditing(null);
+    },
+    onError: (e: unknown) => {
+      toast.error('更新失败', { description: e instanceof Error ? e.message : undefined });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) => adminConfigApi.deleteEndpoint(id),
+    onSuccess: () => {
+      toast.success('已删除端点');
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'provider-endpoints', provider.id] });
+    },
+    onError: (e: unknown) => {
+      toast.error('删除失败', { description: e instanceof Error ? e.message : undefined });
+    },
+  });
+
+  const handleDelete = (e: AdminUpstreamEndpoint) => {
+    if (!confirm(`删除端点「${e.path}」？`)) return;
+    deleteMutation.mutate(e.id);
+  };
+
+  const onAuthKindChange = (v: string) => {
+    setEditing((d) => ({
+      ...d!,
+      authKind: v as EndpointDraft['authKind'],
+      authHeader: DEFAULT_AUTH_HEADER[v] ?? d!.authHeader,
+      authPrefix: DEFAULT_AUTH_PREFIX[v] ?? d!.authPrefix,
+    }));
+  };
+
+  const onProtocolChange = (v: string) => {
+    setEditing((d) => ({
+      ...d!,
+      protocol: v,
+      path: d!.id === null ? (PROTOCOL_DEFAULT_PATHS[v] ?? d!.path) : d!.path,
+    }));
+  };
+
+  const submitting = createMutation.isPending || updateMutation.isPending;
+  const isEditEndpoint = editing?.id != null;
+  const canSubmit = editing != null && editing.path.trim().length > 0 && editing.protocol.length > 0;
+
+  const submit = () => {
+    if (!editing || !canSubmit) return;
+    if (isEditEndpoint) updateMutation.mutate(editing);
+    else createMutation.mutate(editing);
+  };
+
+  return (
+    <Modal
+      open
+      title={`${provider.displayLabel || provider.name} — 端点管理`}
+      description="每个 Provider 可配置多个协议端点。Executor 按 route.protocol 选择匹配的端点转发。"
+      onClose={onClose}
+      maxWidth="lg"
+    >
+      {editing ? (
+        <div className="space-y-5">
+          <FormSection title={isEditEndpoint ? '编辑端点' : '新建端点'} cols={2}>
+            <Field label="协议" required>
+              <SelectField
+                value={editing.protocol}
+                onChange={onProtocolChange}
+                options={PROTOCOL_OPTIONS}
+                disabled={isEditEndpoint}
+              />
+            </Field>
+            <Field label="路径" required hint="相对于 Base URL 的路径">
+              <TextField
+                value={editing.path}
+                onChange={(v) => setEditing({ ...editing, path: v })}
+                placeholder="/v1/chat/completions"
+                className="font-mono"
+              />
+            </Field>
+            <Field label="鉴权方式" required>
+              <SelectField
+                value={editing.authKind}
+                onChange={onAuthKindChange}
+                options={AUTH_KIND_OPTIONS}
+                disabled={isEditEndpoint}
+              />
+            </Field>
+            {editing.authKind === 'api_key_query' ? (
+              <Field label="Query 参数名" required hint="如 key">
+                <TextField
+                  value={editing.authQuery}
+                  onChange={(v) => setEditing({ ...editing, authQuery: v })}
+                  placeholder="key"
+                />
+              </Field>
+            ) : (
+              <Field label="Header 名称" required hint="如 Authorization">
+                <TextField
+                  value={editing.authHeader}
+                  onChange={(v) => setEditing({ ...editing, authHeader: v })}
+                  placeholder="Authorization"
+                />
+              </Field>
+            )}
+            {editing.authKind === 'bearer_header' ? (
+              <Field label="前缀" hint="如 Bearer （含空格）">
+                <TextField
+                  value={editing.authPrefix}
+                  onChange={(v) => setEditing({ ...editing, authPrefix: v })}
+                  placeholder="Bearer "
+                />
+              </Field>
+            ) : null}
+            <Field label="状态">
+              <SwitchField
+                checked={editing.status === 'active'}
+                onChange={(v) => setEditing({ ...editing, status: v ? 'active' : 'disabled' })}
+                label={editing.status === 'active' ? '启用' : '停用'}
+              />
+            </Field>
+          </FormSection>
+          <FormActions
+            onCancel={() => setEditing(null)}
+            onSubmit={submit}
+            submitting={submitting}
+            submitLabel={isEditEndpoint ? '保存' : '创建'}
+            disabled={!canSubmit}
+          />
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {isLoading ? (
+            <p className="py-8 text-center text-sm text-muted-foreground">加载中…</p>
+          ) : endpoints.length === 0 ? (
+            <p className="py-8 text-center text-sm text-muted-foreground">暂无端点，点击「新建端点」添加</p>
+          ) : (
+            <div className="rounded-md border border-border">
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-muted/30">
+                      <TableHead className="text-xs">协议</TableHead>
+                      <TableHead className="text-xs">路径</TableHead>
+                      <TableHead className="text-xs">鉴权</TableHead>
+                      <TableHead className="text-xs">状态</TableHead>
+                      <TableHead className="text-right text-xs">操作</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {endpoints.map((e) => (
+                      <TableRow key={e.id}>
+                        <TableCell className="text-xs">
+                          <span className="rounded-sm bg-muted px-1.5 py-0.5 font-mono text-[10px]">
+                            {PROTOCOL_LABELS[e.protocol] ?? e.protocol}
+                          </span>
+                        </TableCell>
+                        <TableCell className="font-mono text-xs">{e.path}</TableCell>
+                        <TableCell className="font-mono text-[10px] text-muted-foreground">
+                          {e.authKind === 'api_key_query'
+                            ? `?${e.authQuery ?? ''}=`
+                            : `${e.authHeader ?? ''}${e.authPrefix ? ` (${e.authPrefix.trim()})` : ''}`}
+                        </TableCell>
+                        <TableCell>
+                          <span
+                            className={cn(
+                              'inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium',
+                              e.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-muted text-muted-foreground',
+                            )}
+                          >
+                            {e.status === 'active' ? '启用' : '停用'}
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-1">
+                            <button
+                              type="button"
+                              onClick={() => setEditing(endpointToDraft(e))}
+                              className="rounded-sm p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                              aria-label="编辑"
+                              title="编辑"
+                            >
+                              <Pencil className="size-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDelete(e)}
+                              className="rounded-sm p-1.5 text-muted-foreground hover:bg-red-100 hover:text-red-700"
+                              aria-label="删除"
+                              title="删除"
+                            >
+                              <Trash2 className="size-3.5" />
+                            </button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+          )}
+          <div>
+            <button
+              type="button"
+              onClick={() => setEditing(emptyEndpointDraft())}
+              className="inline-flex h-[var(--control-height-sm)] items-center gap-1.5 rounded-sm bg-primary px-3 text-xs font-medium text-primary-foreground hover:opacity-90"
+            >
+              <Plus className="size-3.5" />
+              新建端点
+            </button>
+          </div>
+        </div>
+      )}
     </Modal>
   );
 }
