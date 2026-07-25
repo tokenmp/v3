@@ -32,9 +32,7 @@ type StatusFilter = 'all' | 'active' | 'disabled';
 type CredentialDraft = {
   id: string;
   providerId: string;
-  credentialRef: string;
-  keyPrefix: string;
-  keySuffix: string;
+  apiKey: string;
   priority: string;
   maxConcurrency: string;
   dailyQuota: string;
@@ -45,9 +43,7 @@ function emptyDraft(): CredentialDraft {
   return {
     id: '',
     providerId: '',
-    credentialRef: '',
-    keyPrefix: '',
-    keySuffix: '',
+    apiKey: '',
     priority: '0',
     maxConcurrency: '',
     dailyQuota: '',
@@ -59,9 +55,7 @@ function toDraft(c: AdminUpstreamCredential): CredentialDraft {
   return {
     id: c.id,
     providerId: c.providerId,
-    credentialRef: c.credentialRef,
-    keyPrefix: c.keyPrefix ?? '',
-    keySuffix: c.keySuffix ?? '',
+    apiKey: '', // 不回显明文密钥
     priority: String(c.priority ?? 0),
     maxConcurrency: c.maxConcurrency != null ? String(c.maxConcurrency) : '',
     dailyQuota: c.dailyQuota != null ? String(c.dailyQuota) : '',
@@ -107,7 +101,6 @@ export default function AdminCredentialsPage() {
       const matchKw =
         !kw ||
         c.id.toLowerCase().includes(kw) ||
-        c.credentialRef.toLowerCase().includes(kw) ||
         (c.keyPrefix ?? '').toLowerCase().includes(kw) ||
         c.providerId.toLowerCase().includes(kw);
       const matchStatus =
@@ -142,23 +135,15 @@ export default function AdminCredentialsPage() {
       <div className="flex flex-wrap items-center gap-2">
         <input
           type="text"
-          placeholder="搜索 id / ref / prefix / provider"
+          placeholder="搜索 id / 前缀 / provider"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="h-[var(--control-height-sm)] min-w-56 flex-1 rounded-sm border border-input bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
         />
         <div className="flex flex-wrap gap-1.5 text-xs">
           <FilterChip label="全部" active={statusF === 'all'} onClick={() => setStatusF('all')} />
-          <FilterChip
-            label="启用"
-            active={statusF === 'active'}
-            onClick={() => setStatusF('active')}
-          />
-          <FilterChip
-            label="停用"
-            active={statusF === 'disabled'}
-            onClick={() => setStatusF('disabled')}
-          />
+          <FilterChip label="启用" active={statusF === 'active'} onClick={() => setStatusF('active')} />
+          <FilterChip label="停用" active={statusF === 'disabled'} onClick={() => setStatusF('disabled')} />
         </div>
         <button
           type="button"
@@ -176,49 +161,39 @@ export default function AdminCredentialsPage() {
           <Table>
             <TableHeader>
               <TableRow className="bg-muted/30">
-                <TableHead>ID</TableHead>
-                <TableHead>Provider</TableHead>
-                <TableHead>Credential Ref</TableHead>
-                <TableHead>前缀/后缀</TableHead>
-                <TableHead className="text-right">优先级</TableHead>
-                <TableHead className="text-right">并发</TableHead>
-                <TableHead>状态</TableHead>
-                <TableHead className="text-right">操作</TableHead>
+                <TableHead className="text-xs">ID</TableHead>
+                <TableHead className="text-xs">Provider</TableHead>
+                <TableHead className="text-xs">密钥前缀/后缀</TableHead>
+                <TableHead className="text-right text-xs">优先级</TableHead>
+                <TableHead className="text-right text-xs">并发</TableHead>
+                <TableHead className="text-xs">状态</TableHead>
+                <TableHead className="text-right text-xs">操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {isLoading ? (
                 <TableRow>
-                  <TableCell colSpan={8} className="py-8 text-center text-muted-foreground">
+                  <TableCell colSpan={7} className="py-8 text-center text-muted-foreground">
                     加载中…
                   </TableCell>
                 </TableRow>
               ) : filtered.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={8} className="py-8 text-center text-muted-foreground">
+                  <TableCell colSpan={7} className="py-8 text-center text-muted-foreground">
                     暂无上游账号
                   </TableCell>
                 </TableRow>
               ) : (
                 filtered.map((c) => {
                   const provider = providerMap[c.providerId];
-                  const providerLabel = provider
-                    ? provider.displayLabel || provider.name
-                    : c.providerId;
-                  const prefixSuffix =
-                    c.keyPrefix || c.keySuffix
-                      ? `${c.keyPrefix ?? '-'}…${c.keySuffix ?? '-'}`
-                      : '-';
+                  const providerLabel = provider ? provider.displayLabel || provider.name : c.providerId;
+                  const prefixSuffix = c.keyPrefix || c.keySuffix
+                    ? `${c.keyPrefix ?? '-'}…${c.keySuffix ?? '-'}`
+                    : '-';
                   return (
                     <TableRow key={c.id}>
                       <TableCell className="font-mono text-xs">{c.id}</TableCell>
                       <TableCell className="text-sm">{providerLabel}</TableCell>
-                      <TableCell
-                        className="max-w-[260px] truncate font-mono text-xs"
-                        title={c.credentialRef}
-                      >
-                        {c.credentialRef}
-                      </TableCell>
                       <TableCell className="font-mono text-xs">{prefixSuffix}</TableCell>
                       <TableCell className="text-right font-mono text-xs">{c.priority}</TableCell>
                       <TableCell className="text-right font-mono text-xs">
@@ -259,10 +234,7 @@ export default function AdminCredentialsPage() {
       </div>
 
       {createOpen ? (
-        <CredentialFormModal
-          providers={providers}
-          onClose={() => setCreateOpen(false)}
-        />
+        <CredentialFormModal providers={providers} onClose={() => setCreateOpen(false)} />
       ) : null}
       {editItem ? (
         <CredentialFormModal
@@ -318,9 +290,7 @@ function CredentialFormModal({
     mutationFn: (input: CredentialDraft) =>
       adminConfigApi.createCredential(input.providerId, {
         id: input.id,
-        credentialRef: input.credentialRef,
-        keyPrefix: input.keyPrefix || undefined,
-        keySuffix: input.keySuffix || undefined,
+        apiKey: input.apiKey,
         priority: Number(input.priority) || 0,
         maxConcurrency: numOrNull(input.maxConcurrency),
         dailyQuota: numOrNull(input.dailyQuota),
@@ -339,9 +309,7 @@ function CredentialFormModal({
   const updateMutation = useMutation({
     mutationFn: (input: CredentialDraft) =>
       adminConfigApi.updateCredential(editItem!.id, {
-        credentialRef: input.credentialRef,
-        keyPrefix: input.keyPrefix || null,
-        keySuffix: input.keySuffix || null,
+        apiKey: input.apiKey || undefined,
         priority: Number(input.priority) || 0,
         maxConcurrency: numOrNull(input.maxConcurrency),
         dailyQuota: numOrNull(input.dailyQuota),
@@ -361,7 +329,7 @@ function CredentialFormModal({
   const canSubmit =
     draft.id.trim().length > 0 &&
     draft.providerId.length > 0 &&
-    draft.credentialRef.trim().length > 0;
+    (isEdit || draft.apiKey.trim().length > 0);
 
   const submit = () => {
     if (!canSubmit) return;
@@ -373,7 +341,7 @@ function CredentialFormModal({
     <Modal
       open
       title={isEdit ? `编辑 ${editItem?.id ?? ''}` : '新建上游账号'}
-      description="实际密钥通过 EXECUTOR_CREDENTIAL_* 环境变量映射，此处只保存 vault:// 引用与展示用前后缀。"
+      description={isEdit ? '修改后密钥前缀/后缀会自动更新。留空密钥则保持原密钥不变。' : '填写 Provider 和 API Key，前缀/后缀自动生成。'}
       onClose={onClose}
       maxWidth="lg"
       footer={
@@ -387,7 +355,7 @@ function CredentialFormModal({
       }
     >
       <FormSection cols={2}>
-        <Field label="Credential ID" required hint="唯一标识，创建后不可改" colSpan={2}>
+        <Field label="账号 ID" required hint="唯一标识，创建后不可改" colSpan={2}>
           <TextField
             value={draft.id}
             onChange={(v) => patch({ id: v })}
@@ -405,28 +373,16 @@ function CredentialFormModal({
             disabled={isEdit}
           />
         </Field>
-        <Field label="Credential Ref" required>
+        <Field
+          label="API Key"
+          required={!isEdit}
+          hint={isEdit ? '留空=保持原密钥不变' : '明文存储，前缀/后缀自动派生'}
+        >
           <TextField
-            value={draft.credentialRef}
-            onChange={(v) => patch({ credentialRef: v })}
-            placeholder="vault://provider/credential/default"
-            className="font-mono"
-          />
-        </Field>
-        <Field label="Key Prefix" hint="展示用前缀，如 sk-abc">
-          <TextField
-            value={draft.keyPrefix}
-            onChange={(v) => patch({ keyPrefix: v })}
-            placeholder="sk-abc"
-            className="font-mono"
-          />
-        </Field>
-        <Field label="Key Suffix" hint="展示用后缀，如 xyz">
-          <TextField
-            value={draft.keySuffix}
-            onChange={(v) => patch({ keySuffix: v })}
-            placeholder="xyz"
-            className="font-mono"
+            value={draft.apiKey}
+            onChange={(v) => patch({ apiKey: v })}
+            type="password"
+            placeholder="sk-…"
           />
         </Field>
         <Field label="优先级" hint="数字越小优先级越高，默认 0">

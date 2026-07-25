@@ -237,7 +237,8 @@ export interface AdminRouteConfig {
 export interface AdminUpstreamCredential {
   id: string;
   providerId: string;
-  credentialRef: string; // vault://provider/credential/default
+  credentialRef: string; // auto-generated vault:// ref
+  apiKey?: string | null; // plaintext, only on create/update, never returned in list
   keyPrefix: string | null;
   keySuffix: string | null;
   priority: number;
