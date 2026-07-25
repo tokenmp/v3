@@ -68,9 +68,10 @@ keys/codes/errors/models/plans/providers，recharts 用量图表。
 /admin/request-logs/[id]        → 请求详情（attempts/events）
 /admin/announcements            → 公告管理（CRUD + 发布）
 /admin/changelogs               → 版本日志管理（CRUD）
-/admin/notifications            → 通知管理（发送/查看）
-/admin/models                   → 模型配置（只读，来自 executor config）
-/admin/routes                   → 路由配置（只读，来自 executor config）
+/admin/notifications            → 通知管理（异步发送/查看）
+/admin/providers                → Provider 与上游凭据（CRUD + 元数据）
+/admin/models                   → 模型配置（经 Config Service）
+/admin/routes                   → 路由配置（经 Config Service）
 /admin/billing/usage            → 用量统计（全局聚合）
 /admin/settings                 → 系统设置（平台级）
 ```
@@ -89,10 +90,9 @@ keys/codes/errors/models/plans/providers，recharts 用量图表。
 | **内容** | 公告 | Megaphone | notice.announcements |
 | | 版本日志 | Sparkles | notice.changelogs |
 | | 通知 | Bell | notice.notifications |
-| **执行** | 模型配置 | Box | executor config snapshot |
-| | 路由配置 | Route | executor config snapshot |
-| | Provider | Server | config.providers |
-| | 上游凭据 | KeyOff | config.upstream_credentials（元数据） |
+| **执行** | Provider 与上游凭据 | Server | config.providers + upstream_credentials |
+| | 模型配置 | Box | config.models（经 Config Service） |
+| | 路由配置 | Route | config.route_mappings（经 Config Service） |
 | **系统** | 系统设置 | Settings | platform config |
 
 ## 四、页面详细设计
