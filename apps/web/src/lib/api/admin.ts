@@ -364,3 +364,92 @@ export const adminNotificationApi = {
     await request<void>(`/api/v1/admin/notifications/${id}`, { method: 'DELETE', noContent: true, baseUrl: ADMIN_BASE });
   },
 };
+
+// ---------------------------------------------------------------------------
+// Plans + User plans + Usage (Phase 3 — mock-backed; backend admin endpoints TBD)
+// ---------------------------------------------------------------------------
+
+import type { AdminPlan, AdminPlanInput, AdminUserPlan, AdminUserPlanInput } from '@/types/admin';
+
+const mockPlans: AdminPlan[] = [
+  { id: 'p_1', name: '入门套餐', planType: 'token', price: 0, category: 'monthly', monthlyLimit: null, tokenLimit: 500000, allowedModels: ['gpt-4o-mini', 'deepseek-chat'], status: 'active', createdAt: '2026-07-20T00:00:00Z', updatedAt: '2026-07-20T00:00:00Z' },
+  { id: 'p_2', name: '专业套餐', planType: 'token', price: 99, category: 'monthly', monthlyLimit: null, tokenLimit: 5000000, allowedModels: ['gpt-4o', 'claude-3-5-sonnet', 'gpt-4o-mini', 'deepseek-chat', 'glm-4.5'], status: 'active', createdAt: '2026-07-20T00:00:00Z', updatedAt: '2026-07-20T00:00:00Z' },
+  { id: 'p_3', name: '编程套餐', planType: 'coding', price: 29, category: 'monthly', monthlyLimit: 1000, tokenLimit: null, allowedModels: ['gpt-4o-mini', 'deepseek-chat'], status: 'active', createdAt: '2026-07-20T00:00:00Z', updatedAt: '2026-07-20T00:00:00Z' },
+  { id: 'p_4', name: '图像套餐', planType: 'image', price: 49, category: 'monthly', monthlyLimit: null, tokenLimit: null, allowedModels: ['dall-e-3'], status: 'disabled', createdAt: '2026-07-22T00:00:00Z', updatedAt: '2026-07-22T00:00:00Z' },
+];
+
+const mockUserPlans: AdminUserPlan[] = [
+  { id: 'up_1', userId: 'u_1', userEmail: 'demo@tokenmp.cn', planId: 'p_1', planName: '入门套餐', planType: 'token', status: 'active', activatedAt: '2026-07-20T03:14:00Z', expiresAt: '2026-08-24T00:00:00Z', remainingQuota: '371600' },
+  { id: 'up_2', userId: 'u_3', userEmail: 'alice@example.com', planId: 'p_2', planName: '专业套餐', planType: 'token', status: 'active', activatedAt: '2026-07-22T08:30:00Z', expiresAt: null, remainingQuota: '4890000' },
+  { id: 'up_3', userId: 'u_4', userEmail: 'bob@example.com', planId: 'p_3', planName: '编程套餐', planType: 'coding', status: 'cancelled', activatedAt: '2026-07-18T14:20:00Z', expiresAt: '2026-07-20T14:20:00Z', remainingQuota: '0' },
+];
+
+const allModels = ['gpt-4o', 'gpt-4o-mini', 'claude-3-5-sonnet', 'deepseek-chat', 'glm-4.5', 'dall-e-3'];
+
+// Plans
+export const adminPlanApi = {
+  list: async (): Promise<AdminPlan[]> => {
+    if (useMock) { await delay(260); return [...mockPlans]; }
+    return request<AdminPlan[]>('/api/v1/admin/plans', { baseUrl: ADMIN_BASE });
+  },
+  create: async (input: AdminPlanInput): Promise<AdminPlan> => {
+    if (useMock) {
+      await delay(350);
+      const now = new Date().toISOString();
+      const item: AdminPlan = { ...input, id: genId('p'), createdAt: now, updatedAt: now };
+      mockPlans.unshift(item);
+      return item;
+    }
+    const r = await request<{ plan: AdminPlan }>('/api/v1/admin/plans', { method: 'POST', body: input, baseUrl: ADMIN_BASE });
+    return r.plan;
+  },
+  update: async (id: string, input: AdminPlanInput): Promise<AdminPlan> => {
+    if (useMock) {
+      await delay(300);
+      const p = mockPlans.find((x) => x.id === id);
+      if (!p) throw new Error('not_found');
+      Object.assign(p, input, { updatedAt: new Date().toISOString() });
+      return p;
+    }
+    const r = await request<{ plan: AdminPlan }>(`/api/v1/admin/plans/${id}`, { method: 'PATCH', body: input, baseUrl: ADMIN_BASE });
+    return r.plan;
+  },
+  delete: async (id: string): Promise<void> => {
+    if (useMock) { await delay(300); const i = mockPlans.findIndex((x) => x.id === id); if (i >= 0) mockPlans.splice(i, 1); return; }
+    await request<void>(`/api/v1/admin/plans/${id}`, { method: 'DELETE', noContent: true, baseUrl: ADMIN_BASE });
+  },
+  listModels: async (): Promise<string[]> => {
+    if (useMock) { await delay(100); return allModels; }
+    return request<string[]>('/api/v1/admin/models/catalog', { baseUrl: ADMIN_BASE });
+  },
+};
+
+// User plans
+export const adminUserPlanApi = {
+  list: async (): Promise<AdminUserPlan[]> => {
+    if (useMock) { await delay(260); return [...mockUserPlans]; }
+    return request<AdminUserPlan[]>('/api/v1/admin/user-plans', { baseUrl: ADMIN_BASE });
+  },
+  assign: async (input: AdminUserPlanInput): Promise<AdminUserPlan> => {
+    if (useMock) {
+      await delay(400);
+      const plan = mockPlans.find((p) => p.id === input.planId);
+      const user = mockUsers.find((u) => u.id === input.userId);
+      if (!plan || !user) throw new Error('not_found');
+      const item: AdminUserPlan = {
+        id: genId('up'), userId: input.userId, userEmail: user.email,
+        planId: plan.id, planName: plan.name, planType: plan.planType,
+        status: 'active', activatedAt: new Date().toISOString(),
+        expiresAt: input.expiresAt, remainingQuota: String(plan.tokenLimit ?? plan.monthlyLimit ?? 0),
+      };
+      mockUserPlans.unshift(item);
+      return item;
+    }
+    const r = await request<{ userPlan: AdminUserPlan }>('/api/v1/admin/user-plans', { method: 'POST', body: input, baseUrl: ADMIN_BASE });
+    return r.userPlan;
+  },
+  cancel: async (id: string): Promise<void> => {
+    if (useMock) { await delay(300); const up = mockUserPlans.find((x) => x.id === id); if (up) up.status = 'cancelled'; return; }
+    await request<void>(`/api/v1/admin/user-plans/${id}/cancel`, { method: 'POST', noContent: true, baseUrl: ADMIN_BASE });
+  },
+};

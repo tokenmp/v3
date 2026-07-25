@@ -149,3 +149,51 @@ export interface AdminNotificationInput {
   body: string;
   action: { type: string; label: string; href?: string } | null;
 }
+
+// ---- Plans admin (CRUD) ----
+
+export interface AdminPlan {
+  id: string;
+  name: string;
+  planType: 'coding' | 'token' | 'image' | 'free';
+  price: number;
+  category: 'monthly' | 'quarterly' | 'yearly';
+  monthlyLimit: number | null;
+  tokenLimit: number | null;
+  allowedModels: string[];
+  status: 'active' | 'disabled' | 'deleted';
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AdminPlanInput {
+  name: string;
+  planType: 'coding' | 'token' | 'image' | 'free';
+  price: number;
+  category: 'monthly' | 'quarterly' | 'yearly';
+  monthlyLimit: number | null;
+  tokenLimit: number | null;
+  allowedModels: string[];
+  status: 'active' | 'disabled';
+}
+
+// ---- User plans admin (assignment) ----
+
+export interface AdminUserPlan {
+  id: string;
+  userId: string;
+  userEmail: string;
+  planId: string;
+  planName: string;
+  planType: 'coding' | 'token' | 'image' | 'free';
+  status: 'active' | 'expired' | 'cancelled';
+  activatedAt: string;
+  expiresAt: string | null;
+  remainingQuota: string;
+}
+
+export interface AdminUserPlanInput {
+  userId: string;
+  planId: string;
+  expiresAt: string | null;
+}
