@@ -127,7 +127,7 @@ function mapKey(k: Record<string, unknown>): AdminApiKey {
 
 export const adminApi = {
   // ---- Dashboard ----
-  getDashboardStats: async (): Promise<AdminDashboardStats> => realDashboard(),
+  getDashboardStats: async (days = 15): Promise<AdminDashboardStats> => realDashboard(days),
 
   // ---- Users ----
   listUsers: async (page = 1, pageSize = 20, search = ''): Promise<AdminUserListResponse> => {
