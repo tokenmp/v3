@@ -15,6 +15,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/tokenmp/v3/packages/go/httpresp"
 )
 
 // AuthClient calls the Auth Service admin endpoints.
@@ -184,7 +186,7 @@ func (c *AuthClient) do(ctx context.Context, method, bearer, path string, body a
 		return &StatusError{StatusCode: resp.StatusCode, Body: string(respBody)}
 	}
 	if out != nil {
-		if err := json.Unmarshal(respBody, out); err != nil {
+		if err := httpresp.UnwrapData(respBody, out); err != nil {
 			return ErrAuthUnavailable
 		}
 	}

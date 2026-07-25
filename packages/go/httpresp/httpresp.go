@@ -183,6 +183,50 @@ func ErrorWithStatus(w http.ResponseWriter, status int, code Code, message strin
 	write(w, status, code, nil, message)
 }
 
+// UnwrapData decodes a {code, data, message} envelope from raw bytes and
+// unmarshals the data field into dst. If the body does not have the envelope
+// shape (no "code" field), it falls back to unmarshalling the entire body
+// into dst for backward compatibility.
+//
+// Returns a non-nil error if the envelope code is non-zero (error response)
+// or if unmarshalling fails.
+func UnwrapData(body []byte, dst any) error {
+	var env struct {
+		Code    int             `json:"code"`
+		Data    json.RawMessage `json:"data"`
+		Message string          `json:"message"`
+	}
+	if err := json.Unmarshal(body, &env); err != nil {
+		return err
+	}
+	// If no "code" field was present, this is not an envelope — fall back.
+	if len(body) > 0 && body[0] == '{' && env.Code == 0 && len(env.Data) == 0 {
+		return json.Unmarshal(body, dst)
+	}
+	// Envelope error.
+	if env.Code != 0 {
+		return &EnvelopeError{Code: Code(env.Code), Message: env.Message}
+	}
+	// Success — unmarshal data into dst.
+	if len(env.Data) == 0 || string(env.Data) == "null" {
+		return nil
+	}
+	return json.Unmarshal(env.Data, dst)
+}
+
+// EnvelopeError represents a non-zero code returned in the envelope.
+type EnvelopeError struct {
+	Code    Code
+	Message string
+}
+
+func (e *EnvelopeError) Error() string {
+	if e.Message != "" {
+		return e.Message
+	}
+	return e.Code.String()
+}
+
 func write(w http.ResponseWriter, status int, code Code, data any, message string) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
