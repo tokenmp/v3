@@ -234,3 +234,133 @@ export const adminApi = {
     return request<AdminRequestLog>(`/api/v1/admin/request-logs/${id}`, { baseUrl: ADMIN_BASE });
   },
 };
+
+// ---------------------------------------------------------------------------
+// Content management: announcements, changelogs, notifications
+// (Phase 2 — mock-backed; backend admin write endpoints TBD)
+// ---------------------------------------------------------------------------
+
+import type {
+  AdminAnnouncement,
+  AdminAnnouncementInput,
+  AdminChangelog,
+  AdminChangelogInput,
+  AdminNotification,
+  AdminNotificationInput,
+} from '@/types/admin';
+
+const mockAnnouncements: AdminAnnouncement[] = [
+  { id: 'a_1', title: '系统维护通知', summary: '将于凌晨进行系统维护', body: '## 维护详情\n\n将于 **2026-07-30 凌晨 2:00-4:00** 进行系统维护，期间服务可能短暂中断。', severity: 'warning', publishedAt: '2026-07-24T10:00:00Z', createdAt: '2026-07-24T09:00:00Z', updatedAt: '2026-07-24T10:00:00Z' },
+  { id: 'a_2', title: '新模型上线', summary: 'GPT-4o 已上线', body: '## 新模型\n\n**GPT-4o** 现已可用，支持 vision 和 tools。', severity: 'success', publishedAt: '2026-07-22T08:00:00Z', createdAt: '2026-07-22T07:00:00Z', updatedAt: '2026-07-22T08:00:00Z' },
+  { id: 'a_3', title: '草稿公告', summary: '尚未发布', body: '## 草稿\n\n这是草稿内容。', severity: 'info', publishedAt: null, createdAt: '2026-07-23T15:00:00Z', updatedAt: '2026-07-23T15:00:00Z' },
+];
+
+const mockChangelogs: AdminChangelog[] = [
+  { id: 'c_1', version: 'v3.1.0', title: '后台管理上线', body: '## 新功能\n\n- Admin 后台管理\n- 用户管理\n- 请求日志查看', publishedAt: '2026-07-25T00:00:00Z', createdAt: '2026-07-25T00:00:00Z', updatedAt: '2026-07-25T00:00:00Z' },
+  { id: 'c_2', version: 'v3.0.0', title: 'v3 正式发布', body: '## 重大更新\n\n全新架构，Edge/BFF + 微服务。', publishedAt: '2026-07-20T00:00:00Z', createdAt: '2026-07-20T00:00:00Z', updatedAt: '2026-07-20T00:00:00Z' },
+];
+
+const mockNotifications: AdminNotification[] = [
+  { id: 'n_1', userId: 'u_1', type: 'info', title: '套餐即将到期', body: '您的入门套餐将于 7 天后到期。', action: { type: 'link', label: '查看套餐', href: '/panel/billing/plans' }, readAt: null, createdAt: '2026-07-24T03:00:00Z' },
+  { id: 'n_2', userId: 'u_2', type: 'success', title: '密钥创建成功', body: '您的新 API 密钥已创建。', action: null, readAt: '2026-07-23T10:00:00Z', createdAt: '2026-07-23T09:00:00Z' },
+];
+
+function genId(prefix: string) {
+  return prefix + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+}
+
+// Announcements
+export const adminAnnouncementApi = {
+  list: async (): Promise<AdminAnnouncement[]> => {
+    if (useMock) { await delay(260); return [...mockAnnouncements].sort((a, b) => (b.publishedAt ?? '').localeCompare(a.publishedAt ?? '')); }
+    return request<AdminAnnouncement[]>('/api/v1/admin/announcements', { baseUrl: ADMIN_BASE });
+  },
+  create: async (input: AdminAnnouncementInput): Promise<AdminAnnouncement> => {
+    if (useMock) {
+      await delay(350);
+      const now = new Date().toISOString();
+      const item: AdminAnnouncement = { ...input, id: genId('a'), createdAt: now, updatedAt: now };
+      mockAnnouncements.unshift(item);
+      return item;
+    }
+    const r = await request<{ announcement: AdminAnnouncement }>('/api/v1/admin/announcements', { method: 'POST', body: input, baseUrl: ADMIN_BASE });
+    return r.announcement;
+  },
+  update: async (id: string, input: AdminAnnouncementInput): Promise<AdminAnnouncement> => {
+    if (useMock) {
+      await delay(300);
+      const a = mockAnnouncements.find((x) => x.id === id);
+      if (!a) throw new Error('not_found');
+      Object.assign(a, input, { updatedAt: new Date().toISOString() });
+      return a;
+    }
+    const r = await request<{ announcement: AdminAnnouncement }>(`/api/v1/admin/announcements/${id}`, { method: 'PATCH', body: input, baseUrl: ADMIN_BASE });
+    return r.announcement;
+  },
+  delete: async (id: string): Promise<void> => {
+    if (useMock) { await delay(300); const i = mockAnnouncements.findIndex((x) => x.id === id); if (i >= 0) mockAnnouncements.splice(i, 1); return; }
+    await request<void>(`/api/v1/admin/announcements/${id}`, { method: 'DELETE', noContent: true, baseUrl: ADMIN_BASE });
+  },
+};
+
+// Changelogs
+export const adminChangelogApi = {
+  list: async (): Promise<AdminChangelog[]> => {
+    if (useMock) { await delay(260); return [...mockChangelogs].sort((a, b) => (b.publishedAt ?? '').localeCompare(a.publishedAt ?? '')); }
+    return request<AdminChangelog[]>('/api/v1/admin/changelogs', { baseUrl: ADMIN_BASE });
+  },
+  create: async (input: AdminChangelogInput): Promise<AdminChangelog> => {
+    if (useMock) {
+      await delay(350);
+      const now = new Date().toISOString();
+      const item: AdminChangelog = { ...input, id: genId('c'), createdAt: now, updatedAt: now };
+      mockChangelogs.unshift(item);
+      return item;
+    }
+    const r = await request<{ changelog: AdminChangelog }>('/api/v1/admin/changelogs', { method: 'POST', body: input, baseUrl: ADMIN_BASE });
+    return r.changelog;
+  },
+  update: async (id: string, input: AdminChangelogInput): Promise<AdminChangelog> => {
+    if (useMock) {
+      await delay(300);
+      const c = mockChangelogs.find((x) => x.id === id);
+      if (!c) throw new Error('not_found');
+      Object.assign(c, input, { updatedAt: new Date().toISOString() });
+      return c;
+    }
+    const r = await request<{ changelog: AdminChangelog }>(`/api/v1/admin/changelogs/${id}`, { method: 'PATCH', body: input, baseUrl: ADMIN_BASE });
+    return r.changelog;
+  },
+  delete: async (id: string): Promise<void> => {
+    if (useMock) { await delay(300); const i = mockChangelogs.findIndex((x) => x.id === id); if (i >= 0) mockChangelogs.splice(i, 1); return; }
+    await request<void>(`/api/v1/admin/changelogs/${id}`, { method: 'DELETE', noContent: true, baseUrl: ADMIN_BASE });
+  },
+};
+
+// Notifications
+export const adminNotificationApi = {
+  list: async (): Promise<AdminNotification[]> => {
+    if (useMock) { await delay(260); return [...mockNotifications].sort((a, b) => b.createdAt.localeCompare(a.createdAt)); }
+    return request<AdminNotification[]>('/api/v1/admin/notifications', { baseUrl: ADMIN_BASE });
+  },
+  send: async (input: AdminNotificationInput): Promise<AdminNotification> => {
+    if (useMock) {
+      await delay(400);
+      const item: AdminNotification = {
+        ...input,
+        id: genId('n'),
+        userId: input.userId || 'all',
+        readAt: null,
+        createdAt: new Date().toISOString(),
+      };
+      mockNotifications.unshift(item);
+      return item;
+    }
+    const r = await request<{ notification: AdminNotification }>('/api/v1/admin/notifications/send', { method: 'POST', body: input, baseUrl: ADMIN_BASE });
+    return r.notification;
+  },
+  delete: async (id: string): Promise<void> => {
+    if (useMock) { await delay(300); const i = mockNotifications.findIndex((x) => x.id === id); if (i >= 0) mockNotifications.splice(i, 1); return; }
+    await request<void>(`/api/v1/admin/notifications/${id}`, { method: 'DELETE', noContent: true, baseUrl: ADMIN_BASE });
+  },
+};

@@ -4,8 +4,11 @@ import { cn } from '@/lib/utils';
 
 const Checkbox = React.forwardRef<
   HTMLButtonElement,
-  React.ButtonHTMLAttributes<HTMLButtonElement> & { checked?: boolean }
->(({ className, checked, ...props }, ref) => (
+  React.ButtonHTMLAttributes<HTMLButtonElement> & {
+    checked?: boolean;
+    onCheckedChange?: (checked: boolean) => void;
+  }
+>(({ className, checked, onCheckedChange, onClick, ...props }, ref) => (
   <button
     ref={ref}
     type="button"
@@ -16,6 +19,11 @@ const Checkbox = React.forwardRef<
       checked && 'bg-primary text-primary-foreground',
       className,
     )}
+    onClick={(e) => {
+      const next = !checked;
+      onCheckedChange?.(next);
+      onClick?.(e);
+    }}
     {...props}
   >
     {checked ? <Check className="h-3 w-3" /> : null}

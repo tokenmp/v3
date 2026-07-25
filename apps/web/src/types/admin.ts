@@ -88,3 +88,64 @@ export interface AdminDashboardStats {
 // ---- Plans (admin CRUD reuses the user-facing Plan shape) ----
 
 export type { Plan, UserPlan } from '@/types';
+
+// ---- Announcements (admin CRUD) ----
+
+export interface AdminAnnouncement {
+  id: string;
+  title: string;
+  summary: string;
+  body: string; // Markdown
+  severity: 'info' | 'warning' | 'success';
+  publishedAt: string | null; // null = draft
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AdminAnnouncementInput {
+  title: string;
+  summary: string;
+  body: string;
+  severity: 'info' | 'warning' | 'success';
+  publishedAt: string | null;
+}
+
+// ---- Changelogs (admin CRUD) ----
+
+export interface AdminChangelog {
+  id: string;
+  version: string;
+  title: string;
+  body: string; // Markdown
+  publishedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AdminChangelogInput {
+  version: string;
+  title: string;
+  body: string;
+  publishedAt: string | null;
+}
+
+// ---- Notifications (admin send + list) ----
+
+export interface AdminNotification {
+  id: string;
+  userId: string;
+  type: string;
+  title: string;
+  body: string;
+  action: { type: string; label: string; href?: string } | null;
+  readAt: string | null;
+  createdAt: string;
+}
+
+export interface AdminNotificationInput {
+  userId?: string; // empty = all users
+  type: string;
+  title: string;
+  body: string;
+  action: { type: string; label: string; href?: string } | null;
+}
