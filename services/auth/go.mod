@@ -10,6 +10,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.7.4
 	github.com/oapi-codegen/runtime v1.6.0
+	github.com/tokenmp/v3/packages/go/httpresp v0.0.0-00010101000000-000000000000
 	golang.org/x/crypto v0.46.0
 	gorm.io/driver/postgres v1.6.0
 	gorm.io/gorm v1.31.0

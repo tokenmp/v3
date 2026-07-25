@@ -4,6 +4,7 @@ go 1.26.5
 
 require (
 	github.com/golang-jwt/jwt/v5 v5.3.1
+	github.com/tokenmp/v3/packages/go/httpresp v0.0.0-00010101000000-000000000000
 	gorm.io/driver/postgres v1.6.0
 	gorm.io/gorm v1.31.2
 )
