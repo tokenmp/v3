@@ -347,56 +347,64 @@ function ProviderFormModal({
         />
       }
     >
-      <FormSection cols={2}>
-        {mode === 'create' ? (
-          <Field label="ID" required hint="唯一标识，如 deepseek（创建后不可改）">
+      <div className="space-y-5">
+        <FormSection title="基本信息" cols={2}>
+          {mode === 'create' ? (
+            <Field label="ID" required hint="唯一标识，如 deepseek（创建后不可改）">
+              <TextField
+                value={draft.id}
+                onChange={(v) => patch({ id: v })}
+                placeholder="deepseek"
+              />
+            </Field>
+          ) : null}
+          <Field label="名称" required hint="如 deepseek">
+            <TextField value={draft.name} onChange={(v) => patch({ name: v })} placeholder="deepseek" />
+          </Field>
+          <Field label="显示名" hint="如 DeepSeek">
             <TextField
-              value={draft.id}
-              onChange={(v) => patch({ id: v })}
-              placeholder="deepseek"
+              value={draft.displayLabel}
+              onChange={(v) => patch({ displayLabel: v })}
+              placeholder="DeepSeek"
             />
           </Field>
-        ) : null}
-        <Field label="名称" required hint="如 deepseek">
-          <TextField value={draft.name} onChange={(v) => patch({ name: v })} placeholder="deepseek" />
-        </Field>
-        <Field label="显示名" hint="如 DeepSeek">
-          <TextField
-            value={draft.displayLabel}
-            onChange={(v) => patch({ displayLabel: v })}
-            placeholder="DeepSeek"
-          />
-        </Field>
-        <Field label="Base URL" required colSpan={2} hint="如 https://api.example.com">
-          <TextField
-            value={draft.baseURL}
-            onChange={(v) => patch({ baseURL: v })}
-            placeholder="https://api.example.com"
-            type="url"
-          />
-        </Field>
-        <Field label="SDK 类型" required>
-          <TabField
-            value={draft.sdkKind}
-            onChange={(v) => patch({ sdkKind: v as AdminProvider['sdkKind'] })}
-            options={SDK_TAB_OPTIONS}
-          />
-        </Field>
-        <Field label="协议" required>
-          <SelectField
-            value={draft.protocol}
-            onChange={(v) => patch({ protocol: v })}
-            options={PROTOCOL_OPTIONS}
-          />
-        </Field>
-        <Field label="状态" colSpan={2}>
-          <SwitchField
-            checked={draft.status === 'active'}
-            onChange={(v) => patch({ status: v ? 'active' : 'disabled' })}
-            label={draft.status === 'active' ? '启用' : '停用'}
-          />
-        </Field>
-      </FormSection>
+          <Field label="Base URL" required colSpan={2} hint="如 https://api.example.com">
+            <TextField
+              value={draft.baseURL}
+              onChange={(v) => patch({ baseURL: v })}
+              placeholder="https://api.example.com"
+              type="url"
+            />
+          </Field>
+        </FormSection>
+
+        <FormSection title="协议与 SDK" cols={2}>
+          <Field label="SDK 类型" required>
+            <TabField
+              value={draft.sdkKind}
+              onChange={(v) => patch({ sdkKind: v as AdminProvider['sdkKind'] })}
+              options={SDK_TAB_OPTIONS}
+            />
+          </Field>
+          <Field label="协议" required>
+            <SelectField
+              value={draft.protocol}
+              onChange={(v) => patch({ protocol: v })}
+              options={PROTOCOL_OPTIONS}
+            />
+          </Field>
+        </FormSection>
+
+        <FormSection title="状态" cols={1}>
+          <Field label="状态">
+            <SwitchField
+              checked={draft.status === 'active'}
+              onChange={(v) => patch({ status: v ? 'active' : 'disabled' })}
+              label={draft.status === 'active' ? '启用' : '停用'}
+            />
+          </Field>
+        </FormSection>
+      </div>
     </Modal>
   );
 }

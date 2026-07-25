@@ -351,62 +351,70 @@ function RouteFormModal({
         />
       }
     >
-      <FormSection cols={2}>
-        <Field label="路由 ID" required>
-          <TextField
-            value={draft.id}
-            onChange={(v) => setDraft((d) => ({ ...d, id: v }))}
-            placeholder="例如 openai-gpt-4o-mini"
-            disabled={isEdit}
-            className="font-mono"
-          />
-        </Field>
-        <Field label="协议" required>
-          <SelectField
-            value={draft.protocol}
-            onChange={(v) => setDraft((d) => ({ ...d, protocol: v }))}
-            options={PROTOCOL_OPTIONS}
-          />
-        </Field>
-        <Field label="模型" required>
-          <SelectField
-            value={draft.modelId}
-            onChange={(v) => setDraft((d) => ({ ...d, modelId: v }))}
-            options={modelOptions}
-            placeholder="选择模型"
-          />
-        </Field>
-        <Field label="Provider" required>
-          <SelectField
-            value={draft.providerId}
-            onChange={(v) => setDraft((d) => ({ ...d, providerId: v }))}
-            options={providerOptions}
-            placeholder="选择 Provider"
-          />
-        </Field>
-        <Field label="上游模型" required>
-          <TextField
-            value={draft.upstreamModel}
-            onChange={(v) => setDraft((d) => ({ ...d, upstreamModel: v }))}
-            placeholder="例如 gpt-4o-mini"
-            className="font-mono"
-          />
-        </Field>
-        <Field label="优先级" hint="数字越小优先级越高">
-          <NumberField
-            value={String(draft.priority)}
-            onChange={(v) => setDraft((d) => ({ ...d, priority: Number(v) || 0 }))}
-            min={0}
-          />
-        </Field>
-        <Field label="启用">
-          <SwitchField
-            checked={draft.enabled}
-            onChange={(v) => setDraft((d) => ({ ...d, enabled: v }))}
-            label={draft.enabled ? '已启用' : '已禁用'}
-          />
-        </Field>
-      </FormSection>
+      <div className="space-y-5">
+        <FormSection title="基本信息" cols={2}>
+          <Field label="路由 ID" required>
+            <TextField
+              value={draft.id}
+              onChange={(v) => setDraft((d) => ({ ...d, id: v }))}
+              placeholder="例如 openai-gpt-4o-mini"
+              disabled={isEdit}
+              className="font-mono"
+            />
+          </Field>
+          <Field label="上游模型" required>
+            <TextField
+              value={draft.upstreamModel}
+              onChange={(v) => setDraft((d) => ({ ...d, upstreamModel: v }))}
+              placeholder="例如 deepseek-chat"
+              className="font-mono"
+            />
+          </Field>
+        </FormSection>
+
+        <FormSection title="路由绑定" cols={2}>
+          <Field label="模型" required>
+            <SelectField
+              value={draft.modelId}
+              onChange={(v) => setDraft((d) => ({ ...d, modelId: v }))}
+              options={modelOptions}
+              placeholder="选择模型"
+            />
+          </Field>
+          <Field label="Provider" required>
+            <SelectField
+              value={draft.providerId}
+              onChange={(v) => setDraft((d) => ({ ...d, providerId: v }))}
+              options={providerOptions}
+              placeholder="选择 Provider"
+            />
+          </Field>
+        </FormSection>
+
+        <FormSection title="协议与调度" cols={3}>
+          <Field label="协议" required>
+            <SelectField
+              value={draft.protocol}
+              onChange={(v) => setDraft((d) => ({ ...d, protocol: v }))}
+              options={PROTOCOL_OPTIONS}
+            />
+          </Field>
+          <Field label="优先级" hint="数字越小优先级越高">
+            <NumberField
+              value={String(draft.priority)}
+              onChange={(v) => setDraft((d) => ({ ...d, priority: Number(v) || 0 }))}
+              min={0}
+            />
+          </Field>
+          <Field label="启用">
+            <SwitchField
+              checked={draft.enabled}
+              onChange={(v) => setDraft((d) => ({ ...d, enabled: v }))}
+              label={draft.enabled ? '已启用' : '已禁用'}
+            />
+          </Field>
+        </FormSection>
+      </div>
     </Modal>
   );
 }
