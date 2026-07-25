@@ -24,6 +24,7 @@ import type {
   AdminProvider,
   AdminModelConfig,
   AdminRouteConfig,
+  AdminUpstreamCredential,
 } from '@/types/admin';
 import { request, API_BASE, NOTICE_BASE } from './core';
 
@@ -427,6 +428,22 @@ function mapRouteConfig(r: Record<string, unknown>): AdminRouteConfig {
   };
 }
 
+function mapCredential(c: Record<string, unknown>): AdminUpstreamCredential {
+  return {
+    id: String(c.id ?? ''),
+    providerId: String(c.provider_id ?? c.providerId ?? ''),
+    credentialRef: String(c.credential_ref ?? c.credentialRef ?? ''),
+    keyPrefix: c.key_prefix != null ? String(c.key_prefix) : (c.keyPrefix != null ? String(c.keyPrefix) : null),
+    keySuffix: c.key_suffix != null ? String(c.key_suffix) : (c.keySuffix != null ? String(c.keySuffix) : null),
+    priority: Number(c.priority ?? 0),
+    maxConcurrency: c.max_concurrency != null ? Number(c.max_concurrency) : (c.maxConcurrency != null ? Number(c.maxConcurrency) : null),
+    dailyQuota: c.daily_quota != null ? Number(c.daily_quota) : (c.dailyQuota != null ? Number(c.dailyQuota) : null),
+    status: (c.status ?? 'active') as AdminUpstreamCredential['status'],
+    createdAt: String(c.created_at ?? c.createdAt ?? ''),
+    updatedAt: String(c.updated_at ?? c.updatedAt ?? ''),
+  };
+}
+
 export const adminConfigApi = {
   // ---- Providers ----
   listProviders: async (): Promise<AdminProvider[]> => {
@@ -552,6 +569,70 @@ export const adminConfigApi = {
   },
   deleteRoute: async (id: string): Promise<void> => {
     await request<void>(`/api/v1/admin/routes/${id}`, {
+      method: 'DELETE',
+      baseUrl: ADMIN_BASE,
+    });
+  },
+
+  // ---- Upstream Credentials (上游账号) ----
+  listCredentials: async (providerId: string): Promise<AdminUpstreamCredential[]> => {
+    const res = await request<{ items: AdminUpstreamCredential[] } | AdminUpstreamCredential[]>(
+      `/api/v1/admin/providers/${providerId}/credentials`,
+      { baseUrl: ADMIN_BASE },
+    );
+    const items = Array.isArray(res) ? res : (res.items ?? []);
+    return items.map((c) => mapCredential(c as unknown as Record<string, unknown>));
+  },
+  listAllCredentials: async (): Promise<AdminUpstreamCredential[]> => {
+    // Fetch credentials across all providers by first listing providers
+    const providers = await adminConfigApi.listProviders();
+    const results = await Promise.all(
+      providers.map((p) => adminConfigApi.listCredentials(p.id)),
+    );
+    return results.flat();
+  },
+  createCredential: async (providerId: string, input: {
+    id: string;
+    credentialRef: string;
+    keyPrefix?: string;
+    keySuffix?: string;
+    priority?: number;
+    maxConcurrency?: number | null;
+    dailyQuota?: number | null;
+    status?: string;
+  }): Promise<AdminUpstreamCredential> => {
+    return request<AdminUpstreamCredential>(`/api/v1/admin/providers/${providerId}/credentials`, {
+      method: 'POST',
+      body: {
+        id: input.id,
+        credential_ref: input.credentialRef,
+        key_prefix: input.keyPrefix || null,
+        key_suffix: input.keySuffix || null,
+        priority: input.priority ?? 0,
+        max_concurrency: input.maxConcurrency ?? null,
+        daily_quota: input.dailyQuota ?? null,
+        status: input.status ?? 'active',
+      },
+      baseUrl: ADMIN_BASE,
+    });
+  },
+  updateCredential: async (id: string, input: Partial<AdminUpstreamCredential>): Promise<void> => {
+    const fields: Record<string, unknown> = {};
+    if (input.credentialRef !== undefined) fields.credential_ref = input.credentialRef;
+    if (input.keyPrefix !== undefined) fields.key_prefix = input.keyPrefix;
+    if (input.keySuffix !== undefined) fields.key_suffix = input.keySuffix;
+    if (input.priority !== undefined) fields.priority = input.priority;
+    if (input.maxConcurrency !== undefined) fields.max_concurrency = input.maxConcurrency;
+    if (input.dailyQuota !== undefined) fields.daily_quota = input.dailyQuota;
+    if (input.status !== undefined) fields.status = input.status;
+    await request<{ id: string }>(`/api/v1/admin/credentials/${id}`, {
+      method: 'PATCH',
+      body: fields,
+      baseUrl: ADMIN_BASE,
+    });
+  },
+  deleteCredential: async (id: string): Promise<void> => {
+    await request<void>(`/api/v1/admin/credentials/${id}`, {
       method: 'DELETE',
       baseUrl: ADMIN_BASE,
     });
