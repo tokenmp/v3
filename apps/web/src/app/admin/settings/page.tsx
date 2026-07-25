@@ -1,13 +1,13 @@
 'use client';
 
 import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
   Table,
@@ -17,6 +17,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { cn } from '@/lib/utils';
 
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
@@ -27,14 +28,57 @@ function InfoRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-const services = [
-  { name: 'Auth', status: '运行中' },
-  { name: 'Billing', status: '运行中' },
-  { name: 'Logging', status: '运行中' },
-  { name: 'Notice', status: '运行中' },
-  { name: 'Executor', status: '运行中' },
-  { name: 'Config', status: '运行中' },
+const SERVICES = [
+  { name: 'Auth', url: '/auth-api/healthz' },
+  { name: 'Edge/BFF', url: '/biz-api/healthz' },
+  { name: 'Logging', url: '/biz-api/healthz' },
+  { name: 'Billing', url: '/biz-api/healthz' },
+  { name: 'Notice', url: '/notice-api/healthz' },
+  { name: 'Config', url: '/biz-api/healthz' },
 ] as const;
+
+function ServiceStatusRow({ name, url }: { name: string; url: string }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['healthz', name],
+    queryFn: async () => {
+      try {
+        const res = await fetch(url);
+        return { ok: res.ok, status: res.status };
+      } catch {
+        return { ok: false, status: 0 };
+      }
+    },
+    refetchInterval: 30000,
+  });
+
+  const isUp = data?.ok === true;
+
+  return (
+    <TableRow>
+      <TableCell className="font-medium text-sm">{name}</TableCell>
+      <TableCell>
+        <span
+          className={cn(
+            'inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-medium',
+            isLoading
+              ? 'bg-muted text-muted-foreground'
+              : isUp
+                ? 'bg-green-100 text-green-700'
+                : 'bg-red-100 text-red-700',
+          )}
+        >
+          <span
+            className={cn(
+              'size-1.5 rounded-full',
+              isLoading ? 'bg-muted-foreground' : isUp ? 'bg-green-500' : 'bg-red-500',
+            )}
+          />
+          {isLoading ? '检查中…' : isUp ? '运行中' : '不可用'}
+        </span>
+      </TableCell>
+    </TableRow>
+  );
+}
 
 export default function AdminSettingsPage() {
   const [registrationEnabled, setRegistrationEnabled] = useState(true);
@@ -76,18 +120,13 @@ export default function AdminSettingsPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>服务</TableHead>
-                <TableHead>状态</TableHead>
+                <TableHead className="text-xs">服务</TableHead>
+                <TableHead className="text-xs">状态</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {services.map((s) => (
-                <TableRow key={s.name}>
-                  <TableCell className="font-medium">{s.name}</TableCell>
-                  <TableCell>
-                    <Badge variant="success">{s.status}</Badge>
-                  </TableCell>
-                </TableRow>
+              {SERVICES.map((s) => (
+                <ServiceStatusRow key={s.name} name={s.name} url={s.url} />
               ))}
             </TableBody>
           </Table>

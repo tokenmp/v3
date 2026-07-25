@@ -203,7 +203,7 @@ function TopUsersSection({ rows }: { rows: TopUserRow[] }) {
 export default function AdminDashboardPage() {
   const { data: stats } = useQuery<AdminDashboardStats>({
     queryKey: ['admin', 'dashboard'],
-    queryFn: adminApi.getDashboardStats,
+    queryFn: () => adminApi.getDashboardStats(15),
   });
 
   const dash = stats ?? null;

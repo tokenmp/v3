@@ -108,14 +108,6 @@ export default function RequestLogDetailPage() {
         </CardContent>
       </Card>
 
-      {/* Attempts/Events placeholder */}
-      <Card>
-        <CardContent className="p-4 sm:p-6">
-          <p className="text-sm text-muted-foreground">
-            请求 attempts 与 events 详情待后端扩展
-          </p>
-        </CardContent>
-      </Card>
     </div>
   );
 }

@@ -211,8 +211,8 @@ export default function AdminBillingUsagePage() {
   const [days, setDays] = useState<number>(7);
 
   const { data: stats } = useQuery<AdminDashboardStats>({
-    queryKey: ['admin', 'dashboard'],
-    queryFn: adminApi.getDashboardStats,
+    queryKey: ['admin', 'dashboard', days],
+    queryFn: () => adminApi.getDashboardStats(days),
   });
 
   const dash = stats ?? null;
