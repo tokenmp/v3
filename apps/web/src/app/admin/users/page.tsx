@@ -4,20 +4,13 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { adminApi } from '@/lib/api/admin';
-import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Input } from '@/components/ui/input';
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
+  Table, TableHeader, TableRow, TableHead, TableBody, TableCell,
 } from '@/components/ui/table';
 import { ConfirmDialog } from '@/components/confirm-dialog';
-import { ChevronLeft, ChevronRight, Search } from 'lucide-react';
+import { FilterChip } from '@/components/filter-chip';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { toast } from 'sonner';
 import type { AdminUser } from '@/types/admin';
 
@@ -28,28 +21,32 @@ function formatTime(iso: string) {
 export default function AdminUsersPage() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
-  const pageSize = 20;
+  const [roleF, setRoleF] = useState<string | undefined>(undefined);
+  const [statusF, setStatusF] = useState<string | undefined>(undefined);
   const queryClient = useQueryClient();
 
   const { data } = useQuery({
     queryKey: ['admin', 'users', page, search],
-    queryFn: () => adminApi.listUsers(page, pageSize, search),
+    queryFn: () => adminApi.listUsers(page, 20, search),
   });
 
   const updateMutation = useMutation({
     mutationFn: ({ id, input }: { id: string; input: { status?: 'active' | 'disabled'; role?: 'user' | 'admin' } }) =>
       adminApi.updateUser(id, input),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['admin', 'users'] });
-    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin', 'users'] }),
     onError: () => toast.error('操作失败'),
   });
 
   const users = data?.users ?? [];
   const total = data?.total ?? 0;
-  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const totalPages = Math.max(1, Math.ceil(total / 20));
 
-  // Confirm dialog state
+  const filtered = users.filter((u) => {
+    if (roleF && u.role !== roleF) return false;
+    if (statusF && u.status !== statusF) return false;
+    return true;
+  });
+
   const [confirm, setConfirm] = useState<{
     open: boolean;
     title: string;
@@ -85,70 +82,68 @@ export default function AdminUsersPage() {
     );
   }
 
-  function handleSearchChange(value: string) {
-    setSearch(value);
-    setPage(1);
-  }
-
   return (
-    <div className="space-y-6">
-      {/* Search bar */}
-      <div className="flex justify-between">
-        <div className="relative w-full max-w-sm">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
+    <div className="space-y-4">
+      <h1 className="text-lg font-semibold">用户管理</h1>
+
+      {/* 工具栏：搜索框左 + 筛选 chip 右 */}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-1 items-center gap-2">
+          <input
+            type="text"
             placeholder="搜索邮箱"
             value={search}
-            onChange={(e) => handleSearchChange(e.target.value)}
-            className="pl-9"
+            onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+            className="h-[var(--control-height-sm)] min-w-40 flex-1 rounded-sm border border-input bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
           />
+        </div>
+        <div className="flex flex-wrap gap-1.5 text-xs">
+          <FilterChip label="全部" active={!statusF} onClick={() => setStatusF(undefined)} />
+          <FilterChip label="正常" active={statusF === 'active'} onClick={() => setStatusF('active')} />
+          <FilterChip label="已禁用" active={statusF === 'disabled'} onClick={() => setStatusF('disabled')} />
+          <span className="mx-1 self-center text-muted-foreground">|</span>
+          <FilterChip label="管理员" active={roleF === 'admin'} onClick={() => setRoleF(roleF === 'admin' ? undefined : 'admin')} />
+          <FilterChip label="普通用户" active={roleF === 'user'} onClick={() => setRoleF(roleF === 'user' ? undefined : 'user')} />
         </div>
       </div>
 
-      {/* Desktop table */}
-      <div className="hidden md:block">
-        <Card>
+      {/* 表格 */}
+      <div className="rounded-md border border-border bg-card">
+        <div className="overflow-x-auto">
           <Table>
             <TableHeader>
-              <TableRow>
-                <TableHead>邮箱</TableHead>
-                <TableHead>角色</TableHead>
-                <TableHead>状态</TableHead>
-                <TableHead>注册时间</TableHead>
-                <TableHead>操作</TableHead>
+              <TableRow className="bg-muted/30">
+                <TableHead className="text-xs">邮箱</TableHead>
+                <TableHead className="text-xs">角色</TableHead>
+                <TableHead className="text-xs">状态</TableHead>
+                <TableHead className="text-xs">注册时间</TableHead>
+                <TableHead className="text-xs">操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {users.map((user) => (
+              {filtered.map((user) => (
                 <TableRow key={user.id}>
                   <TableCell>
-                    <Link
-                      href={`/admin/users/${user.id}`}
-                      className="text-sm font-medium hover:underline"
-                    >
+                    <Link href={`/admin/users/${user.id}`} className="text-sm font-medium hover:underline">
                       {user.email}
                     </Link>
                   </TableCell>
                   <TableCell>
-                    <Badge variant={user.role === 'admin' ? 'default' : 'secondary'}>
+                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${user.role === 'admin' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>
                       {user.role === 'admin' ? '管理员' : '用户'}
-                    </Badge>
+                    </span>
                   </TableCell>
                   <TableCell>
-                    <Badge variant={user.status === 'active' ? 'success' : 'destructive'}>
+                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${user.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
                       {user.status === 'active' ? '正常' : '已禁用'}
-                    </Badge>
+                    </span>
                   </TableCell>
                   <TableCell className="text-xs text-muted-foreground">
                     {formatTime(user.createdAt)}
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-1">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleToggleStatus(user)}
-                      >
+                      <Button variant="ghost" size="sm" onClick={() => handleToggleStatus(user)}>
                         {user.status === 'active' ? '禁用' : '启用'}
                       </Button>
                       <Button
@@ -163,98 +158,42 @@ export default function AdminUsersPage() {
                   </TableCell>
                 </TableRow>
               ))}
-              {users.length === 0 && (
+              {filtered.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
+                  <TableCell colSpan={5} className="py-8 text-center text-sm text-muted-foreground">
                     暂无用户数据
                   </TableCell>
                 </TableRow>
               )}
             </TableBody>
           </Table>
-        </Card>
-      </div>
-
-      {/* Mobile card list */}
-      <div className="md:hidden space-y-3">
-        {users.map((user) => (
-          <Card key={user.id}>
-            <CardContent className="p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <Link
-                  href={`/admin/users/${user.id}`}
-                  className="font-medium text-sm hover:underline"
-                >
-                  {user.email}
-                </Link>
-                <Badge variant={user.status === 'active' ? 'success' : 'destructive'}>
-                  {user.status === 'active' ? '正常' : '已禁用'}
-                </Badge>
-              </div>
-              <div className="flex items-center gap-2">
-                <Badge variant={user.role === 'admin' ? 'default' : 'secondary'}>
-                  {user.role === 'admin' ? '管理员' : '用户'}
-                </Badge>
-                <span className="text-xs text-muted-foreground">
-                  {formatTime(user.createdAt)}
-                </span>
-              </div>
-              <div className="flex items-center gap-1">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => handleToggleStatus(user)}
-                >
-                  {user.status === 'active' ? '禁用' : '启用'}
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => handleToggleRole(user)}
-                  disabled={updateMutation.isPending}
-                >
-                  {user.role === 'admin' ? '取消管理员' : '设为管理员'}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-        {users.length === 0 && (
-          <p className="text-center text-muted-foreground py-8 text-sm">暂无用户数据</p>
-        )}
-      </div>
-
-      {/* Pagination */}
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">
-          共 {total} 条
-        </p>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-            disabled={page <= 1}
-          >
-            <ChevronLeft className="h-4 w-4" />
-            上一页
-          </Button>
-          <span className="text-sm">
-            第 {page} / {totalPages} 页
-          </span>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            disabled={page >= totalPages}
-          >
-            下一页
-            <ChevronRight className="h-4 w-4" />
-          </Button>
         </div>
       </div>
 
-      {/* Confirm dialog */}
+      {/* 分页 */}
+      <div className="flex items-center justify-between gap-4 px-1 py-1 text-sm">
+        <p className="text-xs text-muted-foreground">共 {total} 条</p>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            disabled={page <= 1}
+            className="rounded-sm border border-border p-1.5 text-muted-foreground hover:bg-accent disabled:opacity-40 disabled:hover:bg-transparent"
+            aria-label="上一页"
+          >
+            <ChevronLeft className="size-3.5" />
+          </button>
+          <span className="px-2 text-xs tabular-nums">{page} / {totalPages}</span>
+          <button
+            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            disabled={page >= totalPages}
+            className="rounded-sm border border-border p-1.5 text-muted-foreground hover:bg-accent disabled:opacity-40 disabled:hover:bg-transparent"
+            aria-label="下一页"
+          >
+            <ChevronRight className="size-3.5" />
+          </button>
+        </div>
+      </div>
+
       <ConfirmDialog
         open={confirm.open}
         onOpenChange={(open) => setConfirm((c) => ({ ...c, open }))}

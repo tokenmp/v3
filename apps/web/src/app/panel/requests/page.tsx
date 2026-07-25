@@ -3,23 +3,12 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { userApi } from '@/lib/api/user';
-import { Card, CardContent } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
+  Table, TableHeader, TableRow, TableHead, TableBody, TableCell,
 } from '@/components/ui/table';
+import { FilterChip } from '@/components/filter-chip';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import type { RequestLog } from '@/types';
-
-function statusVariant(status: string) {
-  return status === 'success' ? ('success' as const) : ('destructive' as const);
-}
 
 function formatTime(iso: string) {
   return new Date(iso).toLocaleString('zh-CN');
@@ -27,110 +16,111 @@ function formatTime(iso: string) {
 
 export default function RequestsPage() {
   const [page, setPage] = useState(1);
-  const pageSize = 10;
+  const [search, setSearch] = useState('');
+  const [statusF, setStatusF] = useState<string | undefined>(undefined);
 
   const { data } = useQuery({
-    queryKey: ['requests', page, pageSize],
-    queryFn: () => userApi.getRequests(page, pageSize),
+    queryKey: ['requests', page],
+    queryFn: () => userApi.getRequests(page, 10),
   });
 
   const items = data?.items ?? [];
   const total = data?.total ?? 0;
-  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const totalPages = Math.max(1, Math.ceil(total / 10));
+
+  const filtered = items.filter((r) => {
+    if (statusF && r.status !== statusF) return false;
+    if (search) {
+      const q = search.toLowerCase();
+      if (!r.model?.toLowerCase().includes(q) && !r.requestId?.toLowerCase().includes(q)) return false;
+    }
+    return true;
+  });
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
+      <h1 className="text-lg font-semibold">请求日志</h1>
 
-      {/* Desktop table */}
-      <div className="hidden md:block">
-        <Card>
+      {/* 工具栏：搜索框左 + 筛选 chip 右 */}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-1 items-center gap-2">
+          <input
+            type="text"
+            placeholder="搜索模型 / Request ID"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="h-[var(--control-height-sm)] min-w-48 flex-1 rounded-sm border border-input bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          />
+        </div>
+        <div className="flex flex-wrap gap-1.5 text-xs">
+          <FilterChip label="全部" active={!statusF} onClick={() => setStatusF(undefined)} />
+          <FilterChip label="成功" active={statusF === 'success'} onClick={() => setStatusF('success')} />
+          <FilterChip label="失败" active={statusF === 'failed'} onClick={() => setStatusF('failed')} />
+        </div>
+      </div>
+
+      {/* 表格 */}
+      <div className="rounded-md border border-border bg-card">
+        <div className="overflow-x-auto">
           <Table>
             <TableHeader>
-              <TableRow>
-                <TableHead>时间</TableHead>
-                <TableHead>模型</TableHead>
-                <TableHead>状态</TableHead>
-                <TableHead>耗时</TableHead>
-                <TableHead>输入 Token</TableHead>
-                <TableHead>输出 Token</TableHead>
+              <TableRow className="bg-muted/30">
+                <TableHead className="text-xs">时间</TableHead>
+                <TableHead className="text-xs">模型</TableHead>
+                <TableHead className="text-xs">状态</TableHead>
+                <TableHead className="text-xs">耗时</TableHead>
+                <TableHead className="text-xs">输入 Token</TableHead>
+                <TableHead className="text-xs">输出 Token</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {items.map((r: RequestLog) => (
+              {filtered.map((r: RequestLog) => (
                 <TableRow key={r.requestId}>
-                  <TableCell className="text-xs text-muted-foreground">
-                    {formatTime(r.createdAt)}
-                  </TableCell>
+                  <TableCell className="text-xs text-muted-foreground">{formatTime(r.createdAt)}</TableCell>
                   <TableCell className="text-sm">{r.model}</TableCell>
                   <TableCell>
-                    <Badge variant={statusVariant(r.status)}>{r.status === 'success' ? '成功' : '失败'}</Badge>
+                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${r.status === 'success' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                      {r.status === 'success' ? '成功' : '失败'}
+                    </span>
                   </TableCell>
                   <TableCell className="text-sm">{r.durationMs ?? '—'}ms</TableCell>
                   <TableCell className="text-sm">{(r.inputTokens ?? 0).toLocaleString()}</TableCell>
                   <TableCell className="text-sm">{(r.outputTokens ?? 0).toLocaleString()}</TableCell>
                 </TableRow>
               ))}
-              {items.length === 0 && (
+              {filtered.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                  <TableCell colSpan={6} className="py-8 text-center text-sm text-muted-foreground">
                     暂无请求记录
                   </TableCell>
                 </TableRow>
               )}
             </TableBody>
           </Table>
-        </Card>
+        </div>
       </div>
 
-      {/* Mobile card list */}
-      <div className="md:hidden space-y-3">
-        {items.map((r: RequestLog) => (
-          <Card key={r.requestId}>
-            <CardContent className="p-4 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="font-medium text-sm">{r.model}</span>
-                <Badge variant={statusVariant(r.status)}>{r.status === 'success' ? '成功' : '失败'}</Badge>
-              </div>
-              <div className="text-xs text-muted-foreground space-y-0.5">
-                <p>时间：{formatTime(r.createdAt)}</p>
-                <p>耗时：{r.durationMs ?? '—'}ms</p>
-                <p>Token：{r.inputTokens ?? '—'} / {r.outputTokens ?? '—'}</p>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-        {items.length === 0 && (
-          <p className="text-center text-muted-foreground py-8 text-sm">暂无请求记录</p>
-        )}
-      </div>
-
-      {/* Pagination */}
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">
-          共 {total} 条
-        </p>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
+      {/* 分页 */}
+      <div className="flex items-center justify-between gap-4 px-1 py-1 text-sm">
+        <p className="text-xs text-muted-foreground">共 {total} 条</p>
+        <div className="flex items-center gap-1">
+          <button
             onClick={() => setPage((p) => Math.max(1, p - 1))}
             disabled={page <= 1}
+            className="rounded-sm border border-border p-1.5 text-muted-foreground hover:bg-accent disabled:opacity-40 disabled:hover:bg-transparent"
+            aria-label="上一页"
           >
-            <ChevronLeft className="h-4 w-4" />
-            上一页
-          </Button>
-          <span className="text-sm">
-            第 {page} / {totalPages} 页
-          </span>
-          <Button
-            variant="outline"
-            size="sm"
+            <ChevronLeft className="size-3.5" />
+          </button>
+          <span className="px-2 text-xs tabular-nums">{page} / {totalPages}</span>
+          <button
             onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
             disabled={page >= totalPages}
+            className="rounded-sm border border-border p-1.5 text-muted-foreground hover:bg-accent disabled:opacity-40 disabled:hover:bg-transparent"
+            aria-label="下一页"
           >
-            下一页
-            <ChevronRight className="h-4 w-4" />
-          </Button>
+            <ChevronRight className="size-3.5" />
+          </button>
         </div>
       </div>
     </div>
