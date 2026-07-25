@@ -13,13 +13,11 @@ import type {
   AdminUserDetail,
   AdminUserListResponse,
 } from '@/types/admin';
-import { request, API_BASE } from './core';
+import { request, API_BASE, NOTICE_BASE } from './core';
 
 const useMock = process.env.NEXT_PUBLIC_USE_MOCK_ADMIN !== '0';
 // Sub-services that have real Edge admin endpoints implemented. These always
 // call the real API regardless of the global useMock flag.
-const useRealAdminLogs = process.env.NEXT_PUBLIC_ADMIN_REAL_LOGS === '1';
-const useRealAdminBilling = process.env.NEXT_PUBLIC_ADMIN_REAL_BILLING === '1';
 const ADMIN_BASE = process.env.NEXT_PUBLIC_BIZ_API_BASE ?? API_BASE;
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -121,24 +119,33 @@ async function realListUsers(
 ): Promise<AdminUserListResponse> {
   const qs = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
   if (search) qs.set('search', search);
-  return request<AdminUserListResponse>(`/api/v1/admin/users?${qs}`, { baseUrl: ADMIN_BASE });
+  const r = await request<{ users: RawAdminUser[]; total: number; page: number; pageSize: number }>(`/api/v1/admin/users?${qs}`, { baseUrl: ADMIN_BASE });
+  return { users: (r.users ?? []).map(mapAdminUser), total: r.total, page: r.page, pageSize: r.pageSize };
 }
 
 async function realGetUser(id: string): Promise<AdminUserDetail> {
-  return request<AdminUserDetail>(`/api/v1/admin/users/${id}`, { baseUrl: ADMIN_BASE });
+  const r = await request<RawAdminUser>(`/api/v1/admin/users/${id}`, { baseUrl: ADMIN_BASE });
+  // Backend returns a plain AdminUser (no aggregation yet); fill defaults.
+  return {
+    ...mapAdminUser(r),
+    apiKeys: [],
+    userPlans: [],
+    recentRequests: [],
+    totalRequests: 0,
+  };
 }
 
 async function realUpdateUser(id: string, input: { status?: string; role?: string }): Promise<AdminUser> {
-  const r = await request<{ user: AdminUser }>(`/api/v1/admin/users/${id}`, {
+  const r = await request<RawAdminUser>(`/api/v1/admin/users/${id}`, {
     method: 'PATCH', body: input, baseUrl: ADMIN_BASE,
   });
-  return r.user;
+  return mapAdminUser(r);
 }
 
 async function realListKeys(page = 1, pageSize = 20): Promise<{ keys: AdminApiKey[]; total: number }> {
   const qs = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
-  const r = await request<{ keys: AdminApiKey[]; total: number }>(`/api/v1/admin/keys?${qs}`, { baseUrl: ADMIN_BASE });
-  return { keys: r.keys, total: r.total };
+  const r = await request<{ keys: RawAdminApiKey[]; total: number }>(`/api/v1/admin/keys?${qs}`, { baseUrl: ADMIN_BASE });
+  return { keys: (r.keys ?? []).map(mapAdminApiKey), total: r.total };
 }
 
 interface RawLogList {
@@ -262,7 +269,7 @@ export const adminApi = {
 
   // ---- Request logs (global) ----
   listRequestLogs: async (page = 1, pageSize = 20): Promise<AdminRequestLogListResponse> => {
-    if (useMock && !useRealAdminLogs) {
+    if (useMock) {
       await delay(300);
       const total = allMockLogs.length;
       const start = (page - 1) * pageSize;
@@ -271,7 +278,7 @@ export const adminApi = {
     return realListLogs(page, pageSize);
   },
   getRequestLog: async (id: string): Promise<AdminRequestLog> => {
-    if (useMock && !useRealAdminLogs) {
+    if (useMock) {
       await delay(200);
       return allMockLogs.find((l) => l.requestId === id) ?? allMockLogs[0]!;
     }
@@ -317,7 +324,8 @@ function genId(prefix: string) {
 export const adminAnnouncementApi = {
   list: async (): Promise<AdminAnnouncement[]> => {
     if (useMock) { await delay(260); return [...mockAnnouncements].sort((a, b) => (b.publishedAt ?? '').localeCompare(a.publishedAt ?? '')); }
-    return request<AdminAnnouncement[]>('/api/v1/admin/announcements', { baseUrl: ADMIN_BASE });
+    const r = await request<{ items: RawAnnouncement[]; total: number }>('/api/v1/admin/announcements', { baseUrl: NOTICE_BASE });
+    return (r.items ?? []).map(mapAnnouncement);
   },
   create: async (input: AdminAnnouncementInput): Promise<AdminAnnouncement> => {
     if (useMock) {
@@ -327,8 +335,8 @@ export const adminAnnouncementApi = {
       mockAnnouncements.unshift(item);
       return item;
     }
-    const r = await request<{ announcement: AdminAnnouncement }>('/api/v1/admin/announcements', { method: 'POST', body: input, baseUrl: ADMIN_BASE });
-    return r.announcement;
+    const r = await request<RawAnnouncement>('/api/v1/admin/announcements', { method: 'POST', body: input, baseUrl: NOTICE_BASE });
+    return mapAnnouncement(r);
   },
   update: async (id: string, input: AdminAnnouncementInput): Promise<AdminAnnouncement> => {
     if (useMock) {
@@ -338,12 +346,12 @@ export const adminAnnouncementApi = {
       Object.assign(a, input, { updatedAt: new Date().toISOString() });
       return a;
     }
-    const r = await request<{ announcement: AdminAnnouncement }>(`/api/v1/admin/announcements/${id}`, { method: 'PATCH', body: input, baseUrl: ADMIN_BASE });
-    return r.announcement;
+    await request<{ id: string }>(`/api/v1/admin/announcements/${id}`, { method: 'PATCH', body: input, baseUrl: NOTICE_BASE });
+    return { id, ...input, createdAt: '', updatedAt: '' };
   },
   delete: async (id: string): Promise<void> => {
     if (useMock) { await delay(300); const i = mockAnnouncements.findIndex((x) => x.id === id); if (i >= 0) mockAnnouncements.splice(i, 1); return; }
-    await request<void>(`/api/v1/admin/announcements/${id}`, { method: 'DELETE', noContent: true, baseUrl: ADMIN_BASE });
+    await request<void>(`/api/v1/admin/announcements/${id}`, { method: 'DELETE', noContent: true, baseUrl: NOTICE_BASE });
   },
 };
 
@@ -351,7 +359,8 @@ export const adminAnnouncementApi = {
 export const adminChangelogApi = {
   list: async (): Promise<AdminChangelog[]> => {
     if (useMock) { await delay(260); return [...mockChangelogs].sort((a, b) => (b.publishedAt ?? '').localeCompare(a.publishedAt ?? '')); }
-    return request<AdminChangelog[]>('/api/v1/admin/changelogs', { baseUrl: ADMIN_BASE });
+    const r = await request<{ items: RawChangelog[]; total: number }>('/api/v1/admin/changelogs', { baseUrl: NOTICE_BASE });
+    return (r.items ?? []).map(mapChangelog);
   },
   create: async (input: AdminChangelogInput): Promise<AdminChangelog> => {
     if (useMock) {
@@ -361,8 +370,8 @@ export const adminChangelogApi = {
       mockChangelogs.unshift(item);
       return item;
     }
-    const r = await request<{ changelog: AdminChangelog }>('/api/v1/admin/changelogs', { method: 'POST', body: input, baseUrl: ADMIN_BASE });
-    return r.changelog;
+    const r = await request<RawChangelog>('/api/v1/admin/changelogs', { method: 'POST', body: input, baseUrl: NOTICE_BASE });
+    return mapChangelog(r);
   },
   update: async (id: string, input: AdminChangelogInput): Promise<AdminChangelog> => {
     if (useMock) {
@@ -372,12 +381,12 @@ export const adminChangelogApi = {
       Object.assign(c, input, { updatedAt: new Date().toISOString() });
       return c;
     }
-    const r = await request<{ changelog: AdminChangelog }>(`/api/v1/admin/changelogs/${id}`, { method: 'PATCH', body: input, baseUrl: ADMIN_BASE });
-    return r.changelog;
+    await request<{ id: string }>(`/api/v1/admin/changelogs/${id}`, { method: 'PATCH', body: input, baseUrl: NOTICE_BASE });
+    return { id, ...input, publishedAt: null, createdAt: '', updatedAt: '' };
   },
   delete: async (id: string): Promise<void> => {
     if (useMock) { await delay(300); const i = mockChangelogs.findIndex((x) => x.id === id); if (i >= 0) mockChangelogs.splice(i, 1); return; }
-    await request<void>(`/api/v1/admin/changelogs/${id}`, { method: 'DELETE', noContent: true, baseUrl: ADMIN_BASE });
+    await request<void>(`/api/v1/admin/changelogs/${id}`, { method: 'DELETE', noContent: true, baseUrl: NOTICE_BASE });
   },
 };
 
@@ -385,7 +394,8 @@ export const adminChangelogApi = {
 export const adminNotificationApi = {
   list: async (): Promise<AdminNotification[]> => {
     if (useMock) { await delay(260); return [...mockNotifications].sort((a, b) => b.createdAt.localeCompare(a.createdAt)); }
-    return request<AdminNotification[]>('/api/v1/admin/notifications', { baseUrl: ADMIN_BASE });
+    const r = await request<{ items: RawNotification[]; total: number }>('/api/v1/admin/notifications', { baseUrl: NOTICE_BASE });
+    return (r.items ?? []).map(mapNotification);
   },
   send: async (input: AdminNotificationInput): Promise<AdminNotification> => {
     if (useMock) {
@@ -400,12 +410,12 @@ export const adminNotificationApi = {
       mockNotifications.unshift(item);
       return item;
     }
-    const r = await request<{ notification: AdminNotification }>('/api/v1/admin/notifications/send', { method: 'POST', body: input, baseUrl: ADMIN_BASE });
-    return r.notification;
+    const r = await request<RawNotification>('/api/v1/admin/notifications/send', { method: 'POST', body: input, baseUrl: NOTICE_BASE });
+    return mapNotification(r);
   },
   delete: async (id: string): Promise<void> => {
     if (useMock) { await delay(300); const i = mockNotifications.findIndex((x) => x.id === id); if (i >= 0) mockNotifications.splice(i, 1); return; }
-    await request<void>(`/api/v1/admin/notifications/${id}`, { method: 'DELETE', noContent: true, baseUrl: ADMIN_BASE });
+    await request<void>(`/api/v1/admin/notifications/${id}`, { method: 'DELETE', noContent: true, baseUrl: NOTICE_BASE });
   },
 };
 
@@ -433,7 +443,7 @@ const allModels = ['gpt-4o', 'gpt-4o-mini', 'claude-3-5-sonnet', 'deepseek-chat'
 // Plans
 export const adminPlanApi = {
   list: async (): Promise<AdminPlan[]> => {
-    if (useMock && !useRealAdminBilling) { await delay(260); return [...mockPlans]; }
+    if (useMock) { await delay(260); return [...mockPlans]; }
     const r = await request<{ plans: RawPlan[] }>(`/api/v1/admin/plans`, { baseUrl: ADMIN_BASE });
     return (r.plans ?? []).map(mapPlan);
   },
@@ -465,14 +475,19 @@ export const adminPlanApi = {
   },
   listModels: async (): Promise<string[]> => {
     if (useMock) { await delay(100); return allModels; }
-    return request<string[]>('/api/v1/admin/models/catalog', { baseUrl: ADMIN_BASE });
+    try {
+      return await request<string[]>('/api/v1/admin/models/catalog', { baseUrl: ADMIN_BASE });
+    } catch {
+      // endpoint not implemented yet; fall back to mock catalog
+      return allModels;
+    }
   },
 };
 
 // User plans
 export const adminUserPlanApi = {
   list: async (): Promise<AdminUserPlan[]> => {
-    if (useMock && !useRealAdminBilling) { await delay(260); return [...mockUserPlans]; }
+    if (useMock) { await delay(260); return [...mockUserPlans]; }
     const r = await request<{ plans: RawUserPlanWrap[] }>(`/api/v1/admin/user-plans`, { baseUrl: ADMIN_BASE });
     return (r.plans ?? []).map(mapUserPlan);
   },
@@ -602,5 +617,113 @@ function mapUserPlan(r: RawUserPlan): AdminUserPlan {
     activatedAt: r.activated_at,
     expiresAt: r.expires_at,
     remainingQuota: '0',
+  };
+}
+
+// ---- Auth wire (snake_case) mappers ----
+
+interface RawAdminUser {
+  id: string;
+  email: string;
+  role: string;
+  status: string;
+  created_at: string;
+}
+
+interface RawAdminApiKey {
+  id: string;
+  user_id: string;
+  name: string;
+  key_prefix: string;
+  key_suffix: string;
+  status: string;
+  last_used_at: string | null;
+  expires_at: string | null;
+  created_at: string;
+}
+
+function mapAdminUser(r: RawAdminUser): AdminUser {
+  return {
+    id: r.id,
+    email: r.email,
+    role: r.role as AdminUser['role'],
+    status: r.status as AdminUser['status'],
+    createdAt: r.created_at,
+  };
+}
+
+function mapAdminApiKey(r: RawAdminApiKey): AdminApiKey {
+  return {
+    id: r.id,
+    userEmail: r.user_id, // auth returns user_id; email join not available
+    name: r.name,
+    keyPrefix: r.key_prefix,
+    keySuffix: r.key_suffix,
+    status: r.status as AdminApiKey['status'],
+    lastUsedAt: r.last_used_at,
+    expiresAt: r.expires_at,
+    createdAt: r.created_at,
+  };
+}
+
+// ---- Notice wire (snake_case) mappers ----
+
+interface RawAnnouncement {
+  id: string;
+  title: string;
+  summary: string;
+  body: string;
+  severity: string;
+  published_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface RawChangelog {
+  id: string;
+  version: string;
+  title: string;
+  body: string;
+  published_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface RawNotification {
+  id: string;
+  user_id?: string;
+  userId?: string;
+  type: string;
+  title: string;
+  body: string;
+  action: { type: string; label: string; href?: string } | null;
+  read_at?: string | null;
+  readAt?: string | null;
+  created_at: string;
+}
+
+function mapAnnouncement(r: RawAnnouncement): AdminAnnouncement {
+  return {
+    id: r.id, title: r.title, summary: r.summary, body: r.body,
+    severity: r.severity as AdminAnnouncement['severity'],
+    publishedAt: r.published_at, createdAt: r.created_at, updatedAt: r.updated_at,
+  };
+}
+
+function mapChangelog(r: RawChangelog): AdminChangelog {
+  return {
+    id: r.id, version: r.version, title: r.title, body: r.body,
+    publishedAt: r.published_at, createdAt: r.created_at, updatedAt: r.updated_at,
+  };
+}
+
+function mapNotification(r: RawNotification): AdminNotification {
+  return {
+    id: r.id,
+    userId: r.user_id ?? r.userId ?? '',
+    type: r.type, title: r.title, body: r.body,
+    action: r.action,
+    readAt: r.read_at ?? r.readAt ?? null,
+    createdAt: r.created_at,
   };
 }
