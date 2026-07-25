@@ -354,66 +354,78 @@ function CredentialFormModal({
         />
       }
     >
-      <FormSection cols={2}>
-        <Field label="账号 ID" required hint="唯一标识，创建后不可改" colSpan={2}>
-          <TextField
-            value={draft.id}
-            onChange={(v) => patch({ id: v })}
-            placeholder="deepseek-default"
-            disabled={isEdit}
-            className="font-mono"
-          />
-        </Field>
-        <Field label="Provider" required hint={isEdit ? '所属 Provider，不可修改' : undefined}>
-          <SelectField
-            value={draft.providerId}
-            onChange={(v) => patch({ providerId: v })}
-            options={providerOptions}
-            placeholder="请选择 Provider"
-            disabled={isEdit}
-          />
-        </Field>
-        <Field
-          label="API Key"
-          required={!isEdit}
-          hint={isEdit ? '留空=保持原密钥不变' : '明文存储，前缀/后缀自动派生'}
-        >
-          <TextField
-            value={draft.apiKey}
-            onChange={(v) => patch({ apiKey: v })}
-            type="password"
-            placeholder="sk-…"
-          />
-        </Field>
-        <Field label="优先级" hint="数字越小优先级越高，默认 0">
-          <NumberField value={draft.priority} onChange={(v) => patch({ priority: v })} />
-        </Field>
-        <Field label="最大并发" hint="留空=不限">
-          <NumberField
-            value={draft.maxConcurrency}
-            onChange={(v) => patch({ maxConcurrency: v })}
-            min={1}
-            step={1}
-            placeholder="不限"
-          />
-        </Field>
-        <Field label="每日配额" hint="留空=不限">
-          <NumberField
-            value={draft.dailyQuota}
-            onChange={(v) => patch({ dailyQuota: v })}
-            min={0}
-            step={1}
-            placeholder="不限"
-          />
-        </Field>
-        <Field label="状态" hint="启用或停用此账号">
-          <SwitchField
-            checked={draft.status === 'active'}
-            onChange={(v) => patch({ status: v ? 'active' : 'disabled' })}
-            label={draft.status === 'active' ? '启用' : '停用'}
-          />
-        </Field>
-      </FormSection>
+      <div className="space-y-5">
+        {/* 基本信息 */}
+        <FormSection title="基本信息" cols={2}>
+          <Field label="账号 ID" required hint="唯一标识，创建后不可改">
+            <TextField
+              value={draft.id}
+              onChange={(v) => patch({ id: v })}
+              placeholder="deepseek-default"
+              disabled={isEdit}
+              className="font-mono"
+            />
+          </Field>
+          <Field label="Provider" required hint={isEdit ? '不可修改' : undefined}>
+            <SelectField
+              value={draft.providerId}
+              onChange={(v) => patch({ providerId: v })}
+              options={providerOptions}
+              placeholder="请选择 Provider"
+              disabled={isEdit}
+            />
+          </Field>
+          <Field
+            label="API Key"
+            required={!isEdit}
+            hint={isEdit ? '留空=保持原密钥不变' : '明文存储，前缀/后缀自动派生'}
+            colSpan={2}
+          >
+            <TextField
+              value={draft.apiKey}
+              onChange={(v) => patch({ apiKey: v })}
+              type="password"
+              placeholder="sk-…"
+            />
+          </Field>
+        </FormSection>
+
+        {/* 高级设置 */}
+        <FormSection title="高级设置" description="可选，按需配置调度参数" cols={3}>
+          <Field label="优先级" hint="越小越优先">
+            <NumberField value={draft.priority} onChange={(v) => patch({ priority: v })} />
+          </Field>
+          <Field label="最大并发" hint="留空=不限">
+            <NumberField
+              value={draft.maxConcurrency}
+              onChange={(v) => patch({ maxConcurrency: v })}
+              min={1}
+              step={1}
+              placeholder="不限"
+            />
+          </Field>
+          <Field label="每日配额" hint="留空=不限">
+            <NumberField
+              value={draft.dailyQuota}
+              onChange={(v) => patch({ dailyQuota: v })}
+              min={0}
+              step={1}
+              placeholder="不限"
+            />
+          </Field>
+        </FormSection>
+
+        {/* 状态 */}
+        <FormSection title="状态" cols={1}>
+          <Field label="启用/停用">
+            <SwitchField
+              checked={draft.status === 'active'}
+              onChange={(v) => patch({ status: v ? 'active' : 'disabled' })}
+              label={draft.status === 'active' ? '启用' : '停用'}
+            />
+          </Field>
+        </FormSection>
+      </div>
     </Modal>
   );
 }

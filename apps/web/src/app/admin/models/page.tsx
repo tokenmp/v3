@@ -380,7 +380,7 @@ function ModelFormModal({
       }
     >
       <div className="space-y-5">
-        <FormSection cols={2}>
+        <FormSection title="基本信息" cols={2}>
           <Field label="模型 ID" required>
             <TextField
               value={id}
@@ -399,13 +399,11 @@ function ModelFormModal({
           </Field>
         </FormSection>
 
-        <FormSection cols={1}>
-          <Field label="能力标签">
-            <CapabilityEditor value={capabilities} onChange={setCapabilities} />
-          </Field>
+        <FormSection title="能力标签" cols={1} description="点击切换模型支持的能力">
+          <CapabilityEditor value={capabilities} onChange={setCapabilities} />
         </FormSection>
 
-        <FormSection cols={1}>
+        <FormSection title="思考能力" cols={1}>
           <Field label="Thinking 支持">
             <SwitchField
               checked={thinkingSupported}
