@@ -300,6 +300,10 @@ func (s *Server) handleAdminListCredentials(w http.ResponseWriter, r *http.Reque
 		httpresp.Error(w, httpresp.CodeInternalError, "internal error")
 		return
 	}
+	// Strip plaintext api_key from list responses.
+	for i := range items {
+		items[i].APIKey = nil
+	}
 	httpresp.OK(w, map[string]any{"items": items})
 }
 
@@ -309,14 +313,29 @@ func (s *Server) handleAdminCreateCredential(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	c.ProviderID = chi.URLParam(r, "id")
-	if c.ID == "" || c.CredentialRef == "" {
-		httpresp.Error(w, httpresp.CodeBadRequest, "id and credential ref required")
+	if c.ID == "" {
+		httpresp.Error(w, httpresp.CodeBadRequest, "id required")
 		return
+	}
+	// Plaintext API key is required; auto-derive prefix/suffix and credential_ref.
+	if c.APIKey == nil || *c.APIKey == "" {
+		httpresp.Error(w, httpresp.CodeBadRequest, "api_key required")
+		return
+	}
+	apiKey := *c.APIKey
+	prefix, suffix := deriveKeyParts(apiKey)
+	c.KeyPrefix = &prefix
+	c.KeySuffix = &suffix
+	if c.CredentialRef == "" {
+		ref := "vault://" + c.ProviderID + "/credential/" + c.ID
+		c.CredentialRef = ref
 	}
 	if err := s.adminWriter.CreateCredential(r.Context(), &c); err != nil {
 		writeAdminWriteErr(w, err)
 		return
 	}
+	// Do not return the plaintext api_key in the list response for safety.
+	c.APIKey = nil
 	httpresp.Created(w, c)
 }
 
@@ -486,4 +505,17 @@ func (s *Server) handleModelsCatalog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpresp.OK(w, ids)
+}
+
+// deriveKeyParts extracts a safe prefix (first 8 chars) and suffix (last 4 chars)
+// from a plaintext API key for display purposes.
+func deriveKeyParts(key string) (prefix, suffix string) {
+	if len(key) <= 12 {
+		// For short keys, show what we can without revealing the full key.
+		if len(key) > 8 {
+			return key[:8], key[len(key)-4:]
+		}
+		return key, ""
+	}
+	return key[:8], key[len(key)-4:]
 }

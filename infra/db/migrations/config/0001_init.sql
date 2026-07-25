@@ -83,7 +83,8 @@ COMMENT ON COLUMN upstream_endpoints.auth_kind IS 'bearer_header/api_key_header/
 CREATE TABLE upstream_credentials (
     id              text        PRIMARY KEY,
     provider_id     text        NOT NULL REFERENCES providers(id),
-    credential_ref  text        NOT NULL,
+    credential_ref  text,
+    api_key         text,
     key_prefix      text,
     key_suffix      text,
     priority        int         NOT NULL DEFAULT 0,
@@ -98,8 +99,9 @@ CREATE TABLE upstream_credentials (
 CREATE INDEX creds_provider_idx ON upstream_credentials (provider_id);
 CREATE INDEX creds_status_idx ON upstream_credentials (status);
 
-COMMENT ON TABLE upstream_credentials IS '上游凭据元数据，不存明文，只存 vault:// ref + 展示 prefix/suffix';
-COMMENT ON COLUMN upstream_credentials.credential_ref IS 'vault://provider/key (V3 CredentialRef，Secret Store 引用)';
+COMMENT ON TABLE upstream_credentials IS '上游凭据，明文存储 API key，自动派生 prefix/suffix';
+COMMENT ON COLUMN upstream_credentials.api_key IS '明文 API key（如 sk-xxx）';
+COMMENT ON COLUMN upstream_credentials.credential_ref IS '自动生成的 vault:// 引用（向后兼容 executor 编译器）';
 COMMENT ON COLUMN upstream_credentials.priority IS '候选优先级 (V3 CredentialConfig.Priority)';
 
 -- ============================================================================

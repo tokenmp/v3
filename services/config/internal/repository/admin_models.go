@@ -84,11 +84,12 @@ type UpstreamEndpoint struct {
 func (UpstreamEndpoint) TableName() string { return "upstream_endpoints" }
 
 // UpstreamCredential maps to the config.upstream_credentials table.
-// NOTE: credential_ref stores a vault:// ref, never the plaintext secret.
+// api_key stores the plaintext API key; credential_ref is auto-generated
 type UpstreamCredential struct {
 	ID             string    `gorm:"column:id;primaryKey" json:"id"`
 	ProviderID     string    `gorm:"column:provider_id" json:"provider_id"`
-	CredentialRef  string    `gorm:"column:credential_ref" json:"credential_ref"`
+	CredentialRef  string    `gorm:"column:credential_ref" json:"credential_ref,omitempty"`
+	APIKey         *string   `gorm:"column:api_key" json:"api_key,omitempty"`
 	KeyPrefix      *string   `gorm:"column:key_prefix" json:"key_prefix,omitempty"`
 	KeySuffix      *string   `gorm:"column:key_suffix" json:"key_suffix,omitempty"`
 	Priority       int       `gorm:"column:priority" json:"priority"`

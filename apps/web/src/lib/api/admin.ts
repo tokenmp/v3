@@ -593,9 +593,7 @@ export const adminConfigApi = {
   },
   createCredential: async (providerId: string, input: {
     id: string;
-    credentialRef: string;
-    keyPrefix?: string;
-    keySuffix?: string;
+    apiKey: string;
     priority?: number;
     maxConcurrency?: number | null;
     dailyQuota?: number | null;
@@ -605,9 +603,7 @@ export const adminConfigApi = {
       method: 'POST',
       body: {
         id: input.id,
-        credential_ref: input.credentialRef,
-        key_prefix: input.keyPrefix || null,
-        key_suffix: input.keySuffix || null,
+        api_key: input.apiKey,
         priority: input.priority ?? 0,
         max_concurrency: input.maxConcurrency ?? null,
         daily_quota: input.dailyQuota ?? null,
@@ -618,9 +614,7 @@ export const adminConfigApi = {
   },
   updateCredential: async (id: string, input: Partial<AdminUpstreamCredential>): Promise<void> => {
     const fields: Record<string, unknown> = {};
-    if (input.credentialRef !== undefined) fields.credential_ref = input.credentialRef;
-    if (input.keyPrefix !== undefined) fields.key_prefix = input.keyPrefix;
-    if (input.keySuffix !== undefined) fields.key_suffix = input.keySuffix;
+    if (input.apiKey !== undefined && input.apiKey !== '') fields.api_key = input.apiKey;
     if (input.priority !== undefined) fields.priority = input.priority;
     if (input.maxConcurrency !== undefined) fields.max_concurrency = input.maxConcurrency;
     if (input.dailyQuota !== undefined) fields.daily_quota = input.dailyQuota;
