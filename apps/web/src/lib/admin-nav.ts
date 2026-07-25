@@ -12,6 +12,7 @@ import {
   Server,
   Box,
   Route as RouteIcon,
+  KeyRound,
   Settings,
   type LucideIcon,
 } from 'lucide-react';
@@ -60,6 +61,7 @@ export const adminNavGroups: AdminNavGroup[] = [
     label: '执行',
     items: [
       { label: 'Provider', href: '/admin/providers', icon: Server },
+      { label: '上游账号', href: '/admin/credentials', icon: KeyRound },
       { label: '模型配置', href: '/admin/models', icon: Box },
       { label: '路由配置', href: '/admin/routes', icon: RouteIcon },
     ],

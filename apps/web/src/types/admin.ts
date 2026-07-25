@@ -231,3 +231,35 @@ export interface AdminRouteConfig {
   enabled: boolean;
   quarantined: boolean;
 }
+
+// ---- Upstream credentials (上游账号) ----
+
+export interface AdminUpstreamCredential {
+  id: string;
+  providerId: string;
+  credentialRef: string; // vault://provider/credential/default
+  keyPrefix: string | null;
+  keySuffix: string | null;
+  priority: number;
+  maxConcurrency: number | null;
+  dailyQuota: number | null;
+  status: 'active' | 'disabled' | 'deleted';
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ---- Upstream endpoints (上游端点) ----
+
+export interface AdminUpstreamEndpoint {
+  id: number;
+  providerId: string;
+  path: string;
+  protocol: string;
+  authKind: 'bearer_header' | 'api_key_header' | 'api_key_query';
+  authHeader: string | null;
+  authQuery: string | null;
+  authPrefix: string | null;
+  status: 'active' | 'disabled' | 'deleted';
+  createdAt: string;
+  updatedAt: string;
+}
