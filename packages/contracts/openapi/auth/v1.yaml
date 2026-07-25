@@ -255,6 +255,66 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /api/v1/auth/verify-key:
+    post:
+      summary: Verify an API key
+      description: |
+        Verifies an opaque API key (`tmp_` prefix) and returns the owning
+        user identity. This is an internal service-to-service endpoint used
+        by the Edge/BFF to accept API-key authentication from clients.
+        No Bearer JWT is required; the API key is supplied in the request body.
+      operationId: authVerifyKey
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VerifyKeyRequest'
+      responses:
+        '200':
+          description: API key verified.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VerifiedIdentity'
+        '401':
+          description: Invalid, revoked, or disabled API key.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '400':
+          description: Invalid request body.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /api/v1/auth/refresh:
     post:
       summary: Rotate a refresh token
@@ -1315,6 +1375,32 @@ components:
         refresh_token:
           type: string
           description: Opaque base64url refresh token.
+    VerifyKeyRequest:
+      type: object
+      required: [api_key]
+      additionalProperties: false
+      properties:
+        api_key:
+          type: string
+          description: Opaque API key with `tmp_` prefix.
+    VerifiedIdentity:
+      type: object
+      required: [user_id, role, status]
+      additionalProperties: false
+      properties:
+        user_id:
+          type: string
+        email:
+          type: string
+        role:
+          type: string
+          enum: [user, admin]
+        status:
+          type: string
+          enum: [active, disabled]
+        key_id:
+          type: string
+          description: The verified API key ID.
     LogoutRequest:
       type: object
       required: [refresh_token]

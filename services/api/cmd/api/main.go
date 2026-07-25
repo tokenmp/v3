@@ -45,6 +45,14 @@ func run() error {
 		return fmt.Errorf("identity verifier: %w", err)
 	}
 
+	// When Auth URL is configured, the edge also accepts API keys (tmp_ prefix)
+	// by verifying them against Auth's /api/v1/auth/verify-key endpoint.
+	var apiKeyVerifier *identity.APIKeyVerifier
+	if cfg.AuthURL != "" {
+		apiKeyVerifier = identity.NewAPIKeyVerifier(cfg.AuthURL, logger)
+	}
+	compositeVerifier := identity.NewCompositeVerifier(verifier, apiKeyVerifier)
+
 	prx, err := proxy.New(cfg.ExecutorURL, cfg.ExecutorToken, logger)
 	if err != nil {
 		return fmt.Errorf("proxy: %w", err)
@@ -56,13 +64,20 @@ func run() error {
 		keysHandler = keys.NewHandler(keys.New(cfg.AuthURL), logger)
 	}
 
+	// Config URL 配置时启用 admin 配置 CRUD 代理。
+	var configClient *config.Client
+	if cfg.ConfigServiceURL != "" {
+		configClient = config.NewClient(cfg.ConfigServiceURL)
+	}
+
 	deps := app.Deps{
-		Verifier:    verifier,
+		Verifier:    compositeVerifier,
 		Proxy:       prx,
 		Quota:       quota.NewManager(cfg.BillingURL),
 		Logging:     logging.NewClient(cfg.LoggingURL),
 		Billing:     billing.NewClient(cfg.BillingURL),
 		AdminAuth:   admin.NewAuthClient(cfg.AuthURL),
+		ConfigCfg:   configClient,
 		Settings:    settings.NewStore(),
 		KeysHandler: keysHandler,
 		Logger:      logger,

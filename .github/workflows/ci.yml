@@ -123,6 +123,8 @@ jobs:
       LOGGING_REPO_TEST_DSN: postgres://tokenmp:tokenmp@localhost:5432/tokenmp_logging?sslmode=disable
       BILLING_DATABASE_URL: postgres://tokenmp:tokenmp@localhost:5432/tokenmp_billing?sslmode=disable
       BILLING_REPO_TEST_DSN: postgres://tokenmp:tokenmp@localhost:5432/tokenmp_billing?sslmode=disable
+      NOTICE_DATABASE_URL: postgres://tokenmp:tokenmp@localhost:5432/tokenmp_notice?sslmode=disable
+      NOTICE_REPO_TEST_DSN: postgres://tokenmp:tokenmp@localhost:5432/tokenmp_notice?sslmode=disable
     steps:
       - name: Checkout
         # actions/checkout v5
@@ -140,6 +142,7 @@ jobs:
             services/logging/go.sum
             services/billing/go.sum
             services/api/go.sum
+            services/notice/go.sum
 
       - name: Generated code freshness check (Auth)
         run: |
@@ -430,6 +433,52 @@ jobs:
 
       - name: go test -race (api)
         working-directory: services/api
+        run: go test -race ./...
+
+      # ------------------------------------------------------------------
+      # Notice service: gofmt / vet / build / unit test / migration
+      # cycle / repository integration test. Reuses this job's Postgres 17
+      # service via a separate tokenmp_notice database created below.
+      # ------------------------------------------------------------------
+      - name: Create tokenmp_notice database
+        env:
+          PGPASSWORD: tokenmp
+        run: |
+          psql -h localhost -U tokenmp -d postgres -c "CREATE DATABASE tokenmp_notice;" || true
+
+      - name: gofmt (notice)
+        working-directory: services/notice
+        run: |
+          out="$(gofmt -l .)"
+          if [ -n "$out" ]; then
+            echo "gofmt found unformatted files:" >&2
+            echo "$out" >&2
+            exit 1
+          fi
+
+      - name: go vet (notice)
+        working-directory: services/notice
+        run: go vet ./...
+
+      - name: go build (notice)
+        working-directory: services/notice
+        run: |
+          go build ./...
+          go build -o /tmp/notice-bin ./cmd/notice
+
+      - name: Notice migration cycle (up/down/up)
+        working-directory: services/notice
+        run: |
+          set -euo pipefail
+          migrate -path migrations -database "$NOTICE_DATABASE_URL" up
+          migrate -path migrations -database "$NOTICE_DATABASE_URL" down -all
+          migrate -path migrations -database "$NOTICE_DATABASE_URL" up
+
+      - name: go test -race (notice)
+        working-directory: services/notice
+        env:
+          NOTICE_DATABASE_URL: postgres://tokenmp:tokenmp@localhost:5432/tokenmp_notice?sslmode=disable
+          NOTICE_REPO_TEST_DSN: postgres://tokenmp:tokenmp@localhost:5432/tokenmp_notice?sslmode=disable
         run: go test -race ./...
 
       - name: Migration cycle (up/down/up)
