@@ -36,12 +36,13 @@ import (
 
 // Deps holds the runtime dependencies for the API Service.
 type Deps struct {
-	Verifier identity.Verifier
-	Proxy    *proxy.Proxy
-	Quota    quota.Manager
-	Logging  *logging.Client
-	Billing  *billing.Client
-	Settings *settings.Store
+	Verifier  identity.Verifier
+	Proxy     *proxy.Proxy
+	Quota     quota.Manager
+	Logging   *logging.Client
+	Billing   *billing.Client
+	AdminAuth *admin.AuthClient
+	Settings  *settings.Store
 	// KeysHandler 注册 /api/v1/keys* 路由（鉴权但不走配额）；nil 时不注册。
 	KeysHandler *keys.Handler
 	Logger      *slog.Logger
@@ -55,7 +56,7 @@ func NewServer(deps Deps, readHeaderTimeout, idleTimeout time.Duration) *http.Se
 		deps.Logger = slog.Default()
 	}
 	panelHandlers := panel.New(deps.Logging, deps.Billing, deps.Settings, deps.Logger)
-	adminHandlers := admin.New(deps.Logging, deps.Billing, deps.Logger)
+	adminHandlers := admin.New(deps.Logging, deps.Billing, deps.AdminAuth, deps.Logger)
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)

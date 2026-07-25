@@ -836,6 +836,326 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /api/v1/auth/admin/users:
+    get:
+      summary: List users (admin)
+      description: |
+        Requires a Bearer access token with role=admin. Returns a paginated
+        list of all users, optionally filtered by email substring search.
+        Password hashes are never returned.
+      operationId: authAdminListUsers
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: search
+          in: query
+          description: Optional email substring filter.
+          schema:
+            type: string
+            maxLength: 255
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: Paginated user list.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [users, total, page, pageSize]
+                additionalProperties: false
+                properties:
+                  users:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AdminUser'
+                  total:
+                    type: integer
+                  page:
+                    type: integer
+                  pageSize:
+                    type: integer
+        '401':
+          description: Missing, invalid, expired or revoked access token.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Authenticated but not an admin.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/auth/admin/users/{userId}:
+    get:
+      summary: Get user detail (admin)
+      description: |
+        Requires a Bearer access token with role=admin. Returns a single
+        user's profile. Password hashes are never returned.
+      operationId: authAdminGetUser
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/UserIdPath'
+      responses:
+        '200':
+          description: User detail.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminUser'
+        '401':
+          description: Missing, invalid, expired or revoked access token.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Authenticated but not an admin.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Resource not found.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    patch:
+      summary: Modify user (admin)
+      description: |
+        Requires a Bearer access token with role=admin. Modifies the
+        `role` and/or `status` of a user.
+      operationId: authAdminUpdateUser
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/UserIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminUpdateUserRequest'
+      responses:
+        '200':
+          description: Modified user.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminUser'
+        '400':
+          description: Invalid request body.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Missing, invalid, expired or revoked access token.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Authenticated but not an admin.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Resource not found.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/auth/admin/keys:
+    get:
+      summary: List all API keys (admin)
+      description: |
+        Requires a Bearer access token with role=admin. Returns all
+        non-revoked API keys across all users, newest first. Key secrets
+        are never returned; only `key_prefix` and `key_suffix` are exposed.
+      operationId: authAdminListKeys
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: Paginated key list.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [keys, total, page, pageSize]
+                additionalProperties: false
+                properties:
+                  keys:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AdminApiKey'
+                  total:
+                    type: integer
+                  page:
+                    type: integer
+                  pageSize:
+                    type: integer
+        '401':
+          description: Missing, invalid, expired or revoked access token.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Authenticated but not an admin.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 components:
   securitySchemes:
     bearerAuth:
@@ -854,6 +1174,59 @@ components:
       schema:
         type: string
         format: uuid
+    UserIdPath:
+      name: userId
+      in: path
+      required: true
+      description: UUID of the user.
+      schema:
+        type: string
+        format: uuid
+  responses:
+    Unauthorized:
+      description: Missing, invalid, expired or revoked access token.
+      headers:
+        Cache-Control:
+          $ref: '#/components/headers/CacheControlNoStore'
+        Content-Type:
+          $ref: '#/components/headers/ContentTypeJSON'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: Authenticated but lacking the required role.
+      headers:
+        Cache-Control:
+          $ref: '#/components/headers/CacheControlNoStore'
+        Content-Type:
+          $ref: '#/components/headers/ContentTypeJSON'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Resource not found.
+      headers:
+        Cache-Control:
+          $ref: '#/components/headers/CacheControlNoStore'
+        Content-Type:
+          $ref: '#/components/headers/ContentTypeJSON'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    InternalError:
+      description: Internal server error.
+      headers:
+        Cache-Control:
+          $ref: '#/components/headers/CacheControlNoStore'
+        Content-Type:
+          $ref: '#/components/headers/ContentTypeJSON'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
   headers:
     CacheControlNoStore:
       description: Responses are never cached by intermediaries.
@@ -1002,6 +1375,7 @@ components:
                 - bad_request
                 - unauthorized
                 - not_found
+                - forbidden
                 - internal_error
             message:
               type: string
@@ -1094,3 +1468,72 @@ components:
           type: string
           enum: [active, disabled]
           description: New lifecycle status.
+    AdminUser:
+      type: object
+      required: [id, email, role, status, created_at]
+      additionalProperties: false
+      description: |
+        Admin user view. Never includes password hash or internal metadata.
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        role:
+          type: string
+          enum: [user, admin]
+        status:
+          type: string
+          enum: [active, disabled]
+        created_at:
+          type: string
+          format: date-time
+    AdminApiKey:
+      type: object
+      required: [id, user_id, name, key_prefix, key_suffix, status, created_at]
+      additionalProperties: false
+      description: |
+        Admin API key view (cross-user). Includes `user_id` for ownership.
+        Key secrets are never returned.
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          maxLength: 128
+        key_prefix:
+          type: string
+        key_suffix:
+          type: string
+        status:
+          type: string
+          enum: [active, disabled]
+        last_used_at:
+          type: string
+          format: date-time
+          nullable: true
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+    AdminUpdateUserRequest:
+      type: object
+      additionalProperties: false
+      description: |
+        Modifiable user fields for admin. At least one field is required.
+      properties:
+        role:
+          type: string
+          enum: [user, admin]
+        status:
+          type: string
+          enum: [active, disabled]

@@ -175,6 +175,9 @@ type Reader interface {
 	// GetStats aggregates usage over the filter period for the filter user.
 	// byModel is ordered by requests desc then model asc for a stable chart.
 	GetStats(ctx context.Context, filter StatsFilter) (Stats, error)
+	// GetDashboardStats aggregates today's metrics, a N-day trend, today's
+	// per-model usage, and today's top users (cross-user, global).
+	GetDashboardStats(ctx context.Context, trendDays int) (DashboardStats, error)
 }
 
 // Stable classified errors. They do not wrap the driver error so DSN/SQL

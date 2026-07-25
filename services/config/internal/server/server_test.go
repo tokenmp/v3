@@ -26,7 +26,7 @@ func (f *fakeReader) LatestPublished(ctx context.Context) (repository.Snapshot, 
 }
 
 func newServer(r repository.Reader, p fakePinger) *Server {
-	return New(r, p, nil)
+	return New(r, nil, p, nil)
 }
 
 func TestServer_Healthz(t *testing.T) {

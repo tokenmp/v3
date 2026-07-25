@@ -28,17 +28,18 @@ import (
 // Server holds the shared dependencies for the config service HTTP handlers.
 type Server struct {
 	reader repository.Reader
+	writer repository.Writer
 	pinger database.Pinger
 	logger *slog.Logger
 }
 
-// New returns a Server wired with the given reader (snapshot source) and
-// pinger (DB readiness). logger must be non-nil.
-func New(reader repository.Reader, pinger database.Pinger, logger *slog.Logger) *Server {
+// New returns a Server wired with the given reader (snapshot source), writer
+// (draft/publish lifecycle) and pinger (DB readiness). logger must be non-nil.
+func New(reader repository.Reader, writer repository.Writer, pinger database.Pinger, logger *slog.Logger) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Server{reader: reader, pinger: pinger, logger: logger}
+	return &Server{reader: reader, writer: writer, pinger: pinger, logger: logger}
 }
 
 // Router returns the configured chi router.
@@ -50,6 +51,13 @@ func (s *Server) Router() http.Handler {
 	r.Get("/healthz", s.handleHealthz)
 	r.Get("/readyz", s.handleReadyz)
 	r.Get("/v1/config/snapshots/latest", s.handleLatestSnapshot)
+	// Write path (draft/publish)
+	r.Post("/v1/config/drafts", s.handleCreateDraft)
+	r.Get("/v1/config/drafts/{id}", s.handleGetDraft)
+	r.Patch("/v1/config/drafts/{id}", s.handleUpdateDraft)
+	r.Post("/v1/config/revisions/{id}/publish", s.handlePublishRevision)
+	r.Post("/v1/config/revisions/{id}/rollback", s.handleRollbackRevision)
+	r.Get("/v1/config/revisions", s.handleListRevisions)
 	return r
 }
 

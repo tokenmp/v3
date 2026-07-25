@@ -37,8 +37,8 @@ type Config struct {
 	// Service public key; it does not issue tokens. The PEM is parsed by the
 	// jwtverifier package at startup; the path is never echoed in errors.
 	JWTPublicKeyFile string
-	JWTIssuer         string
-	JWTAudience       string
+	JWTIssuer        string
+	JWTAudience      string
 }
 
 const (
@@ -58,8 +58,8 @@ const (
 
 // Sentinel validation errors. None embed the URL or credentials.
 var (
-	ErrMissingDatabaseURL = errors.New("NOTICE_DATABASE_URL is required")
-	ErrInvalidDatabaseURL = errors.New("NOTICE_DATABASE_URL is not a valid postgres URL")
+	ErrMissingDatabaseURL  = errors.New("NOTICE_DATABASE_URL is required")
+	ErrInvalidDatabaseURL  = errors.New("NOTICE_DATABASE_URL is not a valid postgres URL")
 	ErrMissingJWTPublicKey = errors.New("NOTICE_JWT_PUBLIC_KEY_FILE is required")
 )
 

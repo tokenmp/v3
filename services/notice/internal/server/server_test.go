@@ -33,19 +33,19 @@ func (f *fakeVerifier) Verify(raw string) (jwtverifier.Subject, error) {
 }
 
 type fakeStore struct {
-	announcements   []models.Announcement
-	announcementErr map[string]error
-	changelogs      []models.Changelog
-	changelogErr    map[string]error
-	notifications   []models.Notification
+	announcements    []models.Announcement
+	announcementErr  map[string]error
+	changelogs       []models.Changelog
+	changelogErr     map[string]error
+	notifications    []models.Notification
 	notificationsErr error
 	unreadCount      int
-	markReadErr     error
-	markAllReadErr  error
-	listLimit       int
-	listOffset      int
-	markedRead      []string
-	markedAll       bool
+	markReadErr      error
+	markAllReadErr   error
+	listLimit        int
+	listOffset       int
+	markedRead       []string
+	markedAll        bool
 }
 
 func (s *fakeStore) ListAnnouncements(ctx context.Context, limit, offset int) ([]models.Announcement, int, error) {
@@ -107,6 +107,32 @@ func (s *fakeStore) MarkAllRead(ctx context.Context, userID string) error {
 	s.markedAll = true
 	return nil
 }
+
+// Admin stubs for fakeStore.
+
+func (s *fakeStore) ListAllAnnouncements(_ context.Context, limit, offset int) ([]models.Announcement, int, error) {
+	return nil, 0, nil
+}
+func (s *fakeStore) CreateAnnouncement(_ context.Context, a *models.Announcement) error { return nil }
+func (s *fakeStore) UpdateAnnouncement(_ context.Context, id string, fields map[string]any) error {
+	return nil
+}
+func (s *fakeStore) DeleteAnnouncement(_ context.Context, id string) error  { return nil }
+func (s *fakeStore) PublishAnnouncement(_ context.Context, id string) error { return nil }
+func (s *fakeStore) ListAllChangelogs(_ context.Context, limit, offset int) ([]models.Changelog, int, error) {
+	return nil, 0, nil
+}
+func (s *fakeStore) CreateChangelog(_ context.Context, c *models.Changelog) error { return nil }
+func (s *fakeStore) UpdateChangelog(_ context.Context, id string, fields map[string]any) error {
+	return nil
+}
+func (s *fakeStore) DeleteChangelog(_ context.Context, id string) error  { return nil }
+func (s *fakeStore) PublishChangelog(_ context.Context, id string) error { return nil }
+func (s *fakeStore) ListAllNotifications(_ context.Context, limit, offset int) ([]models.Notification, int, error) {
+	return nil, 0, nil
+}
+func (s *fakeStore) CreateNotification(_ context.Context, n *models.Notification) error { return nil }
+func (s *fakeStore) DeleteNotification(_ context.Context, id string) error              { return nil }
 
 // repository.ErrNotFound is used directly by the fakes below.
 
@@ -342,5 +368,3 @@ func TestNoStoreOnAllResponses(t *testing.T) {
 		t.Errorf("404 Cache-Control = %q", rec.Header().Get("Cache-Control"))
 	}
 }
-
-

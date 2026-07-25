@@ -30,7 +30,7 @@ type classifiedError struct {
 
 func (e *classifiedError) Error() string { return e.sentinel.Error() }
 func (e *classifiedError) Unwrap() error { return e.sentinel }
-func (e *classifiedError) cause() error { return e.driver }
+func (e *classifiedError) cause() error  { return e.driver }
 
 // Repository is the notice service data-access layer.
 type Repository struct {

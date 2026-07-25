@@ -80,6 +80,10 @@ func (f *fakeRepo) GetStats(_ context.Context, filter repository.StatsFilter) (r
 	return f.stats, nil
 }
 
+func (f *fakeRepo) GetDashboardStats(_ context.Context, trendDays int) (repository.DashboardStats, error) {
+	return repository.DashboardStats{}, nil
+}
+
 func (f *fakeRepo) IngestBatch(ctx context.Context, batch repository.Batch) error {
 	f.ingestCall++
 	f.ingested = batch

@@ -89,11 +89,11 @@ func (f *fakeBalanceReader) GetBalance(_ context.Context, userID string) (reposi
 }
 
 func newServer(plans *fakePlanReader, userPlans *fakeUserPlanReader, quota *fakeQuotaManager, ledger *fakeLedgerReader, pinger fakePinger) *Server {
-	return New(plans, userPlans, quota, ledger, &fakeBalanceReader{}, pinger, nil)
+	return New(plans, userPlans, quota, ledger, &fakeBalanceReader{}, nil, pinger, nil)
 }
 
 func newServerWithBalance(plans *fakePlanReader, userPlans *fakeUserPlanReader, quota *fakeQuotaManager, ledger *fakeLedgerReader, balance *fakeBalanceReader, pinger fakePinger) *Server {
-	return New(plans, userPlans, quota, ledger, balance, pinger, nil)
+	return New(plans, userPlans, quota, ledger, balance, nil, pinger, nil)
 }
 
 func do(t *testing.T, s *Server, method, target string, body string) *httptest.ResponseRecorder {

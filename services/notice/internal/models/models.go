@@ -16,9 +16,9 @@ import (
 // notification is purely informational). The client renders the action purely
 // from its fields; no target is ever hardcoded by the application.
 type NotificationAction struct {
-	Type  string `json:"type"`            // e.g. "link"
-	Label string `json:"label"`           // human-readable label
-	Href  string `json:"href,omitempty"`  // client route, for "link"
+	Type  string `json:"type"`           // e.g. "link"
+	Label string `json:"label"`          // human-readable label
+	Href  string `json:"href,omitempty"` // client route, for "link"
 }
 
 // NotificationActionPtr wraps *NotificationAction so GORM can scan a nullable
@@ -95,15 +95,15 @@ func (Changelog) TableName() string { return "changelogs" }
 
 // Notification mirrors the notifications table.
 type Notification struct {
-	ID        string                  `gorm:"column:id;primaryKey" json:"id"`
-	UserID    string                  `gorm:"column:user_id" json:"-"`
-	Type      string                  `gorm:"column:type" json:"type"`
-	Title     string                  `gorm:"column:title" json:"title"`
-	Body      string                  `gorm:"column:body" json:"body"`
-	Action    NotificationActionPtr   `gorm:"column:action" json:"-"`
-	ReadAt    *time.Time              `gorm:"column:read_at" json:"read_at"`
-	CreatedAt time.Time               `gorm:"column:created_at" json:"created_at"`
-	UpdatedAt time.Time               `gorm:"column:updated_at" json:"-"`
+	ID        string                `gorm:"column:id;primaryKey" json:"id"`
+	UserID    string                `gorm:"column:user_id" json:"-"`
+	Type      string                `gorm:"column:type" json:"type"`
+	Title     string                `gorm:"column:title" json:"title"`
+	Body      string                `gorm:"column:body" json:"body"`
+	Action    NotificationActionPtr `gorm:"column:action" json:"-"`
+	ReadAt    *time.Time            `gorm:"column:read_at" json:"read_at"`
+	CreatedAt time.Time             `gorm:"column:created_at" json:"created_at"`
+	UpdatedAt time.Time             `gorm:"column:updated_at" json:"-"`
 }
 
 func (Notification) TableName() string { return "notifications" }

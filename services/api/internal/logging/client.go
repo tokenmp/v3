@@ -227,3 +227,58 @@ func (c *Client) get(ctx context.Context, path string, dst any) error {
 func (c *Client) String() string {
 	return fmt.Sprintf("logging.Client(base=%T)", c.httpClient)
 }
+
+// DashboardStats corresponds to the Logging Service dashboard response.
+type DashboardStats struct {
+	TotalRequests    int64        `json:"totalRequests"`
+	TodayRequests    int64        `json:"todayRequests"`
+	TodaySuccess     int64        `json:"todaySuccess"`
+	TodayActiveUsers int64        `json:"todayActiveUsers"`
+	TodayTokens      int64        `json:"todayTokens"`
+	TodayModelUsage  []ModelStat  `json:"todayModelUsage"`
+	TodayTopUsers    []TopUserRow `json:"todayTopUsers"`
+	Trend            []TrendRow   `json:"trend"`
+}
+
+// TopUserRow is a per-user aggregation from the dashboard.
+type TopUserRow struct {
+	UserID       string `json:"user_id"`
+	Requests     int64  `json:"requests"`
+	InputTokens  int64  `json:"input_tokens"`
+	OutputTokens int64  `json:"output_tokens"`
+	TotalTokens  int64  `json:"total_tokens"`
+}
+
+// TrendRow is one day of the request trend.
+type TrendRow struct {
+	Date         string `json:"date"`
+	Requests     int64  `json:"requests"`
+	Success      int64  `json:"success"`
+	InputTokens  int64  `json:"input_tokens"`
+	OutputTokens int64  `json:"output_tokens"`
+}
+
+// GetDashboard calls GET /v1/logs/dashboard on the Logging Service.
+func (c *Client) GetDashboard(ctx context.Context, days int) (DashboardStats, error) {
+	var out DashboardStats
+	if !c.Available() {
+		return out, ErrUnavailable
+	}
+	q := url.Values{}
+	if days > 0 {
+		q.Set("days", strconv.Itoa(days))
+	}
+	if err := c.get(ctx, "/v1/logs/dashboard?"+q.Encode(), &out); err != nil {
+		return out, err
+	}
+	if out.TodayModelUsage == nil {
+		out.TodayModelUsage = []ModelStat{}
+	}
+	if out.TodayTopUsers == nil {
+		out.TodayTopUsers = []TopUserRow{}
+	}
+	if out.Trend == nil {
+		out.Trend = []TrendRow{}
+	}
+	return out, nil
+}

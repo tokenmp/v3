@@ -66,6 +66,7 @@ func (s *Server) Router() http.Handler {
 	r.Post("/v1/logs/ingest", s.handleIngest)
 	r.Get("/v1/logs", s.handleListLogs)
 	r.Get("/v1/logs/stats", s.handleStats)
+	r.Get("/v1/logs/dashboard", s.handleDashboard)
 	r.Get("/v1/logs/{request_id}", s.handleGetLog)
 	return r
 }
@@ -316,6 +317,18 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 // writeJSON encodes value as a JSON response with Cache-Control: no-store
 // already set by the middleware. An encode failure is logged server-side and
 // not surfaced to the client.
+func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	days := parsePositiveInt(q.Get("days"), 15)
+	stats, err := s.reader.GetDashboardStats(r.Context(), days)
+	if err != nil {
+		s.logger.Warn("dashboard query failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "query_failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, stats)
+}
+
 func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)

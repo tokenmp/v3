@@ -21,6 +21,18 @@ import (
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+	// AuthAdminListKeys List all API keys (admin)
+	// (GET /api/v1/auth/admin/keys)
+	AuthAdminListKeys(w http.ResponseWriter, r *http.Request, params AuthAdminListKeysParams)
+	// AuthAdminListUsers List users (admin)
+	// (GET /api/v1/auth/admin/users)
+	AuthAdminListUsers(w http.ResponseWriter, r *http.Request, params AuthAdminListUsersParams)
+	// AuthAdminGetUser Get user detail (admin)
+	// (GET /api/v1/auth/admin/users/{userId})
+	AuthAdminGetUser(w http.ResponseWriter, r *http.Request, userId UserIdPath)
+	// AuthAdminUpdateUser Modify user (admin)
+	// (PATCH /api/v1/auth/admin/users/{userId})
+	AuthAdminUpdateUser(w http.ResponseWriter, r *http.Request, userId UserIdPath)
 	// AuthListApiKeys List API keys
 	// (GET /api/v1/auth/keys)
 	AuthListApiKeys(w http.ResponseWriter, r *http.Request)
@@ -77,6 +89,30 @@ type ServerInterface interface {
 // Unimplemented server implementation that returns http.StatusNotImplemented for each endpoint.
 
 type Unimplemented struct{}
+
+// AuthAdminListKeys List all API keys (admin)
+// (GET /api/v1/auth/admin/keys)
+func (_ Unimplemented) AuthAdminListKeys(w http.ResponseWriter, r *http.Request, params AuthAdminListKeysParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// AuthAdminListUsers List users (admin)
+// (GET /api/v1/auth/admin/users)
+func (_ Unimplemented) AuthAdminListUsers(w http.ResponseWriter, r *http.Request, params AuthAdminListUsersParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// AuthAdminGetUser Get user detail (admin)
+// (GET /api/v1/auth/admin/users/{userId})
+func (_ Unimplemented) AuthAdminGetUser(w http.ResponseWriter, r *http.Request, userId UserIdPath) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// AuthAdminUpdateUser Modify user (admin)
+// (PATCH /api/v1/auth/admin/users/{userId})
+func (_ Unimplemented) AuthAdminUpdateUser(w http.ResponseWriter, r *http.Request, userId UserIdPath) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
 
 // AuthListApiKeys List API keys
 // (GET /api/v1/auth/keys)
@@ -188,6 +224,163 @@ type ServerInterfaceWrapper struct {
 }
 
 type MiddlewareFunc func(http.Handler) http.Handler
+
+// AuthAdminListKeys operation middleware
+func (siw *ServerInterfaceWrapper) AuthAdminListKeys(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params AuthAdminListKeysParams
+
+	// ------------- Optional query parameter "page" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "page", r.URL.Query(), &params.Page, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "page"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "page", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "pageSize" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "pageSize", r.URL.Query(), &params.PageSize, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "pageSize"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "pageSize", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AuthAdminListKeys(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AuthAdminListUsers operation middleware
+func (siw *ServerInterfaceWrapper) AuthAdminListUsers(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params AuthAdminListUsersParams
+
+	// ------------- Optional query parameter "search" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "search", r.URL.Query(), &params.Search, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "search"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "search", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "page" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "page", r.URL.Query(), &params.Page, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "page"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "page", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "pageSize" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "pageSize", r.URL.Query(), &params.PageSize, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "pageSize"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "pageSize", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AuthAdminListUsers(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AuthAdminGetUser operation middleware
+func (siw *ServerInterfaceWrapper) AuthAdminGetUser(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "userId" -------------
+	var userId UserIdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "userId", chi.URLParam(r, "userId"), &userId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "userId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AuthAdminGetUser(w, r, userId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AuthAdminUpdateUser operation middleware
+func (siw *ServerInterfaceWrapper) AuthAdminUpdateUser(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "userId" -------------
+	var userId UserIdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "userId", chi.URLParam(r, "userId"), &userId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "userId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AuthAdminUpdateUser(w, r, userId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
 
 // AuthListApiKeys operation middleware
 func (siw *ServerInterfaceWrapper) AuthListApiKeys(w http.ResponseWriter, r *http.Request) {
@@ -639,8 +832,635 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/api/v1/auth/keys/{keyId}/rotate", wrapper.AuthRotateApiKey)
 	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/auth/admin/users", wrapper.AuthAdminListUsers)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/auth/admin/users/{userId}", wrapper.AuthAdminGetUser)
+	})
+	r.Group(func(r chi.Router) {
+		r.Patch(options.BaseURL+"/api/v1/auth/admin/users/{userId}", wrapper.AuthAdminUpdateUser)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/auth/admin/keys", wrapper.AuthAdminListKeys)
+	})
 
 	return r
+}
+
+type ForbiddenResponseHeaders struct {
+	CacheControl *string
+	ContentType  *string
+}
+type ForbiddenJSONResponse struct {
+	Body Error
+
+	Headers ForbiddenResponseHeaders
+}
+
+type InternalErrorResponseHeaders struct {
+	CacheControl *string
+	ContentType  *string
+}
+type InternalErrorJSONResponse struct {
+	Body Error
+
+	Headers InternalErrorResponseHeaders
+}
+
+type NotFoundResponseHeaders struct {
+	CacheControl *string
+	ContentType  *string
+}
+type NotFoundJSONResponse struct {
+	Body Error
+
+	Headers NotFoundResponseHeaders
+}
+
+type UnauthorizedResponseHeaders struct {
+	CacheControl *string
+	ContentType  *string
+}
+type UnauthorizedJSONResponse struct {
+	Body Error
+
+	Headers UnauthorizedResponseHeaders
+}
+
+type AuthAdminListKeysRequestObject struct {
+	Params AuthAdminListKeysParams
+}
+
+type AuthAdminListKeysResponseObject interface {
+	VisitAuthAdminListKeysResponse(w http.ResponseWriter) error
+}
+
+type AuthAdminListKeys200ResponseHeaders struct {
+	CacheControl *string
+	ContentType  *string
+}
+
+type AuthAdminListKeys200JSONResponse struct {
+	Body struct {
+		Keys     []AdminApiKey `json:"keys"`
+		Page     int           `json:"page"`
+		PageSize int           `json:"pageSize"`
+		Total    int           `json:"total"`
+	}
+	Headers AuthAdminListKeys200ResponseHeaders
+}
+
+func (response AuthAdminListKeys200JSONResponse) VisitAuthAdminListKeysResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	if response.Headers.ContentType != nil {
+		w.Header().Set("Content-Type", fmt.Sprint(*response.Headers.ContentType))
+	}
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AuthAdminListKeys401ResponseHeaders struct {
+	CacheControl *string
+	ContentType  *string
+}
+
+type AuthAdminListKeys401JSONResponse struct {
+	Body    Error
+	Headers AuthAdminListKeys401ResponseHeaders
+}
+
+func (response AuthAdminListKeys401JSONResponse) VisitAuthAdminListKeysResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	if response.Headers.ContentType != nil {
+		w.Header().Set("Content-Type", fmt.Sprint(*response.Headers.ContentType))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AuthAdminListKeys403ResponseHeaders struct {
+	CacheControl *string
+	ContentType  *string
+}
+
+type AuthAdminListKeys403JSONResponse struct {
+	Body    Error
+	Headers AuthAdminListKeys403ResponseHeaders
+}
+
+func (response AuthAdminListKeys403JSONResponse) VisitAuthAdminListKeysResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	if response.Headers.ContentType != nil {
+		w.Header().Set("Content-Type", fmt.Sprint(*response.Headers.ContentType))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AuthAdminListKeys500ResponseHeaders struct {
+	CacheControl *string
+	ContentType  *string
+}
+
+type AuthAdminListKeys500JSONResponse struct {
+	Body    Error
+	Headers AuthAdminListKeys500ResponseHeaders
+}
+
+func (response AuthAdminListKeys500JSONResponse) VisitAuthAdminListKeysResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	if response.Headers.ContentType != nil {
+		w.Header().Set("Content-Type", fmt.Sprint(*response.Headers.ContentType))
+	}
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AuthAdminListUsersRequestObject struct {
+	Params AuthAdminListUsersParams
+}
+
+type AuthAdminListUsersResponseObject interface {
+	VisitAuthAdminListUsersResponse(w http.ResponseWriter) error
+}
+
+type AuthAdminListUsers200ResponseHeaders struct {
+	CacheControl *string
+	ContentType  *string
+}
+
+type AuthAdminListUsers200JSONResponse struct {
+	Body struct {
+		Page     int         `json:"page"`
+		PageSize int         `json:"pageSize"`
+		Total    int         `json:"total"`
+		Users    []AdminUser `json:"users"`
+	}
+	Headers AuthAdminListUsers200ResponseHeaders
+}
+
+func (response AuthAdminListUsers200JSONResponse) VisitAuthAdminListUsersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	if response.Headers.ContentType != nil {
+		w.Header().Set("Content-Type", fmt.Sprint(*response.Headers.ContentType))
+	}
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AuthAdminListUsers401ResponseHeaders struct {
+	CacheControl *string
+	ContentType  *string
+}
+
+type AuthAdminListUsers401JSONResponse struct {
+	Body    Error
+	Headers AuthAdminListUsers401ResponseHeaders
+}
+
+func (response AuthAdminListUsers401JSONResponse) VisitAuthAdminListUsersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	if response.Headers.ContentType != nil {
+		w.Header().Set("Content-Type", fmt.Sprint(*response.Headers.ContentType))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AuthAdminListUsers403ResponseHeaders struct {
+	CacheControl *string
+	ContentType  *string
+}
+
+type AuthAdminListUsers403JSONResponse struct {
+	Body    Error
+	Headers AuthAdminListUsers403ResponseHeaders
+}
+
+func (response AuthAdminListUsers403JSONResponse) VisitAuthAdminListUsersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	if response.Headers.ContentType != nil {
+		w.Header().Set("Content-Type", fmt.Sprint(*response.Headers.ContentType))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AuthAdminListUsers500ResponseHeaders struct {
+	CacheControl *string
+	ContentType  *string
+}
+
+type AuthAdminListUsers500JSONResponse struct {
+	Body    Error
+	Headers AuthAdminListUsers500ResponseHeaders
+}
+
+func (response AuthAdminListUsers500JSONResponse) VisitAuthAdminListUsersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	if response.Headers.ContentType != nil {
+		w.Header().Set("Content-Type", fmt.Sprint(*response.Headers.ContentType))
+	}
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AuthAdminGetUserRequestObject struct {
+	UserId UserIdPath `json:"userId"`
+}
+
+type AuthAdminGetUserResponseObject interface {
+	VisitAuthAdminGetUserResponse(w http.ResponseWriter) error
+}
+
+type AuthAdminGetUser200ResponseHeaders struct {
+	CacheControl *string
+	ContentType  *string
+}
+
+type AuthAdminGetUser200JSONResponse struct {
+	Body    AdminUser
+	Headers AuthAdminGetUser200ResponseHeaders
+}
+
+func (response AuthAdminGetUser200JSONResponse) VisitAuthAdminGetUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	if response.Headers.ContentType != nil {
+		w.Header().Set("Content-Type", fmt.Sprint(*response.Headers.ContentType))
+	}
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AuthAdminGetUser401ResponseHeaders struct {
+	CacheControl *string
+	ContentType  *string
+}
+
+type AuthAdminGetUser401JSONResponse struct {
+	Body    Error
+	Headers AuthAdminGetUser401ResponseHeaders
+}
+
+func (response AuthAdminGetUser401JSONResponse) VisitAuthAdminGetUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	if response.Headers.ContentType != nil {
+		w.Header().Set("Content-Type", fmt.Sprint(*response.Headers.ContentType))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AuthAdminGetUser403ResponseHeaders struct {
+	CacheControl *string
+	ContentType  *string
+}
+
+type AuthAdminGetUser403JSONResponse struct {
+	Body    Error
+	Headers AuthAdminGetUser403ResponseHeaders
+}
+
+func (response AuthAdminGetUser403JSONResponse) VisitAuthAdminGetUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	if response.Headers.ContentType != nil {
+		w.Header().Set("Content-Type", fmt.Sprint(*response.Headers.ContentType))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AuthAdminGetUser404ResponseHeaders struct {
+	CacheControl *string
+	ContentType  *string
+}
+
+type AuthAdminGetUser404JSONResponse struct {
+	Body    Error
+	Headers AuthAdminGetUser404ResponseHeaders
+}
+
+func (response AuthAdminGetUser404JSONResponse) VisitAuthAdminGetUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	if response.Headers.ContentType != nil {
+		w.Header().Set("Content-Type", fmt.Sprint(*response.Headers.ContentType))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AuthAdminGetUser500ResponseHeaders struct {
+	CacheControl *string
+	ContentType  *string
+}
+
+type AuthAdminGetUser500JSONResponse struct {
+	Body    Error
+	Headers AuthAdminGetUser500ResponseHeaders
+}
+
+func (response AuthAdminGetUser500JSONResponse) VisitAuthAdminGetUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	if response.Headers.ContentType != nil {
+		w.Header().Set("Content-Type", fmt.Sprint(*response.Headers.ContentType))
+	}
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AuthAdminUpdateUserRequestObject struct {
+	UserId UserIdPath `json:"userId"`
+	Body   *AuthAdminUpdateUserJSONRequestBody
+}
+
+type AuthAdminUpdateUserResponseObject interface {
+	VisitAuthAdminUpdateUserResponse(w http.ResponseWriter) error
+}
+
+type AuthAdminUpdateUser200ResponseHeaders struct {
+	CacheControl *string
+	ContentType  *string
+}
+
+type AuthAdminUpdateUser200JSONResponse struct {
+	Body    AdminUser
+	Headers AuthAdminUpdateUser200ResponseHeaders
+}
+
+func (response AuthAdminUpdateUser200JSONResponse) VisitAuthAdminUpdateUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	if response.Headers.ContentType != nil {
+		w.Header().Set("Content-Type", fmt.Sprint(*response.Headers.ContentType))
+	}
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AuthAdminUpdateUser400ResponseHeaders struct {
+	CacheControl *string
+	ContentType  *string
+}
+
+type AuthAdminUpdateUser400JSONResponse struct {
+	Body    Error
+	Headers AuthAdminUpdateUser400ResponseHeaders
+}
+
+func (response AuthAdminUpdateUser400JSONResponse) VisitAuthAdminUpdateUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	if response.Headers.ContentType != nil {
+		w.Header().Set("Content-Type", fmt.Sprint(*response.Headers.ContentType))
+	}
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AuthAdminUpdateUser401ResponseHeaders struct {
+	CacheControl *string
+	ContentType  *string
+}
+
+type AuthAdminUpdateUser401JSONResponse struct {
+	Body    Error
+	Headers AuthAdminUpdateUser401ResponseHeaders
+}
+
+func (response AuthAdminUpdateUser401JSONResponse) VisitAuthAdminUpdateUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	if response.Headers.ContentType != nil {
+		w.Header().Set("Content-Type", fmt.Sprint(*response.Headers.ContentType))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AuthAdminUpdateUser403ResponseHeaders struct {
+	CacheControl *string
+	ContentType  *string
+}
+
+type AuthAdminUpdateUser403JSONResponse struct {
+	Body    Error
+	Headers AuthAdminUpdateUser403ResponseHeaders
+}
+
+func (response AuthAdminUpdateUser403JSONResponse) VisitAuthAdminUpdateUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	if response.Headers.ContentType != nil {
+		w.Header().Set("Content-Type", fmt.Sprint(*response.Headers.ContentType))
+	}
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AuthAdminUpdateUser404ResponseHeaders struct {
+	CacheControl *string
+	ContentType  *string
+}
+
+type AuthAdminUpdateUser404JSONResponse struct {
+	Body    Error
+	Headers AuthAdminUpdateUser404ResponseHeaders
+}
+
+func (response AuthAdminUpdateUser404JSONResponse) VisitAuthAdminUpdateUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	if response.Headers.ContentType != nil {
+		w.Header().Set("Content-Type", fmt.Sprint(*response.Headers.ContentType))
+	}
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AuthAdminUpdateUser500ResponseHeaders struct {
+	CacheControl *string
+	ContentType  *string
+}
+
+type AuthAdminUpdateUser500JSONResponse struct {
+	Body    Error
+	Headers AuthAdminUpdateUser500ResponseHeaders
+}
+
+func (response AuthAdminUpdateUser500JSONResponse) VisitAuthAdminUpdateUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	if response.Headers.ContentType != nil {
+		w.Header().Set("Content-Type", fmt.Sprint(*response.Headers.ContentType))
+	}
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
 }
 
 type AuthListApiKeysRequestObject struct {
@@ -2241,6 +3061,18 @@ func (response HeadReadyz503Response) VisitHeadReadyzResponse(w http.ResponseWri
 
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
+	// AuthAdminListKeys List all API keys (admin)
+	// (GET /api/v1/auth/admin/keys)
+	AuthAdminListKeys(ctx context.Context, request AuthAdminListKeysRequestObject) (AuthAdminListKeysResponseObject, error)
+	// AuthAdminListUsers List users (admin)
+	// (GET /api/v1/auth/admin/users)
+	AuthAdminListUsers(ctx context.Context, request AuthAdminListUsersRequestObject) (AuthAdminListUsersResponseObject, error)
+	// AuthAdminGetUser Get user detail (admin)
+	// (GET /api/v1/auth/admin/users/{userId})
+	AuthAdminGetUser(ctx context.Context, request AuthAdminGetUserRequestObject) (AuthAdminGetUserResponseObject, error)
+	// AuthAdminUpdateUser Modify user (admin)
+	// (PATCH /api/v1/auth/admin/users/{userId})
+	AuthAdminUpdateUser(ctx context.Context, request AuthAdminUpdateUserRequestObject) (AuthAdminUpdateUserResponseObject, error)
 	// AuthListApiKeys List API keys
 	// (GET /api/v1/auth/keys)
 	AuthListApiKeys(ctx context.Context, request AuthListApiKeysRequestObject) (AuthListApiKeysResponseObject, error)
@@ -2331,6 +3163,117 @@ type strictHandler struct {
 	ssi         StrictServerInterface
 	middlewares []StrictMiddlewareFunc
 	options     StrictHTTPServerOptions
+}
+
+// AuthAdminListKeys operation middleware
+func (sh *strictHandler) AuthAdminListKeys(w http.ResponseWriter, r *http.Request, params AuthAdminListKeysParams) {
+	var request AuthAdminListKeysRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.AuthAdminListKeys(ctx, request.(AuthAdminListKeysRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "AuthAdminListKeys")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(AuthAdminListKeysResponseObject); ok {
+		if err := validResponse.VisitAuthAdminListKeysResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// AuthAdminListUsers operation middleware
+func (sh *strictHandler) AuthAdminListUsers(w http.ResponseWriter, r *http.Request, params AuthAdminListUsersParams) {
+	var request AuthAdminListUsersRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.AuthAdminListUsers(ctx, request.(AuthAdminListUsersRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "AuthAdminListUsers")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(AuthAdminListUsersResponseObject); ok {
+		if err := validResponse.VisitAuthAdminListUsersResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// AuthAdminGetUser operation middleware
+func (sh *strictHandler) AuthAdminGetUser(w http.ResponseWriter, r *http.Request, userId UserIdPath) {
+	var request AuthAdminGetUserRequestObject
+
+	request.UserId = userId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.AuthAdminGetUser(ctx, request.(AuthAdminGetUserRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "AuthAdminGetUser")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(AuthAdminGetUserResponseObject); ok {
+		if err := validResponse.VisitAuthAdminGetUserResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// AuthAdminUpdateUser operation middleware
+func (sh *strictHandler) AuthAdminUpdateUser(w http.ResponseWriter, r *http.Request, userId UserIdPath) {
+	var request AuthAdminUpdateUserRequestObject
+
+	request.UserId = userId
+
+	var body AuthAdminUpdateUserJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.AuthAdminUpdateUser(ctx, request.(AuthAdminUpdateUserRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "AuthAdminUpdateUser")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(AuthAdminUpdateUserResponseObject); ok {
+		if err := validResponse.VisitAuthAdminUpdateUserResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
 }
 
 // AuthListApiKeys operation middleware

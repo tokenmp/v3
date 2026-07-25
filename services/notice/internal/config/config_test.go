@@ -30,10 +30,10 @@ func TestLoad_MissingJWTPublicKey(t *testing.T) {
 
 func TestLoad_InvalidDatabaseURL(t *testing.T) {
 	cases := []string{
-		"mysql://u:h@db/tokenmp_biz",        // wrong scheme
-		"postgres://u:h@db/tokenmp_auth",    // wrong db name
-		"postgres://u:h@db/",                // empty path
-		"postgres://u:h@db/tokenmp_biz/x",   // extra path segment
+		"mysql://u:h@db/tokenmp_biz",      // wrong scheme
+		"postgres://u:h@db/tokenmp_auth",  // wrong db name
+		"postgres://u:h@db/",              // empty path
+		"postgres://u:h@db/tokenmp_biz/x", // extra path segment
 	}
 	for _, u := range cases {
 		t.Setenv("NOTICE_DATABASE_URL", u)
@@ -47,11 +47,11 @@ func TestLoad_InvalidDatabaseURL(t *testing.T) {
 
 func TestLoad_OK(t *testing.T) {
 	setEnv(t, map[string]string{
-		"NOTICE_DATABASE_URL":          "postgres://user:pass@host:5432/tokenmp_biz",
-		"NOTICE_JWT_PUBLIC_KEY_FILE":   "/tmp/pub.pem",
-		"NOTICE_HTTP_ADDR":             ":9090",
-		"NOTICE_DB_MAX_OPEN_CONNS":     "10",
-		"NOTICE_DB_CONN_MAX_LIFETIME":  "10m",
+		"NOTICE_DATABASE_URL":         "postgres://user:pass@host:5432/tokenmp_biz",
+		"NOTICE_JWT_PUBLIC_KEY_FILE":  "/tmp/pub.pem",
+		"NOTICE_HTTP_ADDR":            ":9090",
+		"NOTICE_DB_MAX_OPEN_CONNS":    "10",
+		"NOTICE_DB_CONN_MAX_LIFETIME": "10m",
 	})
 	cfg, err := Load()
 	if err != nil {

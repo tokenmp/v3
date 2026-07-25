@@ -49,3 +49,4 @@ docs/v3-db-schema-draft.md
 packages/contracts/go/bin/
 
 **/.next/
+services/auth/auth

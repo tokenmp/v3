@@ -97,16 +97,20 @@ func run() error {
 	authService := auth.NewService(userRepo, sessionRepo, txRunner, issuer, clock, cfg.AccessTokenTTL, cfg.RefreshTokenTTL)
 	userStore := authv1api.NewUserRepoAdapter(userRepo)
 	apiKeyStore := authv1api.NewAPIKeyRepoAdapter(apiKeyRepo)
+	adminUserStore := authv1api.NewAdminUserRepoAdapter(userRepo)
+	adminKeyStore := authv1api.NewAdminKeyRepoAdapter(apiKeyRepo)
 
 	pinger := database.PingerFromDB(db)
 	srv := authv1api.NewServer(authv1api.ServerConfig{
-		Addr:        cfg.HTTPAddr,
-		Pinger:      pinger,
-		JWTVerifier: verifier,
-		UserStore:   userStore,
-		AuthService: authService,
-		AccessTTL:   cfg.AccessTokenTTL,
-		APIKeyStore: apiKeyStore,
+		Addr:           cfg.HTTPAddr,
+		Pinger:         pinger,
+		JWTVerifier:    verifier,
+		UserStore:      userStore,
+		AuthService:    authService,
+		AccessTTL:      cfg.AccessTokenTTL,
+		APIKeyStore:    apiKeyStore,
+		AdminUserStore: adminUserStore,
+		AdminKeyStore:  adminKeyStore,
 	})
 
 	errCh := make(chan error, 1)

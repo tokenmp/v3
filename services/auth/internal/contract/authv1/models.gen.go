@@ -12,6 +12,96 @@ import (
 	uuid "github.com/google/uuid"
 )
 
+// Defines values for AdminApiKeyStatus.
+const (
+	AdminApiKeyStatusActive   AdminApiKeyStatus = "active"
+	AdminApiKeyStatusDisabled AdminApiKeyStatus = "disabled"
+)
+
+// Valid indicates whether the value is a known member of the AdminApiKeyStatus enum.
+func (e AdminApiKeyStatus) Valid() bool {
+	switch e {
+	case AdminApiKeyStatusActive:
+		return true
+	case AdminApiKeyStatusDisabled:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminUpdateUserRequestRole.
+const (
+	AdminUpdateUserRequestRoleAdmin AdminUpdateUserRequestRole = "admin"
+	AdminUpdateUserRequestRoleUser  AdminUpdateUserRequestRole = "user"
+)
+
+// Valid indicates whether the value is a known member of the AdminUpdateUserRequestRole enum.
+func (e AdminUpdateUserRequestRole) Valid() bool {
+	switch e {
+	case AdminUpdateUserRequestRoleAdmin:
+		return true
+	case AdminUpdateUserRequestRoleUser:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminUpdateUserRequestStatus.
+const (
+	AdminUpdateUserRequestStatusActive   AdminUpdateUserRequestStatus = "active"
+	AdminUpdateUserRequestStatusDisabled AdminUpdateUserRequestStatus = "disabled"
+)
+
+// Valid indicates whether the value is a known member of the AdminUpdateUserRequestStatus enum.
+func (e AdminUpdateUserRequestStatus) Valid() bool {
+	switch e {
+	case AdminUpdateUserRequestStatusActive:
+		return true
+	case AdminUpdateUserRequestStatusDisabled:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminUserRole.
+const (
+	AdminUserRoleAdmin AdminUserRole = "admin"
+	AdminUserRoleUser  AdminUserRole = "user"
+)
+
+// Valid indicates whether the value is a known member of the AdminUserRole enum.
+func (e AdminUserRole) Valid() bool {
+	switch e {
+	case AdminUserRoleAdmin:
+		return true
+	case AdminUserRoleUser:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminUserStatus.
+const (
+	AdminUserStatusActive   AdminUserStatus = "active"
+	AdminUserStatusDisabled AdminUserStatus = "disabled"
+)
+
+// Valid indicates whether the value is a known member of the AdminUserStatus enum.
+func (e AdminUserStatus) Valid() bool {
+	switch e {
+	case AdminUserStatusActive:
+		return true
+	case AdminUserStatusDisabled:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ApiKeyStatus.
 const (
 	ApiKeyStatusActive   ApiKeyStatus = "active"
@@ -49,6 +139,7 @@ func (e ApiKeyCreatedStatus) Valid() bool {
 const (
 	BadRequest          ErrorErrorCode = "bad_request"
 	EmailTaken          ErrorErrorCode = "email_taken"
+	Forbidden           ErrorErrorCode = "forbidden"
 	InternalError       ErrorErrorCode = "internal_error"
 	InvalidCredentials  ErrorErrorCode = "invalid_credentials"
 	InvalidEmail        ErrorErrorCode = "invalid_email"
@@ -65,6 +156,8 @@ func (e ErrorErrorCode) Valid() bool {
 	case BadRequest:
 		return true
 	case EmailTaken:
+		return true
+	case Forbidden:
 		return true
 	case InternalError:
 		return true
@@ -122,16 +215,16 @@ func (e HealthResponseStatus) Valid() bool {
 
 // Defines values for PublicUserRole.
 const (
-	Admin PublicUserRole = "admin"
-	User  PublicUserRole = "user"
+	PublicUserRoleAdmin PublicUserRole = "admin"
+	PublicUserRoleUser  PublicUserRole = "user"
 )
 
 // Valid indicates whether the value is a known member of the PublicUserRole enum.
 func (e PublicUserRole) Valid() bool {
 	switch e {
-	case Admin:
+	case PublicUserRoleAdmin:
 		return true
-	case User:
+	case PublicUserRoleUser:
 		return true
 	default:
 		return false
@@ -188,6 +281,50 @@ func (e UpdateApiKeyRequestStatus) Valid() bool {
 		return false
 	}
 }
+
+// AdminApiKey Admin API key view (cross-user). Includes `user_id` for ownership.
+// Key secrets are never returned.
+type AdminApiKey struct {
+	CreatedAt  time.Time         `json:"created_at"`
+	ExpiresAt  *time.Time        `json:"expires_at,omitempty"`
+	Id         uuid.UUID         `json:"id"`
+	KeyPrefix  string            `json:"key_prefix"`
+	KeySuffix  string            `json:"key_suffix"`
+	LastUsedAt *time.Time        `json:"last_used_at,omitempty"`
+	Name       string            `json:"name"`
+	Status     AdminApiKeyStatus `json:"status"`
+	UserId     uuid.UUID         `json:"user_id"`
+}
+
+// AdminApiKeyStatus defines model for AdminApiKey.Status.
+type AdminApiKeyStatus string
+
+// AdminUpdateUserRequest Modifiable user fields for admin. At least one field is required.
+type AdminUpdateUserRequest struct {
+	Role   *AdminUpdateUserRequestRole   `json:"role,omitempty"`
+	Status *AdminUpdateUserRequestStatus `json:"status,omitempty"`
+}
+
+// AdminUpdateUserRequestRole defines model for AdminUpdateUserRequest.Role.
+type AdminUpdateUserRequestRole string
+
+// AdminUpdateUserRequestStatus defines model for AdminUpdateUserRequest.Status.
+type AdminUpdateUserRequestStatus string
+
+// AdminUser Admin user view. Never includes password hash or internal metadata.
+type AdminUser struct {
+	CreatedAt time.Time       `json:"created_at"`
+	Email     string          `json:"email"`
+	Id        uuid.UUID       `json:"id"`
+	Role      AdminUserRole   `json:"role"`
+	Status    AdminUserStatus `json:"status"`
+}
+
+// AdminUserRole defines model for AdminUser.Role.
+type AdminUserRole string
+
+// AdminUserStatus defines model for AdminUser.Status.
+type AdminUserStatus string
 
 // ApiKey Public API key view. The full secret is never returned; only
 // `key_prefix` and `key_suffix` are exposed for identification.
@@ -353,6 +490,26 @@ type UpdateApiKeyRequestStatus string
 
 // KeyId defines model for KeyId.
 type KeyId = uuid.UUID
+
+// UserIdPath defines model for UserIdPath.
+type UserIdPath = uuid.UUID
+
+// AuthAdminListKeysParams defines parameters for AuthAdminListKeys.
+type AuthAdminListKeysParams struct {
+	Page     *int `form:"page,omitempty" json:"page,omitempty"`
+	PageSize *int `form:"pageSize,omitempty" json:"pageSize,omitempty"`
+}
+
+// AuthAdminListUsersParams defines parameters for AuthAdminListUsers.
+type AuthAdminListUsersParams struct {
+	// Search Optional email substring filter.
+	Search   *string `form:"search,omitempty" json:"search,omitempty"`
+	Page     *int    `form:"page,omitempty" json:"page,omitempty"`
+	PageSize *int    `form:"pageSize,omitempty" json:"pageSize,omitempty"`
+}
+
+// AuthAdminUpdateUserJSONRequestBody defines body for AuthAdminUpdateUser for application/json ContentType.
+type AuthAdminUpdateUserJSONRequestBody = AdminUpdateUserRequest
 
 // AuthCreateApiKeyJSONRequestBody defines body for AuthCreateApiKey for application/json ContentType.
 type AuthCreateApiKeyJSONRequestBody = CreateApiKeyRequest

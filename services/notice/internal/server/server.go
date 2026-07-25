@@ -37,6 +37,20 @@ type Store interface {
 	UnreadCount(ctx context.Context, userID string) (int, error)
 	MarkRead(ctx context.Context, userID, id string) error
 	MarkAllRead(ctx context.Context, userID string) error
+	// Admin methods
+	ListAllAnnouncements(ctx context.Context, limit, offset int) ([]models.Announcement, int, error)
+	CreateAnnouncement(ctx context.Context, a *models.Announcement) error
+	UpdateAnnouncement(ctx context.Context, id string, fields map[string]any) error
+	DeleteAnnouncement(ctx context.Context, id string) error
+	PublishAnnouncement(ctx context.Context, id string) error
+	ListAllChangelogs(ctx context.Context, limit, offset int) ([]models.Changelog, int, error)
+	CreateChangelog(ctx context.Context, c *models.Changelog) error
+	UpdateChangelog(ctx context.Context, id string, fields map[string]any) error
+	DeleteChangelog(ctx context.Context, id string) error
+	PublishChangelog(ctx context.Context, id string) error
+	ListAllNotifications(ctx context.Context, limit, offset int) ([]models.Notification, int, error)
+	CreateNotification(ctx context.Context, n *models.Notification) error
+	DeleteNotification(ctx context.Context, id string) error
 }
 
 // AuthVerifier is the JWT verification contract. It is satisfied by
@@ -92,6 +106,23 @@ func New(cfg ServerConfig) *http.Server {
 	authMux.HandleFunc("POST /api/v1/notifications/{id}/read", s.handleMarkRead)
 	authMux.HandleFunc("POST /api/v1/notifications/read-all", s.handleMarkAllRead)
 
+	// Admin endpoints (require role=admin, checked by adminMiddleware).
+	adminMux := http.NewServeMux()
+	adminMux.HandleFunc("GET /api/v1/admin/announcements", s.handleAdminListAnnouncements)
+	adminMux.HandleFunc("POST /api/v1/admin/announcements", s.handleAdminCreateAnnouncement)
+	adminMux.HandleFunc("PATCH /api/v1/admin/announcements/{id}", s.handleAdminUpdateAnnouncement)
+	adminMux.HandleFunc("DELETE /api/v1/admin/announcements/{id}", s.handleAdminDeleteAnnouncement)
+	adminMux.HandleFunc("POST /api/v1/admin/announcements/{id}/publish", s.handleAdminPublishAnnouncement)
+	adminMux.HandleFunc("GET /api/v1/admin/changelogs", s.handleAdminListChangelogs)
+	adminMux.HandleFunc("POST /api/v1/admin/changelogs", s.handleAdminCreateChangelog)
+	adminMux.HandleFunc("PATCH /api/v1/admin/changelogs/{id}", s.handleAdminUpdateChangelog)
+	adminMux.HandleFunc("DELETE /api/v1/admin/changelogs/{id}", s.handleAdminDeleteChangelog)
+	adminMux.HandleFunc("POST /api/v1/admin/changelogs/{id}/publish", s.handleAdminPublishChangelog)
+	adminMux.HandleFunc("GET /api/v1/admin/notifications", s.handleAdminListNotifications)
+	adminMux.HandleFunc("POST /api/v1/admin/notifications/send", s.handleAdminSendNotification)
+	adminMux.HandleFunc("DELETE /api/v1/admin/notifications/{id}", s.handleAdminDeleteNotification)
+
+	mux.Handle("/api/v1/admin/", s.authMiddleware(s.adminMiddleware(adminMux)))
 	mux.Handle("/api/", s.authMiddleware(authMux))
 
 	return &http.Server{
@@ -141,6 +172,19 @@ func subjectFromCtx(r *http.Request) jwtverifier.Subject {
 	return jwtverifier.Subject{}
 }
 
+// adminMiddleware wraps the handler with a role=admin check. It must be
+// used inside authMiddleware so the subject is already verified.
+func (s *Server) adminMiddleware(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sub := subjectFromCtx(r)
+		if sub.Role != "admin" {
+			writeError(w, http.StatusForbidden, "forbidden", "Admin role required.")
+			return
+		}
+		h.ServeHTTP(w, r)
+	})
+}
+
 // ---- Helpers ----
 
 func writeJSON(w http.ResponseWriter, status int, body any) {
@@ -164,13 +208,13 @@ func parsePaging(r *http.Request) (int, int) {
 // notificationOut maps a model to its JSON shape, exposing the action as a
 // nullable object.
 type notificationOut struct {
-	ID        string                 `json:"id"`
-	Type      string                 `json:"type"`
-	Title     string                 `json:"title"`
-	Body      string                 `json:"body"`
+	ID        string                     `json:"id"`
+	Type      string                     `json:"type"`
+	Title     string                     `json:"title"`
+	Body      string                     `json:"body"`
 	Action    *models.NotificationAction `json:"action"`
-	ReadAt    *time.Time             `json:"read_at"`
-	CreatedAt time.Time              `json:"created_at"`
+	ReadAt    *time.Time                 `json:"read_at"`
+	CreatedAt time.Time                  `json:"created_at"`
 }
 
 func toNotificationOut(n models.Notification) notificationOut {
