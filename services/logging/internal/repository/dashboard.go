@@ -73,6 +73,7 @@ func (r *GormRepository) GetDashboardStats(ctx context.Context, trendDays int) (
 	const modelQ = `SELECT
 		COALESCE(NULLIF(resolved_model, ''), model_name) AS model,
 		COUNT(*) AS requests,
+		COUNT(CASE WHEN final_status = 'success' THEN 1 END) AS success,
 		COALESCE(SUM(input_tokens), 0) AS input_tokens,
 		COALESCE(SUM(output_tokens), 0) AS output_tokens
 		FROM request_logs

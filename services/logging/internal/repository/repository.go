@@ -144,6 +144,7 @@ type StatsFilter struct {
 type ModelStat struct {
 	Model        string
 	Requests     int64
+	Success      int64
 	InputTokens  int64
 	OutputTokens int64
 }
@@ -222,6 +223,90 @@ const insertRequestLogSQL = `INSERT INTO request_logs (
   ?, ?, ?, ?
 )
 RETURNING id`
+
+// upsertRequestLogSQL updates an existing request_logs row by request_id,
+// preserving previously-set non-zero fields (latency/usage/http_status come
+// from attempt events; final_status/usage/completed_at come from the terminal
+// event). Events for one request arrive sequentially from the executor, so
+// this read-then-write is race-free within a request. The partitioned table
+// forbids a unique constraint on request_id alone, so we cannot use
+// ON CONFLICT; instead we UPDATE and fall back to INSERT when no row matched.
+// COALESCE(NULLIF(excluded, 0/”), existing) keeps the earlier non-zero value
+// when the incoming event leaves a field at its zero value (e.g. the
+// Finalized event carries no latency).
+const upsertRequestLogSQL = `UPDATE request_logs SET
+  trace_id = COALESCE(NULLIF($2, ''), trace_id),
+  user_id = COALESCE(NULLIF($3, ''), user_id),
+  client_key_id = COALESCE(NULLIF($4, ''), client_key_id),
+  model_name = COALESCE(NULLIF($5, ''), model_name),
+  resolved_model = COALESCE(NULLIF($6, ''), resolved_model),
+  route_id = COALESCE(NULLIF($7, ''), route_id),
+  provider_id = COALESCE(NULLIF($8, ''), provider_id),
+  credential_id = COALESCE(NULLIF($9, ''), credential_id),
+  protocol = COALESCE(NULLIF($10, ''), protocol),
+  final_status = COALESCE(NULLIF($11, ''), final_status),
+  http_status = COALESCE(NULLIF($12, 0), http_status),
+  input_tokens = COALESCE(NULLIF($13, 0), input_tokens),
+  output_tokens = COALESCE(NULLIF($14, 0), output_tokens),
+  total_tokens = COALESCE(NULLIF($15, 0), total_tokens),
+  cache_tokens = COALESCE(NULLIF($16, 0), cache_tokens),
+  latency_ms = COALESCE(NULLIF($17, 0), latency_ms),
+  ttft_ms = COALESCE(NULLIF($18, 0), ttft_ms),
+  error_code = COALESCE(NULLIF($19, ''), error_code),
+  error_type = COALESCE(NULLIF($20, ''), error_type),
+  upstream_http_status = COALESCE(NULLIF($21, 0), upstream_http_status),
+  usage_status = COALESCE(NULLIF($22, ''), usage_status),
+  thinking_mode = COALESCE(NULLIF($23, ''), thinking_mode),
+  thinking_effort = COALESCE(NULLIF($24, ''), thinking_effort),
+  thinking_effort_degraded = COALESCE(NULLIF($25, ''), thinking_effort_degraded),
+  reservation_id = COALESCE(NULLIF($26, ''), reservation_id),
+  billing_plan = COALESCE(NULLIF($27, ''), billing_plan),
+  completed_at = COALESCE($28, completed_at)
+WHERE request_id = $1
+RETURNING id`
+
+// upsertRequestLog inserts or updates a request-level summary keyed by
+// request_id. See upsertRequestLogSQL for the merge semantics. Returns the
+// assigned/updated bigserial id.
+func (r *GormRepository) upsertRequestLog(ctx TxContext, log RequestLog) (int64, error) {
+	if log.CreatedAt.IsZero() {
+		log.CreatedAt = time.Now().UTC()
+	}
+	var id int64
+	// First try UPDATE on an existing row for this request_id.
+	err := ctx.Raw(upsertRequestLogSQL,
+		log.RequestID, log.TraceID, log.UserID, log.ClientKeyID, log.ModelName, log.ResolvedModel,
+		log.RouteID, log.ProviderID, log.CredentialID, log.Protocol, log.FinalStatus,
+		log.HTTPStatus, log.InputTokens, log.OutputTokens, log.TotalTokens, log.CacheTokens,
+		log.LatencyMS, log.TTFTMS, log.ErrorCode, log.ErrorType, log.UpstreamHTTPStatus,
+		log.UsageStatus, log.ThinkingMode, log.ThinkingEffort, log.ThinkingEffortDegraded,
+		log.ReservationID, log.BillingPlan, log.CompletedAt,
+	).Scan(&id).Error
+	if err != nil {
+		return 0, ErrInsertFailed
+	}
+	if id != 0 {
+		return id, nil // updated existing row
+	}
+	// No existing row — INSERT a new one.
+	if err := ctx.Raw(insertRequestLogSQL,
+		log.RequestID, log.TraceID, log.UserID, log.ClientKeyID, log.ModelName, log.ResolvedModel,
+		log.RouteID, log.ProviderID, log.CredentialID, log.Protocol, log.Stream, log.FinalStatus,
+		log.HTTPStatus, log.InputTokens, log.OutputTokens, log.TotalTokens, log.CacheTokens,
+		log.LatencyMS, log.TTFTMS, log.ErrorCode, log.ErrorType, log.UpstreamHTTPStatus,
+		log.UsageStatus, log.ThinkingMode, log.ThinkingEffort, log.ThinkingEffortDegraded,
+		log.ReservationID, log.BillingPlan, log.CreatedAt, log.CompletedAt,
+	).Scan(&id).Error; err != nil {
+		return 0, ErrInsertFailed
+	}
+	return id, nil
+}
+
+// TxContext is the minimal gorm DB/tx surface used by upsertRequestLog so it
+// can run inside an IngestBatch transaction.
+type TxContext interface {
+	Raw(sql string, values ...any) *gorm.DB
+}
 
 // InsertRequestLog inserts a request-level summary. created_at is defaulted
 // to now() (UTC) when the caller leaves it zero so the partitioned table can
@@ -347,16 +432,9 @@ func (r *GormRepository) IngestBatch(ctx context.Context, batch Batch) error {
 	if log.CreatedAt.IsZero() {
 		log.CreatedAt = time.Now().UTC()
 	}
-	var logID int64
-	if err := tx.Raw(insertRequestLogSQL,
-		log.RequestID, log.TraceID, log.UserID, log.ClientKeyID, log.ModelName, log.ResolvedModel,
-		log.RouteID, log.ProviderID, log.CredentialID, log.Protocol, log.Stream, log.FinalStatus,
-		log.HTTPStatus, log.InputTokens, log.OutputTokens, log.TotalTokens, log.CacheTokens,
-		log.LatencyMS, log.TTFTMS, log.ErrorCode, log.ErrorType, log.UpstreamHTTPStatus,
-		log.UsageStatus, log.ThinkingMode, log.ThinkingEffort, log.ThinkingEffortDegraded,
-		log.ReservationID, log.BillingPlan, log.CreatedAt, log.CompletedAt,
-	).Scan(&logID).Error; err != nil {
-		return ErrInsertFailed
+	logID, err := r.upsertRequestLog(tx, log)
+	if err != nil {
+		return err
 	}
 	if logID == 0 {
 		return ErrInsertFailed
