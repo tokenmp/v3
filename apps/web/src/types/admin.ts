@@ -68,8 +68,9 @@ export interface ModelUsageRow {
 export interface TopUserRow {
   email: string;
   requests: number;
+  inputTokens: number;
+  outputTokens: number;
   tokens: number;
-  cost: string;
 }
 
 export interface AdminDashboardStats {

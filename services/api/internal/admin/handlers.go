@@ -93,7 +93,7 @@ func (h *Handlers) ListRequestLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpresp.OK(w, map[string]any{
-		"logs":     result.Logs,
+		"logs":     h.enrichLogEmails(r, result.Logs),
 		"total":    result.Total,
 		"page":     result.Page,
 		"pageSize": result.PageSize,
@@ -115,6 +115,7 @@ func (h *Handlers) GetRequestLog(w http.ResponseWriter, r *http.Request) {
 		httpresp.Error(w, httpresp.CodeNotFound, "not found")
 		return
 	}
+	detail.Log = h.enrichLogEmails(r, []logging.RequestLog{detail.Log})[0]
 	httpresp.OK(w, detail)
 }
 
@@ -137,6 +138,38 @@ func (h *Handlers) GetRequestLogStats(w http.ResponseWriter, r *http.Request) {
 }
 
 // ---- Plans (cross-user) ----
+
+// enrichLogEmails best-effort resolves user_id → user_email for a slice of
+// request logs by calling Auth's admin GetUser per distinct user_id. Failures
+// leave user_email empty so the UI falls back to user_id. The lookup is
+// best-effort and never fails the request.
+func (h *Handlers) enrichLogEmails(r *http.Request, logs []logging.RequestLog) []logging.RequestLog {
+	if h.Auth == nil || !h.Auth.Available() || len(logs) == 0 {
+		return logs
+	}
+	bearer := bearerFromRequest(r)
+	emails := make(map[string]string, len(logs))
+	for i := range logs {
+		uid := logs[i].UserID
+		if uid == "" {
+			continue
+		}
+		if _, ok := emails[uid]; ok {
+			continue
+		}
+		if u, err := h.Auth.GetUser(r.Context(), bearer, uid); err == nil {
+			emails[uid] = u.Email
+		} else {
+			emails[uid] = ""
+		}
+	}
+	for i := range logs {
+		if email, ok := emails[logs[i].UserID]; ok && email != "" {
+			logs[i].UserEmail = email
+		}
+	}
+	return logs
+}
 
 func (h *Handlers) ListPlans(w http.ResponseWriter, r *http.Request) {
 	if h.Billing == nil || !h.Billing.Available() {
@@ -268,6 +301,27 @@ func (h *Handlers) AdminListKeys(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.handleAuthErr(w, err)
 		return
+	}
+	// Best-effort resolve user_id → user_email so the admin keys table can
+	// show the owner without a separate column fetch.
+	if h.Auth != nil && h.Auth.Available() && len(result.Keys) > 0 {
+		emails := make(map[string]string, len(result.Keys))
+		for _, k := range result.Keys {
+			if k.UserID == "" {
+				continue
+			}
+			if _, ok := emails[k.UserID]; ok {
+				continue
+			}
+			if u, err := h.Auth.GetUser(r.Context(), bearer, k.UserID); err == nil {
+				emails[k.UserID] = u.Email
+			}
+		}
+		for i := range result.Keys {
+			if email, ok := emails[result.Keys[i].UserID]; ok {
+				result.Keys[i].UserEmail = email
+			}
+		}
 	}
 	httpresp.OK(w, result)
 }
@@ -404,25 +458,30 @@ func (h *Handlers) AdminDashboardStats(w http.ResponseWriter, r *http.Request) {
 				email = u.Email
 			}
 			topUsers = append(topUsers, map[string]any{
-				"email":    email,
-				"requests": tu.Requests,
-				"tokens":   tu.TotalTokens,
+				"email":        email,
+				"requests":     tu.Requests,
+				"inputTokens":  tu.InputTokens,
+				"outputTokens": tu.OutputTokens,
+				"tokens":       tu.TotalTokens,
 			})
 		}
 	} else {
 		for _, tu := range dash.TodayTopUsers {
 			topUsers = append(topUsers, map[string]any{
-				"email":    tu.UserID,
-				"requests": tu.Requests,
-				"tokens":   tu.TotalTokens,
+				"email":        tu.UserID,
+				"requests":     tu.Requests,
+				"inputTokens":  tu.InputTokens,
+				"outputTokens": tu.OutputTokens,
+				"tokens":       tu.TotalTokens,
 			})
 		}
 	}
 
-	// Compute success rate.
+	// Compute success rate (rounded to 1 decimal place).
 	var successRate float64
 	if dash.TodayRequests > 0 {
 		successRate = float64(dash.TodaySuccess) / float64(dash.TodayRequests) * 100
+		successRate = float64(int(successRate*10)) / 10 // round to 1 decimal
 	}
 
 	// Map today model usage.
@@ -431,6 +490,7 @@ func (h *Handlers) AdminDashboardStats(w http.ResponseWriter, r *http.Request) {
 		modelUsage = append(modelUsage, map[string]any{
 			"model":    m.Model,
 			"requests": m.Requests,
+			"success":  m.Success,
 			"tokens":   m.InputTokens + m.OutputTokens,
 		})
 	}
