@@ -138,3 +138,42 @@ func FuzzBearerToken(f *testing.F) {
 	f.Add("")
 	f.Fuzz(func(t *testing.T, v string) { _, _ = bearerToken([]string{v}) })
 }
+
+// TestAuthMiddlewareUserIDHeaderOverride verifies that an X-User-ID header
+// forwarded by the trusted edge overrides the service identity's subject so
+// request logs record the real end user, while malformed/oversized values
+// are ignored (the service subject is retained).
+func TestAuthMiddlewareUserIDHeaderOverride(t *testing.T) {
+	port := &authPort{id: identity.Identity{Subject: "edge-service", KeyID: "edge-kid", Role: identity.RoleService, Status: identity.StatusActive}}
+	for _, tc := range []struct {
+		name   string
+		header string
+		want   string
+	}{
+		{"override", "user-uuid-abc", "user-uuid-abc"},
+		{"empty keeps service subject", "", "edge-service"},
+		{"oversized ignored", strings.Repeat("x", 600), "edge-service"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var got string
+			h := AuthMiddleware(port)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				id, _ := authcontext.IdentityFromContext(r.Context())
+				got = id.Subject
+				w.WriteHeader(http.StatusNoContent)
+			}))
+			r := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+			r.Header.Set("Authorization", "Bearer tm-good")
+			if tc.header != "" {
+				r.Header.Set("X-User-ID", tc.header)
+			}
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, r)
+			if w.Code != http.StatusNoContent {
+				t.Fatalf("status %d", w.Code)
+			}
+			if got != tc.want {
+				t.Errorf("subject = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
