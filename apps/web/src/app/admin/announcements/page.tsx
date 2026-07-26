@@ -34,10 +34,10 @@ function formatTime(iso: string) {
   return new Date(iso).toLocaleString('zh-CN');
 }
 
-const SEVERITY_OPTIONS: { value: AdminAnnouncementInput['severity']; label: string; badgeVariant: 'secondary' | 'warning' | 'success' }[] = [
+const SEVERITY_OPTIONS: { value: AdminAnnouncementInput['severity']; label: string; badgeVariant: 'secondary' | 'warning' | 'destructive' }[] = [
   { value: 'info', label: '提醒', badgeVariant: 'secondary' },
   { value: 'warning', label: '警告', badgeVariant: 'warning' },
-  { value: 'success', label: '成功', badgeVariant: 'success' },
+  { value: 'maintenance', label: '维护', badgeVariant: 'destructive' },
 ];
 
 interface FormState {
