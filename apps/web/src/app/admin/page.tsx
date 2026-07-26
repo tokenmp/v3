@@ -150,22 +150,24 @@ function TopUsersSection({ rows }: { rows: TopUserRow[] }) {
               <TableRow>
                 <TableHead>邮箱</TableHead>
                 <TableHead className="text-right">请求数</TableHead>
+                <TableHead className="text-right">输入</TableHead>
+                <TableHead className="text-right">输出</TableHead>
                 <TableHead className="text-right">Token</TableHead>
-                <TableHead className="text-right">费用</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {rows.map((r) => (
                 <TableRow key={r.email}>
-                  <TableCell className="font-medium truncate max-w-[200px]">{r.email}</TableCell>
+                  <TableCell className="font-medium truncate max-w-[200px]">{r.email || '—'}</TableCell>
                   <TableCell className="text-right tabular-nums">{r.requests.toLocaleString()}</TableCell>
+                  <TableCell className="text-right tabular-nums">{Number(r.inputTokens || 0).toLocaleString()}</TableCell>
+                  <TableCell className="text-right tabular-nums">{Number(r.outputTokens || 0).toLocaleString()}</TableCell>
                   <TableCell className="text-right tabular-nums">{r.tokens.toLocaleString()}</TableCell>
-                  <TableCell className="text-right tabular-nums">¥{Number(r.cost).toFixed(4)}</TableCell>
                 </TableRow>
               ))}
               {rows.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={4} className="py-8 text-center text-muted-foreground">
+                  <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
                     暂无数据
                   </TableCell>
                 </TableRow>
@@ -179,12 +181,12 @@ function TopUsersSection({ rows }: { rows: TopUserRow[] }) {
           {rows.map((r) => (
             <div key={r.email} className="flex items-center justify-between rounded-lg border p-3">
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium truncate">{r.email}</p>
+                <p className="text-sm font-medium truncate">{r.email || '—'}</p>
                 <p className="text-xs text-muted-foreground">
                   {r.requests.toLocaleString()} 次请求
                 </p>
               </div>
-              <p className="text-sm tabular-nums">¥{Number(r.cost).toFixed(4)}</p>
+              <p className="text-sm tabular-nums">{r.tokens.toLocaleString()} tokens</p>
             </div>
           ))}
           {rows.length === 0 && (
@@ -220,7 +222,7 @@ export default function AdminDashboardPage() {
         <StatCard
           icon={CheckCircle2}
           label="成功率"
-          value={dash ? `${dash.successRate}%` : '—'}
+          value={dash ? `${Number(dash.successRate).toFixed(1)}%` : '—'}
         />
         <StatCard
           icon={Users}

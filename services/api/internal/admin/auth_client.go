@@ -70,6 +70,7 @@ type AdminUser struct {
 type AdminApiKey struct {
 	ID         string     `json:"id"`
 	UserID     string     `json:"user_id"`
+	UserEmail  string     `json:"user_email,omitempty"`
 	Name       string     `json:"name"`
 	KeyPrefix  string     `json:"key_prefix"`
 	KeySuffix  string     `json:"key_suffix"`

@@ -28,6 +28,7 @@ var ErrUnavailable = errors.New("logging: service unavailable")
 type RequestLog struct {
 	RequestID    string    `json:"request_id"`
 	UserID       string    `json:"user_id,omitempty"`
+	UserEmail    string    `json:"user_email,omitempty"`
 	ModelName    string    `json:"resolved_model,omitempty"`
 	ProviderID   string    `json:"provider_id,omitempty"`
 	Protocol     string    `json:"protocol,omitempty"`
@@ -75,6 +76,7 @@ type ListResult struct {
 type ModelStat struct {
 	Model        string `json:"model"`
 	Requests     int64  `json:"requests"`
+	Success      int64  `json:"success"`
 	InputTokens  int64  `json:"input_tokens"`
 	OutputTokens int64  `json:"output_tokens"`
 }

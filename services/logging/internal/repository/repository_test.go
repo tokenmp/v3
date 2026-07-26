@@ -426,3 +426,107 @@ func indexOf(s, sub string) int {
 	}
 	return -1
 }
+
+// TestIngestBatch_UpsertDedupes verifies that two events for the same
+// request_id (e.g. an Attempt event followed by a Finalized event) produce a
+// single request_logs row, with fields merged: the Attempt event's latency
+// is preserved and the Finalized event's completed_at is applied.
+func TestIngestBatch_UpsertDedupes(t *testing.T) {
+	d := dsn(t)
+	applyMigrations(t, d)
+	db := openDB(t, d)
+	repo := New(db)
+	ctx := context.Background()
+	reqID := "req-dedup-1"
+	now := time.Now().UTC().Truncate(time.Microsecond)
+
+	// Event 1: Attempt (carries latency, no completion).
+	attemptBatch := Batch{
+		Log: RequestLog{
+			RequestID:   reqID,
+			UserID:      "u-dedup",
+			Protocol:    "openai_chat",
+			Stream:      false,
+			FinalStatus: "success",
+			LatencyMS:   1645,
+			CreatedAt:   now,
+		},
+		Attempts: []Attempt{{
+			RequestID:    reqID,
+			AttemptIndex: 1,
+			ProviderID:   "prov-1",
+			Status:       "success",
+			LatencyMS:    1645,
+			CreatedAt:    now,
+		}},
+		Events: []Event{{
+			RequestID: reqID,
+			Source:    "executor",
+			Stage:     "upstream_finished",
+			Status:    "success",
+			CreatedAt: now,
+		}},
+	}
+	if err := repo.IngestBatch(ctx, attemptBatch); err != nil {
+		t.Fatalf("ingest attempt batch: %v", err)
+	}
+
+	// Event 2: Finalized (carries completion + usage, no latency).
+	completed := now.Add(1645 * time.Millisecond)
+	finalBatch := Batch{
+		Log: RequestLog{
+			RequestID:    reqID,
+			Protocol:     "openai_chat",
+			Stream:       false,
+			FinalStatus:  "success",
+			InputTokens:  7,
+			OutputTokens: 50,
+			TotalTokens:  57,
+			UsageStatus:  "final",
+			CreatedAt:    now,
+			CompletedAt:  &completed,
+		},
+		Events: []Event{{
+			RequestID: reqID,
+			Source:    "executor",
+			Stage:     "terminal",
+			Status:    "success",
+			CreatedAt: completed,
+		}},
+	}
+	if err := repo.IngestBatch(ctx, finalBatch); err != nil {
+		t.Fatalf("ingest final batch: %v", err)
+	}
+
+	// Exactly one request_logs row for reqID.
+	var rowCount int64
+	if err := db.WithContext(ctx).Raw(`SELECT COUNT(*) FROM request_logs WHERE request_id = ?`, reqID).Scan(&rowCount).Error; err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if rowCount != 1 {
+		t.Fatalf("expected 1 request_logs row, got %d", rowCount)
+	}
+
+	// Merged fields: latency from attempt, usage/completed_at from finalized.
+	got, err := repo.GetRequestLog(ctx, reqID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.LatencyMS != 1645 {
+		t.Errorf("latency_ms = %d, want 1645 (preserved from attempt event)", got.LatencyMS)
+	}
+	if got.TotalTokens != 57 {
+		t.Errorf("total_tokens = %d, want 57 (applied from finalized event)", got.TotalTokens)
+	}
+	if got.CompletedAt == nil {
+		t.Errorf("completed_at not set")
+	}
+	// One attempt row.
+	attempts, err := repo.ListAttempts(ctx, reqID)
+	if err != nil {
+		t.Fatalf("list attempts: %v", err)
+	}
+	if len(attempts) != 1 {
+		t.Errorf("attempts = %d, want 1", len(attempts))
+	}
+}

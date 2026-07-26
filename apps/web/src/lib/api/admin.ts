@@ -195,6 +195,21 @@ function mapPlan(p: Record<string, unknown>): AdminPlan {
   };
 }
 
+function mapUserPlan(u: Record<string, unknown>): AdminUserPlan {
+  return {
+    id: String(u.id ?? ''),
+    userId: String(u.user_id ?? u.userId ?? ''),
+    userEmail: String(u.user_email ?? u.userEmail ?? ''),
+    planId: String(u.plan_id ?? u.planId ?? ''),
+    planName: String(u.plan_name ?? u.planName ?? ''),
+    planType: (u.plan_type ?? u.planType ?? 'free') as AdminUserPlan['planType'],
+    status: (u.status ?? 'active') as AdminUserPlan['status'],
+    activatedAt: String(u.activated_at ?? u.activatedAt ?? ''),
+    expiresAt: u.expires_at != null ? String(u.expires_at) : (u.expiresAt != null ? String(u.expiresAt) : null),
+    remainingQuota: String(u.remaining_quota ?? u.remainingQuota ?? ''),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Unified admin API surface (no mock — real backend only)
 // ---------------------------------------------------------------------------
@@ -398,11 +413,12 @@ export const adminApi = {
   // ---- User plans ----
   userPlans: {
     list: async (): Promise<AdminUserPlan[]> => {
-      const res = await request<{ plans: AdminUserPlan[]; items: AdminUserPlan[] } | AdminUserPlan[]>(
+      const res = await request<{ plans: Record<string, unknown>[]; items: Record<string, unknown>[] } | Record<string, unknown>[]>(
         '/api/v1/admin/user-plans',
         { baseUrl: ADMIN_BASE },
       );
-      return Array.isArray(res) ? res : (res.plans ?? res.items ?? []);
+      const raw = Array.isArray(res) ? res : (res.plans ?? res.items ?? []);
+      return raw.map(mapUserPlan);
     },
     assign: async (input: AdminUserPlanInput): Promise<AdminUserPlan> => {
       return request<AdminUserPlan>('/api/v1/admin/user-plans', {

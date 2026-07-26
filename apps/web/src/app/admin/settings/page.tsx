@@ -29,15 +29,15 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 }
 
 const SERVICES = [
-  { name: 'Auth', url: '/auth-api/healthz' },
-  { name: 'Edge/BFF', url: '/biz-api/healthz' },
-  { name: 'Logging', url: '/biz-api/healthz' },
-  { name: 'Billing', url: '/biz-api/healthz' },
-  { name: 'Notice', url: '/notice-api/healthz' },
-  { name: 'Config', url: '/biz-api/healthz' },
-] as const;
+  { name: 'Auth', url: '/auth-api/healthz', port: '8080' },
+  { name: 'Edge/BFF', url: '/biz-api/healthz', port: '3002' },
+  { name: 'Notice', url: '/notice-api/healthz', port: '8086' },
+  { name: 'Logging', url: '/biz-api/healthz', port: '8083', via: 'Edge' },
+  { name: 'Billing', url: '/biz-api/healthz', port: '8085', via: 'Edge' },
+  { name: 'Config', url: '/biz-api/healthz', port: '8084', via: 'Edge' },
+];
 
-function ServiceStatusRow({ name, url }: { name: string; url: string }) {
+function ServiceStatusRow({ name, url, port, via }: { name: string; url: string; port?: string; via?: string }) {
   const { data, isLoading } = useQuery({
     queryKey: ['healthz', name],
     queryFn: async () => {
@@ -56,6 +56,7 @@ function ServiceStatusRow({ name, url }: { name: string; url: string }) {
   return (
     <TableRow>
       <TableCell className="font-medium text-sm">{name}</TableCell>
+      <TableCell className="text-xs text-muted-foreground tabular-nums">:{port ?? '—'}{via ? ` (${via})` : ''}</TableCell>
       <TableCell>
         <span
           className={cn(
@@ -121,12 +122,13 @@ export default function AdminSettingsPage() {
             <TableHeader>
               <TableRow>
                 <TableHead className="text-xs">服务</TableHead>
+                <TableHead className="text-xs">端口</TableHead>
                 <TableHead className="text-xs">状态</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {SERVICES.map((s) => (
-                <ServiceStatusRow key={s.name} name={s.name} url={s.url} />
+                <ServiceStatusRow key={s.name} name={s.name} url={s.url} port={s.port} via={s.via} />
               ))}
             </TableBody>
           </Table>
