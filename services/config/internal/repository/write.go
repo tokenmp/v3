@@ -79,6 +79,16 @@ func (r *GormRepository) CreateDraft(ctx context.Context, revision, createdBy, c
 		ChangeLog:        changeLog,
 		ParentRevisionID: parentRevisionID,
 	}
+	// Use a raw INSERT so parentRevisionID=nil produces an explicit NULL
+	// (GORM's struct Create may omit a nil *int64 column, falling back to
+	// the DB DEFAULT sequence value, which violates the self-referential FK
+	// on the first revision). NULL is exempt from the FK.
+	if parentRevisionID == nil {
+		if err := r.db.WithContext(ctx).Raw(`INSERT INTO config_revisions (revision, status, created_by, change_log, parent_revision_id) VALUES (?, 'draft', ?, ?, NULL) RETURNING id`, revision, createdBy, changeLog).Scan(&row.ID).Error; err != nil {
+			return 0, ErrInsertFailed
+		}
+		return row.ID, nil
+	}
 	if err := r.db.WithContext(ctx).Create(&row).Error; err != nil {
 		return 0, ErrInsertFailed
 	}

@@ -27,9 +27,9 @@ func (Provider) TableName() string { return "providers" }
 type Model struct {
 	ID                     string    `gorm:"column:id;primaryKey" json:"id"`
 	DisplayName            string    `gorm:"column:display_name" json:"display_name"`
-	InputModalities        []byte    `gorm:"column:input_modalities;type:jsonb" json:"input_modalities"`
-	OutputModalities       []byte    `gorm:"column:output_modalities;type:jsonb" json:"output_modalities"`
-	Capabilities           []byte    `gorm:"column:capabilities;type:jsonb" json:"capabilities"`
+	InputModalities        StringArray `gorm:"column:input_modalities;type:jsonb" json:"input_modalities"`
+	OutputModalities       StringArray `gorm:"column:output_modalities;type:jsonb" json:"output_modalities"`
+	Capabilities           StringArray `gorm:"column:capabilities;type:jsonb" json:"capabilities"`
 	ContextWindow          *int      `gorm:"column:context_window" json:"context_window,omitempty"`
 	MaxOutputTokens        *int      `gorm:"column:max_output_tokens" json:"max_output_tokens,omitempty"`
 	ThinkingSupported      bool      `gorm:"column:thinking_supported" json:"thinking_supported"`
@@ -168,4 +168,13 @@ type AdminReader interface {
 	ListRoutes(ctx context.Context, limit, offset int) ([]RouteMapping, int64, error)
 	GetRoute(ctx context.Context, id string) (RouteMapping, error)
 	ListRouteCredentials(ctx context.Context, routeID string) ([]RouteCredential, error)
+
+	// ListAllActiveModels returns all active (non-deleted) models without pagination.
+	ListAllActiveModels(ctx context.Context) ([]Model, error)
+	// ListAllActiveProviders returns all active (non-deleted) providers without pagination.
+	ListAllActiveProviders(ctx context.Context) ([]Provider, error)
+	// ListAllActiveRoutes returns all active (non-deleted) routes without pagination.
+	ListAllActiveRoutes(ctx context.Context) ([]RouteMapping, error)
+	// ListAllActiveAdapters returns all active (non-deleted) adapters without pagination.
+	ListAllActiveAdapters(ctx context.Context) ([]Adapter, error)
 }

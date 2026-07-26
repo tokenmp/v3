@@ -129,6 +129,38 @@ func (r *GormRepository) ListRouteCredentials(ctx context.Context, routeID strin
 	return items, nil
 }
 
+func (r *GormRepository) ListAllActiveModels(ctx context.Context) ([]Model, error) {
+	var items []Model
+	if err := r.db.WithContext(ctx).Where("status <> ?", "deleted").Order("id ASC").Find(&items).Error; err != nil {
+		return nil, classifyReadErr(err)
+	}
+	return items, nil
+}
+
+func (r *GormRepository) ListAllActiveProviders(ctx context.Context) ([]Provider, error) {
+	var items []Provider
+	if err := r.db.WithContext(ctx).Where("status <> ?", "deleted").Order("id ASC").Find(&items).Error; err != nil {
+		return nil, classifyReadErr(err)
+	}
+	return items, nil
+}
+
+func (r *GormRepository) ListAllActiveRoutes(ctx context.Context) ([]RouteMapping, error) {
+	var items []RouteMapping
+	if err := r.db.WithContext(ctx).Where("status <> ?", "deleted").Order("model_id ASC, priority DESC, id ASC").Find(&items).Error; err != nil {
+		return nil, classifyReadErr(err)
+	}
+	return items, nil
+}
+
+func (r *GormRepository) ListAllActiveAdapters(ctx context.Context) ([]Adapter, error) {
+	var items []Adapter
+	if err := r.db.WithContext(ctx).Where("status <> ?", "deleted").Order("id ASC").Find(&items).Error; err != nil {
+		return nil, classifyReadErr(err)
+	}
+	return items, nil
+}
+
 // ---- AdminWriter implementation ----
 
 // AdminWriter is the write contract for config admin data.
@@ -273,7 +305,10 @@ func updateByID(ctx context.Context, db *gorm.DB, model any, col string, id any,
 	if len(fields) == 0 {
 		return nil
 	}
-	fields["updated_at"] = nil // let DB set now()
+	// GORM auto-updates updated_at for models with the field; the DB also has
+	// a touch_updated_at trigger. Do NOT set updated_at in the map — it causes
+	// "multiple assignments to same column" (SQLSTATE 42601).
+	delete(fields, "updated_at")
 	res := db.WithContext(ctx).Model(model).Where(col+" = ?", id).Updates(fields)
 	if res.Error != nil {
 		return classifyWriteErr(res.Error)
@@ -281,8 +316,6 @@ func updateByID(ctx context.Context, db *gorm.DB, model any, col string, id any,
 	if res.RowsAffected == 0 {
 		return ErrNotFound
 	}
-	// updated_at=nil causes GORM to skip it; set explicitly.
-	_ = db.WithContext(ctx).Model(model).Where(col+" = ?", id).Update("updated_at", gorm.Expr("now()")).Error
 	return nil
 }
 
