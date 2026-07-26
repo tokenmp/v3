@@ -3,9 +3,11 @@ package server
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/tokenmp/v3/packages/go/httpresp"
@@ -61,6 +63,9 @@ func (s *Server) registerAdminRoutes(r chi.Router) {
 	r.Delete("/v1/config/admin/routes/{id}", s.handleAdminDeleteRoute)
 	r.Get("/v1/config/admin/routes/{id}/credentials", s.handleAdminListRouteCredentials)
 	r.Put("/v1/config/admin/routes/{id}/credentials", s.handleAdminSetRouteCredentials)
+
+	// Compile
+	r.Post("/v1/config/admin/compile", s.handleAdminCompile)
 }
 
 // ---- Models ----
@@ -437,6 +442,102 @@ func (s *Server) handleAdminSetRouteCredentials(w http.ResponseWriter, r *http.R
 		return
 	}
 	httpresp.OK(w, map[string]any{"route_id": chi.URLParam(r, "id"), "set": true})
+}
+
+// ---- Compile ----
+
+func (s *Server) handleAdminCompile(w http.ResponseWriter, r *http.Request) {
+	if s.adminReader == nil || s.writer == nil {
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "admin not configured")
+		return
+	}
+
+	ctx := r.Context()
+
+	// Read all active admin data.
+	models, err := s.adminReader.ListAllActiveModels(ctx)
+	if err != nil {
+		s.logger.Warn("compile: list models failed", "error", err)
+		httpresp.Error(w, httpresp.CodeInternalError, "internal error")
+		return
+	}
+
+	providers, err := s.adminReader.ListAllActiveProviders(ctx)
+	if err != nil {
+		s.logger.Warn("compile: list providers failed", "error", err)
+		httpresp.Error(w, httpresp.CodeInternalError, "internal error")
+		return
+	}
+
+	routes, err := s.adminReader.ListAllActiveRoutes(ctx)
+	if err != nil {
+		s.logger.Warn("compile: list routes failed", "error", err)
+		httpresp.Error(w, httpresp.CodeInternalError, "internal error")
+		return
+	}
+
+	adapters, err := s.adminReader.ListAllActiveAdapters(ctx)
+	if err != nil {
+		s.logger.Warn("compile: list adapters failed", "error", err)
+		httpresp.Error(w, httpresp.CodeInternalError, "internal error")
+		return
+	}
+
+	// Build credentials by provider map.
+	credentialsByProvider := make(map[string][]repository.UpstreamCredential)
+	for _, p := range providers {
+		creds, err := s.adminReader.ListCredentials(ctx, p.ID)
+		if err != nil {
+			s.logger.Warn("compile: list credentials failed", "provider_id", p.ID, "error", err)
+			continue
+		}
+		credentialsByProvider[p.ID] = creds
+	}
+
+	// Build route credentials by route map.
+	routeCredentialsByRoute := make(map[string][]repository.RouteCredential)
+	for _, rm := range routes {
+		rcs, err := s.adminReader.ListRouteCredentials(ctx, rm.ID)
+		if err != nil {
+			s.logger.Warn("compile: list route credentials failed", "route_id", rm.ID, "error", err)
+			continue
+		}
+		routeCredentialsByRoute[rm.ID] = rcs
+	}
+
+	// Compile snapshot JSON.
+	snapshotJSON, err := compileSnapshot(models, providers, routes, credentialsByProvider, routeCredentialsByRoute, adapters)
+	if err != nil {
+		s.logger.Warn("compile: snapshot compilation failed", "error", err)
+		httpresp.Error(w, httpresp.CodeInternalError, "compilation failed")
+		return
+	}
+
+	// Create a draft revision, write the snapshot JSON, and publish.
+	revision := fmt.Sprintf("compile-%d", time.Now().UTC().Unix())
+	draftID, err := s.writer.CreateDraft(ctx, revision, "system", "admin compile", nil)
+	if err != nil {
+		s.logger.Warn("compile: create draft failed", "error", err)
+		httpresp.Error(w, httpresp.CodeInternalError, "internal error")
+		return
+	}
+
+	if err := s.writer.UpdateDraftJSON(ctx, draftID, snapshotJSON); err != nil {
+		s.logger.Warn("compile: update draft json failed", "error", err)
+		httpresp.Error(w, httpresp.CodeInternalError, "internal error")
+		return
+	}
+
+	if err := s.writer.PublishRevision(ctx, draftID); err != nil {
+		s.logger.Warn("compile: publish failed", "error", err)
+		httpresp.Error(w, httpresp.CodeInternalError, "internal error")
+		return
+	}
+
+	httpresp.OK(w, map[string]any{
+		"revision":  revision,
+		"published": true,
+	})
 }
 
 // ---- shared helpers ----

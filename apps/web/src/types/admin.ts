@@ -96,7 +96,7 @@ export interface AdminAnnouncement {
   title: string;
   summary: string;
   body: string; // Markdown
-  severity: 'info' | 'warning' | 'success';
+  severity: 'info' | 'warning' | 'maintenance';
   publishedAt: string | null; // null = draft
   createdAt: string;
   updatedAt: string;
@@ -106,7 +106,7 @@ export interface AdminAnnouncementInput {
   title: string;
   summary: string;
   body: string;
-  severity: 'info' | 'warning' | 'success';
+  severity: 'info' | 'warning' | 'maintenance';
   publishedAt: string | null;
 }
 
@@ -218,6 +218,8 @@ export interface AdminModelConfig {
   displayName: string;
   capabilities: string[]; // text|tools|vision|thinking|image
   thinkingSupported: boolean;
+  contextWindow: number | null;
+  maxOutputTokens: number | null;
   routeCount: number;
 }
 
@@ -230,6 +232,8 @@ export interface AdminRouteConfig {
   priority: number;
   enabled: boolean;
   quarantined: boolean;
+  contextWindow: number | null;
+  maxOutputTokens: number | null;
 }
 
 // ---- Upstream credentials (上游账号) ----

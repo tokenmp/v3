@@ -67,6 +67,8 @@ type RouteDraft = {
   protocol: string;
   priority: number;
   enabled: boolean;
+  contextWindow: number | null;
+  maxOutputTokens: number | null;
 };
 
 function emptyDraft(): RouteDraft {
@@ -78,6 +80,8 @@ function emptyDraft(): RouteDraft {
     protocol: 'openai_chat',
     priority: 0,
     enabled: true,
+    contextWindow: null,
+    maxOutputTokens: null,
   };
 }
 
@@ -90,6 +94,8 @@ function fromRoute(r: AdminRouteConfig): RouteDraft {
     protocol: r.protocol,
     priority: r.priority,
     enabled: r.enabled,
+    contextWindow: r.contextWindow,
+    maxOutputTokens: r.maxOutputTokens,
   };
 }
 
@@ -114,6 +120,8 @@ export default function AdminRoutesPage() {
         upstreamModel: input.upstreamModel,
         protocol: input.protocol,
         priority: input.priority,
+        contextWindow: input.contextWindow,
+        maxOutputTokens: input.maxOutputTokens,
       }),
     onSuccess: () => {
       toast.success('路由已创建');
@@ -134,6 +142,8 @@ export default function AdminRoutesPage() {
         protocol: input.protocol,
         priority: input.priority,
         enabled: input.enabled,
+        contextWindow: input.contextWindow,
+        maxOutputTokens: input.maxOutputTokens,
       }),
     onSuccess: () => {
       toast.success('路由已保存');
@@ -304,6 +314,12 @@ function RouteFormModal({
 }) {
   const isEdit = !!initial;
   const [draft, setDraft] = useState<RouteDraft>(initial ? fromRoute(initial) : emptyDraft());
+  const [contextWindowStr, setContextWindowStr] = useState<string>(
+    initial?.contextWindow != null ? String(initial.contextWindow) : '',
+  );
+  const [maxOutputTokensStr, setMaxOutputTokensStr] = useState<string>(
+    initial?.maxOutputTokens != null ? String(initial.maxOutputTokens) : '',
+  );
 
   const { data: providers = [] } = useQuery({
     queryKey: ['admin', 'providers'],
@@ -323,6 +339,14 @@ function RouteFormModal({
     label: m.displayName || m.id,
   }));
 
+  /** Parse empty string → null, non-empty → number */
+  const parseNullableInt = (v: string): number | null => {
+    const trimmed = v.trim();
+    if (trimmed === '') return null;
+    const n = Number(trimmed);
+    return Number.isNaN(n) ? null : n;
+  };
+
   const canSubmit =
     draft.id.trim() !== '' &&
     draft.modelId !== '' &&
@@ -332,7 +356,12 @@ function RouteFormModal({
 
   const submit = () => {
     if (!canSubmit) return;
-    onSubmit(draft);
+    const finalDraft: RouteDraft = {
+      ...draft,
+      contextWindow: parseNullableInt(contextWindowStr),
+      maxOutputTokens: parseNullableInt(maxOutputTokensStr),
+    };
+    onSubmit(finalDraft);
   };
 
   return (
@@ -411,6 +440,25 @@ function RouteFormModal({
               checked={draft.enabled}
               onChange={(v) => setDraft((d) => ({ ...d, enabled: v }))}
               label={draft.enabled ? '已启用' : '已禁用'}
+            />
+          </Field>
+        </FormSection>
+
+        <FormSection title="容量覆盖" cols={2} description="留空表示继承模型默认值">
+          <Field label="上下文窗口（token）" hint="留空继承模型默认">
+            <NumberField
+              value={contextWindowStr}
+              onChange={setContextWindowStr}
+              placeholder="留空继承模型默认"
+              min={1}
+            />
+          </Field>
+          <Field label="最大输出 Token" hint="留空继承模型默认">
+            <NumberField
+              value={maxOutputTokensStr}
+              onChange={setMaxOutputTokensStr}
+              placeholder="留空继承模型默认"
+              min={1}
             />
           </Field>
         </FormSection>

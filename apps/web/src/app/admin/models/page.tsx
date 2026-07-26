@@ -11,6 +11,7 @@ import {
   Field,
   FormActions,
   FormSection,
+  NumberField,
   SwitchField,
   TextField,
 } from '@/components/ui/field';
@@ -313,6 +314,12 @@ function ModelFormModal({
   const [thinkingSupported, setThinkingSupported] = useState(
     item?.thinkingSupported ?? false,
   );
+  const [contextWindow, setContextWindow] = useState<string>(
+    item?.contextWindow != null ? String(item.contextWindow) : '',
+  );
+  const [maxOutputTokens, setMaxOutputTokens] = useState<string>(
+    item?.maxOutputTokens != null ? String(item.maxOutputTokens) : '',
+  );
 
   const createMutation = useMutation({
     mutationFn: (input: {
@@ -320,6 +327,8 @@ function ModelFormModal({
       displayName: string;
       capabilities?: string[];
       thinkingSupported?: boolean;
+      contextWindow?: number | null;
+      maxOutputTokens?: number | null;
     }) => adminConfigApi.createModel(input),
     onSuccess: () => {
       toast.success('模型已创建');
@@ -345,13 +354,25 @@ function ModelFormModal({
   const submitting = createMutation.isPending || updateMutation.isPending;
   const canSubmit = isEdit ? displayName.trim().length > 0 : id.trim().length > 0 && displayName.trim().length > 0;
 
+  /** Parse empty string → null, non-empty → number */
+  const parseNullableInt = (v: string): number | null => {
+    const trimmed = v.trim();
+    if (trimmed === '') return null;
+    const n = Number(trimmed);
+    return Number.isNaN(n) ? null : n;
+  };
+
   const submit = () => {
     if (!canSubmit) return;
+    const cw = parseNullableInt(contextWindow);
+    const mot = parseNullableInt(maxOutputTokens);
     if (isEdit) {
       updateMutation.mutate({
         displayName: displayName.trim(),
         capabilities,
         thinkingSupported,
+        contextWindow: cw,
+        maxOutputTokens: mot,
       });
     } else {
       createMutation.mutate({
@@ -359,6 +380,8 @@ function ModelFormModal({
         displayName: displayName.trim(),
         capabilities,
         thinkingSupported,
+        contextWindow: cw,
+        maxOutputTokens: mot,
       });
     }
   };
@@ -408,6 +431,25 @@ function ModelFormModal({
             <SwitchField
               checked={thinkingSupported}
               onChange={setThinkingSupported}
+            />
+          </Field>
+        </FormSection>
+
+        <FormSection title="容量限制" cols={2} description="留空表示使用默认值">
+          <Field label="上下文窗口（token）" hint="留空使用默认">
+            <NumberField
+              value={contextWindow}
+              onChange={setContextWindow}
+              placeholder="留空使用默认"
+              min={1}
+            />
+          </Field>
+          <Field label="最大输出 Token" hint="留空使用默认">
+            <NumberField
+              value={maxOutputTokens}
+              onChange={setMaxOutputTokens}
+              placeholder="留空使用默认"
+              min={1}
             />
           </Field>
         </FormSection>

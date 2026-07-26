@@ -50,3 +50,7 @@ packages/contracts/go/bin/
 
 **/.next/
 services/auth/auth
+
+# Local runtime-generated executor compiled snapshots (no secrets, but product-specific)
+services/executor/internal/snapshot/*-snapshot*.json
+services/executor/internal/snapshot/*-snapshot-resp.json

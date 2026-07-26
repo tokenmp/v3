@@ -224,7 +224,7 @@ func TestListUserPlans_OK(t *testing.T) {
 // ----- 请求日志 -----
 
 func TestListRequestLogs_OK(t *testing.T) {
-	body := `{"logs":[{"request_id":"r1","user_id":"user-1","model_name":"gpt-4","final_status":"success","created_at":"2026-01-01T00:00:00Z"}],"total":1,"page":1,"page_size":20}`
+	body := `{"items":[{"request_id":"r1","user_id":"user-1","resolved_model":"gpt-4","final_status":"success","created_at":"2026-01-01T00:00:00Z"}],"total":1,"page":1,"pageSize":20}`
 	b := newStubBackend(map[string]struct {
 		status int
 		body   string

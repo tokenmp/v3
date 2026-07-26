@@ -87,11 +87,13 @@ async function realListLogs(
     `/api/v1/admin/request-logs?${params}`,
     { baseUrl: ADMIN_BASE },
   );
-  return { logs: res.logs ?? [], total: res.total ?? 0, page, pageSize };
+  const raw = (res.logs ?? []) as unknown as Record<string, unknown>[];
+  return { logs: raw.map(mapRequestLog), total: res.total ?? 0, page, pageSize };
 }
 
 async function realGetLog(id: string): Promise<AdminRequestLog> {
-  return request<AdminRequestLog>(`/api/v1/admin/request-logs/${id}`, { baseUrl: ADMIN_BASE });
+  const res = await request<AdminRequestLog>(`/api/v1/admin/request-logs/${id}`, { baseUrl: ADMIN_BASE });
+  return mapRequestLog(res as unknown as Record<string, unknown>);
 }
 
 // ---------------------------------------------------------------------------
@@ -120,6 +122,77 @@ function mapKey(k: Record<string, unknown>): AdminApiKey {
     expiresAt: k.expires_at ? String(k.expires_at) : (k.expiresAt ? String(k.expiresAt) : null),
     userEmail: String(k.user_email ?? k.userEmail ?? ''),
   } as AdminApiKey;
+}
+
+function mapRequestLogAttempt(a: Record<string, unknown>): Record<string, unknown> {
+  return {
+    ...a,
+    attemptIndex: a.attempt_index ?? a.attemptIndex,
+    upstreamModel: a.upstream_model ?? a.upstreamModel,
+    httpStatus: a.http_status ?? a.httpStatus,
+    latencyMs: a.latency_ms ?? a.latencyMs,
+    errorCode: a.error_code ?? a.errorCode,
+  };
+}
+
+function mapRequestLog(r: Record<string, unknown>): AdminRequestLog {
+  const rawStatus = String(r.final_status ?? r.status ?? '');
+  let status: 'success' | 'error' = 'error';
+  if (rawStatus === 'success') status = 'success';
+
+  const rawAttempts = r.attempts ?? r.events;
+  const attempts = Array.isArray(rawAttempts)
+    ? rawAttempts.map((a: Record<string, unknown>) => mapRequestLogAttempt(a))
+    : undefined;
+
+  const base: AdminRequestLog = {
+    requestId: String(r.request_id ?? r.requestId ?? ''),
+    userId: r.user_id != null && String(r.user_id) !== '' ? String(r.user_id) : null,
+    userEmail: r.user_email != null && String(r.user_email) !== '' ? String(r.user_email) : null,
+    model: String(r.resolved_model ?? r.model ?? ''),
+    status,
+    inputTokens: r.input_tokens != null ? Number(r.input_tokens) : null,
+    outputTokens: r.output_tokens != null ? Number(r.output_tokens) : null,
+    cost: null,
+    durationMs: r.latency_ms != null ? Number(r.latency_ms) : null,
+    createdAt: String(r.created_at ?? r.createdAt ?? ''),
+  };
+
+  // For detail responses (realGetLog), also map provider/attempts/errorMessage
+  // into the object. AdminRequestLog extends RequestLog which lacks these fields,
+  // but the detail page reads them via the loose [key:string]:unknown on attempts.
+  if (attempts || r.provider_id != null || r.error_message != null) {
+    return {
+      ...base,
+      provider: String(r.provider_id ?? r.provider ?? ''),
+      errorMessage: r.error_message ? String(r.error_message) : null,
+      ...(attempts ? { attempts } : {}),
+    } as AdminRequestLog;
+  }
+
+  return base;
+}
+
+function mapPlan(p: Record<string, unknown>): AdminPlan {
+  const allowedModels = p.allowed_models;
+  let parsedModels: string[] = [];
+  if (Array.isArray(allowedModels)) parsedModels = allowedModels.map(String);
+  else if (typeof allowedModels === 'string') {
+    try { parsedModels = JSON.parse(allowedModels) as string[]; } catch { parsedModels = []; }
+  }
+  return {
+    id: String(p.id ?? ''),
+    name: String(p.name ?? ''),
+    planType: (p.plan_type ?? p.planType ?? 'free') as AdminPlan['planType'],
+    price: Number(p.price ?? 0),
+    category: (p.category ?? 'monthly') as AdminPlan['category'],
+    monthlyLimit: p.monthly_limit != null ? Number(p.monthly_limit) : (p.monthlyLimit != null ? Number(p.monthlyLimit) : null),
+    tokenLimit: p.token_limit != null ? Number(p.token_limit) : (p.tokenLimit != null ? Number(p.tokenLimit) : null),
+    allowedModels: parsedModels,
+    status: (p.status ?? 'active') as AdminPlan['status'],
+    createdAt: String(p.created_at ?? p.createdAt ?? ''),
+    updatedAt: String(p.updated_at ?? p.updatedAt ?? ''),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -275,23 +348,42 @@ export const adminApi = {
   // ---- Plans (Billing) ----
   plans: {
     list: async (): Promise<AdminPlan[]> => {
-      const res = await request<{ items: AdminPlan[] } | AdminPlan[]>(
+      const res = await request<{ plans: AdminPlan[]; items: AdminPlan[] } | AdminPlan[]>(
         '/api/v1/admin/plans',
         { baseUrl: ADMIN_BASE },
       );
-      return Array.isArray(res) ? res : (res.items ?? []);
+      const items = Array.isArray(res) ? res : (res.plans ?? res.items ?? []);
+      return items.map((p) => mapPlan(p as unknown as Record<string, unknown>));
     },
     create: async (input: AdminPlanInput): Promise<AdminPlan> => {
       return request<AdminPlan>('/api/v1/admin/plans', {
         method: 'POST',
-        body: input,
+        body: {
+          name: input.name,
+          plan_type: input.planType,
+          price: input.price,
+          category: input.category,
+          monthly_limit: input.monthlyLimit,
+          token_limit: input.tokenLimit,
+          allowed_models: input.allowedModels,
+          status: input.status,
+        },
         baseUrl: ADMIN_BASE,
       });
     },
     update: async (id: string, input: AdminPlanInput): Promise<AdminPlan> => {
       return request<AdminPlan>('/api/v1/admin/plans/' + id, {
         method: 'PATCH',
-        body: input,
+        body: {
+          name: input.name,
+          plan_type: input.planType,
+          price: input.price,
+          category: input.category,
+          monthly_limit: input.monthlyLimit,
+          token_limit: input.tokenLimit,
+          allowed_models: input.allowedModels,
+          status: input.status,
+        },
         baseUrl: ADMIN_BASE,
       });
     },
@@ -306,16 +398,20 @@ export const adminApi = {
   // ---- User plans ----
   userPlans: {
     list: async (): Promise<AdminUserPlan[]> => {
-      const res = await request<{ items: AdminUserPlan[] } | AdminUserPlan[]>(
+      const res = await request<{ plans: AdminUserPlan[]; items: AdminUserPlan[] } | AdminUserPlan[]>(
         '/api/v1/admin/user-plans',
         { baseUrl: ADMIN_BASE },
       );
-      return Array.isArray(res) ? res : (res.items ?? []);
+      return Array.isArray(res) ? res : (res.plans ?? res.items ?? []);
     },
     assign: async (input: AdminUserPlanInput): Promise<AdminUserPlan> => {
       return request<AdminUserPlan>('/api/v1/admin/user-plans', {
         method: 'POST',
-        body: input,
+        body: {
+          user_id: input.userId,
+          plan_id: Number(input.planId),
+          expires_at: input.expiresAt ?? undefined,
+        },
         baseUrl: ADMIN_BASE,
       });
     },
@@ -412,6 +508,8 @@ function mapModelConfig(m: Record<string, unknown>): AdminModelConfig {
     displayName: String(m.display_name ?? m.displayName ?? ''),
     capabilities,
     thinkingSupported: Boolean(m.thinking_supported ?? m.thinkingSupported ?? false),
+    contextWindow: m.context_window != null ? Number(m.context_window) : (m.contextWindow != null ? Number(m.contextWindow) : null),
+    maxOutputTokens: m.max_output_tokens != null ? Number(m.max_output_tokens) : (m.maxOutputTokens != null ? Number(m.maxOutputTokens) : null),
     routeCount: Number(m.route_count ?? m.routeCount ?? 0),
   };
 }
@@ -426,6 +524,8 @@ function mapRouteConfig(r: Record<string, unknown>): AdminRouteConfig {
     priority: Number(r.priority ?? 0),
     enabled: Boolean(r.enabled ?? false),
     quarantined: Boolean(r.quarantined ?? false),
+    contextWindow: r.context_window != null ? Number(r.context_window) : (r.contextWindow != null ? Number(r.contextWindow) : null),
+    maxOutputTokens: r.max_output_tokens != null ? Number(r.max_output_tokens) : (r.maxOutputTokens != null ? Number(r.maxOutputTokens) : null),
   };
 }
 
@@ -517,7 +617,7 @@ export const adminConfigApi = {
     const items = Array.isArray(res) ? res : (res.items ?? []);
     return items.map((m) => mapModelConfig(m as unknown as Record<string, unknown>));
   },
-  createModel: async (input: { id: string; displayName: string; capabilities?: string[]; thinkingSupported?: boolean }): Promise<AdminModelConfig> => {
+  createModel: async (input: { id: string; displayName: string; capabilities?: string[]; thinkingSupported?: boolean; contextWindow?: number | null; maxOutputTokens?: number | null }): Promise<AdminModelConfig> => {
     return request<AdminModelConfig>('/api/v1/admin/models', {
       method: 'POST',
       body: {
@@ -525,6 +625,8 @@ export const adminConfigApi = {
         display_name: input.displayName,
         capabilities: input.capabilities ?? ['text'],
         thinking_supported: input.thinkingSupported ?? false,
+        context_window: input.contextWindow ?? null,
+        max_output_tokens: input.maxOutputTokens ?? null,
         status: 'active',
       },
       baseUrl: ADMIN_BASE,
@@ -534,6 +636,9 @@ export const adminConfigApi = {
     const fields: Record<string, unknown> = {};
     if (input.displayName !== undefined) fields.display_name = input.displayName;
     if (input.thinkingSupported !== undefined) fields.thinking_supported = input.thinkingSupported;
+    if (input.capabilities !== undefined) fields.capabilities = input.capabilities;
+    if (input.contextWindow !== undefined) fields.context_window = input.contextWindow;
+    if (input.maxOutputTokens !== undefined) fields.max_output_tokens = input.maxOutputTokens;
     await request<{ id: string }>(`/api/v1/admin/models/${id}`, {
       method: 'PATCH',
       body: fields,
@@ -556,7 +661,7 @@ export const adminConfigApi = {
     const items = Array.isArray(res) ? res : (res.items ?? []);
     return items.map((r) => mapRouteConfig(r as unknown as Record<string, unknown>));
   },
-  createRoute: async (input: { id: string; modelId: string; providerId: string; upstreamModel: string; protocol: string; priority?: number }): Promise<AdminRouteConfig> => {
+  createRoute: async (input: { id: string; modelId: string; providerId: string; upstreamModel: string; protocol: string; priority?: number; contextWindow?: number | null; maxOutputTokens?: number | null }): Promise<AdminRouteConfig> => {
     return request<AdminRouteConfig>('/api/v1/admin/routes', {
       method: 'POST',
       body: {
@@ -566,6 +671,8 @@ export const adminConfigApi = {
         upstream_model: input.upstreamModel,
         protocol: input.protocol,
         priority: input.priority ?? 0,
+        context_window: input.contextWindow ?? null,
+        max_output_tokens: input.maxOutputTokens ?? null,
         enabled: true,
         is_default: false,
         status: 'active',
@@ -578,6 +685,8 @@ export const adminConfigApi = {
     if (input.upstreamModel !== undefined) fields.upstream_model = input.upstreamModel;
     if (input.priority !== undefined) fields.priority = input.priority;
     if (input.enabled !== undefined) fields.enabled = input.enabled;
+    if (input.contextWindow !== undefined) fields.context_window = input.contextWindow;
+    if (input.maxOutputTokens !== undefined) fields.max_output_tokens = input.maxOutputTokens;
     await request<{ id: string }>(`/api/v1/admin/routes/${id}`, {
       method: 'PATCH',
       body: fields,

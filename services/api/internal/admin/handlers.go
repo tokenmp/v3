@@ -92,7 +92,12 @@ func (h *Handlers) ListRequestLogs(w http.ResponseWriter, r *http.Request) {
 		httpresp.Error(w, httpresp.CodeServiceUnavailable, "logging unavailable")
 		return
 	}
-	httpresp.OK(w, result)
+	httpresp.OK(w, map[string]any{
+		"logs":     result.Logs,
+		"total":    result.Total,
+		"page":     result.Page,
+		"pageSize": result.PageSize,
+	})
 }
 
 func (h *Handlers) GetRequestLog(w http.ResponseWriter, r *http.Request) {
