@@ -15,36 +15,36 @@ import (
 // match exactly what executor's parseConfig (DisallowUnknownFields) expects.
 
 type wireConfigSnapshot struct {
-	Revision  string         `json:"Revision"`
-	CreatedAt string         `json:"CreatedAt"`
-	Global    wireGlobal     `json:"Global"`
-	Models    map[string]wireModel  `json:"Models"`
+	Revision  string                  `json:"Revision"`
+	CreatedAt string                  `json:"CreatedAt"`
+	Global    wireGlobal              `json:"Global"`
+	Models    map[string]wireModel    `json:"Models"`
 	Providers map[string]wireProvider `json:"Providers"`
-	Routes    []wireRoute    `json:"Routes"`
-	Adapters  map[string]wireAdapter `json:"Adapters"`
+	Routes    []wireRoute             `json:"Routes"`
+	Adapters  map[string]wireAdapter  `json:"Adapters"`
 }
 
 type wireGlobal struct {
-	Retry        wireRetryPolicy `json:"Retry"`
+	Retry        wireRetryPolicy   `json:"Retry"`
 	Timeout      wireTimeoutPolicy `json:"Timeout"`
-	AutoModelIDs []string        `json:"AutoModelIDs"`
+	AutoModelIDs []string          `json:"AutoModelIDs"`
 }
 
 type wireRetryPolicy struct {
-	MaxTotalAttempts      *int         `json:"MaxTotalAttempts,omitempty"`
-	MaxSameTargetAttempts *int         `json:"MaxSameTargetAttempts,omitempty"`
-	MaxTotalDuration      string       `json:"MaxTotalDuration,omitempty"`
-	Backoff               string       `json:"Backoff,omitempty"`
+	MaxTotalAttempts      *int            `json:"MaxTotalAttempts,omitempty"`
+	MaxSameTargetAttempts *int            `json:"MaxSameTargetAttempts,omitempty"`
+	MaxTotalDuration      string          `json:"MaxTotalDuration,omitempty"`
+	Backoff               string          `json:"Backoff,omitempty"`
 	Rules                 []wireRetryRule `json:"Rules,omitempty"`
 }
 
 type wireRetryRule struct {
-	ID           string `json:"ID"`
-	Priority     int    `json:"Priority"`
-	HTTPStatuses []int  `json:"HTTPStatuses"`
+	ID           string   `json:"ID"`
+	Priority     int      `json:"Priority"`
+	HTTPStatuses []int    `json:"HTTPStatuses"`
 	ErrorCodes   []string `json:"ErrorCodes,omitempty"`
 	ErrorTypes   []string `json:"ErrorTypes,omitempty"`
-	Action       string `json:"Action"`
+	Action       string   `json:"Action"`
 }
 
 type wireTimeoutPolicy struct {
@@ -56,15 +56,15 @@ type wireTimeoutPolicy struct {
 }
 
 type wireModel struct {
-	ID               string   `json:"ID"`
-	DisplayName      string   `json:"DisplayName"`
-	Capabilities     []string `json:"Capabilities"`
+	ID               string            `json:"ID"`
+	DisplayName      string            `json:"DisplayName"`
+	Capabilities     []string          `json:"Capabilities"`
 	Thinking         wireModelThinking `json:"Thinking"`
-	FallbackModelIDs []string `json:"FallbackModelIDs,omitempty"`
+	FallbackModelIDs []string          `json:"FallbackModelIDs,omitempty"`
 }
 
 type wireModelThinking struct {
-	Supported      bool `json:"Supported"`
+	Supported      bool   `json:"Supported"`
 	DefaultEffort  string `json:"DefaultEffort"`
 	MaxEffort      string `json:"MaxEffort"`
 	MinBudgetToken int    `json:"MinBudgetToken"`
@@ -72,30 +72,30 @@ type wireModelThinking struct {
 }
 
 type wireProvider struct {
-	ID       string `json:"ID"`
-	Selector string `json:"Selector"`
-	Name     string `json:"Name"`
-	BaseURL  string `json:"BaseURL"`
-	SDKKind  string `json:"SDKKind"`
-	Protocol string `json:"Protocol"`
-	Retry    wireRetryPolicy `json:"Retry"`
+	ID       string            `json:"ID"`
+	Selector string            `json:"Selector"`
+	Name     string            `json:"Name"`
+	BaseURL  string            `json:"BaseURL"`
+	SDKKind  string            `json:"SDKKind"`
+	Protocol string            `json:"Protocol"`
+	Retry    wireRetryPolicy   `json:"Retry"`
 	Timeout  wireTimeoutPolicy `json:"Timeout"`
 }
 
 type wireRoute struct {
-	ID               string              `json:"ID"`
-	ModelID          string              `json:"ModelID"`
-	ProviderID       string              `json:"ProviderID"`
-	AdapterID        string              `json:"AdapterID"`
-	UpstreamModel    string              `json:"UpstreamModel"`
-	Priority         int                 `json:"Priority"`
-	Enabled          bool                `json:"Enabled"`
-	Protocol         string              `json:"Protocol"`
-	Retry            wireRetryPolicy     `json:"Retry"`
-	Timeout          wireTimeoutPolicy   `json:"Timeout"`
-	Credentials      []wireCredential    `json:"Credentials"`
-	FallbackRouteIDs []string            `json:"FallbackRouteIDs,omitempty"`
-	RouteGroup       string              `json:"RouteGroup,omitempty"`
+	ID               string            `json:"ID"`
+	ModelID          string            `json:"ModelID"`
+	ProviderID       string            `json:"ProviderID"`
+	AdapterID        string            `json:"AdapterID"`
+	UpstreamModel    string            `json:"UpstreamModel"`
+	Priority         int               `json:"Priority"`
+	Enabled          bool              `json:"Enabled"`
+	Protocol         string            `json:"Protocol"`
+	Retry            wireRetryPolicy   `json:"Retry"`
+	Timeout          wireTimeoutPolicy `json:"Timeout"`
+	Credentials      []wireCredential  `json:"Credentials"`
+	FallbackRouteIDs []string          `json:"FallbackRouteIDs,omitempty"`
+	RouteGroup       string            `json:"RouteGroup,omitempty"`
 }
 
 type wireCredential struct {
@@ -106,18 +106,18 @@ type wireCredential struct {
 }
 
 type wireAdapter struct {
-	ID         string            `json:"ID"`
-	Name       string            `json:"Name"`
-	Version    int               `json:"Version"`
-	SDKKind    string            `json:"SDKKind"`
-	Protocol   string            `json:"Protocol"`
-	Auth       wireAuth          `json:"Auth"`
-	Capability wireCapability    `json:"Capability"`
+	ID         string              `json:"ID"`
+	Name       string              `json:"Name"`
+	Version    int                 `json:"Version"`
+	SDKKind    string              `json:"SDKKind"`
+	Protocol   string              `json:"Protocol"`
+	Auth       wireAuth            `json:"Auth"`
+	Capability wireCapability      `json:"Capability"`
 	Thinking   wireAdapterThinking `json:"Thinking"`
-	Request    wireRequest       `json:"Request"`
-	Response   wireResponse      `json:"Response"`
-	Retry      wireRetryPolicy   `json:"Retry"`
-	Timeout    wireTimeoutPolicy `json:"Timeout"`
+	Request    wireRequest         `json:"Request"`
+	Response   wireResponse        `json:"Response"`
+	Retry      wireRetryPolicy     `json:"Retry"`
+	Timeout    wireTimeoutPolicy   `json:"Timeout"`
 }
 
 type wireAuth struct {
@@ -143,23 +143,23 @@ type wireAdapterThinking struct {
 }
 
 type wireRequest struct {
-	AllowedHeaders []string        `json:"AllowedHeaders"`
-	AllowedQuery   []string        `json:"AllowedQuery"`
+	AllowedHeaders []string          `json:"AllowedHeaders"`
+	AllowedQuery   []string          `json:"AllowedQuery"`
 	Rules          []wireRequestRule `json:"Rules"`
 }
 
 type wireRequestRule struct {
-	ID      string          `json:"ID"`
-	Action  string          `json:"Action"`
-	Path    string          `json:"Path,omitempty"`
-	From    string          `json:"From,omitempty"`
-	To      string          `json:"To,omitempty"`
-	Value   json.RawMessage `json:"Value,omitempty"`
-	EnumMap map[string]string `json:"EnumMap,omitempty"`
-	Min     *float64        `json:"Min,omitempty"`
-	Max     *float64        `json:"Max,omitempty"`
-	Name    string          `json:"Name,omitempty"`
-	ValueRef string         `json:"ValueRef,omitempty"`
+	ID       string            `json:"ID"`
+	Action   string            `json:"Action"`
+	Path     string            `json:"Path,omitempty"`
+	From     string            `json:"From,omitempty"`
+	To       string            `json:"To,omitempty"`
+	Value    json.RawMessage   `json:"Value,omitempty"`
+	EnumMap  map[string]string `json:"EnumMap,omitempty"`
+	Min      *float64          `json:"Min,omitempty"`
+	Max      *float64          `json:"Max,omitempty"`
+	Name     string            `json:"Name,omitempty"`
+	ValueRef string            `json:"ValueRef,omitempty"`
 }
 
 type wireResponse struct {
@@ -167,9 +167,9 @@ type wireResponse struct {
 }
 
 type wireResponseRule struct {
-	ID       string          `json:"ID"`
-	Priority int             `json:"Priority"`
-	Match    wireResponseMatch `json:"Match"`
+	ID       string             `json:"ID"`
+	Priority int                `json:"Priority"`
+	Match    wireResponseMatch  `json:"Match"`
 	Output   wireResponseOutput `json:"Output"`
 }
 
@@ -687,14 +687,14 @@ func autoGenerateAdapter(p repository.Provider, credentialsByProvider map[string
 	}
 
 	return wireAdapter{
-		ID:       adapterID,
-		Name:     p.Name + " Adapter",
-		Version:  1,
-		SDKKind:  p.SDKKind,
-		Protocol: p.Protocol,
-		Auth:     auth,
+		ID:         adapterID,
+		Name:       p.Name + " Adapter",
+		Version:    1,
+		SDKKind:    p.SDKKind,
+		Protocol:   p.Protocol,
+		Auth:       auth,
 		Capability: capability,
-		Thinking: thinking,
+		Thinking:   thinking,
 		Request: wireRequest{
 			AllowedHeaders: allowedHeaders,
 			AllowedQuery:   []string{},

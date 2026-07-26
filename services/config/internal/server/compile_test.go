@@ -189,24 +189,30 @@ func (w *fakeWriter) RollbackRevision(_ context.Context, _ int64) (int64, error)
 }
 
 // CreateProvider/Model/etc. stubs for AdminWriter interface
-func (w *fakeWriter) CreateProvider(_ context.Context, _ *repository.Provider) error       { return nil }
-func (w *fakeWriter) UpdateProvider(_ context.Context, _ string, _ map[string]any) error   { return nil }
-func (w *fakeWriter) DeleteProvider(_ context.Context, _ string) error                     { return nil }
-func (w *fakeWriter) CreateModel(_ context.Context, _ *repository.Model) error             { return nil }
-func (w *fakeWriter) UpdateModel(_ context.Context, _ string, _ map[string]any) error      { return nil }
-func (w *fakeWriter) DeleteModel(_ context.Context, _ string) error                        { return nil }
-func (w *fakeWriter) CreateAdapter(_ context.Context, _ *repository.Adapter) error         { return nil }
-func (w *fakeWriter) UpdateAdapter(_ context.Context, _ string, _ map[string]any) error    { return nil }
-func (w *fakeWriter) DeleteAdapter(_ context.Context, _ string) error                      { return nil }
-func (w *fakeWriter) CreateEndpoint(_ context.Context, _ *repository.UpstreamEndpoint) error { return nil }
-func (w *fakeWriter) UpdateEndpoint(_ context.Context, _ int64, _ map[string]any) error    { return nil }
-func (w *fakeWriter) DeleteEndpoint(_ context.Context, _ int64) error                      { return nil }
-func (w *fakeWriter) CreateCredential(_ context.Context, _ *repository.UpstreamCredential) error { return nil }
-func (w *fakeWriter) UpdateCredential(_ context.Context, _ string, _ map[string]any) error { return nil }
-func (w *fakeWriter) DeleteCredential(_ context.Context, _ string) error                   { return nil }
-func (w *fakeWriter) CreateRoute(_ context.Context, _ *repository.RouteMapping) error      { return nil }
-func (w *fakeWriter) UpdateRoute(_ context.Context, _ string, _ map[string]any) error      { return nil }
-func (w *fakeWriter) DeleteRoute(_ context.Context, _ string) error                        { return nil }
+func (w *fakeWriter) CreateProvider(_ context.Context, _ *repository.Provider) error     { return nil }
+func (w *fakeWriter) UpdateProvider(_ context.Context, _ string, _ map[string]any) error { return nil }
+func (w *fakeWriter) DeleteProvider(_ context.Context, _ string) error                   { return nil }
+func (w *fakeWriter) CreateModel(_ context.Context, _ *repository.Model) error           { return nil }
+func (w *fakeWriter) UpdateModel(_ context.Context, _ string, _ map[string]any) error    { return nil }
+func (w *fakeWriter) DeleteModel(_ context.Context, _ string) error                      { return nil }
+func (w *fakeWriter) CreateAdapter(_ context.Context, _ *repository.Adapter) error       { return nil }
+func (w *fakeWriter) UpdateAdapter(_ context.Context, _ string, _ map[string]any) error  { return nil }
+func (w *fakeWriter) DeleteAdapter(_ context.Context, _ string) error                    { return nil }
+func (w *fakeWriter) CreateEndpoint(_ context.Context, _ *repository.UpstreamEndpoint) error {
+	return nil
+}
+func (w *fakeWriter) UpdateEndpoint(_ context.Context, _ int64, _ map[string]any) error { return nil }
+func (w *fakeWriter) DeleteEndpoint(_ context.Context, _ int64) error                   { return nil }
+func (w *fakeWriter) CreateCredential(_ context.Context, _ *repository.UpstreamCredential) error {
+	return nil
+}
+func (w *fakeWriter) UpdateCredential(_ context.Context, _ string, _ map[string]any) error {
+	return nil
+}
+func (w *fakeWriter) DeleteCredential(_ context.Context, _ string) error              { return nil }
+func (w *fakeWriter) CreateRoute(_ context.Context, _ *repository.RouteMapping) error { return nil }
+func (w *fakeWriter) UpdateRoute(_ context.Context, _ string, _ map[string]any) error { return nil }
+func (w *fakeWriter) DeleteRoute(_ context.Context, _ string) error                   { return nil }
 func (w *fakeWriter) SetRouteCredentials(_ context.Context, _ string, _ []repository.RouteCredential) error {
 	return nil
 }
@@ -605,8 +611,8 @@ func TestCompileSnapshot_ThinkingNotSupported(t *testing.T) {
 		providers: []repository.Provider{
 			{ID: "p1", Name: "P1", Selector: "openai", BaseURL: "https://api.example.com/v1", SDKKind: "openai", Protocol: "openai_chat", Status: "active"},
 		},
-		routes: []repository.RouteMapping{},
-		adapters:    []repository.Adapter{},
+		routes:   []repository.RouteMapping{},
+		adapters: []repository.Adapter{},
 	}
 
 	data, err := compileSnapshot(
@@ -837,8 +843,8 @@ func TestHandleAdminCompile(t *testing.T) {
 	}
 
 	var resp struct {
-		Code    int    `json:"code"`
-		Data    struct {
+		Code int `json:"code"`
+		Data struct {
 			Revision  string `json:"revision"`
 			Published bool   `json:"published"`
 		} `json:"data"`
@@ -910,9 +916,9 @@ type strictConfigSnapshot struct {
 }
 
 type strictGlobal struct {
-	Retry        strictRetryPolicy `json:"Retry"`
+	Retry        strictRetryPolicy   `json:"Retry"`
 	Timeout      strictTimeoutPolicy `json:"Timeout"`
-	AutoModelIDs []string          `json:"AutoModelIDs"`
+	AutoModelIDs []string            `json:"AutoModelIDs"`
 }
 
 type strictRetryPolicy struct {
@@ -957,13 +963,13 @@ type strictModelThinking struct {
 }
 
 type strictProvider struct {
-	ID       string             `json:"ID"`
-	Selector string             `json:"Selector"`
-	Name     string             `json:"Name"`
-	BaseURL  string             `json:"BaseURL"`
-	SDKKind  string             `json:"SDKKind"`
-	Protocol string             `json:"Protocol"`
-	Retry    strictRetryPolicy  `json:"Retry"`
+	ID       string              `json:"ID"`
+	Selector string              `json:"Selector"`
+	Name     string              `json:"Name"`
+	BaseURL  string              `json:"BaseURL"`
+	SDKKind  string              `json:"SDKKind"`
+	Protocol string              `json:"Protocol"`
+	Retry    strictRetryPolicy   `json:"Retry"`
 	Timeout  strictTimeoutPolicy `json:"Timeout"`
 }
 
@@ -991,18 +997,18 @@ type strictCredential struct {
 }
 
 type strictAdapter struct {
-	ID         string               `json:"ID"`
-	Name       string               `json:"Name"`
-	Version    int                  `json:"Version"`
-	SDKKind    string               `json:"SDKKind"`
-	Protocol   string               `json:"Protocol"`
-	Auth       strictAuth           `json:"Auth"`
-	Capability strictCapability     `json:"Capability"`
+	ID         string                `json:"ID"`
+	Name       string                `json:"Name"`
+	Version    int                   `json:"Version"`
+	SDKKind    string                `json:"SDKKind"`
+	Protocol   string                `json:"Protocol"`
+	Auth       strictAuth            `json:"Auth"`
+	Capability strictCapability      `json:"Capability"`
 	Thinking   strictAdapterThinking `json:"Thinking"`
-	Request    strictRequest        `json:"Request"`
-	Response   strictResponse       `json:"Response"`
-	Retry      strictRetryPolicy    `json:"Retry"`
-	Timeout    strictTimeoutPolicy  `json:"Timeout"`
+	Request    strictRequest         `json:"Request"`
+	Response   strictResponse        `json:"Response"`
+	Retry      strictRetryPolicy     `json:"Retry"`
+	Timeout    strictTimeoutPolicy   `json:"Timeout"`
 }
 
 type strictAuth struct {
@@ -1028,23 +1034,23 @@ type strictAdapterThinking struct {
 }
 
 type strictRequest struct {
-	AllowedHeaders []string          `json:"AllowedHeaders"`
-	AllowedQuery   []string          `json:"AllowedQuery"`
+	AllowedHeaders []string            `json:"AllowedHeaders"`
+	AllowedQuery   []string            `json:"AllowedQuery"`
 	Rules          []strictRequestRule `json:"Rules"`
 }
 
 type strictRequestRule struct {
-	ID       string          `json:"ID"`
-	Action   string          `json:"Action"`
-	Path     string          `json:"Path,omitempty"`
-	From     string          `json:"From,omitempty"`
-	To       string          `json:"To,omitempty"`
-	Value    json.RawMessage `json:"Value,omitempty"`
+	ID       string            `json:"ID"`
+	Action   string            `json:"Action"`
+	Path     string            `json:"Path,omitempty"`
+	From     string            `json:"From,omitempty"`
+	To       string            `json:"To,omitempty"`
+	Value    json.RawMessage   `json:"Value,omitempty"`
 	EnumMap  map[string]string `json:"EnumMap,omitempty"`
-	Min      *float64        `json:"Min,omitempty"`
-	Max      *float64        `json:"Max,omitempty"`
-	Name     string          `json:"Name,omitempty"`
-	ValueRef string          `json:"ValueRef,omitempty"`
+	Min      *float64          `json:"Min,omitempty"`
+	Max      *float64          `json:"Max,omitempty"`
+	Name     string            `json:"Name,omitempty"`
+	ValueRef string            `json:"ValueRef,omitempty"`
 }
 
 type strictResponse struct {
@@ -1052,9 +1058,9 @@ type strictResponse struct {
 }
 
 type strictResponseRule struct {
-	ID       string             `json:"ID"`
-	Priority int                `json:"Priority"`
-	Match    strictResponseMatch `json:"Match"`
+	ID       string               `json:"ID"`
+	Priority int                  `json:"Priority"`
+	Match    strictResponseMatch  `json:"Match"`
 	Output   strictResponseOutput `json:"Output"`
 }
 
@@ -1344,8 +1350,8 @@ func TestCompileSnapshot_AnthropicAutoAdapterCapability(t *testing.T) {
 		providers: []repository.Provider{
 			{ID: "anthropic-default", Name: "Anthropic Default", Selector: "anthropic", BaseURL: "https://api.anthropic.example", SDKKind: "anthropic", Protocol: "anthropic_messages", Status: "active"},
 		},
-		routes: []repository.RouteMapping{},
-		adapters:  []repository.Adapter{},
+		routes:   []repository.RouteMapping{},
+		adapters: []repository.Adapter{},
 	}
 
 	data, err := compileSnapshot(
