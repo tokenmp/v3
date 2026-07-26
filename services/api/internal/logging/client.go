@@ -28,7 +28,7 @@ var ErrUnavailable = errors.New("logging: service unavailable")
 type RequestLog struct {
 	RequestID    string    `json:"request_id"`
 	UserID       string    `json:"user_id,omitempty"`
-	ModelName    string    `json:"model_name,omitempty"`
+	ModelName    string    `json:"resolved_model,omitempty"`
 	ProviderID   string    `json:"provider_id,omitempty"`
 	Protocol     string    `json:"protocol,omitempty"`
 	Stream       bool      `json:"stream"`
@@ -65,10 +65,10 @@ type LogDetail struct {
 
 // ListResult 是 GET /v1/logs 的分页响应。
 type ListResult struct {
-	Logs     []RequestLog `json:"logs"`
+	Logs     []RequestLog `json:"items"`
 	Total    int          `json:"total"`
 	Page     int          `json:"page"`
-	PageSize int          `json:"page_size"`
+	PageSize int          `json:"pageSize"`
 }
 
 // ModelStat 是按模型聚合的用量统计。

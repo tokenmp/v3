@@ -2,13 +2,14 @@ package identity
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
 
 	"log/slog"
+
+	"github.com/tokenmp/v3/packages/go/httpresp"
 )
 
 // APIKeyPrefix is the prefix that identifies an API key (vs a JWT).
@@ -61,7 +62,7 @@ func (v *APIKeyVerifier) Verify(ctx context.Context, apiKey string) (Claims, err
 		Role   string `json:"role"`
 		Status string `json:"status"`
 	}
-	if err := json.Unmarshal(respBody, &identity); err != nil {
+	if err := httpresp.UnwrapData(respBody, &identity); err != nil {
 		return Claims{}, ErrUnauthenticated
 	}
 	if identity.Status != "active" {

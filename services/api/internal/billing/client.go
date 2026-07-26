@@ -119,14 +119,20 @@ func (c *Client) GetBalance(ctx context.Context, userID string) (Balance, error)
 	return out, nil
 }
 
-// ListAllUserPlans calls GET /v1/billing/user-plans (cross-user admin list).
-// Returns ErrUnavailable if the endpoint is not implemented by Billing yet.
+// ListAllUserPlans calls GET /v1/billing/admin/user-plans (cross-user admin list).
+// Billing returns {userPlans:[...], total, page, pageSize} inside the envelope;
+// we decode the userPlans array and return it (nil → empty slice).
 func (c *Client) ListAllUserPlans(ctx context.Context) ([]UserPlan, error) {
-	var out []UserPlan
-	if err := c.get(ctx, "/v1/billing/user-plans", &out); err != nil {
+	var out struct {
+		UserPlans []UserPlan `json:"userPlans"`
+	}
+	if err := c.get(ctx, "/v1/billing/admin/user-plans", &out); err != nil {
 		return nil, err
 	}
-	return out, nil
+	if out.UserPlans == nil {
+		out.UserPlans = []UserPlan{}
+	}
+	return out.UserPlans, nil
 }
 
 // NotFound 表示下游返回 404，便于上层区分「不存在」与「不可用」。

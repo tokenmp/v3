@@ -27,6 +27,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/tokenmp/v3/packages/go/httpresp"
 	"github.com/tokenmp/v3/services/api/internal/contract/apiv1"
 )
 
@@ -280,15 +281,14 @@ func (c *Client) do(ctx context.Context, method, path, bearer string, body any) 
 // decodeJSON 在 maxBodySize 限制内解码 JSON。
 func decodeJSON(resp *http.Response, out any) error {
 	limited := io.LimitReader(resp.Body, maxBodySize)
-	dec := json.NewDecoder(limited)
-	if err := dec.Decode(out); err != nil {
+	raw, err := io.ReadAll(limited)
+	if err != nil {
 		return err
 	}
-	// 拒绝 trailing 内容。
-	if err := dec.Decode(&struct{}{}); err != io.EOF {
-		return errors.New("trailing content")
-	}
-	return nil
+	// Auth returns responses in the {code,data,message} envelope; unwrap the
+	// data field. UnwrapData falls back to a raw decode when the body is not
+	// an envelope, so non-envelope responses still work.
+	return httpresp.UnwrapData(raw, out)
 }
 
 // statusErr 将非成功响应转换为 StatusError，保留状态码与错误信封但不泄漏 URL。

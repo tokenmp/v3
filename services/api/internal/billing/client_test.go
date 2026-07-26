@@ -73,3 +73,97 @@ func TestGetBalance_OK(t *testing.T) {
 		t.Errorf("out = %+v", out)
 	}
 }
+
+func TestListAllUserPlans_OK(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/billing/admin/user-plans" {
+			t.Errorf("path = %q", r.URL.Path)
+		}
+		// Billing returns envelope: {code:0, data: {userPlans:[...], total, page, pageSize}}
+		_ = json.NewEncoder(w).Encode(struct {
+			Code int `json:"code"`
+			Data struct {
+				UserPlans []UserPlan `json:"userPlans"`
+				Total     int        `json:"total"`
+				Page      int        `json:"page"`
+				PageSize  int        `json:"pageSize"`
+			} `json:"data"`
+		}{
+			Code: 0,
+			Data: struct {
+				UserPlans []UserPlan `json:"userPlans"`
+				Total     int        `json:"total"`
+				Page      int        `json:"page"`
+				PageSize  int        `json:"pageSize"`
+			}{
+				UserPlans: []UserPlan{
+					{ID: 10, UserID: "u1", PlanID: 1, PlanType: "coding", Status: "active"},
+					{ID: 11, UserID: "u2", PlanID: 2, PlanType: "image", Status: "active"},
+				},
+				Total:    2,
+				Page:     1,
+				PageSize: 20,
+			},
+		})
+	}))
+	defer srv.Close()
+	c := NewClient(srv.URL)
+	out, err := c.ListAllUserPlans(context.Background())
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if len(out) != 2 {
+		t.Fatalf("len = %d, want 2", len(out))
+	}
+	if out[0].ID != 10 || out[0].UserID != "u1" || out[0].PlanType != "coding" {
+		t.Errorf("out[0] = %+v", out[0])
+	}
+	if out[1].ID != 11 || out[1].UserID != "u2" || out[1].PlanType != "image" {
+		t.Errorf("out[1] = %+v", out[1])
+	}
+}
+
+func TestListAllUserPlans_EmptyEnvelope(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Billing returns envelope with empty userPlans array
+		_ = json.NewEncoder(w).Encode(struct {
+			Code int `json:"code"`
+			Data struct {
+				UserPlans []UserPlan `json:"userPlans"`
+				Total     int        `json:"total"`
+				Page      int        `json:"page"`
+				PageSize  int        `json:"pageSize"`
+			} `json:"data"`
+		}{Code: 0})
+	}))
+	defer srv.Close()
+	c := NewClient(srv.URL)
+	out, err := c.ListAllUserPlans(context.Background())
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if out == nil {
+		t.Fatal("out is nil, want empty slice")
+	}
+	if len(out) != 0 {
+		t.Errorf("len = %d, want 0", len(out))
+	}
+}
+
+func TestListAllUserPlans_Unavailable(t *testing.T) {
+	c := NewClient("")
+	if _, err := c.ListAllUserPlans(context.Background()); !errors.Is(err, ErrUnavailable) {
+		t.Errorf("err = %v, want ErrUnavailable", err)
+	}
+}
+
+func TestListAllUserPlans_NotFound(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+	c := NewClient(srv.URL)
+	if _, err := c.ListAllUserPlans(context.Background()); !errors.Is(err, NotFound) {
+		t.Errorf("err = %v, want NotFound", err)
+	}
+}
