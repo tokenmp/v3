@@ -70,9 +70,9 @@ type fakeStore struct {
 	markedAll        bool
 
 	// Admin state
-	adminAnnouncements []models.Announcement
-	adminChangelogs    []models.Changelog
-	adminNotifications []models.Notification
+	adminAnnouncements  []models.Announcement
+	adminChangelogs     []models.Changelog
+	adminNotifications  []models.Notification
 	createdAnnouncement *models.Announcement
 	createdChangelog    *models.Changelog
 	createdNotification *models.Notification

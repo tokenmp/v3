@@ -108,7 +108,7 @@ func (s *Server) handleAdminListAnnouncements(w http.ResponseWriter, r *http.Req
 	}
 	writeJSON(w, http.StatusOK, struct {
 		Items []adminAnnouncementOut `json:"items"`
-		Total int                     `json:"total"`
+		Total int                    `json:"total"`
 	}{Items: outs, Total: total})
 }
 
@@ -224,7 +224,7 @@ func (s *Server) handleAdminListChangelogs(w http.ResponseWriter, r *http.Reques
 	}
 	writeJSON(w, http.StatusOK, struct {
 		Items []adminChangelogOut `json:"items"`
-		Total int                  `json:"total"`
+		Total int                 `json:"total"`
 	}{Items: outs, Total: total})
 }
 
@@ -338,7 +338,7 @@ func (s *Server) handleAdminListNotifications(w http.ResponseWriter, r *http.Req
 	}
 	writeJSON(w, http.StatusOK, struct {
 		Items []adminNotificationOut `json:"items"`
-		Total int                     `json:"total"`
+		Total int                    `json:"total"`
 	}{Items: outs, Total: total})
 }
 
