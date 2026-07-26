@@ -68,6 +68,16 @@ type fakeStore struct {
 	listOffset       int
 	markedRead       []string
 	markedAll        bool
+
+	// Admin state
+	adminAnnouncements []models.Announcement
+	adminChangelogs    []models.Changelog
+	adminNotifications []models.Notification
+	createdAnnouncement *models.Announcement
+	createdChangelog    *models.Changelog
+	createdNotification *models.Notification
+	updatedAnnFields    map[string]any
+	updatedClFields     map[string]any
 }
 
 func (s *fakeStore) ListAnnouncements(ctx context.Context, limit, offset int) ([]models.Announcement, int, error) {
@@ -133,28 +143,39 @@ func (s *fakeStore) MarkAllRead(ctx context.Context, userID string) error {
 // Admin stubs for fakeStore.
 
 func (s *fakeStore) ListAllAnnouncements(_ context.Context, limit, offset int) ([]models.Announcement, int, error) {
-	return nil, 0, nil
+	return s.adminAnnouncements, len(s.adminAnnouncements), nil
 }
-func (s *fakeStore) CreateAnnouncement(_ context.Context, a *models.Announcement) error { return nil }
+func (s *fakeStore) CreateAnnouncement(_ context.Context, a *models.Announcement) error {
+	s.createdAnnouncement = a
+	return nil
+}
 func (s *fakeStore) UpdateAnnouncement(_ context.Context, id string, fields map[string]any) error {
+	s.updatedAnnFields = fields
 	return nil
 }
 func (s *fakeStore) DeleteAnnouncement(_ context.Context, id string) error  { return nil }
 func (s *fakeStore) PublishAnnouncement(_ context.Context, id string) error { return nil }
 func (s *fakeStore) ListAllChangelogs(_ context.Context, limit, offset int) ([]models.Changelog, int, error) {
-	return nil, 0, nil
+	return s.adminChangelogs, len(s.adminChangelogs), nil
 }
-func (s *fakeStore) CreateChangelog(_ context.Context, c *models.Changelog) error { return nil }
+func (s *fakeStore) CreateChangelog(_ context.Context, c *models.Changelog) error {
+	s.createdChangelog = c
+	return nil
+}
 func (s *fakeStore) UpdateChangelog(_ context.Context, id string, fields map[string]any) error {
+	s.updatedClFields = fields
 	return nil
 }
 func (s *fakeStore) DeleteChangelog(_ context.Context, id string) error  { return nil }
 func (s *fakeStore) PublishChangelog(_ context.Context, id string) error { return nil }
 func (s *fakeStore) ListAllNotifications(_ context.Context, limit, offset int) ([]models.Notification, int, error) {
-	return nil, 0, nil
+	return s.adminNotifications, len(s.adminNotifications), nil
 }
-func (s *fakeStore) CreateNotification(_ context.Context, n *models.Notification) error { return nil }
-func (s *fakeStore) DeleteNotification(_ context.Context, id string) error              { return nil }
+func (s *fakeStore) CreateNotification(_ context.Context, n *models.Notification) error {
+	s.createdNotification = n
+	return nil
+}
+func (s *fakeStore) DeleteNotification(_ context.Context, id string) error { return nil }
 
 // repository.ErrNotFound is used directly by the fakes below.
 
@@ -386,5 +407,234 @@ func TestNoStoreOnAllResponses(t *testing.T) {
 	rec = doGet(s, "/api/v1/announcements/00000000-0000-0000-0000-000000000099", "tok")
 	if rec.Header().Get("Cache-Control") != "no-store" {
 		t.Errorf("404 Cache-Control = %q", rec.Header().Get("Cache-Control"))
+	}
+}
+
+// --- Admin endpoint tests ---
+
+func doAdminGet(s *http.Server, target string) *httptest.ResponseRecorder {
+	return doGet(s, target, "admin-token")
+}
+
+func doAdminPost(s *http.Server, target, body string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodPost, target, strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer admin-token")
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.Handler.ServeHTTP(rec, req)
+	return rec
+}
+
+func doAdminPatch(s *http.Server, target, body string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodPatch, target, strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer admin-token")
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.Handler.ServeHTTP(rec, req)
+	return rec
+}
+
+func adminVerifier() *fakeVerifier {
+	return &fakeVerifier{subject: jwtverifier.Subject{UserID: "admin1", Role: "admin"}}
+}
+
+func TestAdminListAnnouncements_ExposeTimestamps(t *testing.T) {
+	now := time.Date(2025, 1, 15, 10, 30, 0, 0, time.UTC)
+	pub := time.Date(2025, 1, 14, 0, 0, 0, 0, time.UTC)
+	store := &fakeStore{adminAnnouncements: []models.Announcement{
+		{ID: "a1", Title: "T", Summary: "S", Body: "B", Severity: "info", PublishedAt: pub, CreatedAt: now, UpdatedAt: now},
+	}}
+	s := newTestServer(t, store, adminVerifier())
+	rec := doAdminGet(s, "/api/v1/admin/announcements")
+	if rec.Code != 200 {
+		t.Fatalf("got %d: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	// created_at and updated_at must appear (models have json:"-")
+	if !strings.Contains(body, `"created_at"`) {
+		t.Errorf("missing created_at in response: %s", body)
+	}
+	if !strings.Contains(body, `"updated_at"`) {
+		t.Errorf("missing updated_at in response: %s", body)
+	}
+	if !strings.Contains(body, `"published_at"`) {
+		t.Errorf("missing published_at in response: %s", body)
+	}
+}
+
+func TestAdminListAnnouncements_DraftNullPublishedAt(t *testing.T) {
+	now := time.Date(2025, 1, 15, 10, 30, 0, 0, time.UTC)
+	store := &fakeStore{adminAnnouncements: []models.Announcement{
+		{ID: "a2", Title: "Draft", Summary: "", Body: "", Severity: "info", CreatedAt: now, UpdatedAt: now},
+	}}
+	s := newTestServer(t, store, adminVerifier())
+	rec := doAdminGet(s, "/api/v1/admin/announcements")
+	if rec.Code != 200 {
+		t.Fatalf("got %d: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `"published_at":null`) {
+		t.Errorf("draft should have null published_at, body=%s", body)
+	}
+}
+
+func TestAdminCreateAnnouncement_WithPublishedAt(t *testing.T) {
+	store := &fakeStore{}
+	s := newTestServer(t, store, adminVerifier())
+	pub := "2025-06-01T00:00:00Z"
+	rec := doAdminPost(s, "/api/v1/admin/announcements", `{"title":"T","summary":"S","body":"B","severity":"warning","published_at":"`+pub+`"}`)
+	if rec.Code != 201 {
+		t.Fatalf("got %d: %s", rec.Code, rec.Body.String())
+	}
+	if store.createdAnnouncement == nil {
+		t.Fatal("announcement not created")
+	}
+	if store.createdAnnouncement.PublishedAt.IsZero() {
+		t.Error("published_at should be set on model")
+	}
+	// Response should contain published_at
+	body := rec.Body.String()
+	if !strings.Contains(body, `"published_at"`) {
+		t.Errorf("response missing published_at: %s", body)
+	}
+}
+
+func TestAdminCreateAnnouncement_DraftNoPublishedAt(t *testing.T) {
+	store := &fakeStore{}
+	s := newTestServer(t, store, adminVerifier())
+	rec := doAdminPost(s, "/api/v1/admin/announcements", `{"title":"Draft","summary":"","body":"","severity":"info"}`)
+	if rec.Code != 201 {
+		t.Fatalf("got %d: %s", rec.Code, rec.Body.String())
+	}
+	if store.createdAnnouncement == nil {
+		t.Fatal("announcement not created")
+	}
+	if !store.createdAnnouncement.PublishedAt.IsZero() {
+		t.Error("draft should have zero published_at on model")
+	}
+}
+
+func TestAdminUpdateAnnouncement_AllowPublishedAt(t *testing.T) {
+	store := &fakeStore{}
+	s := newTestServer(t, store, adminVerifier())
+	rec := doAdminPatch(s, "/api/v1/admin/announcements/a1", `{"title":"New","published_at":"2025-07-01T00:00:00Z"}`)
+	if rec.Code != 200 {
+		t.Fatalf("got %d: %s", rec.Code, rec.Body.String())
+	}
+	if store.updatedAnnFields == nil {
+		t.Fatal("no fields passed to UpdateAnnouncement")
+	}
+	if _, ok := store.updatedAnnFields["published_at"]; !ok {
+		t.Errorf("published_at not in allowed fields: %v", store.updatedAnnFields)
+	}
+	if _, ok := store.updatedAnnFields["title"]; !ok {
+		t.Errorf("title not in allowed fields: %v", store.updatedAnnFields)
+	}
+}
+
+func TestAdminListChangelogs_ExposeTimestamps(t *testing.T) {
+	now := time.Date(2025, 3, 1, 12, 0, 0, 0, time.UTC)
+	pub := time.Date(2025, 2, 28, 0, 0, 0, 0, time.UTC)
+	store := &fakeStore{adminChangelogs: []models.Changelog{
+		{ID: "c1", Version: "v3.0.0", Title: "Release", Body: "notes", PublishedAt: pub, CreatedAt: now, UpdatedAt: now},
+	}}
+	s := newTestServer(t, store, adminVerifier())
+	rec := doAdminGet(s, "/api/v1/admin/changelogs")
+	if rec.Code != 200 {
+		t.Fatalf("got %d: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `"created_at"`) {
+		t.Errorf("missing created_at: %s", body)
+	}
+	if !strings.Contains(body, `"updated_at"`) {
+		t.Errorf("missing updated_at: %s", body)
+	}
+	if !strings.Contains(body, `"published_at"`) {
+		t.Errorf("missing published_at: %s", body)
+	}
+}
+
+func TestAdminCreateChangelog_WithPublishedAt(t *testing.T) {
+	store := &fakeStore{}
+	s := newTestServer(t, store, adminVerifier())
+	rec := doAdminPost(s, "/api/v1/admin/changelogs", `{"version":"v1.0.0","title":"Release","body":"notes","published_at":"2025-06-01T00:00:00Z"}`)
+	if rec.Code != 201 {
+		t.Fatalf("got %d: %s", rec.Code, rec.Body.String())
+	}
+	if store.createdChangelog == nil {
+		t.Fatal("changelog not created")
+	}
+	if store.createdChangelog.PublishedAt.IsZero() {
+		t.Error("published_at should be set on model")
+	}
+}
+
+func TestAdminUpdateChangelog_AllowPublishedAt(t *testing.T) {
+	store := &fakeStore{}
+	s := newTestServer(t, store, adminVerifier())
+	rec := doAdminPatch(s, "/api/v1/admin/changelogs/c1", `{"version":"v2.0.0","published_at":"2025-08-01T00:00:00Z"}`)
+	if rec.Code != 200 {
+		t.Fatalf("got %d: %s", rec.Code, rec.Body.String())
+	}
+	if store.updatedClFields == nil {
+		t.Fatal("no fields passed to UpdateChangelog")
+	}
+	if _, ok := store.updatedClFields["published_at"]; !ok {
+		t.Errorf("published_at not in allowed fields: %v", store.updatedClFields)
+	}
+}
+
+func TestAdminListNotifications_ExposeUserIDAndAction(t *testing.T) {
+	now := time.Date(2025, 5, 1, 8, 0, 0, 0, time.UTC)
+	act := models.NotificationAction{Type: "link", Label: "View", Href: "/settings"}
+	store := &fakeStore{adminNotifications: []models.Notification{
+		{ID: "n1", UserID: "user-42", Type: "system", Title: "Hi", Body: "msg", Action: models.NotificationActionPtr{Action: &act}, CreatedAt: now},
+		{ID: "n2", UserID: "user-99", Type: "info", Title: "Info", Body: "note", CreatedAt: now},
+	}}
+	s := newTestServer(t, store, adminVerifier())
+	rec := doAdminGet(s, "/api/v1/admin/notifications")
+	if rec.Code != 200 {
+		t.Fatalf("got %d: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	// user_id must appear (model has json:"-")
+	if !strings.Contains(body, `"user_id":"user-42"`) {
+		t.Errorf("missing user_id in response: %s", body)
+	}
+	if !strings.Contains(body, `"user_id":"user-99"`) {
+		t.Errorf("missing second user_id: %s", body)
+	}
+	// action with data
+	if !strings.Contains(body, `"label":"View"`) {
+		t.Errorf("missing action label: %s", body)
+	}
+	// null action for second
+	if !strings.Contains(body, `"action":null`) {
+		t.Errorf("missing null action: %s", body)
+	}
+}
+
+func TestAdminSendNotification_ResponseShape(t *testing.T) {
+	store := &fakeStore{}
+	s := newTestServer(t, store, adminVerifier())
+	rec := doAdminPost(s, "/api/v1/admin/notifications/send", `{"userId":"u1","type":"info","title":"T","body":"B"}`)
+	if rec.Code != 202 {
+		t.Fatalf("got %d: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `"accepted":true`) {
+		t.Errorf("missing accepted in response: %s", body)
+	}
+	if !strings.Contains(body, `"queuedAt"`) {
+		t.Errorf("missing queuedAt in response: %s", body)
+	}
+}
+
+func TestAdminForbidden_NonAdmin(t *testing.T) {
+	s := newTestServer(t, &fakeStore{}, &fakeVerifier{subject: jwtverifier.Subject{UserID: "u1", Role: "user"}})
+	rec := doGet(s, "/api/v1/admin/announcements", "user-token")
+	if rec.Code != 403 {
+		t.Fatalf("got %d, want 403", rec.Code)
 	}
 }

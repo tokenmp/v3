@@ -8,6 +8,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -197,8 +198,18 @@ func writeJSONStatus(w http.ResponseWriter, status int, body any) {
 	switch status {
 	case http.StatusCreated:
 		httpresp.Created(w, body)
+	case http.StatusAccepted:
+		// httpresp has no Accepted helper; write envelope directly.
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		w.WriteHeader(http.StatusAccepted)
+		_ = json.NewEncoder(w).Encode(struct {
+			Code    int    `json:"code"`
+			Data    any    `json:"data"`
+			Message string `json:"message"`
+		}{Code: 0, Data: body, Message: "success"})
 	default:
-		// 202 Accepted and others — use OK with the body.
+		// Other non-200 — use OK with the body.
 		httpresp.OK(w, body)
 	}
 }

@@ -12,6 +12,87 @@ import (
 
 const maxAdminBodyBytes = 2 << 20 // 2 MiB
 
+// ---- Admin output DTOs ----
+// These DTOs expose fields that models hide with json:"-" for public endpoints.
+
+type adminAnnouncementOut struct {
+	ID          string     `json:"id"`
+	Title       string     `json:"title"`
+	Summary     string     `json:"summary"`
+	Body        string     `json:"body"`
+	Severity    string     `json:"severity"`
+	PublishedAt *time.Time `json:"published_at"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
+}
+
+func toAdminAnnouncementOut(a models.Announcement) adminAnnouncementOut {
+	var pa *time.Time
+	if !a.PublishedAt.IsZero() {
+		pa = &a.PublishedAt
+	}
+	return adminAnnouncementOut{
+		ID:          a.ID,
+		Title:       a.Title,
+		Summary:     a.Summary,
+		Body:        a.Body,
+		Severity:    a.Severity,
+		PublishedAt: pa,
+		CreatedAt:   a.CreatedAt,
+		UpdatedAt:   a.UpdatedAt,
+	}
+}
+
+type adminChangelogOut struct {
+	ID          string     `json:"id"`
+	Version     string     `json:"version"`
+	Title       string     `json:"title"`
+	Body        string     `json:"body"`
+	PublishedAt *time.Time `json:"published_at"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
+}
+
+func toAdminChangelogOut(c models.Changelog) adminChangelogOut {
+	var pa *time.Time
+	if !c.PublishedAt.IsZero() {
+		pa = &c.PublishedAt
+	}
+	return adminChangelogOut{
+		ID:          c.ID,
+		Version:     c.Version,
+		Title:       c.Title,
+		Body:        c.Body,
+		PublishedAt: pa,
+		CreatedAt:   c.CreatedAt,
+		UpdatedAt:   c.UpdatedAt,
+	}
+}
+
+type adminNotificationOut struct {
+	ID        string                     `json:"id"`
+	UserID    string                     `json:"user_id"`
+	Type      string                     `json:"type"`
+	Title     string                     `json:"title"`
+	Body      string                     `json:"body"`
+	Action    *models.NotificationAction `json:"action"`
+	ReadAt    *time.Time                 `json:"read_at"`
+	CreatedAt time.Time                  `json:"created_at"`
+}
+
+func toAdminNotificationOut(n models.Notification) adminNotificationOut {
+	return adminNotificationOut{
+		ID:        n.ID,
+		UserID:    n.UserID,
+		Type:      n.Type,
+		Title:     n.Title,
+		Body:      n.Body,
+		Action:    n.Action.Action,
+		ReadAt:    n.ReadAt,
+		CreatedAt: n.CreatedAt,
+	}
+}
+
 // ---- Announcement admin ----
 
 func (s *Server) handleAdminListAnnouncements(w http.ResponseWriter, r *http.Request) {
@@ -21,14 +102,22 @@ func (s *Server) handleAdminListAnnouncements(w http.ResponseWriter, r *http.Req
 		writeError(w, http.StatusInternalServerError, "internal_error", "Internal error.")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": total})
+	outs := make([]adminAnnouncementOut, 0, len(items))
+	for _, a := range items {
+		outs = append(outs, toAdminAnnouncementOut(a))
+	}
+	writeJSON(w, http.StatusOK, struct {
+		Items []adminAnnouncementOut `json:"items"`
+		Total int                     `json:"total"`
+	}{Items: outs, Total: total})
 }
 
 type adminAnnouncementBody struct {
-	Title    string `json:"title"`
-	Summary  string `json:"summary"`
-	Body     string `json:"body"`
-	Severity string `json:"severity"`
+	Title       string     `json:"title"`
+	Summary     string     `json:"summary"`
+	Body        string     `json:"body"`
+	Severity    string     `json:"severity"`
+	PublishedAt *time.Time `json:"published_at,omitempty"`
 }
 
 func (s *Server) handleAdminCreateAnnouncement(w http.ResponseWriter, r *http.Request) {
@@ -47,11 +136,14 @@ func (s *Server) handleAdminCreateAnnouncement(w http.ResponseWriter, r *http.Re
 		Body:     body.Body,
 		Severity: defaultIfEmpty(body.Severity, "info"),
 	}
+	if body.PublishedAt != nil {
+		a.PublishedAt = *body.PublishedAt
+	}
 	if err := s.store.CreateAnnouncement(r.Context(), a); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Internal error.")
 		return
 	}
-	writeJSONStatus(w, http.StatusCreated, a)
+	writeJSONStatus(w, http.StatusCreated, toAdminAnnouncementOut(*a))
 }
 
 func (s *Server) handleAdminUpdateAnnouncement(w http.ResponseWriter, r *http.Request) {
@@ -65,7 +157,7 @@ func (s *Server) handleAdminUpdateAnnouncement(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid JSON body.")
 		return
 	}
-	allowed := map[string]bool{"title": true, "summary": true, "body": true, "severity": true}
+	allowed := map[string]bool{"title": true, "summary": true, "body": true, "severity": true, "published_at": true}
 	fields := make(map[string]any)
 	for k, v := range body {
 		if allowed[k] {
@@ -126,13 +218,21 @@ func (s *Server) handleAdminListChangelogs(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusInternalServerError, "internal_error", "Internal error.")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": total})
+	outs := make([]adminChangelogOut, 0, len(items))
+	for _, c := range items {
+		outs = append(outs, toAdminChangelogOut(c))
+	}
+	writeJSON(w, http.StatusOK, struct {
+		Items []adminChangelogOut `json:"items"`
+		Total int                  `json:"total"`
+	}{Items: outs, Total: total})
 }
 
 type adminChangelogBody struct {
-	Version string `json:"version"`
-	Title   string `json:"title"`
-	Body    string `json:"body"`
+	Version     string     `json:"version"`
+	Title       string     `json:"title"`
+	Body        string     `json:"body"`
+	PublishedAt *time.Time `json:"published_at,omitempty"`
 }
 
 func (s *Server) handleAdminCreateChangelog(w http.ResponseWriter, r *http.Request) {
@@ -150,11 +250,14 @@ func (s *Server) handleAdminCreateChangelog(w http.ResponseWriter, r *http.Reque
 		Title:   body.Title,
 		Body:    body.Body,
 	}
+	if body.PublishedAt != nil {
+		c.PublishedAt = *body.PublishedAt
+	}
 	if err := s.store.CreateChangelog(r.Context(), c); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Internal error.")
 		return
 	}
-	writeJSONStatus(w, http.StatusCreated, c)
+	writeJSONStatus(w, http.StatusCreated, toAdminChangelogOut(*c))
 }
 
 func (s *Server) handleAdminUpdateChangelog(w http.ResponseWriter, r *http.Request) {
@@ -168,7 +271,7 @@ func (s *Server) handleAdminUpdateChangelog(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid JSON body.")
 		return
 	}
-	allowed := map[string]bool{"version": true, "title": true, "body": true}
+	allowed := map[string]bool{"version": true, "title": true, "body": true, "published_at": true}
 	fields := make(map[string]any)
 	for k, v := range body {
 		if allowed[k] {
@@ -229,7 +332,14 @@ func (s *Server) handleAdminListNotifications(w http.ResponseWriter, r *http.Req
 		writeError(w, http.StatusInternalServerError, "internal_error", "Internal error.")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": total})
+	outs := make([]adminNotificationOut, 0, len(items))
+	for _, n := range items {
+		outs = append(outs, toAdminNotificationOut(n))
+	}
+	writeJSON(w, http.StatusOK, struct {
+		Items []adminNotificationOut `json:"items"`
+		Total int                     `json:"total"`
+	}{Items: outs, Total: total})
 }
 
 type adminSendNotificationBody struct {

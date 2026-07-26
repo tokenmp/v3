@@ -27,7 +27,7 @@ func (r *Repository) ListAllAnnouncements(ctx context.Context, limit, offset int
 
 // CreateAnnouncement inserts a new announcement row.
 func (r *Repository) CreateAnnouncement(ctx context.Context, a *models.Announcement) error {
-	if err := r.db.WithContext(ctx).Create(a).Error; err != nil {
+	if err := r.db.WithContext(ctx).Omit("id").Create(a).Error; err != nil {
 		return &classifiedError{sentinel: ErrInternal, driver: err}
 	}
 	return nil
@@ -90,7 +90,7 @@ func (r *Repository) ListAllChangelogs(ctx context.Context, limit, offset int) (
 
 // CreateChangelog inserts a new changelog row.
 func (r *Repository) CreateChangelog(ctx context.Context, c *models.Changelog) error {
-	if err := r.db.WithContext(ctx).Create(c).Error; err != nil {
+	if err := r.db.WithContext(ctx).Omit("id").Create(c).Error; err != nil {
 		return &classifiedError{sentinel: ErrInternal, driver: err}
 	}
 	return nil
@@ -153,7 +153,7 @@ func (r *Repository) ListAllNotifications(ctx context.Context, limit, offset int
 
 // CreateNotification inserts a new notification row.
 func (r *Repository) CreateNotification(ctx context.Context, n *models.Notification) error {
-	if err := r.db.WithContext(ctx).Create(n).Error; err != nil {
+	if err := r.db.WithContext(ctx).Omit("id").Create(n).Error; err != nil {
 		return &classifiedError{sentinel: ErrInternal, driver: err}
 	}
 	return nil
