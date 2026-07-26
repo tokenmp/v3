@@ -52,6 +52,11 @@ const PROTOCOL_LABELS: Record<string, string> = {
   openai_images: 'Images',
 };
 
+/** Derive default protocol from SDK kind. */
+function protocolForSdk(sdk: AdminProvider['sdkKind']): string {
+  return sdk === 'anthropic' ? 'anthropic_messages' : 'openai_chat';
+}
+
 type StatusFilter = 'all' | 'active' | 'disabled';
 
 type ProviderDraft = {
@@ -60,7 +65,6 @@ type ProviderDraft = {
   displayLabel: string;
   baseURL: string;
   sdkKind: AdminProvider['sdkKind'];
-  protocol: string;
   status: AdminProvider['status'];
 };
 
@@ -71,7 +75,6 @@ function emptyDraft(): ProviderDraft {
     displayLabel: '',
     baseURL: '',
     sdkKind: 'openai',
-    protocol: 'openai_chat',
     status: 'active',
   };
 }
@@ -166,7 +169,6 @@ export default function AdminProvidersPage() {
                 <TableHead>显示名</TableHead>
                 <TableHead>Base URL</TableHead>
                 <TableHead>SDK</TableHead>
-                <TableHead>协议</TableHead>
                 <TableHead>状态</TableHead>
                 <TableHead className="text-right">操作</TableHead>
               </TableRow>
@@ -174,13 +176,13 @@ export default function AdminProvidersPage() {
             <TableBody>
               {isLoading ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="py-8 text-center text-muted-foreground">
+                  <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
                     加载中…
                   </TableCell>
                 </TableRow>
               ) : filtered.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="py-8 text-center text-muted-foreground">
+                  <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
                     暂无 Provider
                   </TableCell>
                 </TableRow>
@@ -196,7 +198,6 @@ export default function AdminProvidersPage() {
                       {p.baseURL}
                     </TableCell>
                     <TableCell className="text-xs">{p.sdkKind}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{p.protocol}</TableCell>
                     <TableCell>
                       <StatusBadge status={p.status} />
                     </TableCell>
@@ -298,7 +299,6 @@ function ProviderFormModal({
           displayLabel: item.displayLabel,
           baseURL: item.baseURL,
           sdkKind: item.sdkKind,
-          protocol: item.protocol,
           status: item.status,
         }
       : emptyDraft(),
@@ -313,7 +313,7 @@ function ProviderFormModal({
         name: input.name,
         baseURL: input.baseURL,
         sdkKind: input.sdkKind,
-        protocol: input.protocol,
+        protocol: protocolForSdk(input.sdkKind),
         displayLabel: input.displayLabel || undefined,
         selector: input.id,
         status: input.status,
@@ -335,7 +335,7 @@ function ProviderFormModal({
         displayLabel: input.displayLabel,
         baseURL: input.baseURL,
         sdkKind: input.sdkKind,
-        protocol: input.protocol,
+        protocol: protocolForSdk(input.sdkKind),
         status: input.status,
       }),
     onSuccess: () => {
@@ -407,19 +407,16 @@ function ProviderFormModal({
           </Field>
         </FormSection>
 
-        <FormSection title="协议与 SDK" cols={2}>
-          <Field label="SDK 类型" required>
+        <FormSection title="SDK" cols={1} description="协议由 SDK 类型自动推导，具体端点在端点管理中配置">
+          <Field label="SDK 类型" required hint={
+            draft.sdkKind === 'openai'
+              ? '→ 默认协议 openai_chat，可在端点管理中添加 responses/images 等端点'
+              : '→ 默认协议 anthropic_messages'
+          }>
             <TabField
               value={draft.sdkKind}
               onChange={(v) => patch({ sdkKind: v as AdminProvider['sdkKind'] })}
               options={SDK_TAB_OPTIONS}
-            />
-          </Field>
-          <Field label="协议" required>
-            <SelectField
-              value={draft.protocol}
-              onChange={(v) => patch({ protocol: v })}
-              options={PROTOCOL_OPTIONS}
             />
           </Field>
         </FormSection>
