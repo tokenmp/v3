@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { userApi } from '@/lib/api/user';
+import { copyText } from '@/lib/utils';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -81,11 +82,10 @@ export default function KeysPage() {
     onError: () => toast.error('轮换密钥失败'),
   });
 
-  const copyToClipboard = (text: string, label: string) => {
-    navigator.clipboard.writeText(text).then(
-      () => toast.success(`${label}已复制`),
-      () => toast.error('复制失败'),
-    );
+  const copyToClipboard = async (text: string, label: string) => {
+    const ok = await copyText(text);
+    if (ok) toast.success(`${label}已复制`);
+    else toast.error('复制失败');
   };
 
   return (
