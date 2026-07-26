@@ -161,21 +161,23 @@ function mapRequestLog(r: Record<string, unknown>): AdminRequestLog {
     status,
     inputTokens: r.input_tokens != null ? Number(r.input_tokens) : null,
     outputTokens: r.output_tokens != null ? Number(r.output_tokens) : null,
+    totalTokens: r.total_tokens != null ? Number(r.total_tokens) : null,
     cost: null,
     durationMs: r.latency_ms != null ? Number(r.latency_ms) : null,
     createdAt: String(r.created_at ?? r.createdAt ?? ''),
+    provider: r.provider_id != null ? String(r.provider_id) : null,
+    protocol: r.protocol != null ? String(r.protocol) : null,
+    stream: r.stream != null ? Boolean(r.stream) : null,
+    httpStatus: r.http_status != null ? Number(r.http_status) : null,
+    errorCode: r.error_code != null ? String(r.error_code) : null,
+    errorType: r.error_type != null ? String(r.error_type) : null,
+    errorMessage: r.error_message != null ? String(r.error_message) : null,
+    billingPlan: r.billing_plan != null ? String(r.billing_plan) : null,
   };
 
-  // For detail responses (realGetLog), also map provider/attempts/errorMessage
-  // into the object. AdminRequestLog extends RequestLog which lacks these fields,
-  // but the detail page reads them via the loose [key:string]:unknown on attempts.
-  if (attempts || r.provider_id != null || r.error_message != null) {
-    return {
-      ...base,
-      provider: String(r.provider_id ?? r.provider ?? ''),
-      errorMessage: r.error_message ? String(r.error_message) : null,
-      ...(attempts ? { attempts } : {}),
-    } as AdminRequestLog;
+  // For detail responses (realGetLog), attach the mapped attempts array.
+  if (attempts) {
+    return { ...base, attempts } as AdminRequestLog;
   }
 
   return base;

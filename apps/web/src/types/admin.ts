@@ -2,7 +2,7 @@
 // packages/contracts/openapi/admin/v1.yaml). Mock-backed by default until the
 // Edge admin endpoints land; components are agnostic to the source.
 
-import type { ApiKey, RequestLog, UserPlan } from '@/types';
+import type { ApiKey, RequestLog, RequestLogAttempt, UserPlan } from '@/types';
 
 // ---- Users ----
 
@@ -39,6 +39,16 @@ export interface AdminApiKey extends ApiKey {
 export interface AdminRequestLog extends RequestLog {
   userId: string | null;
   userEmail: string | null;
+  provider?: string | null;
+  protocol?: string | null;
+  stream?: boolean | null;
+  httpStatus?: number | null;
+  errorCode?: string | null;
+  errorType?: string | null;
+  errorMessage?: string | null;
+  totalTokens?: number | null;
+  billingPlan?: string | null;
+  attempts?: RequestLogAttempt[];
 }
 
 export interface AdminRequestLogListResponse {
