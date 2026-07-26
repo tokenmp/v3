@@ -20,6 +20,8 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"strings"
+
+	"github.com/tokenmp/v3/services/api/internal/identity"
 )
 
 // Proxy is a reverse proxy to the Executor service.
@@ -48,6 +50,19 @@ func New(executorURL, serviceToken string, logger *slog.Logger) (*Proxy, error) 
 			}
 			// When serviceToken is empty, the client's Authorization header
 			// is forwarded as-is (JWT passthrough mode).
+
+			// Forward the verified end-user id so the executor records the
+			// real caller in its request log instead of the edge service
+			// identity. The edge has already authenticated the user (JWT or
+			// API key via Auth verify-key); the executor trusts this header
+			// because it only accepts requests bearing the edge service
+			// token. Strip any client-supplied value first to prevent
+			// spoofing in JWT-passthrough mode.
+			req.Header.Del("X-User-ID")
+			if claims, ok := identity.FromContext(req.Context()); ok && claims.Subject != "" {
+				req.Header.Set("X-User-ID", claims.Subject)
+			}
+
 			// Remove hop-by-hop headers.
 			req.Header.Del("X-Forwarded-For")
 		},

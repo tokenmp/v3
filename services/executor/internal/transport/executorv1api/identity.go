@@ -48,6 +48,15 @@ func AuthMiddleware(source identity.Port) func(http.Handler) http.Handler {
 				writeUnauthorized(w, r.URL.Path)
 				return
 			}
+			// The edge proxy authenticates the end user (JWT or Auth verify-key)
+			// and forwards the verified user id via the X-User-ID header. The
+			// executor trusts this header because AuthMiddleware has already
+			// verified the edge service token above; only a trusted edge can
+			// reach this point. Override the service identity's subject with
+			// the real caller so request logs and quota record the end user.
+			if uid := r.Header.Get("X-User-ID"); validBearerKey(uid) {
+				resolved.Subject = uid
+			}
 			next.ServeHTTP(w, r.WithContext(authcontext.WithIdentity(r.Context(), resolved)))
 		})
 	}

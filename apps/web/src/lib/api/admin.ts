@@ -92,8 +92,16 @@ async function realListLogs(
 }
 
 async function realGetLog(id: string): Promise<AdminRequestLog> {
-  const res = await request<AdminRequestLog>(`/api/v1/admin/request-logs/${id}`, { baseUrl: ADMIN_BASE });
-  return mapRequestLog(res as unknown as Record<string, unknown>);
+  // The detail endpoint returns { log: {...}, attempts: [...] }; unwrap the
+  // log object and attach attempts so mapRequestLog maps snake_case fields.
+  const res = await request<{ log?: Record<string, unknown>; attempts?: unknown[] } & Record<string, unknown>>(
+    `/api/v1/admin/request-logs/${id}`,
+    { baseUrl: ADMIN_BASE },
+  );
+  const log = res.log ?? res;
+  const merged: Record<string, unknown> = { ...log };
+  if (Array.isArray(res.attempts)) merged.attempts = res.attempts;
+  return mapRequestLog(merged);
 }
 
 // ---------------------------------------------------------------------------
