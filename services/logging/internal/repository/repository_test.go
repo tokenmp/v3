@@ -462,7 +462,7 @@ func TestIngestBatch_UpsertDedupes(t *testing.T) {
 		Events: []Event{{
 			RequestID: reqID,
 			Source:    "executor",
-			Stage:     "attempt",
+			Stage:     "upstream_finished",
 			Status:    "success",
 			CreatedAt: now,
 		}},
@@ -489,7 +489,7 @@ func TestIngestBatch_UpsertDedupes(t *testing.T) {
 		Events: []Event{{
 			RequestID: reqID,
 			Source:    "executor",
-			Stage:     "finalized",
+			Stage:     "terminal",
 			Status:    "success",
 			CreatedAt: completed,
 		}},
