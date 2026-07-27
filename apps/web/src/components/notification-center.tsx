@@ -115,12 +115,18 @@ export function NotificationCenter() {
 
   useEffect(() => {
     if (!open) return;
-    // Re-measure on the next frame after the browser settles any layout
-    // shift triggered by opening (e.g. scrollbar/mobile reflow).
-    const raf = requestAnimationFrame(place);
+    // On mobile the header/bell can still be settling into its final
+    // position right after the click (layout shift / entrance animation),
+    // so a single rAF measures a stale rect. Schedule a couple of passes
+    // plus a small timeout to land on the final position.
+    const raf1 = requestAnimationFrame(place);
+    const raf2 = requestAnimationFrame(() => requestAnimationFrame(place));
+    const t = setTimeout(place, 120);
     window.addEventListener('resize', place);
     return () => {
-      cancelAnimationFrame(raf);
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
+      clearTimeout(t);
       window.removeEventListener('resize', place);
     };
   }, [open]);
@@ -130,17 +136,7 @@ export function NotificationCenter() {
       <button
         ref={triggerRef}
         type="button"
-        onClick={() => {
-          setOpen((v) => {
-            const next = !v;
-            if (next) {
-              // Compute position synchronously on open so the popover lands
-              // correctly before paint.
-              requestAnimationFrame(place);
-            }
-            return next;
-          });
-        }}
+        onClick={() => setOpen((v) => !v)}
         className="focus-inset relative inline-flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
         aria-label="通知与公告"
       >
