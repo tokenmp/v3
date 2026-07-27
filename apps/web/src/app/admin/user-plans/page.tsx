@@ -171,8 +171,8 @@ export default function AdminUserPlansPage() {
                   const statusCfg = STATUS_CONFIG[up.status] ?? { label: up.status, variant: 'secondary' as const };
                   return (
                     <TableRow key={up.id}>
-                      <TableCell className="font-medium">{up.userEmail}</TableCell>
-                      <TableCell>{up.planName}</TableCell>
+                      <TableCell className="font-medium">{up.userEmail || up.userId}</TableCell>
+                      <TableCell>{up.planName || `#${up.planId}`}</TableCell>
                       <TableCell>
                         <Badge variant="outline">
                           {PLAN_TYPE_LABELS[up.planType] ?? up.planType}
@@ -212,8 +212,8 @@ export default function AdminUserPlansPage() {
                   <CardContent className="p-4 space-y-3">
                     <div className="flex items-start justify-between gap-2">
                       <div>
-                        <div className="font-medium">{up.userEmail}</div>
-                        <div className="text-sm text-muted-foreground">{up.planName}</div>
+                        <div className="font-medium">{up.userEmail || up.userId}</div>
+                        <div className="text-sm text-muted-foreground">{up.planName || `#${up.planId}`}</div>
                       </div>
                       <div className="flex items-center gap-1.5 shrink-0">
                         <Badge variant="outline">
