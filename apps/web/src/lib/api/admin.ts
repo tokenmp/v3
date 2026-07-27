@@ -265,7 +265,10 @@ export const adminApi = {
         { baseUrl: NOTICE_BASE },
       );
       const items = Array.isArray(res) ? res : (res.items ?? []);
-      return items.map((a) => mapAnnouncement(a as unknown as Record<string, unknown>));
+      const mapped = items.map((a) => mapAnnouncement(a as unknown as Record<string, unknown>));
+      // Deterministic newest-first: backend orders by created_at DESC, id DESC,
+      // but sort client-side too so a stale cache never shows a confusing order.
+      return mapped.sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0));
     },
     create: async (input: AdminAnnouncementInput): Promise<AdminAnnouncement> => {
       const res = await request<AdminAnnouncement>('/api/v1/notice/admin/announcements', {
@@ -307,7 +310,8 @@ export const adminApi = {
         { baseUrl: NOTICE_BASE },
       );
       const items = Array.isArray(res) ? res : (res.items ?? []);
-      return items.map((c) => mapChangelog(c as unknown as Record<string, unknown>));
+      const mapped = items.map((c) => mapChangelog(c as unknown as Record<string, unknown>));
+      return mapped.sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0));
     },
     create: async (input: AdminChangelogInput): Promise<AdminChangelog> => {
       const res = await request<AdminChangelog>('/api/v1/notice/admin/changelogs', {
@@ -348,7 +352,8 @@ export const adminApi = {
         { baseUrl: NOTICE_BASE },
       );
       const items = Array.isArray(res) ? res : (res.items ?? []);
-      return items.map((n) => mapNotification(n as unknown as Record<string, unknown>));
+      const mapped = items.map((n) => mapNotification(n as unknown as Record<string, unknown>));
+      return mapped.sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0));
     },
     send: async (input: AdminNotificationInput): Promise<AdminNotification> => {
       const res = await request<{ id: string; accepted: boolean; queuedAt: string }>(
