@@ -7,6 +7,7 @@ import {
   GitCommitHorizontal,
   Boxes,
   Sparkles,
+  Settings,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -41,11 +42,16 @@ export const navGroups: NavGroup[] = [
   },
 ];
 
-/** Bottom tab bar items (first 3). */
-export const mobileTabs: NavItem[] = navGroups[0]!.items.slice(0, 3);
-
-/** "More" sheet items (remaining). */
-export const mobileMore: NavItem[] = [
-  ...navGroups[0]!.items.slice(3),
-  ...navGroups[1]!.items,
+/** Bottom tab bar items (mobile). The 4th tab is the "Me"/settings hub so
+ * notice entries (announcements/notifications/changelogs) live inside it
+ * rather than crowding the tab bar. */
+export const mobileTabs: NavItem[] = [
+  { label: '概览', href: '/panel', icon: LayoutDashboard },
+  { label: '请求日志', href: '/panel/requests', icon: Activity },
+  { label: '模型', href: '/panel/models', icon: Boxes },
+  { label: '我的', href: '/panel/settings', icon: Settings },
 ];
+
+/** Items shown only in the desktop sidebar's "其他" group (not in the mobile
+ * tab bar — on mobile they are reached via /panel/settings). */
+export const mobileMore: NavItem[] = navGroups[1]!.items;

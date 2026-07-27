@@ -96,8 +96,11 @@ export function Header({ title: _title = 'TokenMP' }: HeaderProps) {
 
       {/* Right */}
       <div className="flex items-center gap-2">
-        {/* Notifications & announcements */}
-        <NotificationCenter />
+        {/* Notifications & announcements (desktop only — on mobile these
+            live in /panel/settings) */}
+        <div className="hidden md:block">
+          <NotificationCenter />
+        </div>
 
         {/* Theme toggle */}
         <button
