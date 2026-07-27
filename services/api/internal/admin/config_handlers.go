@@ -66,6 +66,12 @@ func (h *ConfigHandlers) Routes(r chi.Router) {
 		{http.MethodDelete, "/api/v1/admin/routes/{id}", "/v1/config/admin/routes/{id}"},
 		{http.MethodGet, "/api/v1/admin/routes/{id}/credentials", "/v1/config/admin/routes/{id}/credentials"},
 		{http.MethodPut, "/api/v1/admin/routes/{id}/credentials", "/v1/config/admin/routes/{id}/credentials"},
+		// Global policy (retry/timeout)
+		{http.MethodGet, "/api/v1/admin/global", "/v1/config/admin/global"},
+		{http.MethodGet, "/api/v1/admin/global/{key}", "/v1/config/admin/global/{key}"},
+		{http.MethodPut, "/api/v1/admin/global/{key}", "/v1/config/admin/global/{key}"},
+		// Compile
+		{http.MethodPost, "/api/v1/admin/compile", "/v1/config/admin/compile"},
 	}
 
 	for _, rt := range cfgRoutes {
@@ -109,7 +115,7 @@ func (h *ConfigHandlers) proxyToConfig(w http.ResponseWriter, r *http.Request, c
 	}
 	// Substitute path params.
 	path := cfgPath
-	for _, param := range []string{"id", "eid", "cid"} {
+	for _, param := range []string{"id", "eid", "cid", "key"} {
 		val := chi.URLParam(r, param)
 		if val != "" {
 			path = strings.ReplaceAll(path, "{"+param+"}", val)
