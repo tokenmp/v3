@@ -74,7 +74,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/UnreadyResponse'
-  /api/v1/announcements:
+  /api/v1/notice/announcements:
     get:
       summary: List announcements
       description: Returns published announcements, newest first.
@@ -96,7 +96,7 @@ paths:
                 $ref: '#/components/schemas/AnnouncementPage'
         '401':
           $ref: '#/components/responses/Unauthorized'
-  /api/v1/announcements/{id}:
+  /api/v1/notice/announcements/{id}:
     get:
       summary: Get an announcement
       operationId: getAnnouncement
@@ -118,7 +118,7 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
-  /api/v1/changelogs:
+  /api/v1/notice/changelogs:
     get:
       summary: List changelogs
       description: Returns published product changelogs, newest first.
@@ -140,7 +140,7 @@ paths:
                 $ref: '#/components/schemas/ChangelogPage'
         '401':
           $ref: '#/components/responses/Unauthorized'
-  /api/v1/changelogs/{id}:
+  /api/v1/notice/changelogs/{id}:
     get:
       summary: Get a changelog
       operationId: getChangelog
@@ -162,7 +162,7 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
-  /api/v1/notifications:
+  /api/v1/notice/notifications:
     get:
       summary: List notifications for the current user
       description: |
@@ -188,7 +188,7 @@ paths:
                 $ref: '#/components/schemas/NotificationPage'
         '401':
           $ref: '#/components/responses/Unauthorized'
-  /api/v1/notifications/unread-count:
+  /api/v1/notice/notifications/unread-count:
     get:
       summary: Count unread notifications for the current user
       operationId: getUnreadCount
@@ -206,7 +206,7 @@ paths:
                 $ref: '#/components/schemas/UnreadCount'
         '401':
           $ref: '#/components/responses/Unauthorized'
-  /api/v1/notifications/{id}/read:
+  /api/v1/notice/notifications/{id}/read:
     post:
       summary: Mark a notification as read
       description: Idempotent — marking an already-read notification succeeds with 204.
@@ -225,7 +225,7 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
-  /api/v1/notifications/read-all:
+  /api/v1/notice/notifications/read-all:
     post:
       summary: Mark all notifications as read for the current user
       description: Idempotent — succeeds with 204 even when there is nothing to mark.

@@ -29,12 +29,12 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 }
 
 const SERVICES = [
-  { name: 'Auth', url: '/auth-api/healthz', port: '8080' },
-  { name: 'Edge/BFF', url: '/biz-api/healthz', port: '3002' },
-  { name: 'Notice', url: '/notice-api/healthz', port: '8086' },
-  { name: 'Logging', url: '/biz-api/healthz', port: '8083', via: 'Edge' },
-  { name: 'Billing', url: '/biz-api/healthz', port: '8085', via: 'Edge' },
-  { name: 'Config', url: '/biz-api/healthz', port: '8084', via: 'Edge' },
+  { name: 'Edge/BFF (gateway)', url: '/healthz', port: '3002' },
+  { name: 'Auth', url: '/healthz', port: '8080', via: 'Edge' },
+  { name: 'Notice', url: '/healthz', port: '8086', via: 'Edge' },
+  { name: 'Logging', url: '/healthz', port: '8083', via: 'Edge' },
+  { name: 'Billing', url: '/healthz', port: '8085', via: 'Edge' },
+  { name: 'Config', url: '/healthz', port: '8084', via: 'Edge' },
 ];
 
 function ServiceStatusRow({ name, url, port, via }: { name: string; url: string; port?: string; via?: string }) {

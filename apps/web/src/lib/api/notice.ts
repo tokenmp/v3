@@ -16,39 +16,39 @@ export const noticeApi = {
   // ---- Announcements ----
   listAnnouncements: async (limit = 20, offset = 0): Promise<{ items: Announcement[]; total: number }> => {
     const qs = new URLSearchParams({ limit: String(limit), offset: String(offset) });
-    return realGet(`/api/v1/announcements?${qs}`);
+    return realGet(`/api/v1/notice/announcements?${qs}`);
   },
 
   getAnnouncement: async (id: string): Promise<Announcement> => {
-    return realGet(`/api/v1/announcements/${id}`);
+    return realGet(`/api/v1/notice/announcements/${id}`);
   },
 
   // ---- Changelogs ----
   listChangelogs: async (limit = 20, offset = 0): Promise<{ items: Changelog[]; total: number }> => {
     const qs = new URLSearchParams({ limit: String(limit), offset: String(offset) });
-    return realGet(`/api/v1/changelogs?${qs}`);
+    return realGet(`/api/v1/notice/changelogs?${qs}`);
   },
 
   getChangelog: async (id: string): Promise<Changelog> => {
-    return realGet(`/api/v1/changelogs/${id}`);
+    return realGet(`/api/v1/notice/changelogs/${id}`);
   },
 
   // ---- Notifications ----
   listNotifications: async (limit = 20, offset = 0): Promise<{ items: Notification[]; total: number }> => {
     const qs = new URLSearchParams({ limit: String(limit), offset: String(offset) });
-    return realGet(`/api/v1/notifications?${qs}`);
+    return realGet(`/api/v1/notice/notifications?${qs}`);
   },
 
   unreadCount: async (): Promise<number> => {
-    const r = await realGet<{ count: number }>(`/api/v1/notifications/unread-count`);
+    const r = await realGet<{ count: number }>(`/api/v1/notice/notifications/unread-count`);
     return r.count;
   },
 
   markRead: async (id: string): Promise<void> => {
-    return realPost(`/api/v1/notifications/${id}/read`);
+    return realPost(`/api/v1/notice/notifications/${id}/read`);
   },
 
   markAllRead: async (): Promise<void> => {
-    return realPost('/api/v1/notifications/read-all');
+    return realPost('/api/v1/notice/notifications/read-all');
   },
 };

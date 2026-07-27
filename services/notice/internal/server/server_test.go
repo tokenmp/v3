@@ -242,7 +242,7 @@ func TestHealthzAndReadyz(t *testing.T) {
 
 func TestAnnouncements_Unauth(t *testing.T) {
 	s := newTestServer(t, &fakeStore{}, &fakeVerifier{})
-	rec := doGet(s, "/api/v1/announcements", "")
+	rec := doGet(s, "/api/v1/notice/announcements", "")
 	if rec.Code != 401 {
 		t.Fatalf("got %d, want 401", rec.Code)
 	}
@@ -256,7 +256,7 @@ func TestAnnouncements_OK(t *testing.T) {
 		{ID: "00000000-0000-0000-0000-000000000001", Title: "维护通知", Summary: "s", Body: "b", Severity: "maintenance", PublishedAt: time.Now()},
 	}}
 	s := newTestServer(t, store, &fakeVerifier{subject: jwtverifier.Subject{UserID: "u1"}})
-	rec := doGet(s, "/api/v1/announcements?limit=5&offset=2", "tok")
+	rec := doGet(s, "/api/v1/notice/announcements?limit=5&offset=2", "tok")
 	if rec.Code != 200 {
 		t.Fatalf("got %d: %s", rec.Code, rec.Body.String())
 	}
@@ -277,12 +277,12 @@ func TestGetAnnouncement_NotFound(t *testing.T) {
 	store := &fakeStore{}
 	s := newTestServer(t, store, &fakeVerifier{subject: jwtverifier.Subject{UserID: "u1"}})
 	// invalid uuid shape -> 404
-	rec := doGet(s, "/api/v1/announcements/not-a-uuid", "tok")
+	rec := doGet(s, "/api/v1/notice/announcements/not-a-uuid", "tok")
 	if rec.Code != 404 {
 		t.Fatalf("got %d", rec.Code)
 	}
 	// valid uuid but not present -> 404
-	rec = doGet(s, "/api/v1/announcements/00000000-0000-0000-0000-000000000099", "tok")
+	rec = doGet(s, "/api/v1/notice/announcements/00000000-0000-0000-0000-000000000099", "tok")
 	if rec.Code != 404 {
 		t.Fatalf("got %d", rec.Code)
 	}
@@ -293,7 +293,7 @@ func TestChangelogs_OK(t *testing.T) {
 		{ID: "00000000-0000-0000-0000-000000000002", Version: "v3.2.0", Title: "t", Body: "b", PublishedAt: time.Now()},
 	}}
 	s := newTestServer(t, store, &fakeVerifier{subject: jwtverifier.Subject{UserID: "u1"}})
-	rec := doGet(s, "/api/v1/changelogs", "tok")
+	rec := doGet(s, "/api/v1/notice/changelogs", "tok")
 	if rec.Code != 200 {
 		t.Fatalf("got %d: %s", rec.Code, rec.Body.String())
 	}
@@ -312,7 +312,7 @@ func TestNotifications_NullAction(t *testing.T) {
 		{ID: "00000000-0000-0000-0000-000000000003", UserID: "u1", Type: "system", Title: "Welcome", Body: "hi"},
 	}}
 	s := newTestServer(t, store, &fakeVerifier{subject: jwtverifier.Subject{UserID: "u1"}})
-	rec := doGet(s, "/api/v1/notifications", "tok")
+	rec := doGet(s, "/api/v1/notice/notifications", "tok")
 	if rec.Code != 200 {
 		t.Fatalf("got %d: %s", rec.Code, rec.Body.String())
 	}
@@ -328,7 +328,7 @@ func TestNotifications_WithAction(t *testing.T) {
 		{ID: "00000000-0000-0000-0000-000000000004", UserID: "u1", Type: "plan_activated", Title: "套餐已启用", Body: "您的套餐已启用", Action: models.NotificationActionPtr{Action: &act}},
 	}}
 	s := newTestServer(t, store, &fakeVerifier{subject: jwtverifier.Subject{UserID: "u1"}})
-	rec := doGet(s, "/api/v1/notifications", "tok")
+	rec := doGet(s, "/api/v1/notice/notifications", "tok")
 	if rec.Code != 200 {
 		t.Fatalf("got %d", rec.Code)
 	}
@@ -344,7 +344,7 @@ func TestNotifications_WithAction(t *testing.T) {
 func TestUnreadCount(t *testing.T) {
 	store := &fakeStore{unreadCount: 7}
 	s := newTestServer(t, store, &fakeVerifier{subject: jwtverifier.Subject{UserID: "u1"}})
-	rec := doGet(s, "/api/v1/notifications/unread-count", "tok")
+	rec := doGet(s, "/api/v1/notice/notifications/unread-count", "tok")
 	if rec.Code != 200 {
 		t.Fatalf("got %d", rec.Code)
 	}
@@ -358,7 +358,7 @@ func TestUnreadCount(t *testing.T) {
 func TestMarkRead(t *testing.T) {
 	store := &fakeStore{}
 	s := newTestServer(t, store, &fakeVerifier{subject: jwtverifier.Subject{UserID: "u1"}})
-	rec := doPost(s, "/api/v1/notifications/00000000-0000-0000-0000-000000000010/read", "tok")
+	rec := doPost(s, "/api/v1/notice/notifications/00000000-0000-0000-0000-000000000010/read", "tok")
 	if rec.Code != 204 {
 		t.Fatalf("got %d: %s", rec.Code, rec.Body.String())
 	}
@@ -370,7 +370,7 @@ func TestMarkRead(t *testing.T) {
 func TestMarkRead_NotFound(t *testing.T) {
 	store := &fakeStore{markReadErr: repository.ErrNotFound}
 	s := newTestServer(t, store, &fakeVerifier{subject: jwtverifier.Subject{UserID: "u1"}})
-	rec := doPost(s, "/api/v1/notifications/00000000-0000-0000-0000-000000000010/read", "tok")
+	rec := doPost(s, "/api/v1/notice/notifications/00000000-0000-0000-0000-000000000010/read", "tok")
 	if rec.Code != 404 {
 		t.Fatalf("got %d", rec.Code)
 	}
@@ -379,7 +379,7 @@ func TestMarkRead_NotFound(t *testing.T) {
 func TestMarkAllRead(t *testing.T) {
 	store := &fakeStore{}
 	s := newTestServer(t, store, &fakeVerifier{subject: jwtverifier.Subject{UserID: "u1"}})
-	rec := doPost(s, "/api/v1/notifications/read-all", "tok")
+	rec := doPost(s, "/api/v1/notice/notifications/read-all", "tok")
 	if rec.Code != 204 {
 		t.Fatalf("got %d", rec.Code)
 	}
@@ -391,7 +391,7 @@ func TestMarkAllRead(t *testing.T) {
 func TestInvalidBearer(t *testing.T) {
 	store := &fakeStore{}
 	s := newTestServer(t, store, &fakeVerifier{err: jwtverifier.ErrInvalidToken})
-	rec := doGet(s, "/api/v1/announcements", "bad-token")
+	rec := doGet(s, "/api/v1/notice/announcements", "bad-token")
 	if rec.Code != 401 {
 		t.Fatalf("got %d, want 401", rec.Code)
 	}
@@ -404,7 +404,7 @@ func TestNoStoreOnAllResponses(t *testing.T) {
 		t.Errorf("healthz Cache-Control = %q", rec.Header().Get("Cache-Control"))
 	}
 	// even 404 responses
-	rec = doGet(s, "/api/v1/announcements/00000000-0000-0000-0000-000000000099", "tok")
+	rec = doGet(s, "/api/v1/notice/announcements/00000000-0000-0000-0000-000000000099", "tok")
 	if rec.Header().Get("Cache-Control") != "no-store" {
 		t.Errorf("404 Cache-Control = %q", rec.Header().Get("Cache-Control"))
 	}
@@ -445,7 +445,7 @@ func TestAdminListAnnouncements_ExposeTimestamps(t *testing.T) {
 		{ID: "a1", Title: "T", Summary: "S", Body: "B", Severity: "info", PublishedAt: pub, CreatedAt: now, UpdatedAt: now},
 	}}
 	s := newTestServer(t, store, adminVerifier())
-	rec := doAdminGet(s, "/api/v1/admin/announcements")
+	rec := doAdminGet(s, "/api/v1/notice/admin/announcements")
 	if rec.Code != 200 {
 		t.Fatalf("got %d: %s", rec.Code, rec.Body.String())
 	}
@@ -468,7 +468,7 @@ func TestAdminListAnnouncements_DraftNullPublishedAt(t *testing.T) {
 		{ID: "a2", Title: "Draft", Summary: "", Body: "", Severity: "info", CreatedAt: now, UpdatedAt: now},
 	}}
 	s := newTestServer(t, store, adminVerifier())
-	rec := doAdminGet(s, "/api/v1/admin/announcements")
+	rec := doAdminGet(s, "/api/v1/notice/admin/announcements")
 	if rec.Code != 200 {
 		t.Fatalf("got %d: %s", rec.Code, rec.Body.String())
 	}
@@ -482,7 +482,7 @@ func TestAdminCreateAnnouncement_WithPublishedAt(t *testing.T) {
 	store := &fakeStore{}
 	s := newTestServer(t, store, adminVerifier())
 	pub := "2025-06-01T00:00:00Z"
-	rec := doAdminPost(s, "/api/v1/admin/announcements", `{"title":"T","summary":"S","body":"B","severity":"warning","published_at":"`+pub+`"}`)
+	rec := doAdminPost(s, "/api/v1/notice/admin/announcements", `{"title":"T","summary":"S","body":"B","severity":"warning","published_at":"`+pub+`"}`)
 	if rec.Code != 201 {
 		t.Fatalf("got %d: %s", rec.Code, rec.Body.String())
 	}
@@ -502,7 +502,7 @@ func TestAdminCreateAnnouncement_WithPublishedAt(t *testing.T) {
 func TestAdminCreateAnnouncement_DraftNoPublishedAt(t *testing.T) {
 	store := &fakeStore{}
 	s := newTestServer(t, store, adminVerifier())
-	rec := doAdminPost(s, "/api/v1/admin/announcements", `{"title":"Draft","summary":"","body":"","severity":"info"}`)
+	rec := doAdminPost(s, "/api/v1/notice/admin/announcements", `{"title":"Draft","summary":"","body":"","severity":"info"}`)
 	if rec.Code != 201 {
 		t.Fatalf("got %d: %s", rec.Code, rec.Body.String())
 	}
@@ -517,7 +517,7 @@ func TestAdminCreateAnnouncement_DraftNoPublishedAt(t *testing.T) {
 func TestAdminUpdateAnnouncement_AllowPublishedAt(t *testing.T) {
 	store := &fakeStore{}
 	s := newTestServer(t, store, adminVerifier())
-	rec := doAdminPatch(s, "/api/v1/admin/announcements/a1", `{"title":"New","published_at":"2025-07-01T00:00:00Z"}`)
+	rec := doAdminPatch(s, "/api/v1/notice/admin/announcements/a1", `{"title":"New","published_at":"2025-07-01T00:00:00Z"}`)
 	if rec.Code != 200 {
 		t.Fatalf("got %d: %s", rec.Code, rec.Body.String())
 	}
@@ -539,7 +539,7 @@ func TestAdminListChangelogs_ExposeTimestamps(t *testing.T) {
 		{ID: "c1", Version: "v3.0.0", Title: "Release", Body: "notes", PublishedAt: pub, CreatedAt: now, UpdatedAt: now},
 	}}
 	s := newTestServer(t, store, adminVerifier())
-	rec := doAdminGet(s, "/api/v1/admin/changelogs")
+	rec := doAdminGet(s, "/api/v1/notice/admin/changelogs")
 	if rec.Code != 200 {
 		t.Fatalf("got %d: %s", rec.Code, rec.Body.String())
 	}
@@ -558,7 +558,7 @@ func TestAdminListChangelogs_ExposeTimestamps(t *testing.T) {
 func TestAdminCreateChangelog_WithPublishedAt(t *testing.T) {
 	store := &fakeStore{}
 	s := newTestServer(t, store, adminVerifier())
-	rec := doAdminPost(s, "/api/v1/admin/changelogs", `{"version":"v1.0.0","title":"Release","body":"notes","published_at":"2025-06-01T00:00:00Z"}`)
+	rec := doAdminPost(s, "/api/v1/notice/admin/changelogs", `{"version":"v1.0.0","title":"Release","body":"notes","published_at":"2025-06-01T00:00:00Z"}`)
 	if rec.Code != 201 {
 		t.Fatalf("got %d: %s", rec.Code, rec.Body.String())
 	}
@@ -573,7 +573,7 @@ func TestAdminCreateChangelog_WithPublishedAt(t *testing.T) {
 func TestAdminUpdateChangelog_AllowPublishedAt(t *testing.T) {
 	store := &fakeStore{}
 	s := newTestServer(t, store, adminVerifier())
-	rec := doAdminPatch(s, "/api/v1/admin/changelogs/c1", `{"version":"v2.0.0","published_at":"2025-08-01T00:00:00Z"}`)
+	rec := doAdminPatch(s, "/api/v1/notice/admin/changelogs/c1", `{"version":"v2.0.0","published_at":"2025-08-01T00:00:00Z"}`)
 	if rec.Code != 200 {
 		t.Fatalf("got %d: %s", rec.Code, rec.Body.String())
 	}
@@ -593,7 +593,7 @@ func TestAdminListNotifications_ExposeUserIDAndAction(t *testing.T) {
 		{ID: "n2", UserID: "user-99", Type: "info", Title: "Info", Body: "note", CreatedAt: now},
 	}}
 	s := newTestServer(t, store, adminVerifier())
-	rec := doAdminGet(s, "/api/v1/admin/notifications")
+	rec := doAdminGet(s, "/api/v1/notice/admin/notifications")
 	if rec.Code != 200 {
 		t.Fatalf("got %d: %s", rec.Code, rec.Body.String())
 	}
@@ -618,7 +618,7 @@ func TestAdminListNotifications_ExposeUserIDAndAction(t *testing.T) {
 func TestAdminSendNotification_ResponseShape(t *testing.T) {
 	store := &fakeStore{}
 	s := newTestServer(t, store, adminVerifier())
-	rec := doAdminPost(s, "/api/v1/admin/notifications/send", `{"userId":"u1","type":"info","title":"T","body":"B"}`)
+	rec := doAdminPost(s, "/api/v1/notice/admin/notifications/send", `{"userId":"u1","type":"info","title":"T","body":"B"}`)
 	if rec.Code != 202 {
 		t.Fatalf("got %d: %s", rec.Code, rec.Body.String())
 	}
@@ -633,7 +633,7 @@ func TestAdminSendNotification_ResponseShape(t *testing.T) {
 
 func TestAdminForbidden_NonAdmin(t *testing.T) {
 	s := newTestServer(t, &fakeStore{}, &fakeVerifier{subject: jwtverifier.Subject{UserID: "u1", Role: "user"}})
-	rec := doGet(s, "/api/v1/admin/announcements", "user-token")
+	rec := doGet(s, "/api/v1/notice/admin/announcements", "user-token")
 	if rec.Code != 403 {
 		t.Fatalf("got %d, want 403", rec.Code)
 	}
