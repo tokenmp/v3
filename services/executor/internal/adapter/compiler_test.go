@@ -663,12 +663,11 @@ func TestCompileRoutingCandidates(t *testing.T) {
 			in.Adapters["a"] = a
 			in.Routes[0].Credentials = []CredentialInput{{ID: "c", CredentialRef: "vault://provider/c", Enabled: true}}
 		}},
-		{"credential ids global", "duplicate credential ID", func(in *ConfigInput) {
-			in.Routes = append(in.Routes, RouteInput{ID: "r2", ModelID: "m", ProviderID: "p", AdapterID: "a", UpstreamModel: "two", Protocol: ProtocolOpenAIChat, Credentials: []CredentialInput{{ID: "c", CredentialRef: "vault://provider/c", Enabled: true}}})
+		{"credential ids per-route dup", "route \"r\" has duplicate credential ID", func(in *ConfigInput) {
 			a := in.Adapters["a"]
 			a.Auth = AuthRule{Kind: AuthBearerHeader, Header: "Authorization"}
 			in.Adapters["a"] = a
-			in.Routes[0].Credentials = []CredentialInput{{ID: "c", CredentialRef: "vault://provider/first", Enabled: true}}
+			in.Routes[0].Credentials = []CredentialInput{{ID: "c", CredentialRef: "vault://provider/first", Enabled: true}, {ID: "c", CredentialRef: "vault://provider/second", Enabled: true}}
 		}},
 		{"fallback group mismatch", "route group", func(in *ConfigInput) {
 			in.Routes[0].RouteGroup = "one"

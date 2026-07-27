@@ -1218,16 +1218,19 @@ func compatible(m CompiledModel, a CompiledAdapter) error {
 	return nil
 }
 func validateRouteCredentials(routes []CompiledRoute) error {
-	ids := map[string]bool{}
 	for _, route := range routes {
 		if route.RouteGroup != "" && !safeSegment(route.RouteGroup) {
 			return fmt.Errorf("route %q has invalid route group %q", route.ID, route.RouteGroup)
 		}
+		// Credential IDs must be unique within a single route, but may be
+		// shared across routes: the same provider API key commonly backs
+		// several models, so a credential ID naturally repeats across routes.
+		seen := map[string]bool{}
 		for _, credential := range route.Credentials {
-			if ids[credential.ID] {
-				return fmt.Errorf("duplicate credential ID %q", credential.ID)
+			if seen[credential.ID] {
+				return fmt.Errorf("route %q has duplicate credential ID %q", route.ID, credential.ID)
 			}
-			ids[credential.ID] = true
+			seen[credential.ID] = true
 		}
 	}
 	return nil
