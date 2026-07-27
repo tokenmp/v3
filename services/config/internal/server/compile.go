@@ -267,6 +267,66 @@ func defaultGlobalRetry() wireRetryPolicy {
 	}
 }
 
+// resolveGlobalRetry decodes the global_config default_retry jsonb value.
+// When the value is absent or fails to decode, the safe built-in default is
+// returned so a misconfigured row can never produce an empty policy.
+func resolveGlobalRetry(raw json.RawMessage) wireRetryPolicy {
+	if len(raw) == 0 {
+		return defaultGlobalRetry()
+	}
+	var p wireRetryPolicy
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return defaultGlobalRetry()
+	}
+	// Sanitize: enforce non-empty rules and valid actions. An invalid row is
+	// treated as missing so the executor never receives a half-formed policy.
+	for i := range p.Rules {
+		if !validRetryAction(p.Rules[i].Action) {
+			return defaultGlobalRetry()
+		}
+		if p.Rules[i].ID == "" {
+			return defaultGlobalRetry()
+		}
+	}
+	if len(p.Rules) == 0 {
+		return defaultGlobalRetry()
+	}
+	return p
+}
+
+// resolveGlobalTimeout decodes the global_config default_timeout jsonb value,
+// falling back to the built-in default when absent or invalid.
+func resolveGlobalTimeout(raw json.RawMessage) wireTimeoutPolicy {
+	if len(raw) == 0 {
+		return defaultGlobalTimeout()
+	}
+	var p wireTimeoutPolicy
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return defaultGlobalTimeout()
+	}
+	return p
+}
+
+// validRetryAction reports whether action is a supported retry action.
+func validRetryAction(action string) bool {
+	switch action {
+	case "none", "same_credential", "next_credential", "next_route", "next_provider", "next_model":
+		return true
+	}
+	return false
+}
+
+// validRetryRules reports whether every rule has a non-empty ID and a valid
+// action. Empty rule lists are valid (the route inherits the global policy).
+func validRetryRules(rules []wireRetryRule) bool {
+	for _, r := range rules {
+		if r.ID == "" || !validRetryAction(r.Action) {
+			return false
+		}
+	}
+	return true
+}
+
 func defaultGlobalTimeout() wireTimeoutPolicy {
 	return wireTimeoutPolicy{
 		RequestTimeout:    "120s",
@@ -287,6 +347,7 @@ func compileSnapshot(
 	credentialsByProvider map[string][]repository.UpstreamCredential,
 	routeCredentialsByRoute map[string][]repository.RouteCredential,
 	adapters []repository.Adapter,
+	global repository.GlobalPolicy,
 ) ([]byte, error) {
 	now := time.Now().UTC()
 	revision := fmt.Sprintf("compile-%d", now.Unix())
@@ -463,7 +524,12 @@ func compileSnapshot(
 		var retry wireRetryPolicy
 		var timeout wireTimeoutPolicy
 		if len(rm.RetryPolicy) > 0 {
-			_ = json.Unmarshal(rm.RetryPolicy, &retry)
+			var parsed wireRetryPolicy
+			if err := json.Unmarshal(rm.RetryPolicy, &parsed); err == nil && validRetryRules(parsed.Rules) {
+				retry = parsed
+			}
+			// An invalid route retry_policy is silently dropped: the route then
+			// inherits the global retry policy downstream, never a malformed one.
 		}
 		if len(rm.TimeoutPolicy) > 0 {
 			_ = json.Unmarshal(rm.TimeoutPolicy, &timeout)
@@ -494,8 +560,8 @@ func compileSnapshot(
 		Revision:  revision,
 		CreatedAt: now.Format(time.RFC3339),
 		Global: wireGlobal{
-			Retry:        defaultGlobalRetry(),
-			Timeout:      defaultGlobalTimeout(),
+			Retry:        resolveGlobalRetry(global.DefaultRetry),
+			Timeout:      resolveGlobalTimeout(global.DefaultTimeout),
 			AutoModelIDs: autoModelIDs,
 		},
 		Models:    wireModels,

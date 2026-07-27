@@ -189,6 +189,9 @@ type AdminWriter interface {
 	UpdateRoute(ctx context.Context, id string, fields map[string]any) error
 	DeleteRoute(ctx context.Context, id string) error
 	SetRouteCredentials(ctx context.Context, routeID string, creds []RouteCredential) error
+
+	// SetGlobalConfigEntry upserts a single global_config row.
+	SetGlobalConfigEntry(ctx context.Context, key string, value []byte, updatedBy string) error
 }
 
 func (r *GormRepository) CreateProvider(ctx context.Context, p *Provider) error {

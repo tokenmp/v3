@@ -66,6 +66,10 @@ func (s *Server) registerAdminRoutes(r chi.Router) {
 
 	// Compile
 	r.Post("/v1/config/admin/compile", s.handleAdminCompile)
+
+	// Global policy (retry/timeout/auto_model_ids KV store).
+	r.Get("/v1/config/admin/global", s.handleAdminGetGlobal)
+	r.Put("/v1/config/admin/global/{key}", s.handleAdminSetGlobal)
 }
 
 // ---- Models ----
@@ -483,6 +487,13 @@ func (s *Server) handleAdminCompile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	global, err := s.adminReader.GetGlobalPolicy(ctx)
+	if err != nil {
+		s.logger.Warn("compile: read global policy failed", "error", err)
+		httpresp.Error(w, httpresp.CodeInternalError, "internal error")
+		return
+	}
+
 	// Build credentials by provider map.
 	credentialsByProvider := make(map[string][]repository.UpstreamCredential)
 	for _, p := range providers {
@@ -506,7 +517,7 @@ func (s *Server) handleAdminCompile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Compile snapshot JSON.
-	snapshotJSON, err := compileSnapshot(models, providers, routes, credentialsByProvider, routeCredentialsByRoute, adapters)
+	snapshotJSON, err := compileSnapshot(models, providers, routes, credentialsByProvider, routeCredentialsByRoute, adapters, global)
 	if err != nil {
 		s.logger.Warn("compile: snapshot compilation failed", "error", err)
 		httpresp.Error(w, httpresp.CodeInternalError, "compilation failed")
@@ -538,6 +549,91 @@ func (s *Server) handleAdminCompile(w http.ResponseWriter, r *http.Request) {
 		"revision":  revision,
 		"published": true,
 	})
+}
+
+// ---- Global policy (retry/timeout/auto_model_ids) ----
+
+// handleAdminGetGlobal returns the aggregate global policy (all three KV
+// rows). Missing rows are returned as null; the caller applies defaults.
+func (s *Server) handleAdminGetGlobal(w http.ResponseWriter, r *http.Request) {
+	if s.adminReader == nil {
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "admin not configured")
+		return
+	}
+	policy, err := s.adminReader.GetGlobalPolicy(r.Context())
+	if err != nil {
+		s.logger.Warn("global: read failed", "error", err)
+		httpresp.Error(w, httpresp.CodeInternalError, "internal error")
+		return
+	}
+	resp := map[string]any{}
+	if len(policy.DefaultRetry) > 0 {
+		var v any
+		if json.Unmarshal(policy.DefaultRetry, &v) == nil {
+			resp["default_retry"] = v
+		}
+	}
+	if len(policy.DefaultTimeout) > 0 {
+		var v any
+		if json.Unmarshal(policy.DefaultTimeout, &v) == nil {
+			resp["default_timeout"] = v
+		}
+	}
+	if len(policy.AutoModelIDs) > 0 {
+		var v any
+		if json.Unmarshal(policy.AutoModelIDs, &v) == nil {
+			resp["auto_model_ids"] = v
+		}
+	}
+	httpresp.OK(w, resp)
+}
+
+// validGlobalKeys is the allowlist of keys that may be set via the global
+// admin endpoint. Only the three well-known policy keys are accepted.
+var validGlobalKeys = map[string]bool{
+	string(repository.GlobalKeyDefaultRetry):   true,
+	string(repository.GlobalKeyDefaultTimeout): true,
+	string(repository.GlobalKeyAutoModelIDs):   true,
+}
+
+// handleAdminSetGlobal upserts a single global_config row. The key must be
+// one of default_retry / default_timeout / auto_model_ids.
+func (s *Server) handleAdminSetGlobal(w http.ResponseWriter, r *http.Request) {
+	if s.adminWriter == nil {
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "admin not configured")
+		return
+	}
+	key := chi.URLParam(r, "key")
+	if !validGlobalKeys[key] {
+		httpresp.Error(w, httpresp.CodeBadRequest, "unsupported global key")
+		return
+	}
+	var body json.RawMessage
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&body); err != nil {
+		httpresp.Error(w, httpresp.CodeBadRequest, "invalid json body")
+		return
+	}
+	// Re-marshal to canonical form so we store compact, validated JSON.
+	var v any
+	if err := json.Unmarshal(body, &v); err != nil {
+		httpresp.Error(w, httpresp.CodeBadRequest, "invalid json body")
+		return
+	}
+	canon, err := json.Marshal(v)
+	if err != nil {
+		httpresp.Error(w, httpresp.CodeInternalError, "internal error")
+		return
+	}
+	updatedBy := "admin"
+	if u := r.Header.Get("X-User-ID"); u != "" {
+		updatedBy = u
+	}
+	if err := s.adminWriter.SetGlobalConfigEntry(r.Context(), key, canon, updatedBy); err != nil {
+		s.logger.Warn("global: write failed", "error", err)
+		httpresp.Error(w, httpresp.CodeInternalError, "internal error")
+		return
+	}
+	httpresp.OK(w, map[string]any{"key": key, "updated": true})
 }
 
 // ---- shared helpers ----
