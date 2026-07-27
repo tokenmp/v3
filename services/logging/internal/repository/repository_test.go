@@ -5,6 +5,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -528,5 +530,72 @@ func TestIngestBatch_UpsertDedupes(t *testing.T) {
 	}
 	if len(attempts) != 1 {
 		t.Errorf("attempts = %d, want 1", len(attempts))
+	}
+}
+
+// TestIngestBatch_ConcurrentSameRequestIDNoDup verifies that concurrent
+// ingests of the same request_id (e.g. reserved + finalized events arriving
+// on separate HTTP connections at the same time) produce exactly one
+// request_logs row. Without the advisory lock the UPDATE-then-INSERT pattern
+// races and both transactions insert, leaving duplicate rows.
+func TestIngestBatch_ConcurrentSameRequestIDNoDup(t *testing.T) {
+	d := dsn(t)
+	applyMigrations(t, d)
+	db := openDB(t, d)
+	repo := New(db)
+	ctx := context.Background()
+	reqID := "req-concurrent-dedup-1"
+	now := time.Now().UTC().Truncate(time.Microsecond)
+
+	mkBatch := func(stage string, completed bool) Batch {
+		b := Batch{
+			Log: RequestLog{
+				RequestID:   reqID,
+				UserID:      "u-concurrent",
+				Protocol:    "openai_chat",
+				Stream:      false,
+				FinalStatus: "success",
+				LatencyMS:   1000,
+				CreatedAt:   now,
+			},
+			Events: []Event{{
+				RequestID: reqID,
+				Source:    "executor",
+				Stage:     stage,
+				Status:    "success",
+				CreatedAt: now,
+			}},
+		}
+		if completed {
+			c := now.Add(time.Second)
+			b.Log.CompletedAt = &c
+		}
+		return b
+	}
+
+	const n = 8
+	var wg sync.WaitGroup
+	errs := make(chan error, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			if err := repo.IngestBatch(ctx, mkBatch("event-"+strconv.Itoa(i), i == 0)); err != nil {
+				errs <- err
+			}
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatalf("concurrent ingest failed: %v", err)
+	}
+
+	var rowCount int64
+	if err := db.WithContext(ctx).Raw(`SELECT COUNT(*) FROM request_logs WHERE request_id = ?`, reqID).Scan(&rowCount).Error; err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if rowCount != 1 {
+		t.Fatalf("expected 1 request_logs row after %d concurrent ingests, got %d", n, rowCount)
 	}
 }
