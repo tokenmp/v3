@@ -199,7 +199,66 @@ func (h *Handlers) ListUserPlans(w http.ResponseWriter, r *http.Request) {
 		httpresp.OK(w, map[string]any{"plans": []any{}})
 		return
 	}
-	httpresp.OK(w, map[string]any{"plans": userPlans})
+	httpresp.OK(w, map[string]any{"plans": h.enrichUserPlans(r, userPlans)})
+}
+
+// enrichUserPlans best-effort resolves user_id → user_email and plan_id →
+// plan_name for a slice of user plans. Failures leave the field empty so the
+// UI falls back to the raw id. The lookup is best-effort and never fails the
+// request.
+func (h *Handlers) enrichUserPlans(r *http.Request, plans []billing.UserPlan) []map[string]any {
+	if len(plans) == 0 {
+		return []map[string]any{}
+	}
+	// plan_id → plan_name from a single ListPlans call.
+	planNames := make(map[int64]string, 8)
+	if h.Billing != nil && h.Billing.Available() {
+		if allPlans, err := h.Billing.ListPlans(r.Context()); err == nil {
+			for _, p := range allPlans {
+				planNames[p.ID] = p.Name
+			}
+		}
+	}
+	// user_id → user_email from Auth admin GetUser (best-effort).
+	emails := make(map[string]string, len(plans))
+	if h.Auth != nil && h.Auth.Available() {
+		bearer := bearerFromRequest(r)
+		for _, up := range plans {
+			if up.UserID == "" {
+				continue
+			}
+			if _, ok := emails[up.UserID]; ok {
+				continue
+			}
+			if u, err := h.Auth.GetUser(r.Context(), bearer, up.UserID); err == nil {
+				emails[up.UserID] = u.Email
+			} else {
+				emails[up.UserID] = ""
+			}
+		}
+	}
+	out := make([]map[string]any, 0, len(plans))
+	for _, up := range plans {
+		entry := map[string]any{
+			"id":           up.ID,
+			"user_id":      up.UserID,
+			"plan_id":      up.PlanID,
+			"plan_type":    up.PlanType,
+			"status":       up.Status,
+			"activated_at": up.ActivatedAt,
+		}
+		if up.ExpiresAt != nil {
+			entry["expires_at"] = *up.ExpiresAt
+		}
+		if email, ok := emails[up.UserID]; ok && email != "" {
+			entry["user_email"] = email
+		}
+		if name, ok := planNames[up.PlanID]; ok && name != "" {
+			entry["plan_name"] = name
+		}
+		out = append(out, entry)
+	}
+	return out
 }
 
 // ---- helpers ----
