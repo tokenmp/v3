@@ -563,29 +563,29 @@ function mapRouteConfig(r: Record<string, unknown>): AdminRouteConfig {
 function mapRetryPolicy(v: unknown): RetryPolicy | null {
   if (!v || typeof v !== 'object') return null;
   const r = v as Record<string, unknown>;
-  const rules = Array.isArray(r.rules)
-    ? r.rules
+  const rules = Array.isArray(r.rules) || Array.isArray(r.Rules)
+    ? ((r.rules ?? r.Rules) as Record<string, unknown>[])
         .map((rr: Record<string, unknown>) => ({
-          id: String(rr.id ?? ''),
-          priority: Number(rr.priority ?? 0),
-          httpStatuses: Array.isArray(rr.http_statuses) || Array.isArray(rr.httpStatuses)
-            ? ((rr.http_statuses ?? rr.httpStatuses) as number[]).map(Number)
+          id: String(rr.id ?? rr.ID ?? ''),
+          priority: Number(rr.priority ?? rr.Priority ?? 0),
+          httpStatuses: Array.isArray(rr.http_statuses) || Array.isArray(rr.httpStatuses) || Array.isArray(rr.HTTPStatuses)
+            ? ((rr.http_statuses ?? rr.httpStatuses ?? rr.HTTPStatuses) as number[]).map(Number)
             : [],
-          errorCodes: Array.isArray(rr.error_codes) || Array.isArray(rr.errorCodes)
-            ? ((rr.error_codes ?? rr.errorCodes) as string[]).map(String)
+          errorCodes: Array.isArray(rr.error_codes) || Array.isArray(rr.errorCodes) || Array.isArray(rr.ErrorCodes)
+            ? ((rr.error_codes ?? rr.errorCodes ?? rr.ErrorCodes) as string[]).map(String)
             : undefined,
-          errorTypes: Array.isArray(rr.error_types) || Array.isArray(rr.errorTypes)
-            ? ((rr.error_types ?? rr.errorTypes) as string[]).map(String)
+          errorTypes: Array.isArray(rr.error_types) || Array.isArray(rr.errorTypes) || Array.isArray(rr.ErrorTypes)
+            ? ((rr.error_types ?? rr.errorTypes ?? rr.ErrorTypes) as string[]).map(String)
             : undefined,
-          action: String(rr.action ?? 'none') as RetryAction,
+          action: String(rr.action ?? rr.Action ?? 'none') as RetryAction,
         }))
         .filter((rr: RetryRule) => rr.id !== '')
     : undefined;
   return {
-    maxTotalAttempts: r.max_total_attempts != null ? Number(r.max_total_attempts) : (r.maxTotalAttempts != null ? Number(r.maxTotalAttempts) : null) ?? null,
-    maxSameTargetAttempts: r.max_same_target_attempts != null ? Number(r.max_same_target_attempts) : (r.maxSameTargetAttempts != null ? Number(r.maxSameTargetAttempts) : null) ?? null,
-    maxTotalDuration: typeof r.max_total_duration === 'string' ? r.max_total_duration : (typeof r.maxTotalDuration === 'string' ? r.maxTotalDuration : undefined),
-    backoff: typeof r.backoff === 'string' ? r.backoff : undefined,
+    maxTotalAttempts: r.max_total_attempts != null ? Number(r.max_total_attempts) : (r.maxTotalAttempts != null ? Number(r.maxTotalAttempts) : (r.MaxTotalAttempts != null ? Number(r.MaxTotalAttempts) : null)),
+    maxSameTargetAttempts: r.max_same_target_attempts != null ? Number(r.max_same_target_attempts) : (r.maxSameTargetAttempts != null ? Number(r.maxSameTargetAttempts) : (r.MaxSameTargetAttempts != null ? Number(r.MaxSameTargetAttempts) : null)),
+    maxTotalDuration: typeof r.max_total_duration === 'string' ? r.max_total_duration : (typeof r.maxTotalDuration === 'string' ? r.maxTotalDuration : (typeof r.MaxTotalDuration === 'string' ? r.MaxTotalDuration : undefined)),
+    backoff: typeof r.backoff === 'string' ? r.backoff : (typeof r.Backoff === 'string' ? r.Backoff : undefined),
     rules,
   };
 }
@@ -876,12 +876,34 @@ export const adminConfigApi = {
 
   // ---- Global policy (retry/timeout/auto_model_ids) ----
   getGlobalPolicy: async (): Promise<AdminGlobalPolicy> => {
-    return request<AdminGlobalPolicy>('/api/v1/admin/global', { baseUrl: ADMIN_BASE });
+    const res = await request<Record<string, unknown>>('/api/v1/admin/global', { baseUrl: ADMIN_BASE });
+    return {
+      default_retry: mapRetryPolicy(res.default_retry),
+      default_timeout: (res.default_timeout as AdminGlobalPolicy['default_timeout']) ?? null,
+      auto_model_ids: (res.auto_model_ids as string[] | null) ?? null,
+    };
   },
   setGlobalRetry: async (policy: RetryPolicy): Promise<void> => {
+    // Backend wire uses PascalCase keys (wireRetryPolicy). Convert from the
+    // camelCase TS type so compile's json.Unmarshal into wireRetryPolicy works.
+    const wire: Record<string, unknown> = {};
+    if (policy.maxTotalAttempts != null) wire.MaxTotalAttempts = policy.maxTotalAttempts;
+    if (policy.maxSameTargetAttempts != null) wire.MaxSameTargetAttempts = policy.maxSameTargetAttempts;
+    if (policy.maxTotalDuration) wire.MaxTotalDuration = policy.maxTotalDuration;
+    if (policy.backoff) wire.Backoff = policy.backoff;
+    if (policy.rules) {
+      wire.Rules = policy.rules.map((r) => ({
+        ID: r.id,
+        Priority: r.priority,
+        HTTPStatuses: r.httpStatuses,
+        ErrorCodes: r.errorCodes ?? [],
+        ErrorTypes: r.errorTypes ?? [],
+        Action: r.action,
+      }));
+    }
     await request<{ key: string }>(`/api/v1/admin/global/default_retry`, {
       method: 'PUT',
-      body: policy,
+      body: wire,
       baseUrl: ADMIN_BASE,
     });
   },
