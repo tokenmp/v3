@@ -35,6 +35,10 @@ export function NotificationCenter() {
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<Tab>('announcements');
   const ref = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  // Popover coordinates relative to the viewport, computed on open so the
+  // panel aligns to the bell's right edge and never overflows on mobile.
+  const [popStyle, setPopStyle] = useState<React.CSSProperties>({});
 
   const { data: announcements } = useQuery({
     queryKey: ['notice', 'announcements', 'header'] as const,
@@ -89,9 +93,36 @@ export function NotificationCenter() {
     };
   }, [open]);
 
+  // Position the popover: align its right edge to the bell's right edge,
+  // clamped so it never overflows the viewport (mobile-friendly). Recompute
+  // on open and on resize.
+  useEffect(() => {
+    if (!open) return;
+    const place = () => {
+      const el = triggerRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const wantW = Math.min(384, window.innerWidth - 16);
+      // Right-align to the bell; if that would overflow on the left, pin left.
+      let left = r.right - wantW;
+      if (left < 8) left = 8;
+      setPopStyle({
+        position: 'fixed',
+        top: r.bottom + 6,
+        left,
+        width: wantW,
+        maxWidth: window.innerWidth - 16,
+      });
+    };
+    place();
+    window.addEventListener('resize', place);
+    return () => window.removeEventListener('resize', place);
+  }, [open]);
+
   return (
     <div className="relative" ref={ref}>
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
         className="focus-inset relative inline-flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
@@ -109,7 +140,8 @@ export function NotificationCenter() {
         <div
           role="dialog"
           aria-label="通知与公告"
-          className="absolute right-0 top-full z-50 mt-2 w-[min(92vw,24rem)] overflow-hidden rounded-lg border bg-popover text-popover-foreground shadow-lg"
+          style={popStyle}
+          className="z-50 overflow-hidden rounded-lg border bg-popover text-popover-foreground shadow-lg"
         >
           {/* Tabs */}
           <div className="flex border-b">
