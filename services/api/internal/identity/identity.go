@@ -153,6 +153,13 @@ func FromContext(ctx context.Context) (Claims, bool) {
 	return c, ok
 }
 
+// WithClaims returns a copy of ctx carrying the given claims. It is intended
+// for middleware and tests that need to inject a verified identity without
+// running the full JWT verification chain.
+func WithClaims(ctx context.Context, claims Claims) context.Context {
+	return context.WithValue(ctx, claimsKey, claims)
+}
+
 // RequireAdmin is a middleware that rejects requests from non-admin users
 // with 403. It must be placed after Middleware (which populates Claims in
 // context).

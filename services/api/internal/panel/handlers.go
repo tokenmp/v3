@@ -298,7 +298,7 @@ func (h *Handlers) UpdateUserSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		pb = &v
 	}
-	s := h.Settings.Snapshot(claims.Subject, pb, body.FallbackEnabled)
+	s := h.Settings.Snapshot(claims.Subject, pb, body.FallbackEnabled, nil)
 	httpresp.OK(w, apiv1.UserSettings{
 		PreferredBilling: apiv1.UserSettingsPreferredBilling(s.PreferredBilling),
 		FallbackEnabled:  s.FallbackEnabled,
@@ -544,4 +544,54 @@ func strPtrOrNil(s string) *string {
 		return nil
 	}
 	return &s
+}
+
+// ---- per-user auto model pool ----
+
+// autoModelsResponse is the read shape of GET /api/v1/user/auto-models.
+type autoModelsResponse struct {
+	ModelIDs []string `json:"model_ids"`
+}
+
+// autoModelsUpdate is the PATCH body. model_ids may be nil (no change) or an
+// empty slice (reset to platform default) or a non-empty ordered list.
+type autoModelsUpdate struct {
+	ModelIDs []string `json:"model_ids"`
+}
+
+// GetAutoModels returns the caller's configured auto model pool override.
+func (h *Handlers) GetAutoModels(w http.ResponseWriter, r *http.Request) {
+	claims, ok := identity.FromContext(r.Context())
+	if !ok {
+		httpresp.Error(w, httpresp.CodeUnauthorized, "unauthorized")
+		return
+	}
+	pool := h.Settings.AutoModelIDs(claims.Subject)
+	httpresp.OK(w, autoModelsResponse{ModelIDs: pool})
+}
+
+// UpdateAutoModels sets the caller's auto model pool override (ordered list
+// of model IDs). An empty slice resets to the platform default.
+func (h *Handlers) UpdateAutoModels(w http.ResponseWriter, r *http.Request) {
+	claims, ok := identity.FromContext(r.Context())
+	if !ok {
+		httpresp.Error(w, httpresp.CodeUnauthorized, "unauthorized")
+		return
+	}
+	var body autoModelsUpdate
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&body); err != nil {
+		httpresp.Error(w, httpresp.CodeInvalidJSON, "invalid JSON")
+		return
+	}
+	// Bound the list; entries are validated against the catalog client-side.
+	// The executor resolver ignores unknown model IDs, so a bogus entry is
+	// simply inert rather than a security risk.
+	if len(body.ModelIDs) > 64 {
+		httpresp.Error(w, httpresp.CodeBadRequest, "too many model ids")
+		return
+	}
+	pool := h.Settings.Snapshot(claims.Subject, nil, nil, body.ModelIDs).AutoModelIDs
+	httpresp.OK(w, autoModelsResponse{ModelIDs: pool})
 }

@@ -155,7 +155,7 @@ func (r NormalizedRequest) StreamRequest(sink execution.ProtocolSink) StreamRequ
 	return StreamRequest{
 		Protocol: req.Protocol, Selector: req.Selector,
 		Body: json.RawMessage(append([]byte(nil), req.Body...)), Thinking: req.Thinking,
-		RequestID: req.RequestID, Principal: req.Principal, Sink: sink,
+		RequestID: req.RequestID, Principal: req.Principal, AutoModelIDs: req.AutoModelIDs, Sink: sink,
 	}
 }
 
@@ -262,7 +262,7 @@ func normalize(
 		principal = nonstream.Principal{Subject: id.Subject, KeyID: id.KeyID, Role: string(id.Role), Status: string(id.Status)}
 	}
 	return NormalizedRequest{Request: NonStreamRequest{
-		Protocol: protocol, Selector: selector, Body: json.RawMessage(append([]byte(nil), raw...)), Thinking: requestThinking, RequestID: requestID, Principal: principal,
+		Protocol: protocol, Selector: selector, Body: json.RawMessage(append([]byte(nil), raw...)), Thinking: requestThinking, RequestID: requestID, Principal: principal, AutoModelIDs: AutoModelIDsFromContext(ctx),
 	}, Stream: stream}, nil
 }
 

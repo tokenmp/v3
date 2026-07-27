@@ -217,6 +217,27 @@ func NewResolver(source *snapshot.CompiledSnapshot, quarantine QuarantineReader,
 	return &Resolver{identity: &resolverIdentity{}, revision: source.Revision(), generation: source.Generation(), config: config, quarantine: quarantine, clock: clock}, nil
 }
 
+// autoPool returns the ordered auto model ID pool for a selector. When the
+// selector carries a per-request override (trusted, injected by the edge
+// BFF from per-user config), it is used verbatim with duplicates collapsed
+// (first occurrence wins); otherwise the compiled global AutoModelIDs is the
+// platform default. The result is always a fresh slice.
+func (r *Resolver) autoPool(selector Selector) []string {
+	if selector.Auto && len(selector.AutoModelIDs) > 0 {
+		seen := make(map[string]bool, len(selector.AutoModelIDs))
+		pool := make([]string, 0, len(selector.AutoModelIDs))
+		for _, id := range selector.AutoModelIDs {
+			if id == "" || seen[id] {
+				continue
+			}
+			seen[id] = true
+			pool = append(pool, id)
+		}
+		return pool
+	}
+	return append([]string(nil), r.config.AutoModelIDs...)
+}
+
 // ValidatePlan confirms that plan was issued by this exact Resolver and is
 // pinned to its current frozen revision and generation. It is intentionally
 // safe to return directly: it includes neither selectors nor routing data.
@@ -236,14 +257,14 @@ func (r *Resolver) Resolve(ctx context.Context, selector Selector) (Plan, error)
 	if err := ctx.Err(); err != nil {
 		return Plan{}, err
 	}
-	plan := Plan{Revision: r.revision, Generation: r.generation, owner: r.identity, auto: selector.Auto, autoModelIDs: append([]string(nil), r.config.AutoModelIDs...), fallbackModels: make(map[string][]string, len(r.config.Models)), fallbackRoutes: make(map[string][]string, len(r.config.Routes))}
+	plan := Plan{Revision: r.revision, Generation: r.generation, owner: r.identity, auto: selector.Auto, autoModelIDs: r.autoPool(selector), fallbackModels: make(map[string][]string, len(r.config.Models)), fallbackRoutes: make(map[string][]string, len(r.config.Routes))}
 	for modelID, model := range r.config.Models {
 		plan.fallbackModels[modelID] = append([]string(nil), model.FallbackModelIDs...)
 	}
 	candidateModels := plan.candidateModels(selector)
-	autoRank := make(map[string]int, len(r.config.AutoModelIDs))
+	autoRank := make(map[string]int, len(plan.autoModelIDs))
 	if selector.Auto {
-		for index, modelID := range r.config.AutoModelIDs {
+		for index, modelID := range plan.autoModelIDs {
 			autoRank[modelID] = index
 		}
 	}

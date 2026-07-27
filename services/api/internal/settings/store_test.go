@@ -14,13 +14,13 @@ func TestSnapshotUpdatesOnlyProvidedFields(t *testing.T) {
 	s := NewStore()
 	// 只更新 preferredBilling。
 	pb := "token"
-	got := s.Snapshot("u1", &pb, nil)
+	got := s.Snapshot("u1", &pb, nil, nil)
 	if got.PreferredBilling != "token" || got.FallbackEnabled != DefaultFallbackEnabled {
 		t.Errorf("snapshot1 = %+v", got)
 	}
 	// 只把 fallbackEnabled 显式设为 false。
 	fe := false
-	got = s.Snapshot("u1", nil, &fe)
+	got = s.Snapshot("u1", nil, &fe, nil)
 	if got.PreferredBilling != "token" || got.FallbackEnabled != false {
 		t.Errorf("snapshot2 = %+v", got)
 	}
@@ -33,9 +33,9 @@ func TestSnapshotUpdatesOnlyProvidedFields(t *testing.T) {
 func TestSnapshotIgnoresEmptyPreferredBilling(t *testing.T) {
 	s := NewStore()
 	pb := "token"
-	s.Snapshot("u1", &pb, nil)
+	s.Snapshot("u1", &pb, nil, nil)
 	empty := ""
-	got := s.Snapshot("u1", &empty, nil)
+	got := s.Snapshot("u1", &empty, nil, nil)
 	if got.PreferredBilling != "token" {
 		t.Errorf("empty preferredBilling should not clear existing, got %q", got.PreferredBilling)
 	}

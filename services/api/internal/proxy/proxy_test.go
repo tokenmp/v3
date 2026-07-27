@@ -1,10 +1,15 @@
 package proxy
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+
+	"github.com/tokenmp/v3/services/api/internal/identity"
+	"github.com/tokenmp/v3/services/api/internal/settings"
 )
 
 func TestProxyForwardsRequestWithToken(t *testing.T) {
@@ -73,4 +78,59 @@ func contains(s, sub string) bool {
 		}
 	}
 	return false
+}
+
+// TestProxyInjectsAutoModelIDsHeader verifies the per-user auto model pool is
+// injected as X-Auto-Model-IDs when the request carries a verified identity.
+func TestProxyInjectsAutoModelIDsHeader(t *testing.T) {
+	var got string
+	var hasHdr bool
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Get("X-Auto-Model-IDs")
+		hasHdr = got != ""
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer backend.Close()
+
+	st := settings.NewStore()
+	st.Snapshot("user-1", nil, nil, []string{"glm-5.1", "glm-5.2"})
+
+	prx, err := NewWithSettings(backend.URL, "edge-svc-token", st, nil)
+	if err != nil {
+		t.Fatalf("NewWithSettings: %v", err)
+	}
+	ts := httptest.NewServer(prx)
+	defer ts.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader("{}"))
+	req = req.WithContext(identity.WithClaims(context.Background(), identity.Claims{Subject: "user-1"}))
+	prx.ServeHTTP(httptest.NewRecorder(), req)
+
+	if !hasHdr {
+		t.Fatal("X-Auto-Model-IDs header not forwarded")
+	}
+	if got != "glm-5.1,glm-5.2" {
+		t.Fatalf("header = %q, want %q", got, "glm-5.1,glm-5.2")
+	}
+}
+
+// TestProxyStripsClientSuppliedAutoModelIDs verifies a client-supplied
+// X-Auto-Model-IDs header is stripped (no spoofing in passthrough mode).
+func TestProxyStripsClientSuppliedAutoModelIDs(t *testing.T) {
+	var got string
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Get("X-Auto-Model-IDs")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer backend.Close()
+
+	// No settings store: nothing injected, client value must be stripped.
+	prx, _ := NewWithSettings(backend.URL, "", nil, nil)
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader("{}"))
+	req.Header.Set("X-Auto-Model-IDs", "spoofed")
+	req = req.WithContext(identity.WithClaims(context.Background(), identity.Claims{Subject: "user-1"}))
+	prx.ServeHTTP(httptest.NewRecorder(), req)
+	if got != "" {
+		t.Fatalf("client X-Auto-Model-IDs leaked: %q", got)
+	}
 }

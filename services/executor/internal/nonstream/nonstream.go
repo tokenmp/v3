@@ -52,12 +52,13 @@ const (
 // value the execution path may read; it is never serialized into an upstream
 // call and carries no key material.
 type Request struct {
-	Protocol  adapter.Protocol
-	Selector  string
-	Body      json.RawMessage
-	Thinking  adapter.ThinkingRequest
-	RequestID string
-	Principal Principal
+	Protocol     adapter.Protocol
+	Selector     string
+	Body         json.RawMessage
+	Thinking     adapter.ThinkingRequest
+	RequestID    string
+	Principal    Principal
+	AutoModelIDs []string
 }
 
 // Result aliases the internal execution result so the transport and facade do

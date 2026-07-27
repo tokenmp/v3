@@ -26,13 +26,14 @@ const (
 // Request is the protocol-normalized input to one streaming execution. Sink
 // owns protocol rendering; it is deliberately outside the streaming core.
 type Request struct {
-	Protocol  adapter.Protocol
-	Selector  string
-	Body      json.RawMessage
-	Thinking  adapter.ThinkingRequest
-	RequestID string
-	Principal Principal
-	Sink      execution.ProtocolSink
+	Protocol     adapter.Protocol
+	Selector     string
+	Body         json.RawMessage
+	Thinking     adapter.ThinkingRequest
+	RequestID    string
+	Principal    Principal
+	AutoModelIDs []string
+	Sink         execution.ProtocolSink
 }
 
 // Result aliases the internal stream lifecycle result.

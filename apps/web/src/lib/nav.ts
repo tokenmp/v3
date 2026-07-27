@@ -6,6 +6,7 @@ import {
   Bell,
   GitCommitHorizontal,
   Boxes,
+  Sparkles,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -27,6 +28,7 @@ export const navGroups: NavGroup[] = [
       { label: 'API 密钥', href: '/panel/keys', icon: Key },
       { label: '请求日志', href: '/panel/requests', icon: Activity },
       { label: '模型', href: '/panel/models', icon: Boxes },
+      { label: 'Auto 模型', href: '/panel/auto-model', icon: Sparkles },
     ],
   },
   {

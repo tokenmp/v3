@@ -87,6 +87,8 @@ func NewServer(deps Deps, readHeaderTimeout, idleTimeout time.Duration) *http.Se
 		r.Get("/api/v1/user/plans", panelHandlers.ListUserPlans)
 		r.Get("/api/v1/user/settings", panelHandlers.GetUserSettings)
 		r.Patch("/api/v1/user/settings", panelHandlers.UpdateUserSettings)
+		r.Get("/api/v1/user/auto-models", panelHandlers.GetAutoModels)
+		r.Patch("/api/v1/user/auto-models", panelHandlers.UpdateAutoModels)
 		r.Get("/api/v1/request-logs", panelHandlers.ListRequestLogs)
 		r.Get("/api/v1/request-logs/stats", panelHandlers.GetRequestLogStats)
 		r.Get("/api/v1/request-logs/{requestId}", panelHandlers.GetRequestLog)

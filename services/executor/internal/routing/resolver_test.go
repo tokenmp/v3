@@ -158,6 +158,8 @@ func TestResolveSelectorsOrderAndSafeCandidates(t *testing.T) {
 	}{
 		{"exact model keeps compiled route order", Selector{Model: "a"}, []string{"primary/p-1", "primary/p-2", "fallback/f-1", "other-provider/q-1", "other-group/other-1"}},
 		{"auto uses configured model rank", Selector{Model: "auto", Auto: true}, []string{"model-b/b-1", "primary/p-1", "primary/p-2", "fallback/f-1", "other-provider/q-1", "other-group/other-1"}},
+		{"auto per-request override reorders pool", Selector{Model: "auto", Auto: true, AutoModelIDs: []string{"a", "b"}}, []string{"primary/p-1", "primary/p-2", "fallback/f-1", "other-provider/q-1", "other-group/other-1", "model-b/b-1"}},
+		{"auto per-request override narrows pool", Selector{Model: "auto", Auto: true, AutoModelIDs: []string{"b"}}, []string{"model-b/b-1"}},
 		{"effective provider selector", Selector{Model: "a", Provider: "openai"}, []string{"primary/p-1", "primary/p-2", "fallback/f-1", "other-group/other-1"}},
 		{"exact group", Selector{Model: "a", Group: "g"}, []string{"primary/p-1", "primary/p-2", "fallback/f-1", "other-provider/q-1"}},
 	}

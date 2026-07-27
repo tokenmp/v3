@@ -28,12 +28,20 @@ var ErrInvalidSelector = errors.New("invalid selector")
 // example a transport-facing facade) rather than parsed from the selector
 // string: when non-empty, Resolve admits only routes whose compiled Protocol
 // matches. It is intentionally not part of the canonical grammar.
+//
+// AutoModelIDs is an optional, programmatic per-request override of the auto
+// model pool order, set by a trusted caller (the edge BFF injects it from
+// per-user config). When non-empty and Auto is true, Resolve ranks auto
+// candidates by this order instead of the compiled global AutoModelIDs;
+// models absent from this list are excluded from the auto candidate set.
+// It is intentionally not part of the canonical grammar.
 type Selector struct {
-	Model    string
-	Group    string
-	Provider string
-	Protocol adapter.Protocol
-	Auto     bool
+	Model        string
+	Group        string
+	Provider     string
+	Protocol     adapter.Protocol
+	Auto         bool
+	AutoModelIDs []string
 }
 
 // ParseSelector parses model[:group][@provider]. A selector may contain at

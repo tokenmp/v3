@@ -17,6 +17,7 @@ const (
 type Settings struct {
 	PreferredBilling string
 	FallbackEnabled  bool
+	AutoModelIDs     []string // ordered auto model pool override; nil/empty = use platform default
 }
 
 // Store 是并发安全的内存用户设置存储。
@@ -40,10 +41,23 @@ func (s *Store) Get(userID string) Settings {
 	return Settings{PreferredBilling: DefaultPreferredBilling, FallbackEnabled: DefaultFallbackEnabled}
 }
 
+// AutoModelIDs returns the user's configured auto model pool override, or
+// nil when unset (meaning the executor's global pool applies). It never
+// returns the store's internal slice.
+func (s *Store) AutoModelIDs(userID string) []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if v, ok := s.m[userID]; ok && len(v.AutoModelIDs) > 0 {
+		return append([]string(nil), v.AutoModelIDs...)
+	}
+	return nil
+}
+
 // Snapshot 用显式可选字段更新设置，支持把 FallbackEnabled 显式设为 false
 // （bool 无法区分「未设置」与「设为 false」，故用指针表达可选意图）。
 // preferredBilling 为 nil 或空串时不更新；fallbackEnabled 为 nil 时不更新。
-func (s *Store) Snapshot(userID string, preferredBilling *string, fallbackEnabled *bool) Settings {
+// autoModelIDs 为 nil 时不更新；为非 nil 的空切片时清空（恢复平台默认）。
+func (s *Store) Snapshot(userID string, preferredBilling *string, fallbackEnabled *bool, autoModelIDs []string) Settings {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	cur, ok := s.m[userID]
@@ -55,6 +69,9 @@ func (s *Store) Snapshot(userID string, preferredBilling *string, fallbackEnable
 	}
 	if fallbackEnabled != nil {
 		cur.FallbackEnabled = *fallbackEnabled
+	}
+	if autoModelIDs != nil {
+		cur.AutoModelIDs = append([]string(nil), autoModelIDs...)
 	}
 	s.m[userID] = cur
 	return cur

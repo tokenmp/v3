@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"context"
 	"strings"
 	"testing"
 )
@@ -226,6 +227,34 @@ func TestCaptureRawBodyOversizedEmitsProtocolNative400UnderRealServer(t *testing
 						t.Fatal("downstream handler must be called for in-limit body")
 					}
 				})
+			}
+		})
+	}
+}
+
+func TestAutoModelIDsFromContextParsesHeader(t *testing.T) {
+	cases := []struct {
+		name string
+		hdr  string
+		want []string
+	}{
+		{"empty", "", nil},
+		{"single", "glm-5.1", []string{"glm-5.1"}},
+		{"comma separated trims", " glm-5.1 , glm-5.2 , ", []string{"glm-5.1", "glm-5.2"}},
+		{"drops blanks", ", ,glm-5.1,", []string{"glm-5.1"}},
+		{"drops oversize", "glm-5.1," + strings.Repeat("x", 129), []string{"glm-5.1"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := withAutoModelIDs(context.Background(), tc.hdr)
+			got := AutoModelIDsFromContext(ctx)
+			if len(got) != len(tc.want) {
+				t.Fatalf("got %v, want %v", got, tc.want)
+			}
+			for i := range got {
+				if got[i] != tc.want[i] {
+					t.Errorf("[%d] got %q want %q", i, got[i], tc.want[i])
+				}
 			}
 		})
 	}

@@ -22,12 +22,14 @@ import (
 	"strings"
 
 	"github.com/tokenmp/v3/services/api/internal/identity"
+	"github.com/tokenmp/v3/services/api/internal/settings"
 )
 
 // Proxy is a reverse proxy to the Executor service.
 type Proxy struct {
 	rp           *httputil.ReverseProxy
-	serviceToken string // when non-empty, overrides client Authorization
+	serviceToken string          // when non-empty, overrides client Authorization
+	settings     *settings.Store // when non-nil, injects per-user auto model pool
 }
 
 // New creates a Proxy forwarding to the given executor base URL. When
@@ -35,6 +37,14 @@ type Proxy struct {
 // header on every forwarded request (identityenv mode). When empty, the
 // client's Authorization header is forwarded as-is (JWT passthrough mode).
 func New(executorURL, serviceToken string, logger *slog.Logger) (*Proxy, error) {
+	return NewWithSettings(executorURL, serviceToken, nil, logger)
+}
+
+// NewWithSettings is like New but also injects the caller's per-user auto
+// model pool (from the settings store) as the X-Auto-Model-IDs header on
+// forwarded /v1/* requests. A nil store disables the injection (auto falls
+// back to the executor's global pool).
+func NewWithSettings(executorURL, serviceToken string, st *settings.Store, logger *slog.Logger) (*Proxy, error) {
 	target, err := url.Parse(strings.TrimSuffix(executorURL, "/"))
 	if err != nil {
 		return nil, err
@@ -61,6 +71,16 @@ func New(executorURL, serviceToken string, logger *slog.Logger) (*Proxy, error) 
 			req.Header.Del("X-User-ID")
 			if claims, ok := identity.FromContext(req.Context()); ok && claims.Subject != "" {
 				req.Header.Set("X-User-ID", claims.Subject)
+				// Inject the per-user auto model pool override when configured.
+				// The executor honors it only for model=auto requests and ignores
+				// the header otherwise. Strip any client-supplied value first to
+				// prevent spoofing in JWT-passthrough mode.
+				req.Header.Del("X-Auto-Model-IDs")
+				if st != nil {
+					if pool := st.AutoModelIDs(claims.Subject); len(pool) > 0 {
+						req.Header.Set("X-Auto-Model-IDs", strings.Join(pool, ","))
+					}
+				}
 			}
 
 			// Remove hop-by-hop headers.
@@ -76,7 +96,7 @@ func New(executorURL, serviceToken string, logger *slog.Logger) (*Proxy, error) 
 			_, _ = w.Write([]byte(`{"error":{"code":"upstream_unavailable","message":"Executor service is unavailable"}}`))
 		},
 	}
-	return &Proxy{rp: rp, serviceToken: serviceToken}, nil
+	return &Proxy{rp: rp, serviceToken: serviceToken, settings: st}, nil
 }
 
 // ServeHTTP forwards the request to the executor.

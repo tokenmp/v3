@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"strings"
 )
 
 const (
@@ -49,7 +50,13 @@ func CaptureRawBody(next http.Handler) http.Handler {
 		// bytes. Keep the capture-owned context slice isolated from r.Body so the
 		// normalizer always sees exact client bytes.
 		r.Body = io.NopCloser(bytes.NewReader(append([]byte(nil), body...)))
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), rawBodyContextKey{}, body)))
+		ctx := context.WithValue(r.Context(), rawBodyContextKey{}, body)
+		// Capture the trusted per-request auto model pool override injected by
+		// the edge BFF (X-Auto-Model-IDs). Bound the count and segment length so
+		// a malformed/trusted header cannot exhaust memory; the resolver dedupes
+		// and validates entries against compiled models.
+		ctx = withAutoModelIDs(ctx, r.Header.Get("X-Auto-Model-IDs"))
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
@@ -73,6 +80,52 @@ func RawBody(ctx context.Context) ([]byte, bool) {
 func rawBodyView(ctx context.Context) ([]byte, bool) {
 	body, ok := ctx.Value(rawBodyContextKey{}).([]byte)
 	return body, ok
+}
+
+// autoModelIDsContextKey carries the per-request auto model pool override.
+// It mirrors the raw-body pattern: a trusted header injected by the edge
+// BFF is parsed once here so the normalizer and facade never touch the
+// raw http.Request.
+type autoModelIDsContextKey struct{}
+
+const (
+	maxAutoModelIDs    = 64
+	maxAutoModelIDLen  = 128
+	autoModelIDsHeader = "X-Auto-Model-IDs"
+)
+
+// withAutoModelIDs parses the trusted X-Auto-Model-IDs header (comma-
+// separated model IDs) into a bounded, trimmed slice and stores it in ctx.
+// Empty/absent header yields a nil slice. Malformed entries are dropped; the
+// resolver dedupes and validates the rest against compiled models.
+func withAutoModelIDs(ctx context.Context, header string) context.Context {
+	header = strings.TrimSpace(header)
+	if header == "" {
+		return ctx
+	}
+	parts := strings.Split(header, ",")
+	ids := make([]string, 0, len(parts))
+	for _, p := range parts {
+		id := strings.TrimSpace(p)
+		if id == "" || len(id) > maxAutoModelIDLen || len(ids) >= maxAutoModelIDs {
+			continue
+		}
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, autoModelIDsContextKey{}, ids)
+}
+
+// AutoModelIDsFromContext returns the per-request auto model pool override, or
+// nil when none was injected. The slice is the capture-owned copy; callers must
+// not mutate it.
+func AutoModelIDsFromContext(ctx context.Context) []string {
+	if ids, ok := ctx.Value(autoModelIDsContextKey{}).([]string); ok {
+		return ids
+	}
+	return nil
 }
 
 func writeBodyCaptureError(w http.ResponseWriter, path string) {
