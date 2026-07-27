@@ -914,6 +914,16 @@ export const adminConfigApi = {
       baseUrl: ADMIN_BASE,
     });
   },
+  // Set the global auto_model_ids list (ordered list of model IDs eligible
+  // for the reserved "auto" selector). Pass null/empty to reset to the
+  // default all-active-models-sorted fallback.
+  setAutoModelIds: async (ids: string[] | null): Promise<void> => {
+    await request<{ key: string }>(`/api/v1/admin/global/auto_model_ids`, {
+      method: 'PUT',
+      body: ids ?? [],
+      baseUrl: ADMIN_BASE,
+    });
+  },
   compile: async (): Promise<{ revision: string }> => {
     const res = await request<{ revision: string; published: boolean }>(
       '/api/v1/admin/compile',
