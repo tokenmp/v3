@@ -245,6 +245,7 @@ export interface AdminRouteConfig {
   quarantined: boolean;
   contextWindow: number | null;
   maxOutputTokens: number | null;
+  retryPolicy?: RetryPolicy | null;
 }
 
 // ---- Upstream credentials (上游账号) ----
@@ -278,4 +279,47 @@ export interface AdminUpstreamEndpoint {
   status: 'active' | 'disabled' | 'deleted';
   createdAt: string;
   updatedAt: string;
+}
+
+// ---- Retry policy (全局 + 路由级) ----
+
+/** 重试动作：匹配上游错误后如何选择下一个候选 */
+export type RetryAction =
+  | 'none'
+  | 'same_credential' // 同目标重试（适用 503 瞬时过载）
+  | 'next_credential' // 换同路由下另一个密钥（适用 429 限流）
+  | 'next_route' // 换同模型另一路由（适用 5xx 上游故障）
+  | 'next_provider' // 换 provider
+  | 'next_model'; // 换模型
+
+export interface RetryRule {
+  id: string;
+  priority: number;
+  httpStatuses: number[];
+  errorCodes?: string[];
+  errorTypes?: string[];
+  action: RetryAction;
+}
+
+export interface RetryPolicy {
+  maxTotalAttempts?: number | null;
+  maxSameTargetAttempts?: number | null;
+  maxTotalDuration?: string; // e.g. "45s"
+  backoff?: string; // e.g. "500ms"
+  rules?: RetryRule[];
+}
+
+export interface TimeoutPolicy {
+  requestTimeout?: string;
+  ttftTimeout?: string;
+  streamIdleTimeout?: string;
+  streamMaxLifetime?: string;
+  retryBackoff?: string;
+}
+
+/** 全局策略：GET /v1/config/admin/global 返回 */
+export interface AdminGlobalPolicy {
+  default_retry?: RetryPolicy | null;
+  default_timeout?: TimeoutPolicy | null;
+  auto_model_ids?: string[] | null;
 }

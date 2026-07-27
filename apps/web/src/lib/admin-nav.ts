@@ -14,6 +14,7 @@ import {
   Route as RouteIcon,
   KeyRound,
   Settings,
+  RefreshCw,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -64,6 +65,7 @@ export const adminNavGroups: AdminNavGroup[] = [
       { label: '上游账号', href: '/admin/credentials', icon: KeyRound },
       { label: '模型配置', href: '/admin/models', icon: Box },
       { label: '路由配置', href: '/admin/routes', icon: RouteIcon },
+      { label: '重试策略', href: '/admin/retry', icon: RefreshCw },
     ],
   },
   {

@@ -177,4 +177,10 @@ type AdminReader interface {
 	ListAllActiveRoutes(ctx context.Context) ([]RouteMapping, error)
 	// ListAllActiveAdapters returns all active (non-deleted) adapters without pagination.
 	ListAllActiveAdapters(ctx context.Context) ([]Adapter, error)
+
+	// GetGlobalPolicy reads all three global_config KV rows (default_retry,
+	// default_timeout, auto_model_ids). Missing rows yield nil bytes.
+	GetGlobalPolicy(ctx context.Context) (GlobalPolicy, error)
+	// GetGlobalConfigEntry returns a single global_config row by key.
+	GetGlobalConfigEntry(ctx context.Context, key string) (GlobalConfig, error)
 }

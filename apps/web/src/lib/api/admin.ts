@@ -26,6 +26,10 @@ import type {
   AdminRouteConfig,
   AdminUpstreamCredential,
   AdminUpstreamEndpoint,
+  AdminGlobalPolicy,
+  RetryPolicy,
+  RetryAction,
+  RetryRule,
 } from '@/types/admin';
 import { request, API_BASE, NOTICE_BASE } from './core';
 
@@ -552,6 +556,37 @@ function mapRouteConfig(r: Record<string, unknown>): AdminRouteConfig {
     quarantined: Boolean(r.quarantined ?? false),
     contextWindow: r.context_window != null ? Number(r.context_window) : (r.contextWindow != null ? Number(r.contextWindow) : null),
     maxOutputTokens: r.max_output_tokens != null ? Number(r.max_output_tokens) : (r.maxOutputTokens != null ? Number(r.maxOutputTokens) : null),
+    retryPolicy: mapRetryPolicy(r.retry_policy ?? r.retryPolicy),
+  };
+}
+
+function mapRetryPolicy(v: unknown): RetryPolicy | null {
+  if (!v || typeof v !== 'object') return null;
+  const r = v as Record<string, unknown>;
+  const rules = Array.isArray(r.rules)
+    ? r.rules
+        .map((rr: Record<string, unknown>) => ({
+          id: String(rr.id ?? ''),
+          priority: Number(rr.priority ?? 0),
+          httpStatuses: Array.isArray(rr.http_statuses) || Array.isArray(rr.httpStatuses)
+            ? ((rr.http_statuses ?? rr.httpStatuses) as number[]).map(Number)
+            : [],
+          errorCodes: Array.isArray(rr.error_codes) || Array.isArray(rr.errorCodes)
+            ? ((rr.error_codes ?? rr.errorCodes) as string[]).map(String)
+            : undefined,
+          errorTypes: Array.isArray(rr.error_types) || Array.isArray(rr.errorTypes)
+            ? ((rr.error_types ?? rr.errorTypes) as string[]).map(String)
+            : undefined,
+          action: String(rr.action ?? 'none') as RetryAction,
+        }))
+        .filter((rr: RetryRule) => rr.id !== '')
+    : undefined;
+  return {
+    maxTotalAttempts: r.max_total_attempts != null ? Number(r.max_total_attempts) : (r.maxTotalAttempts != null ? Number(r.maxTotalAttempts) : null) ?? null,
+    maxSameTargetAttempts: r.max_same_target_attempts != null ? Number(r.max_same_target_attempts) : (r.maxSameTargetAttempts != null ? Number(r.maxSameTargetAttempts) : null) ?? null,
+    maxTotalDuration: typeof r.max_total_duration === 'string' ? r.max_total_duration : (typeof r.maxTotalDuration === 'string' ? r.maxTotalDuration : undefined),
+    backoff: typeof r.backoff === 'string' ? r.backoff : undefined,
+    rules,
   };
 }
 
@@ -713,6 +748,7 @@ export const adminConfigApi = {
     if (input.enabled !== undefined) fields.enabled = input.enabled;
     if (input.contextWindow !== undefined) fields.context_window = input.contextWindow;
     if (input.maxOutputTokens !== undefined) fields.max_output_tokens = input.maxOutputTokens;
+    if (input.retryPolicy !== undefined) fields.retry_policy = input.retryPolicy;
     await request<{ id: string }>(`/api/v1/admin/routes/${id}`, {
       method: 'PATCH',
       body: fields,
@@ -836,6 +872,32 @@ export const adminConfigApi = {
       method: 'DELETE',
       baseUrl: ADMIN_BASE,
     });
+  },
+
+  // ---- Global policy (retry/timeout/auto_model_ids) ----
+  getGlobalPolicy: async (): Promise<AdminGlobalPolicy> => {
+    return request<AdminGlobalPolicy>('/api/v1/admin/global', { baseUrl: ADMIN_BASE });
+  },
+  setGlobalRetry: async (policy: RetryPolicy): Promise<void> => {
+    await request<{ key: string }>(`/api/v1/admin/global/default_retry`, {
+      method: 'PUT',
+      body: policy,
+      baseUrl: ADMIN_BASE,
+    });
+  },
+  setGlobalTimeout: async (policy: NonNullable<AdminGlobalPolicy['default_timeout']>): Promise<void> => {
+    await request<{ key: string }>(`/api/v1/admin/global/default_timeout`, {
+      method: 'PUT',
+      body: policy,
+      baseUrl: ADMIN_BASE,
+    });
+  },
+  compile: async (): Promise<{ revision: string }> => {
+    const res = await request<{ revision: string; published: boolean }>(
+      '/api/v1/admin/compile',
+      { method: 'POST', baseUrl: ADMIN_BASE },
+    );
+    return { revision: res.revision };
   },
 };
 
