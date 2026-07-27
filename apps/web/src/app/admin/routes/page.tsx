@@ -17,6 +17,7 @@ import {
   TextField,
   inputCls,
 } from '@/components/ui/field';
+import { CompileButton } from '@/components/compile-button';
 import {
   Table,
   TableBody,
@@ -124,7 +125,7 @@ export default function AdminRoutesPage() {
         maxOutputTokens: input.maxOutputTokens,
       }),
     onSuccess: () => {
-      toast.success('路由已创建');
+      toast.success('路由已创建（需点编译并发布生效）');
       queryClient.invalidateQueries({ queryKey: ['admin', 'route-configs'] });
       setCreating(false);
     },
@@ -146,7 +147,7 @@ export default function AdminRoutesPage() {
         maxOutputTokens: input.maxOutputTokens,
       }),
     onSuccess: () => {
-      toast.success('路由已保存');
+      toast.success('路由已保存（需点编译并发布生效）');
       queryClient.invalidateQueries({ queryKey: ['admin', 'route-configs'] });
       setEditing(null);
     },
@@ -158,7 +159,7 @@ export default function AdminRoutesPage() {
   const deleteMut = useMutation({
     mutationFn: (id: string) => adminConfigApi.deleteRoute(id),
     onSuccess: () => {
-      toast.success('路由已删除');
+      toast.success('路由已删除（需点编译并发布生效）');
       queryClient.invalidateQueries({ queryKey: ['admin', 'route-configs'] });
     },
     onError: (e: unknown) => {
@@ -188,7 +189,12 @@ export default function AdminRoutesPage() {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-lg font-semibold">路由管理</h1>
+      <div className="flex items-center gap-2">
+        <h1 className="text-lg font-semibold">路由管理</h1>
+        <div className="ml-auto">
+          <CompileButton size="sm" />
+        </div>
+      </div>
 
       {/* 工具栏：搜索 + 状态筛选 + 新建 */}
       <div className="flex flex-wrap items-center gap-2">

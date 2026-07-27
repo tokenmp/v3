@@ -15,6 +15,7 @@ import {
   SwitchField,
   TextField,
 } from '@/components/ui/field';
+import { CompileButton } from '@/components/compile-button';
 import {
   Table,
   TableBody,
@@ -112,6 +113,9 @@ export default function AdminModelsPage() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
         <h1 className="text-lg font-semibold">模型管理</h1>
+        <div className="ml-auto">
+          <CompileButton size="sm" />
+        </div>
       </div>
 
       {/* Toolbar */}
@@ -331,7 +335,7 @@ function ModelFormModal({
       maxOutputTokens?: number | null;
     }) => adminConfigApi.createModel(input),
     onSuccess: () => {
-      toast.success('模型已创建');
+      toast.success('模型已创建（需点“编译并发布”生效）');
       onSaved();
     },
     onError: (e: unknown) => {
@@ -343,7 +347,7 @@ function ModelFormModal({
     mutationFn: (input: Partial<AdminModelConfig>) =>
       adminConfigApi.updateModel(item!.id, input),
     onSuccess: () => {
-      toast.success('已保存');
+      toast.success('已保存（需点“编译并发布”生效）');
       onSaved();
     },
     onError: (e: unknown) => {
