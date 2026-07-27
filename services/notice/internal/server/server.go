@@ -236,9 +236,17 @@ func writeError(w http.ResponseWriter, status int, code, message string) {
 	httpresp.ErrorWithStatus(w, status, c, message)
 }
 
+// parsePaging extracts the limit/offset query params, applying sensible
+// defaults when omitted. A missing limit defaults to defaultPageSize (20)
+// rather than 0 — the repository clamps 0 down to 1, which would silently
+// return only a single row for callers that omit paging (e.g. the admin
+// list endpoints invoked without query params).
 func parsePaging(r *http.Request) (int, int) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	if limit < 1 {
+		limit = defaultPageSize
+	}
 	return limit, offset
 }
 

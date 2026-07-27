@@ -12,6 +12,11 @@ import (
 
 const maxAdminBodyBytes = 2 << 20 // 2 MiB
 
+// defaultPageSize is the page size used by parsePaging when the client omits
+// the limit query param. It matches the repository's max clamp so a default
+// list returns a full page rather than a single row.
+const defaultPageSize = 20
+
 // ---- Admin output DTOs ----
 // These DTOs expose fields that models hide with json:"-" for public endpoints.
 
