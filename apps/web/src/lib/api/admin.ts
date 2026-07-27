@@ -261,14 +261,14 @@ export const adminApi = {
   announcements: {
     list: async (): Promise<AdminAnnouncement[]> => {
       const res = await request<{ items: AdminAnnouncement[] } | AdminAnnouncement[]>(
-        '/api/v1/admin/announcements',
+        '/api/v1/notice/admin/announcements',
         { baseUrl: NOTICE_BASE },
       );
       const items = Array.isArray(res) ? res : (res.items ?? []);
       return items.map((a) => mapAnnouncement(a as unknown as Record<string, unknown>));
     },
     create: async (input: AdminAnnouncementInput): Promise<AdminAnnouncement> => {
-      const res = await request<AdminAnnouncement>('/api/v1/admin/announcements', {
+      const res = await request<AdminAnnouncement>('/api/v1/notice/admin/announcements', {
         method: 'POST',
         body: input,
         baseUrl: NOTICE_BASE,
@@ -276,7 +276,7 @@ export const adminApi = {
       return res;
     },
     update: async (id: string, input: AdminAnnouncementInput): Promise<AdminAnnouncement> => {
-      await request<{ id: string }>('/api/v1/admin/announcements/' + id, {
+      await request<{ id: string }>('/api/v1/notice/admin/announcements/' + id, {
         method: 'PATCH',
         body: input,
         baseUrl: NOTICE_BASE,
@@ -285,13 +285,13 @@ export const adminApi = {
       return { ...input, id, publishedAt: input.publishedAt, createdAt: '', updatedAt: '' } as AdminAnnouncement;
     },
     delete: async (id: string): Promise<void> => {
-      await request<void>('/api/v1/admin/announcements/' + id, {
+      await request<void>('/api/v1/notice/admin/announcements/' + id, {
         method: 'DELETE',
         baseUrl: NOTICE_BASE,
       });
     },
     publish: async (id: string): Promise<AdminAnnouncement> => {
-      await request<void>('/api/v1/admin/announcements/' + id + '/publish', {
+      await request<void>('/api/v1/notice/admin/announcements/' + id + '/publish', {
         method: 'POST',
         baseUrl: NOTICE_BASE,
       });
@@ -303,14 +303,14 @@ export const adminApi = {
   changelogs: {
     list: async (): Promise<AdminChangelog[]> => {
       const res = await request<{ items: AdminChangelog[] } | AdminChangelog[]>(
-        '/api/v1/admin/changelogs',
+        '/api/v1/notice/admin/changelogs',
         { baseUrl: NOTICE_BASE },
       );
       const items = Array.isArray(res) ? res : (res.items ?? []);
       return items.map((c) => mapChangelog(c as unknown as Record<string, unknown>));
     },
     create: async (input: AdminChangelogInput): Promise<AdminChangelog> => {
-      const res = await request<AdminChangelog>('/api/v1/admin/changelogs', {
+      const res = await request<AdminChangelog>('/api/v1/notice/admin/changelogs', {
         method: 'POST',
         body: input,
         baseUrl: NOTICE_BASE,
@@ -318,7 +318,7 @@ export const adminApi = {
       return res;
     },
     update: async (id: string, input: AdminChangelogInput): Promise<AdminChangelog> => {
-      await request<{ id: string }>('/api/v1/admin/changelogs/' + id, {
+      await request<{ id: string }>('/api/v1/notice/admin/changelogs/' + id, {
         method: 'PATCH',
         body: input,
         baseUrl: NOTICE_BASE,
@@ -326,13 +326,13 @@ export const adminApi = {
       return { ...input, id, publishedAt: input.publishedAt, createdAt: '', updatedAt: '' } as AdminChangelog;
     },
     delete: async (id: string): Promise<void> => {
-      await request<void>('/api/v1/admin/changelogs/' + id, {
+      await request<void>('/api/v1/notice/admin/changelogs/' + id, {
         method: 'DELETE',
         baseUrl: NOTICE_BASE,
       });
     },
     publish: async (id: string): Promise<AdminChangelog> => {
-      await request<void>('/api/v1/admin/changelogs/' + id + '/publish', {
+      await request<void>('/api/v1/notice/admin/changelogs/' + id + '/publish', {
         method: 'POST',
         baseUrl: NOTICE_BASE,
       });
@@ -344,7 +344,7 @@ export const adminApi = {
   notifications: {
     list: async (): Promise<AdminNotification[]> => {
       const res = await request<{ items: AdminNotification[] } | AdminNotification[]>(
-        '/api/v1/admin/notifications',
+        '/api/v1/notice/admin/notifications',
         { baseUrl: NOTICE_BASE },
       );
       const items = Array.isArray(res) ? res : (res.items ?? []);
@@ -352,7 +352,7 @@ export const adminApi = {
     },
     send: async (input: AdminNotificationInput): Promise<AdminNotification> => {
       const res = await request<{ id: string; accepted: boolean; queuedAt: string }>(
-        '/api/v1/admin/notifications/send',
+        '/api/v1/notice/admin/notifications/send',
         { method: 'POST', body: input, baseUrl: NOTICE_BASE },
       );
       return {
@@ -367,7 +367,7 @@ export const adminApi = {
       };
     },
     delete: async (id: string): Promise<void> => {
-      await request<void>('/api/v1/admin/notifications/' + id, {
+      await request<void>('/api/v1/notice/admin/notifications/' + id, {
         method: 'DELETE',
         baseUrl: NOTICE_BASE,
       });
