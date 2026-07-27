@@ -5,7 +5,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -547,7 +546,7 @@ func TestIngestBatch_ConcurrentSameRequestIDNoDup(t *testing.T) {
 	reqID := "req-concurrent-dedup-1"
 	now := time.Now().UTC().Truncate(time.Microsecond)
 
-	mkBatch := func(stage string, completed bool) Batch {
+	mkBatch := func(completed bool) Batch {
 		b := Batch{
 			Log: RequestLog{
 				RequestID:   reqID,
@@ -561,7 +560,7 @@ func TestIngestBatch_ConcurrentSameRequestIDNoDup(t *testing.T) {
 			Events: []Event{{
 				RequestID: reqID,
 				Source:    "executor",
-				Stage:     stage,
+				Stage:     "completed",
 				Status:    "success",
 				CreatedAt: now,
 			}},
@@ -580,7 +579,7 @@ func TestIngestBatch_ConcurrentSameRequestIDNoDup(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			if err := repo.IngestBatch(ctx, mkBatch("event-"+strconv.Itoa(i), i == 0)); err != nil {
+			if err := repo.IngestBatch(ctx, mkBatch(i == 0)); err != nil {
 				errs <- err
 			}
 		}(i)

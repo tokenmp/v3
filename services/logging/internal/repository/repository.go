@@ -283,8 +283,10 @@ func (r *GormRepository) upsertRequestLog(ctx TxContext, log RequestLog) (int64,
 	// Hold a transaction-scoped advisory lock keyed by request_id so concurrent
 	// ingests of the same request serialize. hashtext is int4; cast to int8 for
 	// the single-key advisory lock variant. Hash collisions only cause two
-	// different requests to serialize, which is safe.
-	if err := ctx.Raw("SELECT pg_advisory_xact_lock(hashtext($1)::bigint)", log.RequestID).Error; err != nil {
+	// different requests to serialize, which is safe. Raw() only builds the
+	// query; Scan() actually executes it.
+	var lockToken string
+	if err := ctx.Raw("SELECT pg_advisory_xact_lock(hashtext($1)::bigint)::text", log.RequestID).Scan(&lockToken).Error; err != nil {
 		return 0, ErrInsertFailed
 	}
 	var id int64
