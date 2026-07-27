@@ -1508,3 +1508,84 @@ func containsStr(s, sub string) bool {
 	}
 	return false
 }
+
+// TestCompileSnapshot_AutoModelIDsHonored verifies that when the global
+// auto_model_ids config is a non-empty list of existing active model IDs,
+// the compiled snapshot uses it verbatim (order preserved), rather than the
+// default all-active-models-sorted fallback.
+func TestCompileSnapshot_AutoModelIDsHonored(t *testing.T) {
+	reader, credsByProvider, routeCredsByRoute := sampleData()
+	// Add two more active models so the fallback (sorted) would differ from
+	// the configured order.
+	reader.models = append(reader.models,
+		repository.Model{ID: "glm-5.1", DisplayName: "GLM 5.1", Capabilities: repository.StringArray{"chat"}, Status: "active"},
+		repository.Model{ID: "glm-5.2", DisplayName: "GLM 5.2", Capabilities: repository.StringArray{"chat"}, Status: "active"},
+	)
+	global := repository.GlobalPolicy{
+		AutoModelIDs: json.RawMessage(`["glm-5.2","glm-5.1","chat-default"]`),
+	}
+	data, err := compileSnapshot(
+		reader.models, reader.providers, reader.routes,
+		credsByProvider, routeCredsByRoute, reader.adapters,
+		global,
+	)
+	if err != nil {
+		t.Fatalf("compileSnapshot: %v", err)
+	}
+	var snap struct {
+		Global struct {
+			AutoModelIDs []string `json:"AutoModelIDs"`
+		} `json:"Global"`
+	}
+	if err := json.Unmarshal(data, &snap); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	want := []string{"glm-5.2", "glm-5.1", "chat-default"}
+	if len(snap.Global.AutoModelIDs) != len(want) {
+		t.Fatalf("AutoModelIDs len = %d, want %d (%v)", len(snap.Global.AutoModelIDs), len(want), snap.Global.AutoModelIDs)
+	}
+	for i, id := range want {
+		if snap.Global.AutoModelIDs[i] != id {
+			t.Errorf("AutoModelIDs[%d] = %q, want %q (full=%v)", i, snap.Global.AutoModelIDs[i], id, snap.Global.AutoModelIDs)
+		}
+	}
+}
+
+// TestCompileSnapshot_AutoModelIDsFallback verifies that an empty/invalid
+// auto_model_ids config falls back to all active models sorted by ID.
+func TestCompileSnapshot_AutoModelIDsFallback(t *testing.T) {
+	reader, credsByProvider, routeCredsByRoute := sampleData()
+	reader.models = append(reader.models,
+		repository.Model{ID: "glm-5.1", DisplayName: "GLM 5.1", Capabilities: repository.StringArray{"chat"}, Status: "active"},
+		repository.Model{ID: "glm-5.2", DisplayName: "GLM 5.2", Capabilities: repository.StringArray{"chat"}, Status: "active"},
+	)
+	// References a non-existent model -> must fall back.
+	global := repository.GlobalPolicy{
+		AutoModelIDs: json.RawMessage(`["glm-5.2","unknown-model"]`),
+	}
+	data, err := compileSnapshot(
+		reader.models, reader.providers, reader.routes,
+		credsByProvider, routeCredsByRoute, reader.adapters,
+		global,
+	)
+	if err != nil {
+		t.Fatalf("compileSnapshot: %v", err)
+	}
+	var snap struct {
+		Global struct {
+			AutoModelIDs []string `json:"AutoModelIDs"`
+		} `json:"Global"`
+	}
+	if err := json.Unmarshal(data, &snap); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	want := []string{"chat-default", "glm-5.1", "glm-5.2"}
+	if len(snap.Global.AutoModelIDs) != len(want) {
+		t.Fatalf("AutoModelIDs len = %d, want %d (%v)", len(snap.Global.AutoModelIDs), len(want), snap.Global.AutoModelIDs)
+	}
+	for i, id := range want {
+		if snap.Global.AutoModelIDs[i] != id {
+			t.Errorf("AutoModelIDs[%d] = %q, want %q (full=%v)", i, snap.Global.AutoModelIDs[i], id, snap.Global.AutoModelIDs)
+		}
+	}
+}

@@ -307,6 +307,45 @@ func resolveGlobalTimeout(raw json.RawMessage) wireTimeoutPolicy {
 	return p
 }
 
+// resolveAutoModelIDs honors the admin-configured global auto_model_ids list
+// when it is a non-empty JSON array of strings that all reference existing
+// active models. The configured order is significant: the executor picks the
+// first eligible candidate for the reserved "auto" selector. When the config
+// is absent, empty, references unknown/inactive models, or is malformed, it
+// falls back to all active models sorted by ID for deterministic output.
+func resolveAutoModelIDs(raw json.RawMessage, models []repository.Model) []string {
+	active := make(map[string]bool, len(models))
+	for _, m := range models {
+		if m.Status == "active" {
+			active[m.ID] = true
+		}
+	}
+	if len(raw) > 0 {
+		var ids []string
+		if err := json.Unmarshal(raw, &ids); err == nil {
+			ok := len(ids) > 0
+			for _, id := range ids {
+				if !active[id] {
+					ok = false
+					break
+				}
+			}
+			if ok {
+				return ids
+			}
+		}
+	}
+		// Fall back: all active models sorted by ID.
+	fallback := make([]string, 0, len(models))
+	for _, m := range models {
+		if m.Status == "active" {
+			fallback = append(fallback, m.ID)
+		}
+	}
+	sort.Strings(fallback)
+	return fallback
+}
+
 // validRetryAction reports whether action is a supported retry action.
 func validRetryAction(action string) bool {
 	switch action {
@@ -353,13 +392,12 @@ func compileSnapshot(
 	revision := fmt.Sprintf("compile-%d", now.Unix())
 
 	// ---- AutoModelIDs ----
-	autoModelIDs := make([]string, 0, len(models))
-	for _, m := range models {
-		if m.Status == "active" {
-			autoModelIDs = append(autoModelIDs, m.ID)
-		}
-	}
-	sort.Strings(autoModelIDs)
+	// Honor the admin-configured global auto_model_ids when it is a non-empty
+	// list of model IDs that all exist as active models; the order is
+	// significant (the executor picks the first eligible candidate). When
+	// unset/empty/invalid, fall back to all active models sorted by ID for
+	// deterministic output.
+	autoModelIDs := resolveAutoModelIDs(global.AutoModelIDs, models)
 
 	// ---- Models ----
 	wireModels := make(map[string]wireModel, len(models))

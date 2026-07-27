@@ -5,6 +5,7 @@ import {
   Megaphone,
   Bell,
   GitCommitHorizontal,
+  Boxes,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -25,6 +26,7 @@ export const navGroups: NavGroup[] = [
       { label: '概览', href: '/panel', icon: LayoutDashboard },
       { label: 'API 密钥', href: '/panel/keys', icon: Key },
       { label: '请求日志', href: '/panel/requests', icon: Activity },
+      { label: '模型', href: '/panel/models', icon: Boxes },
     ],
   },
   {
