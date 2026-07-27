@@ -74,18 +74,22 @@ All Go services read their listen address and database DSN from environment vari
 | Logging | `services/logging` | `:8083` (`LOGGING_HTTP_ADDR`) | `tokenmp_logging` (`LOGGING_DATABASE_URL`) | Ingests request logs/attempts/events from Executor; serves admin query/stats/dashboard |
 | Notice | `services/notice` | `:8081` (`NOTICE_HTTP_ADDR`) | `tokenmp_biz` (`NOTICE_DATABASE_URL`) | Project announcements/changelogs/notifications; reuses Auth Ed25519 public key for local JWT verification |
 | Billing | `services/billing` | `:8085` (`BILLING_HTTP_ADDR`) | `tokenmp_billing` (`BILLING_DATABASE_URL`) | Quota/balance; balances are computed values |
-| Web | `apps/web` | `:3100` (`next dev/start -p 3100`) | none | Next.js admin panel + user panel; calls Edge via same-origin relative paths (`/auth-api`, `/biz-api`, `/notice-api`) |
+| Web | `apps/web` | `:3100` (`next dev/start -p 3100`) | none | Next.js admin panel + user panel; all API calls are same-origin (`/v1`, `/api/v1`) |
 
-> **Port collision warning**: the `Executor` default (`127.0.0.1:8081`) and the `Notice` default (`:8081`) both bind 8081. The Edge BFF (`services/api`) expects Executor on 8081, so on hosts that also run Notice you must override `NOTICE_HTTP_ADDR` (dev uses 8086). Similarly, `Config` defaults to 8082 which the dev topology reserves for the public nginx entry, so dev overrides `CONFIG_HTTP_ADDR` to 8084.
+> **Port collision warning**: the `Executor` default (`127.0.0.1:8081`) and the `Notice` default (`:8081`) both bind 8081. The Edge BFF (`services/api`) expects Executor on 8081, so on hosts that also run Notice you must override `NOTICE_HTTP_ADDR` (dev uses 8086). Similarly, `Config` defaults to 8082 which the public openresty also used historically; dev overrides `CONFIG_HTTP_ADDR` to 8084.
 
-### Dev edge routing
+### Edge routing
 
-The dev box exposes a single public nginx on `:8082` that routes by path prefix to the backend services. The web app is served separately. Path prefixes seen by the browser:
+The dev box exposes a single public entry on `:80` via the system openresty (managed by one-panel). All API calls are same-origin from the browser's perspective; clients only see `/v1/*` (executor model requests) and `/api/v1/*` (business). openresty dispatches by path prefix to the backend services:
 
-- `/auth-api/*` → Auth (`:8080`)
-- `/notice-api/*` → Notice (dev `:8086`)
-- `/biz-api/*` → Edge/BFF (`:3002`), which in turn forwards `/v1/*` to Executor, admin calls to Logging/Config, and key management to Auth
-- `/biz-api/healthz` is the single public health endpoint
+- `/v1/*` → Edge/BFF (`:3002`), which applies quota then proxies to the Executor
+- `/api/v1/auth/*` → Auth (`:8080`)
+- `/api/v1/notice/*` → Notice (`:8086`)
+- `/api/v1/*` → Edge/BFF (`:3002`) for business routes (user/keys/admin/request-logs/plans)
+- `/healthz` → Edge/BFF (`:3002`)
+- `/*` → Web (`:3100`, Next.js)
+
+The legacy `:8082` nginx container has been retired; `:80` is the sole public entry.
 
 ## Internal Communication Flows
 
@@ -93,7 +97,7 @@ The dev box exposes a single public nginx on `:8082` that routes by path prefix 
 
 ```text
 browser (Bearer JWT)
-  → nginx /biz-api/v1/chat/completions
+  → openresty :80 /v1/chat/completions
   → services/api (Edge/BFF)
        identity.Middleware      : local Ed25519 JWT verify (iss/aud/exp/sub/role)
        quota.Middleware         : reserve quota against Billing Service
@@ -191,7 +195,7 @@ Read `AGENTS.md`, then read each nested `AGENTS.md` from the repository root to 
 
 ## Implemented modules
 
-- [`apps/web`](apps/web): Next.js web app — admin panel (users/keys/request-logs/retry-policy/billing/usage/notice/settings) and user panel (keys/usage). Calls the Edge/BFF via same-origin relative paths (`/auth-api`, `/biz-api`, `/notice-api`).
+- [`apps/web`](apps/web): Next.js web app — admin panel (users/keys/request-logs/retry-policy/billing/usage/notice/settings) and user panel (keys/usage). All API calls are same-origin (`/v1` for executor model requests, `/api/v1` for business); openresty on `:80` dispatches by prefix to the backend services.
 - [`@tokenmp/ui-tokens`](packages/ui-tokens/README.md): framework-neutral Design Tokens with Tailwind CSS v4 and shadcn integration exports.
 - [`@tokenmp/contracts`](packages/contracts/README.md): language-neutral API contract package and single source of truth. Auth, Executor, and Notice OpenAPI contracts are generated into Go strict servers; Logging and Config are documented design-time contracts. Generated outputs are committed and checked by the existing `go-auth` CI job.
 - [`services/auth`](services/auth/README.md): Auth Service — Go 1.26.5, Chi, GORM, PostgreSQL (`tokenmp_auth`). Registration, login, Ed25519 (EdDSA) access-token issuance, opaque refresh-token rotation with reuse detection, logout, `/me`, Argon2id hashing with bcrypt legacy upgrade.
