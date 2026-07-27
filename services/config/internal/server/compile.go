@@ -335,7 +335,7 @@ func resolveAutoModelIDs(raw json.RawMessage, models []repository.Model) []strin
 			}
 		}
 	}
-		// Fall back: all active models sorted by ID.
+	// Fall back: all active models sorted by ID.
 	fallback := make([]string, 0, len(models))
 	for _, m := range models {
 		if m.Status == "active" {
