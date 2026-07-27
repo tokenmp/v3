@@ -94,29 +94,35 @@ export function NotificationCenter() {
   }, [open]);
 
   // Position the popover: align its right edge to the bell's right edge,
-  // clamped so it never overflows the viewport (mobile-friendly). Recompute
-  // on open and on resize.
+  // clamped so it never overflows the viewport (mobile-friendly). Computed
+  // synchronously on click (after open flips) so the bell is in its final
+  // layout position; a resize listener keeps it aligned while open.
+  const place = () => {
+    const el = triggerRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const wantW = Math.min(384, window.innerWidth - 16);
+    let left = r.right - wantW;
+    if (left < 8) left = 8;
+    setPopStyle({
+      position: 'fixed',
+      top: r.bottom + 6,
+      left,
+      width: wantW,
+      maxWidth: window.innerWidth - 16,
+    });
+  };
+
   useEffect(() => {
     if (!open) return;
-    const place = () => {
-      const el = triggerRef.current;
-      if (!el) return;
-      const r = el.getBoundingClientRect();
-      const wantW = Math.min(384, window.innerWidth - 16);
-      // Right-align to the bell; if that would overflow on the left, pin left.
-      let left = r.right - wantW;
-      if (left < 8) left = 8;
-      setPopStyle({
-        position: 'fixed',
-        top: r.bottom + 6,
-        left,
-        width: wantW,
-        maxWidth: window.innerWidth - 16,
-      });
-    };
-    place();
+    // Re-measure on the next frame after the browser settles any layout
+    // shift triggered by opening (e.g. scrollbar/mobile reflow).
+    const raf = requestAnimationFrame(place);
     window.addEventListener('resize', place);
-    return () => window.removeEventListener('resize', place);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener('resize', place);
+    };
   }, [open]);
 
   return (
@@ -124,7 +130,17 @@ export function NotificationCenter() {
       <button
         ref={triggerRef}
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => {
+          setOpen((v) => {
+            const next = !v;
+            if (next) {
+              // Compute position synchronously on open so the popover lands
+              // correctly before paint.
+              requestAnimationFrame(place);
+            }
+            return next;
+          });
+        }}
         className="focus-inset relative inline-flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
         aria-label="通知与公告"
       >
