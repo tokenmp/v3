@@ -7,6 +7,7 @@ import { Sun, Moon, ChevronDown, KeyRound, Laptop, LogOut, ChevronRight, ShieldC
 import { toast } from 'sonner';
 import { TokenMPLogoMark } from '@/components/tokenmp-logo';
 import { useTheme } from '@/components/theme-provider';
+import { NotificationCenter } from '@/components/notification-center';
 import { useAuthStore } from '@/lib/auth';
 import { authApi } from '@/lib/api/auth';
 import { navGroups } from '@/lib/nav';
@@ -95,6 +96,9 @@ export function Header({ title: _title = 'TokenMP' }: HeaderProps) {
 
       {/* Right */}
       <div className="flex items-center gap-2">
+        {/* Notifications & announcements */}
+        <NotificationCenter />
+
         {/* Theme toggle */}
         <button
           type="button"

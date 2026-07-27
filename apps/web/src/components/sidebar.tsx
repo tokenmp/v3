@@ -4,9 +4,11 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
 import { TokenMPLogoMark } from '@/components/tokenmp-logo';
 import { useSidebarStore } from '@/lib/sidebar-store';
 import { navGroups } from '@/lib/nav';
+import { noticeApi } from '@/lib/api/notice';
 import { cn } from '@/lib/utils';
 
 export function Sidebar() {
@@ -18,6 +20,14 @@ export function Sidebar() {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
   const isCollapsed = mounted && collapsed;
+
+  // Latest changelog version, shown as a small label beside the logo.
+  const { data: changelogs } = useQuery({
+    queryKey: ['notice', 'changelogs', 'version'] as const,
+    queryFn: () => noticeApi.listChangelogs(1, 0),
+    staleTime: 5 * 60_000,
+  });
+  const latestVersion = changelogs?.items?.[0]?.version;
 
   const isActive = (href: string) => {
     if (href === '/panel') return pathname === '/panel';
@@ -41,7 +51,20 @@ export function Sidebar() {
       >
         <Link href="/panel" aria-label="TokenMP" className="flex items-center gap-2.5">
           <TokenMPLogoMark className="h-7 w-7 shrink-0" />
-          {!isCollapsed && <span className="font-semibold text-lg">TokenMP</span>}
+          {!isCollapsed && (
+            <div className="flex flex-col leading-none">
+              <span className="font-semibold text-lg">TokenMP</span>
+              {latestVersion && (
+                <Link
+                  href="/panel/changelogs"
+                  className="text-[10px] font-normal text-muted-foreground hover:text-foreground transition-colors"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {latestVersion}
+                </Link>
+              )}
+            </div>
+          )}
         </Link>
       </div>
 
