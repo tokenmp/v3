@@ -722,35 +722,12 @@ func autoGenerateAdapter(p repository.Provider, credentialsByProvider map[string
 		MaxBudgetToken: 8000,
 	}
 
-	// Retry config: default values.
-	mta := 3
-	msta := 2
-	retry := wireRetryPolicy{
-		MaxTotalAttempts:      &mta,
-		MaxSameTargetAttempts: &msta,
-		MaxTotalDuration:      "45s",
-		Backoff:               "500ms",
-		Rules: []wireRetryRule{
-			{ID: "retry-429", Priority: 10, HTTPStatuses: []int{429}, Action: "next_credential"},
-			{ID: "retry-5xx", Priority: 20, HTTPStatuses: []int{500, 502, 503, 504}, Action: "next_route"},
-		},
-	}
-
-	// Anthropic retry includes 529.
-	if p.SDKKind == "anthropic" {
-		retry.Rules = []wireRetryRule{
-			{ID: "retry-429", Priority: 10, HTTPStatuses: []int{429}, Action: "next_credential"},
-			{ID: "retry-5xx", Priority: 20, HTTPStatuses: []int{500, 502, 503, 529}, Action: "next_route"},
-		}
-	}
-
-	timeout := wireTimeoutPolicy{
-		RequestTimeout:    "120s",
-		TTFTTimeout:       "20s",
-		StreamIdleTimeout: "30s",
-		StreamMaxLifetime: "300s",
-		RetryBackoff:      "500ms",
-	}
+	// Retry/Timeout config: intentionally left empty so the executor compiler
+	// inherits the global policy (global_config default_retry/timeout). A
+	// non-empty rules slice here would override the global policy at the
+	// adapter layer, defeating admin-configured global retry rules.
+	retry := wireRetryPolicy{}
+	timeout := wireTimeoutPolicy{}
 
 	return wireAdapter{
 		ID:         adapterID,
