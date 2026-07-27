@@ -88,4 +88,17 @@ export const userApi = {
       method: 'PATCH', body: input, baseUrl: BIZ_BASE,
     });
   },
+  // Per-user auto model pool override. model_ids is the ordered list of model
+  // IDs to use when calling model=auto; an empty array resets to platform
+  // default. Returns the stored list.
+  getAutoModels: async (): Promise<string[]> => {
+    const res = await request<{ model_ids: string[] }>(`/api/v1/user/auto-models`, { baseUrl: BIZ_BASE });
+    return res.model_ids ?? [];
+  },
+  updateAutoModels: async (modelIds: string[]): Promise<string[]> => {
+    const res = await request<{ model_ids: string[] }>(`/api/v1/user/auto-models`, {
+      method: 'PATCH', body: { model_ids: modelIds }, baseUrl: BIZ_BASE,
+    });
+    return res.model_ids ?? [];
+  },
 };

@@ -2,6 +2,7 @@ package routing
 
 import (
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -63,7 +64,7 @@ func TestParseSelector(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ParseSelector(%q) unexpected error: %v", tt.input, err)
 			}
-			if got != tt.want {
+			if !reflect.DeepEqual(got, tt.want) {
 				t.Fatalf("ParseSelector(%q) = %#v, want %#v", tt.input, got, tt.want)
 			}
 		})
@@ -91,7 +92,7 @@ func TestSelectorCanonicalRoundTrip(t *testing.T) {
 			if err != nil {
 				t.Fatalf("reparse canonical: %v", err)
 			}
-			if reparsed != parsed {
+			if !reflect.DeepEqual(reparsed, parsed) {
 				t.Fatalf("reparsed canonical = %#v, want %#v", reparsed, parsed)
 			}
 		})
@@ -116,7 +117,7 @@ func FuzzParseSelector(f *testing.F) {
 		if err != nil {
 			t.Fatalf("ParseSelector(Canonical()) = %v", err)
 		}
-		if reparsed != selector {
+		if !reflect.DeepEqual(reparsed, selector) {
 			t.Fatalf("ParseSelector(Canonical()) = %#v, want %#v", reparsed, selector)
 		}
 	})

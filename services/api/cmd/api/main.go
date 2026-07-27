@@ -53,7 +53,8 @@ func run() error {
 	}
 	compositeVerifier := identity.NewCompositeVerifier(verifier, apiKeyVerifier)
 
-	prx, err := proxy.New(cfg.ExecutorURL, cfg.ExecutorToken, logger)
+	userSettings := settings.NewStore()
+	prx, err := proxy.NewWithSettings(cfg.ExecutorURL, cfg.ExecutorToken, userSettings, logger)
 	if err != nil {
 		return fmt.Errorf("proxy: %w", err)
 	}
@@ -78,7 +79,7 @@ func run() error {
 		Billing:     billing.NewClient(cfg.BillingURL),
 		AdminAuth:   admin.NewAuthClient(cfg.AuthURL),
 		ConfigCfg:   configClient,
-		Settings:    settings.NewStore(),
+		Settings:    userSettings,
 		KeysHandler: keysHandler,
 		Logger:      logger,
 	}

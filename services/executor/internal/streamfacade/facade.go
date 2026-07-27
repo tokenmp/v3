@@ -242,6 +242,7 @@ func (f *Facade) Execute(ctx context.Context, req stream.Request) (stream.Result
 	// (no conversion needed). Otherwise, resolve without protocol filter to
 	// allow cross-protocol routes.
 	selector.Protocol = req.Protocol
+	selector.AutoModelIDs = req.AutoModelIDs
 
 	plan, err := resolver.Resolve(ctx, selector)
 	if err != nil && !errors.Is(err, routing.ErrNotFound) {
