@@ -76,7 +76,9 @@ export function NotificationCenter() {
     },
   });
 
-  // Close on outside click / Escape.
+  // Close on outside click / Escape, and lock background scroll while open
+  // so the popover (fixed-positioned) never detaches from the bell as the
+  // page scrolls. Restores the previous overflow on close.
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
@@ -87,9 +89,12 @@ export function NotificationCenter() {
     };
     document.addEventListener('mousedown', onDown);
     document.addEventListener('keydown', onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
     return () => {
       document.removeEventListener('mousedown', onDown);
       document.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prevOverflow;
     };
   }, [open]);
 
