@@ -876,12 +876,34 @@ export const adminConfigApi = {
 
   // ---- Global policy (retry/timeout/auto_model_ids) ----
   getGlobalPolicy: async (): Promise<AdminGlobalPolicy> => {
-    return request<AdminGlobalPolicy>('/api/v1/admin/global', { baseUrl: ADMIN_BASE });
+    const res = await request<Record<string, unknown>>('/api/v1/admin/global', { baseUrl: ADMIN_BASE });
+    return {
+      default_retry: mapRetryPolicy(res.default_retry),
+      default_timeout: (res.default_timeout as AdminGlobalPolicy['default_timeout']) ?? null,
+      auto_model_ids: (res.auto_model_ids as string[] | null) ?? null,
+    };
   },
   setGlobalRetry: async (policy: RetryPolicy): Promise<void> => {
+    // Backend wire uses PascalCase keys (wireRetryPolicy). Convert from the
+    // camelCase TS type so compile's json.Unmarshal into wireRetryPolicy works.
+    const wire: Record<string, unknown> = {};
+    if (policy.maxTotalAttempts != null) wire.MaxTotalAttempts = policy.maxTotalAttempts;
+    if (policy.maxSameTargetAttempts != null) wire.MaxSameTargetAttempts = policy.maxSameTargetAttempts;
+    if (policy.maxTotalDuration) wire.MaxTotalDuration = policy.maxTotalDuration;
+    if (policy.backoff) wire.Backoff = policy.backoff;
+    if (policy.rules) {
+      wire.Rules = policy.rules.map((r) => ({
+        ID: r.id,
+        Priority: r.priority,
+        HTTPStatuses: r.httpStatuses,
+        ErrorCodes: r.errorCodes ?? [],
+        ErrorTypes: r.errorTypes ?? [],
+        Action: r.action,
+      }));
+    }
     await request<{ key: string }>(`/api/v1/admin/global/default_retry`, {
       method: 'PUT',
-      body: policy,
+      body: wire,
       baseUrl: ADMIN_BASE,
     });
   },
