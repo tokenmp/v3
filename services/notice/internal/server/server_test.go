@@ -509,8 +509,11 @@ func TestAdminCreateAnnouncement_DraftNoPublishedAt(t *testing.T) {
 	if store.createdAnnouncement == nil {
 		t.Fatal("announcement not created")
 	}
-	if !store.createdAnnouncement.PublishedAt.IsZero() {
-		t.Error("draft should have zero published_at on model")
+	// When the caller omits published_at, the server defaults it to now
+	// (rather than inserting a 0001-01-01 zero value that overrides the DB
+	// DEFAULT and confuses downstream rendering/sorting).
+	if store.createdAnnouncement.PublishedAt.IsZero() {
+		t.Error("published_at should default to now, got zero value")
 	}
 }
 

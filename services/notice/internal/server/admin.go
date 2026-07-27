@@ -135,14 +135,26 @@ func (s *Server) handleAdminCreateAnnouncement(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusBadRequest, "bad_request", "Title is required.")
 		return
 	}
+	// summary has a NOT NULL CHECK (summary <> '') constraint; default to the
+	// title when omitted rather than failing the insert with a 500.
+	summary := body.Summary
+	if summary == "" {
+		summary = body.Title
+	}
 	a := &models.Announcement{
 		Title:    body.Title,
-		Summary:  body.Summary,
+		Summary:  summary,
 		Body:     body.Body,
 		Severity: defaultIfEmpty(body.Severity, "info"),
 	}
+	// GORM only auto-fills CreatedAt/UpdatedAt by convention; PublishedAt is
+	// not auto-filled, so a zero value would be inserted, overriding the DB
+	// DEFAULT now() and producing published_at = 0001-01-01. When the caller
+	// omits it, default to now so the row has a real publish timestamp.
 	if body.PublishedAt != nil {
 		a.PublishedAt = *body.PublishedAt
+	} else {
+		a.PublishedAt = time.Now()
 	}
 	if err := s.store.CreateAnnouncement(r.Context(), a); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Internal error.")
@@ -255,8 +267,12 @@ func (s *Server) handleAdminCreateChangelog(w http.ResponseWriter, r *http.Reque
 		Title:   body.Title,
 		Body:    body.Body,
 	}
+	// See announcements: GORM does not auto-fill PublishedAt, so default to
+	// now to avoid a 0001-01-01 row overriding the DB DEFAULT.
 	if body.PublishedAt != nil {
 		c.PublishedAt = *body.PublishedAt
+	} else {
+		c.PublishedAt = time.Now()
 	}
 	if err := s.store.CreateChangelog(r.Context(), c); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Internal error.")

@@ -13,7 +13,7 @@ import (
 func (r *Repository) ListAllAnnouncements(ctx context.Context, limit, offset int) ([]models.Announcement, int, error) {
 	limit = clampLimit(limit)
 	offset = clampOffset(offset)
-	q := r.db.WithContext(ctx).Order("created_at DESC")
+	q := r.db.WithContext(ctx).Order("created_at DESC, id DESC")
 	var total int64
 	if err := q.Model(&models.Announcement{}).Count(&total).Error; err != nil {
 		return nil, 0, &classifiedError{sentinel: ErrInternal, driver: err}
@@ -76,7 +76,7 @@ func (r *Repository) PublishAnnouncement(ctx context.Context, id string) error {
 func (r *Repository) ListAllChangelogs(ctx context.Context, limit, offset int) ([]models.Changelog, int, error) {
 	limit = clampLimit(limit)
 	offset = clampOffset(offset)
-	q := r.db.WithContext(ctx).Order("created_at DESC")
+	q := r.db.WithContext(ctx).Order("created_at DESC, id DESC")
 	var total int64
 	if err := q.Model(&models.Changelog{}).Count(&total).Error; err != nil {
 		return nil, 0, &classifiedError{sentinel: ErrInternal, driver: err}
@@ -139,7 +139,7 @@ func (r *Repository) PublishChangelog(ctx context.Context, id string) error {
 func (r *Repository) ListAllNotifications(ctx context.Context, limit, offset int) ([]models.Notification, int, error) {
 	limit = clampLimit(limit)
 	offset = clampOffset(offset)
-	q := r.db.WithContext(ctx).Order("created_at DESC")
+	q := r.db.WithContext(ctx).Order("created_at DESC, id DESC")
 	var total int64
 	if err := q.Model(&models.Notification{}).Count(&total).Error; err != nil {
 		return nil, 0, &classifiedError{sentinel: ErrInternal, driver: err}
