@@ -268,9 +268,26 @@ RETURNING id`
 // upsertRequestLog inserts or updates a request-level summary keyed by
 // request_id. See upsertRequestLogSQL for the merge semantics. Returns the
 // assigned/updated bigserial id.
+//
+// Concurrency: request_logs is RANGE-partitioned by created_at, so it
+// cannot carry a UNIQUE(request_id) constraint, and the UPDATE-then-INSERT
+// pattern below is otherwise vulnerable to a TOCTOU race when two batches
+// for the same request_id are ingested concurrently (e.g. reserved +
+// finalized events arriving on separate HTTP connections). We serialize
+// same-request_id ingestion with a transaction-scoped advisory lock so the
+// second transaction's UPDATE observes the first's committed row.
 func (r *GormRepository) upsertRequestLog(ctx TxContext, log RequestLog) (int64, error) {
 	if log.CreatedAt.IsZero() {
 		log.CreatedAt = time.Now().UTC()
+	}
+	// Hold a transaction-scoped advisory lock keyed by request_id so concurrent
+	// ingests of the same request serialize. hashtext is int4; cast to int8 for
+	// the single-key advisory lock variant. Hash collisions only cause two
+	// different requests to serialize, which is safe. Raw() only builds the
+	// query; Scan() actually executes it.
+	var lockToken string
+	if err := ctx.Raw("SELECT pg_advisory_xact_lock(hashtext($1)::bigint)::text", log.RequestID).Scan(&lockToken).Error; err != nil {
+		return 0, ErrInsertFailed
 	}
 	var id int64
 	// First try UPDATE on an existing row for this request_id.
