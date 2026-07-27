@@ -128,7 +128,8 @@ export default function AdminAutoModelPage() {
       {loading ? (
         <div className="rounded-lg border p-8 text-center text-sm text-muted-foreground">加载中…</div>
       ) : (
-        <div className="rounded-lg border">
+        <>
+        <div className="hidden md:block rounded-lg border">
           <Table>
             <TableHeader>
               <TableRow>
@@ -192,6 +193,62 @@ export default function AdminAutoModelPage() {
             </TableBody>
           </Table>
         </div>
+
+        <div className="md:hidden space-y-3">
+          {allModels.length === 0 ? (
+            <p className="py-8 text-center text-sm text-muted-foreground">暂无模型</p>
+          ) : allModels.map((m: AdminModelConfig) => {
+            const inPool = selectedSet.has(m.id);
+            const orderIdx = inPool ? draft.indexOf(m.id) : -1;
+            return (
+              <div key={m.id} className={cn('rounded-lg border bg-card p-3 space-y-2', !inPool && 'opacity-60')}>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium truncate">{m.displayName}</p>
+                    <p className="font-mono text-[10px] text-muted-foreground truncate">{m.id}</p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={inPool}
+                    onChange={() => toggle(m.id)}
+                    className="h-4 w-4 rounded border-input"
+                  />
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  {(m.capabilities ?? []).join(', ') || '—'}
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-muted-foreground tabular-nums">
+                    序 {orderIdx >= 0 ? orderIdx + 1 : '—'}
+                  </span>
+                  {inPool && (
+                    <div className="flex gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 w-7 p-0"
+                        onClick={() => move(m.id, -1)}
+                        disabled={orderIdx === 0}
+                      >
+                        <ArrowUp className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 w-7 p-0"
+                        onClick={() => move(m.id, 1)}
+                        disabled={orderIdx === draft.length - 1}
+                      >
+                        <ArrowDown className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        </>
       )}
     </div>
   );

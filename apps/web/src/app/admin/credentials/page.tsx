@@ -156,7 +156,7 @@ export default function AdminCredentialsPage() {
       </div>
 
       {/* Table */}
-      <div className="rounded-md border border-border bg-card">
+      <div className="hidden md:block rounded-md border border-border bg-card">
         <div className="overflow-x-auto">
           <Table>
             <TableHeader>
@@ -231,6 +231,57 @@ export default function AdminCredentialsPage() {
             </TableBody>
           </Table>
         </div>
+      </div>
+
+      {/* Mobile cards */}
+      <div className="md:hidden space-y-3">
+        {isLoading ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">加载中…</p>
+        ) : filtered.length === 0 ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">暂无上游账号</p>
+        ) : (
+          filtered.map((c) => {
+            const provider = providerMap[c.providerId];
+            const providerLabel = provider ? provider.displayLabel || provider.name : c.providerId;
+            const prefixSuffix = c.keyPrefix || c.keySuffix
+              ? `${c.keyPrefix ?? '-'}…${c.keySuffix ?? '-'}`
+              : '-';
+            return (
+              <div key={c.id} className="rounded-lg border bg-card p-3 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-mono text-xs truncate">{c.id}</span>
+                  <StatusBadge status={c.status} />
+                </div>
+                <p className="text-xs text-muted-foreground">Provider: {providerLabel}</p>
+                <p className="font-mono text-[10px] text-muted-foreground truncate">{prefixSuffix}</p>
+                <div className="flex items-center justify-between text-xs text-muted-foreground">
+                  <span>优先级 {c.priority}</span>
+                  <span>并发 {c.maxConcurrency != null ? c.maxConcurrency : '∞'}</span>
+                </div>
+                <div className="flex justify-end gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setEditItem(c)}
+                    className="rounded-sm p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                    aria-label="编辑"
+                    title="编辑"
+                  >
+                    <Pencil className="size-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDelete(c)}
+                    className="rounded-sm p-1.5 text-muted-foreground hover:bg-red-100 hover:text-red-700"
+                    aria-label="删除"
+                    title="删除"
+                  >
+                    <Trash2 className="size-3.5" />
+                  </button>
+                </div>
+              </div>
+            );
+          })
+        )}
       </div>
 
       {createOpen ? (

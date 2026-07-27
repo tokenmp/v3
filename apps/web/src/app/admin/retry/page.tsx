@@ -370,61 +370,109 @@ function RouteRetryCard() {
         <p className="text-xs text-muted-foreground">
           为单个路由配置覆盖全局的策略。留空表示继承全局策略。
         </p>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>路由 ID</TableHead>
-              <TableHead>模型</TableHead>
-              <TableHead>Provider</TableHead>
-              <TableHead>当前策略</TableHead>
-              <TableHead className="text-right">操作</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {(routes ?? []).map((r) => (
-              <TableRow key={r.id}>
-                <TableCell className="font-mono text-xs">{r.id}</TableCell>
-                <TableCell>{r.modelId}</TableCell>
-                <TableCell>{r.providerId}</TableCell>
-                <TableCell>
-                  {editing === r.id ? (
-                    <span className="text-xs text-amber-600">编辑中…</span>
-                  ) : r.retryPolicy?.rules?.length ? (
-                    <div className="flex flex-wrap gap-1">
-                      {r.retryPolicy.rules.map((rule) => (
-                        <Badge key={rule.id} variant="secondary" className="font-normal">
-                          {rule.httpStatuses.join(',')}/{actionLabel(rule.action)}
-                        </Badge>
-                      ))}
-                    </div>
-                  ) : (
-                    <span className="text-xs text-muted-foreground">继承全局</span>
-                  )}
-                </TableCell>
-                <TableCell className="text-right">
-                  {editing === r.id ? (
-                    <div className="flex justify-end gap-1">
-                      <Button
-                        size="sm"
-                        onClick={() => save.mutate({ id: r.id, policy: draft })}
-                        disabled={save.isPending}
-                      >
-                        保存
-                      </Button>
-                      <Button size="sm" variant="ghost" onClick={() => setEditing(null)}>
-                        取消
-                      </Button>
-                    </div>
-                  ) : (
-                    <Button size="sm" variant="outline" onClick={() => startEdit(r)}>
-                      编辑
-                    </Button>
-                  )}
-                </TableCell>
+        <div className="hidden md:block">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>路由 ID</TableHead>
+                <TableHead>模型</TableHead>
+                <TableHead>Provider</TableHead>
+                <TableHead>当前策略</TableHead>
+                <TableHead className="text-right">操作</TableHead>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+            </TableHeader>
+            <TableBody>
+              {(routes ?? []).map((r) => (
+                <TableRow key={r.id}>
+                  <TableCell className="font-mono text-xs">{r.id}</TableCell>
+                  <TableCell>{r.modelId}</TableCell>
+                  <TableCell>{r.providerId}</TableCell>
+                  <TableCell>
+                    {editing === r.id ? (
+                      <span className="text-xs text-amber-600">编辑中…</span>
+                    ) : r.retryPolicy?.rules?.length ? (
+                      <div className="flex flex-wrap gap-1">
+                        {r.retryPolicy.rules.map((rule) => (
+                          <Badge key={rule.id} variant="secondary" className="font-normal">
+                            {rule.httpStatuses.join(',')}/{actionLabel(rule.action)}
+                          </Badge>
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">继承全局</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {editing === r.id ? (
+                      <div className="flex justify-end gap-1">
+                        <Button
+                          size="sm"
+                          onClick={() => save.mutate({ id: r.id, policy: draft })}
+                          disabled={save.isPending}
+                        >
+                          保存
+                        </Button>
+                        <Button size="sm" variant="ghost" onClick={() => setEditing(null)}>
+                          取消
+                        </Button>
+                      </div>
+                    ) : (
+                      <Button size="sm" variant="outline" onClick={() => startEdit(r)}>
+                        编辑
+                      </Button>
+                    )}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+
+        <div className="md:hidden space-y-3">
+          {(routes ?? []).length === 0 ? (
+            <p className="py-8 text-center text-sm text-muted-foreground">暂无路由</p>
+          ) : (routes ?? []).map((r) => (
+            <div key={r.id} className="rounded-lg border bg-card p-3 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-mono text-xs truncate">{r.id}</span>
+                {editing === r.id ? (
+                  <div className="flex shrink-0 gap-1">
+                    <Button
+                      size="sm"
+                      onClick={() => save.mutate({ id: r.id, policy: draft })}
+                      disabled={save.isPending}
+                    >
+                      保存
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => setEditing(null)}>
+                      取消
+                    </Button>
+                  </div>
+                ) : (
+                  <Button size="sm" variant="outline" onClick={() => startEdit(r)}>
+                    编辑
+                  </Button>
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground">{r.modelId} · {r.providerId}</p>
+              <p className="text-xs">
+                {editing === r.id ? (
+                  <span className="text-amber-600">编辑中…</span>
+                ) : r.retryPolicy?.rules?.length ? (
+                  <span className="flex flex-wrap gap-1">
+                    {r.retryPolicy.rules.map((rule) => (
+                      <Badge key={rule.id} variant="secondary" className="font-normal">
+                        {rule.httpStatuses.join(',')}/{actionLabel(rule.action)}
+                      </Badge>
+                    ))}
+                  </span>
+                ) : (
+                  <span className="text-muted-foreground">继承全局</span>
+                )}
+              </p>
+            </div>
+          ))}
+        </div>
 
         {editing && draft && (
           <div className="rounded-lg border bg-muted/20 p-4">

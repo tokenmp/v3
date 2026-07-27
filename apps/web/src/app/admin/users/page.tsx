@@ -108,7 +108,7 @@ export default function AdminUsersPage() {
       </div>
 
       {/* 表格 */}
-      <div className="rounded-md border border-border bg-card">
+      <div className="hidden md:block rounded-md border border-border bg-card">
         <div className="overflow-x-auto">
           <Table>
             <TableHeader>
@@ -168,6 +168,50 @@ export default function AdminUsersPage() {
             </TableBody>
           </Table>
         </div>
+      </div>
+
+      {/* Mobile card list */}
+      <div className="md:hidden space-y-3">
+        {filtered.map((user) => (
+          <div key={user.id} className="rounded-lg border bg-card p-3 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <Link href={`/admin/users/${user.id}`} className="text-sm font-medium truncate hover:underline">
+                {user.email}
+              </Link>
+              <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${user.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                {user.status === 'active' ? '正常' : '已禁用'}
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${user.role === 'admin' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>
+                {user.role === 'admin' ? '管理员' : '用户'}
+              </span>
+              <span className="text-xs text-muted-foreground">{formatTime(user.createdAt)}</span>
+            </div>
+            <div className="flex gap-2 pt-1">
+              <Button
+                variant="outline"
+                size="sm"
+                className="flex-1"
+                onClick={() => handleToggleStatus(user)}
+              >
+                {user.status === 'active' ? '禁用' : '启用'}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="flex-1"
+                onClick={() => handleToggleRole(user)}
+                disabled={updateMutation.isPending}
+              >
+                {user.role === 'admin' ? '取消管理员' : '设为管理员'}
+              </Button>
+            </div>
+          </div>
+        ))}
+        {filtered.length === 0 && (
+          <p className="py-8 text-center text-sm text-muted-foreground">暂无用户数据</p>
+        )}
       </div>
 
       {/* 分页 */}

@@ -80,7 +80,7 @@ export default function AdminApiKeysPage() {
       </div>
 
       {/* 表格 */}
-      <div className="rounded-md border border-border bg-card">
+      <div className="hidden md:block rounded-md border border-border bg-card">
         <div className="overflow-x-auto">
           <Table>
             <TableHeader>
@@ -131,6 +131,39 @@ export default function AdminApiKeysPage() {
             </TableBody>
           </Table>
         </div>
+      </div>
+
+      {/* Mobile card list */}
+      <div className="md:hidden space-y-3">
+        {filtered.map((k: AdminApiKey) => (
+          <div key={k.id} className="rounded-lg border bg-card p-3 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-sm font-medium truncate">{k.name}</span>
+              <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${k.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-muted text-muted-foreground'}`}>
+                {k.status === 'active' ? '活跃' : '已禁用'}
+              </span>
+            </div>
+            <p className="text-xs text-muted-foreground truncate">{k.userEmail}</p>
+            <p className="font-mono text-xs text-muted-foreground">{k.keyPrefix}…{k.keySuffix}</p>
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span>创建：{formatTime(k.createdAt)}</span>
+            </div>
+            <p className="text-xs text-muted-foreground">最近使用：{formatTime(k.lastUsedAt)}</p>
+            {k.status === 'active' && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full text-destructive hover:text-destructive"
+                onClick={() => setRevokeTarget(k)}
+              >
+                撤销密钥
+              </Button>
+            )}
+          </div>
+        ))}
+        {filtered.length === 0 && (
+          <p className="py-8 text-center text-sm text-muted-foreground">暂无 API 密钥</p>
+        )}
       </div>
 
       {/* 分页 */}

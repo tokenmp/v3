@@ -10,11 +10,7 @@ import {
 } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
-  Table,
-  TableBody,
   TableCell,
-  TableHead,
-  TableHeader,
   TableRow,
 } from '@/components/ui/table';
 import { cn } from '@/lib/utils';
@@ -54,13 +50,39 @@ function ServiceStatusRow({ name, url, port, via }: { name: string; url: string;
   const isUp = data?.ok === true;
 
   return (
-    <TableRow>
-      <TableCell className="font-medium text-sm">{name}</TableCell>
-      <TableCell className="text-xs text-muted-foreground tabular-nums">:{port ?? '—'}{via ? ` (${via})` : ''}</TableCell>
-      <TableCell>
+    <>
+      <TableRow className="hidden md:table-row">
+        <TableCell className="font-medium text-sm">{name}</TableCell>
+        <TableCell className="text-xs text-muted-foreground tabular-nums">:{port ?? '—'}{via ? ` (${via})` : ''}</TableCell>
+        <TableCell>
+          <span
+            className={cn(
+              'inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-medium',
+              isLoading
+                ? 'bg-muted text-muted-foreground'
+                : isUp
+                  ? 'bg-green-100 text-green-700'
+                  : 'bg-red-100 text-red-700',
+            )}
+          >
+            <span
+              className={cn(
+                'size-1.5 rounded-full',
+                isLoading ? 'bg-muted-foreground' : isUp ? 'bg-green-500' : 'bg-red-500',
+              )}
+            />
+            {isLoading ? '检查中…' : isUp ? '运行中' : '不可用'}
+          </span>
+        </TableCell>
+      </TableRow>
+      <div className="md:hidden flex items-center justify-between rounded-lg border bg-card p-3">
+        <div className="min-w-0">
+          <p className="text-sm font-medium truncate">{name}</p>
+          <p className="text-xs text-muted-foreground tabular-nums">:{port ?? '—'}{via ? ` (${via})` : ''}</p>
+        </div>
         <span
           className={cn(
-            'inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-medium',
+            'inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-medium shrink-0',
             isLoading
               ? 'bg-muted text-muted-foreground'
               : isUp
@@ -76,8 +98,8 @@ function ServiceStatusRow({ name, url, port, via }: { name: string; url: string;
           />
           {isLoading ? '检查中…' : isUp ? '运行中' : '不可用'}
         </span>
-      </TableCell>
-    </TableRow>
+      </div>
+    </>
   );
 }
 
@@ -117,21 +139,10 @@ export default function AdminSettingsPage() {
         <CardHeader>
           <CardTitle>服务状态</CardTitle>
         </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="text-xs">服务</TableHead>
-                <TableHead className="text-xs">端口</TableHead>
-                <TableHead className="text-xs">状态</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {SERVICES.map((s) => (
-                <ServiceStatusRow key={s.name} name={s.name} url={s.url} port={s.port} via={s.via} />
-              ))}
-            </TableBody>
-          </Table>
+        <CardContent className="flex flex-col gap-2">
+          {SERVICES.map((s) => (
+            <ServiceStatusRow key={s.name} name={s.name} url={s.url} port={s.port} via={s.via} />
+          ))}
         </CardContent>
       </Card>
 

@@ -148,7 +148,7 @@ export default function AdminModelsPage() {
       </div>
 
       {/* Table */}
-      <div className="overflow-x-auto rounded-md border border-border">
+      <div className="hidden md:block overflow-x-auto rounded-md border border-border">
         <Table>
           <TableHeader>
             <TableRow>
@@ -232,6 +232,45 @@ export default function AdminModelsPage() {
             )}
           </TableBody>
         </Table>
+      </div>
+
+      {/* Mobile card list */}
+      <div className="md:hidden space-y-3">
+        {isLoading ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">加载中…</p>
+        ) : filtered.length === 0 ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">暂无模型配置</p>
+        ) : filtered.map((m) => (
+          <div key={m.id} className="rounded-lg border bg-card p-3 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <p className="text-sm font-medium truncate">{m.displayName}</p>
+                <p className="font-mono text-[10px] text-muted-foreground truncate">{m.id}</p>
+              </div>
+              <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground tabular-nums">{m.routeCount} 路由</span>
+            </div>
+            <div className="flex flex-wrap gap-1">
+              {m.capabilities.map((cap) => (
+                <span key={cap} className={cn('rounded-full px-1.5 py-0.5 text-[10px] font-medium', capabilityTone(cap))}>
+                  {capabilityLabel(cap)}
+                </span>
+              ))}
+            </div>
+            <div className="flex items-center justify-between">
+              <span className={cn('rounded-full px-1.5 py-0.5 text-[10px] font-medium', m.thinkingSupported ? 'bg-emerald-50 text-emerald-600' : 'bg-muted text-muted-foreground')}>
+                {m.thinkingSupported ? '支持思考' : '不支持思考'}
+              </span>
+              <div className="flex gap-1">
+                <button type="button" onClick={() => setEditing(m)} aria-label="编辑" title="编辑" className="rounded-sm p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground">
+                  <Pencil className="size-3.5" />
+                </button>
+                <button type="button" onClick={() => onDelete(m)} aria-label="删除" title="删除" className="rounded-sm p-1.5 text-muted-foreground hover:bg-red-100 hover:text-red-700">
+                  <Trash2 className="size-3.5" />
+                </button>
+              </div>
+            </div>
+          </div>
+        ))}
       </div>
 
       {creating ? (
