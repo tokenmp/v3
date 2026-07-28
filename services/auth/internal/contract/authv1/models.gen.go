@@ -579,7 +579,7 @@ type VerifiedIdentityStatus string
 
 // VerifyKeyRequest defines model for VerifyKeyRequest.
 type VerifyKeyRequest struct {
-	// ApiKey Opaque API key with `tmp_` prefix.
+	// ApiKey Opaque API key with `sk-` prefix.
 	ApiKey string `json:"api_key"`
 }
 

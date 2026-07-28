@@ -59,7 +59,7 @@ go test -race ./...
 - Logging 推送（Edge 侧日志 sink，当前 executor logsink 已覆盖执行事件）
 - 客户端速率限制
 - 流式响应的 quota finalize（当前在 response 完成时 finalize，流式可能需要 stream-aware）
-- API Key 验证（当前仅 JWT；后续调 Auth Service `/api/v1/auth/verify-key`）
+- API Key 验证：V3 与 legacy prod key 均为 `sk-` 前缀，走 Auth Service `/api/v1/auth/verify-key`（`internal/identity/apikey_verifier.go`，`NewCompositeVerifier` 按前缀分发）。Legacy key 兼容需要 Auth 侧注入 `AUTH_LEGACY_API_KEY_PEPPER`（见 `services/auth/AGENTS.md`）。
 - cancel-risk 评估
 
 ## 约束
