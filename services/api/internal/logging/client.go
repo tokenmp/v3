@@ -8,6 +8,7 @@ package logging
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -35,6 +36,7 @@ type RequestLog struct {
 	Stream       bool      `json:"stream"`
 	FinalStatus  string    `json:"final_status"`
 	HTTPStatus   int       `json:"http_status,omitempty"`
+	UpstreamHTTPStatus int `json:"upstream_http_status,omitempty"`
 	InputTokens  int       `json:"input_tokens,omitempty"`
 	OutputTokens int       `json:"output_tokens,omitempty"`
 	TotalTokens  int       `json:"total_tokens,omitempty"`
@@ -47,21 +49,38 @@ type RequestLog struct {
 
 // Attempt 对应 Logging Service 返回的单个 attempt。
 type Attempt struct {
-	RequestID     string    `json:"request_id"`
-	AttemptIndex  int       `json:"attempt_index"`
-	ProviderID    string    `json:"provider_id,omitempty"`
-	UpstreamModel string    `json:"upstream_model,omitempty"`
-	Status        string    `json:"status"`
-	HTTPStatus    int       `json:"http_status,omitempty"`
-	LatencyMS     int       `json:"latency_ms,omitempty"`
-	ErrorCode     string    `json:"error_code,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
+	RequestID          string          `json:"request_id"`
+	AttemptIndex       int             `json:"attempt_index"`
+	ProviderID         string          `json:"provider_id,omitempty"`
+	UpstreamModel      string          `json:"upstream_model,omitempty"`
+	Status             string          `json:"status"`
+	HTTPStatus         int             `json:"http_status,omitempty"`
+	UpstreamHTTPStatus int             `json:"upstream_http_status,omitempty"`
+	LatencyMS          int             `json:"latency_ms,omitempty"`
+	ErrorCode          string          `json:"error_code,omitempty"`
+	ErrorType          string          `json:"error_type,omitempty"`
+	RetryClassified    string          `json:"retry_classified,omitempty"`
+	Metadata           json.RawMessage `json:"metadata,omitempty"`
+	CreatedAt          time.Time       `json:"created_at"`
 }
 
 // LogDetail 是 GET /v1/logs/{request_id} 的响应：日志摘要 + attempts。
 type LogDetail struct {
 	Log      RequestLog `json:"log"`
 	Attempts []Attempt  `json:"attempts"`
+	Events   []Event    `json:"events"`
+}
+
+// Event 对应 Logging Service 返回的单条时间线事件。
+type Event struct {
+	RequestID    string          `json:"request_id"`
+	Stage        string          `json:"stage"`
+	Status       string          `json:"status"`
+	AttemptIndex *int            `json:"attempt_index,omitempty"`
+	DurationMS   int             `json:"duration_ms,omitempty"`
+	Message      string          `json:"message,omitempty"`
+	Metadata     json.RawMessage `json:"metadata,omitempty"`
+	CreatedAt    time.Time       `json:"created_at"`
 }
 
 // ListResult 是 GET /v1/logs 的分页响应。
