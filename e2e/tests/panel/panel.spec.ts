@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { TestUtils } from '../utils/test-utils';
+import { TestUtils } from '../../utils/test-utils';
 
 test.describe('Panel 用户概览页面', () => {
   let utils: TestUtils;

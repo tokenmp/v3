@@ -1,0 +1,21 @@
+title = "TokenMP v3 gitleaks config"
+
+# gitleaks v8 legacy global allowlist syntax.
+[allowlist]
+description = "Allow documented dummy API key used only by Playwright test fixtures"
+paths = [
+  '''e2e/utils/test-utils\.ts''',
+]
+regexes = [
+  '''sk-test123456789''',
+]
+
+# gitleaks v8 current global allowlist syntax.
+[[allowlists]]
+description = "Allow documented dummy API key used only by Playwright test fixtures"
+paths = [
+  '''e2e/utils/test-utils\.ts''',
+]
+regexes = [
+  '''sk-test123456789''',
+]

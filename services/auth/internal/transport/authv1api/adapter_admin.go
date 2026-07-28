@@ -94,11 +94,11 @@ func (a *StrictAdapter) AuthAdminListUsers(ctx context.Context, req authv1.AuthA
 	}
 	status := ""
 	if req.Params.Status != nil {
-		status = *req.Params.Status
+		status = string(*req.Params.Status)
 	}
 	role := ""
 	if req.Params.Role != nil {
-		role = *req.Params.Role
+		role = string(*req.Params.Role)
 	}
 	users, total, err := a.adminUsers.ListAll(ctx, search, status, role, pageSize, (page-1)*pageSize)
 	if err != nil {

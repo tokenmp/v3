@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { TestUtils } from '../utils/test-utils';
+import { TestUtils } from '../../utils/test-utils';
 
 test.describe('Admin 套餐管理页面', () => {
   let utils: TestUtils;
@@ -228,8 +228,8 @@ test.describe('Admin Provider 管理页面', () => {
     // 检查表格
     await expect(page.locator('table')).toBeVisible();
     
-    // 检查编译按钮
-    await expect(page.locator('text=编译并发布')).toBeVisible();
+    // 检查统一发布提示（发布操作集中在系统设置）
+    await expect(page.locator('text=配置保存后需统一发布')).toBeVisible();
   });
 
   test('新建 Provider', async ({ page }) => {
@@ -312,7 +312,12 @@ test.describe('Admin Provider 管理页面', () => {
     }
   });
 
-  test('编译并发布', async ({ page }) => {
+  test('系统设置统一编译并发布', async ({ page }) => {
+    // 发布操作集中到系统设置页面
+    await page.goto('/admin/settings');
+    await utils.waitForPageLoad();
+    await expect(page.locator('text=配置发布')).toBeVisible();
+
     // 点击编译按钮
     await page.click('text=编译并发布');
     
@@ -320,7 +325,7 @@ test.describe('Admin Provider 管理页面', () => {
     await page.waitForTimeout(2000);
     
     // 检查是否有成功提示
-    await utils.waitForToast('配置已发布');
+    await utils.waitForToast('已重新编译并发布 snapshot');
   });
 
   test('Provider 表单验证', async ({ page }) => {

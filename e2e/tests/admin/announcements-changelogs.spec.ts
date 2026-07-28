@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { TestUtils } from '../utils/test-utils';
+import { TestUtils } from '../../utils/test-utils';
 
 test.describe('Admin 公告管理页面', () => {
   let utils: TestUtils;
