@@ -12,7 +12,7 @@ import {
   FormActions,
   TextField,
 } from '@/components/ui/field';
-import { CompileButton } from '@/components/compile-button';
+import { PublishStatusHint } from '@/components/publish-status-hint';
 import {
   Table,
   TableBody,
@@ -103,7 +103,7 @@ export default function AdminModelsPage() {
   const deleteMutation = useMutation({
     mutationFn: (id: string) => adminConfigApi.deleteModel(id),
     onSuccess: () => {
-      toast.success('已删除');
+      toast.success('已删除（需点编译并发布生效）');
       setEditing(null);
       void queryClient.invalidateQueries({ queryKey: QUERY_KEY });
     },
@@ -120,8 +120,9 @@ export default function AdminModelsPage() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
+        <h1 className="text-lg font-semibold">模型配置</h1>
         <div className="ml-auto">
-          <CompileButton size="sm" />
+          <PublishStatusHint />
         </div>
       </div>
 

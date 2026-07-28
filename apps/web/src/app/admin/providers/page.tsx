@@ -17,7 +17,7 @@ import {
   TabField,
   TextField,
 } from '@/components/ui/field';
-import { CompileButton } from '@/components/compile-button';
+import { PublishStatusHint } from '@/components/publish-status-hint';
 import {
   Table,
   TableBody,
@@ -111,7 +111,7 @@ export default function AdminProvidersPage() {
   const deleteMutation = useMutation({
     mutationFn: (id: string) => adminConfigApi.deleteProvider(id),
     onSuccess: () => {
-      toast.success('已删除 Provider');
+      toast.success('已删除 Provider（需点编译并发布生效）');
       void queryClient.invalidateQueries({ queryKey: ['admin', 'providers'] });
     },
     onError: (e: unknown) => {
@@ -129,7 +129,7 @@ export default function AdminProvidersPage() {
       <div className="flex items-center gap-2">
         <h1 className="text-lg font-semibold">Provider 管理</h1>
         <div className="ml-auto">
-          <CompileButton size="sm" />
+          <PublishStatusHint />
         </div>
       </div>
 
@@ -591,7 +591,7 @@ function EndpointsModal({
   const deleteMutation = useMutation({
     mutationFn: (id: number) => adminConfigApi.deleteEndpoint(id),
     onSuccess: () => {
-      toast.success('已删除端点');
+      toast.success('已删除端点（需点编译并发布生效）');
       void queryClient.invalidateQueries({ queryKey: ['admin', 'provider-endpoints', provider.id] });
     },
     onError: (e: unknown) => {

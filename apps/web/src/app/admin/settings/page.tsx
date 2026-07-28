@@ -8,6 +8,7 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
+import { CompileButton } from '@/components/compile-button';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
   TableCell,
@@ -143,6 +144,22 @@ export default function AdminSettingsPage() {
           {SERVICES.map((s) => (
             <ServiceStatusRow key={s.name} name={s.name} url={s.url} port={s.port} via={s.via} />
           ))}
+        </CardContent>
+      </Card>
+
+      {/* 配置发布 */}
+      <Card>
+        <CardHeader>
+          <CardTitle>配置发布</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="space-y-1">
+            <p className="text-sm text-foreground">统一编译并发布执行配置 snapshot</p>
+            <p className="text-xs text-muted-foreground">
+              Provider、上游账号、模型、Auto 模型、路由与重试策略保存后，只会写入配置库；发布后约 10 秒 Executor 热加载生效。
+            </p>
+          </div>
+          <CompileButton className="w-full sm:w-auto" />
         </CardContent>
       </Card>
 

@@ -7,7 +7,6 @@ import {
   ArrowDownToLine,
   GripVertical,
   Plus,
-  RefreshCw,
   Save,
   Trash2,
   Zap,
@@ -21,6 +20,7 @@ import type {
 } from '@/types/admin';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { PublishStatusHint } from '@/components/publish-status-hint';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
@@ -497,16 +497,6 @@ function RouteRetryCard() {
 /* -------------------------------------------------------------------------- */
 
 export default function RetryPolicyPage() {
-  const qc = useQueryClient();
-  const compile = useMutation({
-    mutationFn: () => adminConfigApi.compile(),
-    onSuccess: () => {
-      toast.success('已重新编译并发布 snapshot');
-      void qc.invalidateQueries();
-    },
-    onError: () => toast.error('编译失败'),
-  });
-
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -516,10 +506,7 @@ export default function RetryPolicyPage() {
             配置上游错误（429/503/5xx）的重试行为。
           </p>
         </div>
-        <Button variant="default" onClick={() => compile.mutate()} disabled={compile.isPending} className="w-full sm:w-auto">
-          <RefreshCw className={`h-4 w-4 mr-1 ${compile.isPending ? 'animate-spin' : ''}`} />
-          {compile.isPending ? '编译中…' : '编译并发布'}
-        </Button>
+        <PublishStatusHint className="w-full justify-center sm:w-auto" />
       </div>
 
       <GlobalRetryCard />
@@ -535,7 +522,7 @@ export default function RetryPolicyPage() {
               <li><b>换密钥</b>：同路由下另一个 credential，适合 429 限流</li>
               <li><b>换路由</b>：同模型另一路由，适合 5xx 上游故障</li>
               <li>路由级策略非空时完全替代全局；留空继承全局</li>
-              <li>修改后需点「编译并发布」让 executor 热加载新 snapshot</li>
+              <li>修改后需到系统设置统一发布，让 executor 热加载新 snapshot</li>
             </ul>
           </div>
         </CardContent>

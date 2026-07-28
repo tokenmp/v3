@@ -17,7 +17,7 @@ import {
   TextField,
   inputCls,
 } from '@/components/ui/field';
-import { CompileButton } from '@/components/compile-button';
+import { PublishStatusHint } from '@/components/publish-status-hint';
 import {
   Table,
   TableBody,
@@ -192,7 +192,7 @@ export default function AdminRoutesPage() {
       <div className="flex items-center gap-2">
         <h1 className="text-lg font-semibold">路由管理</h1>
         <div className="ml-auto">
-          <CompileButton size="sm" />
+          <PublishStatusHint />
         </div>
       </div>
 

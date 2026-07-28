@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowDown, ArrowUp, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { adminConfigApi } from '@/lib/api/admin';
-import { CompileButton } from '@/components/compile-button';
+import { PublishStatusHint } from '@/components/publish-status-hint';
 import {
   Table,
   TableBody,
@@ -26,7 +26,7 @@ import type { AdminModelConfig } from '@/types/admin';
  * ordered pool (Global.AutoModelIDs). Without an explicit config the
  * executor falls back to all active models sorted by ID — which is rarely
  * what an operator wants. This page lets admins pick which active models
- * join the auto pool and in what order, then publish via CompileButton.
+ * join the auto pool and in what order, then publish from System Settings.
  */
 export default function AdminAutoModelPage() {
   const qc = useQueryClient();
@@ -103,12 +103,12 @@ export default function AdminAutoModelPage() {
       <div className="flex items-center gap-2">
         <h1 className="text-lg font-semibold">Auto 模型</h1>
         <div className="ml-auto">
-          <CompileButton size="sm" />
+          <PublishStatusHint />
         </div>
       </div>
 
       <p className="text-sm text-muted-foreground">
-        客户端请求 <code className="rounded bg-muted px-1">model=auto</code> 时，executor 从下方已选模型池中按顺序选第一个可用的。拖动顺序或勾选模型，保存后点「编译并发布」生效。
+        客户端请求 <code className="rounded bg-muted px-1">model=auto</code> 时，executor 从下方已选模型池中按顺序选第一个可用的。拖动顺序或勾选模型，保存后到系统设置统一发布生效。
       </p>
 
       <div className="flex items-center gap-2">

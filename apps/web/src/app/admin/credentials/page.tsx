@@ -17,6 +17,7 @@ import {
   SwitchField,
   TextField,
 } from '@/components/ui/field';
+import { PublishStatusHint } from '@/components/publish-status-hint';
 import {
   Table,
   TableBody,
@@ -114,7 +115,7 @@ export default function AdminCredentialsPage() {
   const deleteMutation = useMutation({
     mutationFn: (id: string) => adminConfigApi.deleteCredential(id),
     onSuccess: () => {
-      toast.success('已删除上游账号');
+      toast.success('已删除上游账号（需点编译并发布生效）');
       void queryClient.invalidateQueries({ queryKey: ['admin', 'credentials'] });
     },
     onError: (e: unknown) => {
@@ -129,7 +130,12 @@ export default function AdminCredentialsPage() {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-lg font-semibold">上游账号</h1>
+      <div className="flex items-center gap-2">
+        <h1 className="text-lg font-semibold">上游账号</h1>
+        <div className="ml-auto">
+          <PublishStatusHint />
+        </div>
+      </div>
 
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-2">
@@ -333,7 +339,7 @@ function CredentialFormModal({
         status: input.status,
       }),
     onSuccess: () => {
-      toast.success('已创建上游账号');
+      toast.success('已创建上游账号（需点编译并发布生效）');
       void queryClient.invalidateQueries({ queryKey: ['admin', 'credentials'] });
       onClose();
     },
@@ -352,7 +358,7 @@ function CredentialFormModal({
         status: input.status,
       }),
     onSuccess: () => {
-      toast.success('已更新上游账号');
+      toast.success('已更新上游账号（需点编译并发布生效）');
       void queryClient.invalidateQueries({ queryKey: ['admin', 'credentials'] });
       onClose();
     },
