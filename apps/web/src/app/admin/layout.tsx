@@ -5,6 +5,7 @@ import { useAdminGuard } from '@/hooks/use-admin-guard';
 import { useSidebarStore } from '@/lib/sidebar-store';
 import { AdminSidebar } from '@/components/admin-sidebar';
 import { AdminHeader } from '@/components/admin-header';
+import { AdminBottomNav } from '@/components/admin-bottom-nav';
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const { isHydrated, isAuthenticated, isAdmin } = useAdminGuard();
@@ -35,6 +36,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         <AdminHeader />
         <main className="p-4 sm:p-6 pb-24 md:pb-6">{children}</main>
       </div>
+      <AdminBottomNav />
     </div>
   );
 }

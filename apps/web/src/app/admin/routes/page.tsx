@@ -17,7 +17,7 @@ import {
   TextField,
   inputCls,
 } from '@/components/ui/field';
-import { CompileButton } from '@/components/compile-button';
+import { PublishStatusHint } from '@/components/publish-status-hint';
 import {
   Table,
   TableBody,
@@ -192,7 +192,7 @@ export default function AdminRoutesPage() {
       <div className="flex items-center gap-2">
         <h1 className="text-lg font-semibold">路由管理</h1>
         <div className="ml-auto">
-          <CompileButton size="sm" />
+          <PublishStatusHint />
         </div>
       </div>
 
@@ -233,7 +233,8 @@ export default function AdminRoutesPage() {
       ) : filtered.length === 0 ? (
         <div className="py-12 text-center text-sm text-muted-foreground">暂无路由配置</div>
       ) : (
-        <div className="overflow-x-auto">
+        <>
+        <div className="hidden md:block overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
@@ -286,6 +287,36 @@ export default function AdminRoutesPage() {
             </TableBody>
           </Table>
         </div>
+
+        {/* 移动端卡片 */}
+        <div className="md:hidden space-y-3">
+          {filtered.length === 0 ? (
+            <p className="py-8 text-center text-sm text-muted-foreground">暂无路由配置</p>
+          ) : (
+            filtered.map((r) => (
+              <button
+                key={r.id}
+                type="button"
+                onClick={() => setEditing(r)}
+                className="w-full text-left rounded-lg border bg-card p-3 space-y-2 active:bg-accent/50 transition-colors"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-mono text-xs truncate">{r.id}</span>
+                  <StatusPill enabled={r.enabled} quarantined={r.quarantined} />
+                </div>
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-medium truncate">{r.modelId}</span>
+                  <span className="text-muted-foreground">{r.protocol}</span>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {r.providerId} → {r.upstreamModel}
+                </p>
+                <span className="text-xs text-muted-foreground">优先级 {r.priority}</span>
+              </button>
+            ))
+          )}
+        </div>
+        </>
       )}
 
       {creating ? (

@@ -17,6 +17,7 @@ import {
   SwitchField,
   TextField,
 } from '@/components/ui/field';
+import { PublishStatusHint } from '@/components/publish-status-hint';
 import {
   Table,
   TableBody,
@@ -114,7 +115,7 @@ export default function AdminCredentialsPage() {
   const deleteMutation = useMutation({
     mutationFn: (id: string) => adminConfigApi.deleteCredential(id),
     onSuccess: () => {
-      toast.success('已删除上游账号');
+      toast.success('已删除上游账号（需点编译并发布生效）');
       void queryClient.invalidateQueries({ queryKey: ['admin', 'credentials'] });
     },
     onError: (e: unknown) => {
@@ -129,7 +130,12 @@ export default function AdminCredentialsPage() {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-lg font-semibold">上游账号</h1>
+      <div className="flex items-center gap-2">
+        <h1 className="text-lg font-semibold">上游账号</h1>
+        <div className="ml-auto">
+          <PublishStatusHint />
+        </div>
+      </div>
 
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-2">
@@ -156,7 +162,7 @@ export default function AdminCredentialsPage() {
       </div>
 
       {/* Table */}
-      <div className="rounded-md border border-border bg-card">
+      <div className="hidden md:block rounded-md border border-border bg-card">
         <div className="overflow-x-auto">
           <Table>
             <TableHeader>
@@ -233,6 +239,42 @@ export default function AdminCredentialsPage() {
         </div>
       </div>
 
+      {/* Mobile cards */}
+      <div className="md:hidden space-y-3">
+        {isLoading ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">加载中…</p>
+        ) : filtered.length === 0 ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">暂无上游账号</p>
+        ) : (
+          filtered.map((c) => {
+            const provider = providerMap[c.providerId];
+            const providerLabel = provider ? provider.displayLabel || provider.name : c.providerId;
+            const prefixSuffix = c.keyPrefix || c.keySuffix
+              ? `${c.keyPrefix ?? '-'}…${c.keySuffix ?? '-'}`
+              : '-';
+            return (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => setEditItem(c)}
+                className="w-full text-left rounded-lg border bg-card p-3 space-y-2 active:bg-accent/50 transition-colors"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-mono text-xs truncate">{c.id}</span>
+                  <StatusBadge status={c.status} />
+                </div>
+                <p className="text-xs text-muted-foreground">Provider: {providerLabel}</p>
+                <p className="font-mono text-[10px] text-muted-foreground truncate">{prefixSuffix}</p>
+                <div className="flex items-center justify-between text-xs text-muted-foreground">
+                  <span>优先级 {c.priority}</span>
+                  <span>并发 {c.maxConcurrency != null ? c.maxConcurrency : '∞'}</span>
+                </div>
+              </button>
+            );
+          })
+        )}
+      </div>
+
       {createOpen ? (
         <CredentialFormModal providers={providers} onClose={() => setCreateOpen(false)} />
       ) : null}
@@ -297,7 +339,7 @@ function CredentialFormModal({
         status: input.status,
       }),
     onSuccess: () => {
-      toast.success('已创建上游账号');
+      toast.success('已创建上游账号（需点编译并发布生效）');
       void queryClient.invalidateQueries({ queryKey: ['admin', 'credentials'] });
       onClose();
     },
@@ -316,7 +358,7 @@ function CredentialFormModal({
         status: input.status,
       }),
     onSuccess: () => {
-      toast.success('已更新上游账号');
+      toast.success('已更新上游账号（需点编译并发布生效）');
       void queryClient.invalidateQueries({ queryKey: ['admin', 'credentials'] });
       onClose();
     },

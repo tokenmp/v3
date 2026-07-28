@@ -229,6 +229,10 @@ export interface AdminModelConfig {
   displayName: string;
   capabilities: string[]; // text|tools|vision|thinking|image
   thinkingSupported: boolean;
+  thinkingDefaultEffort?: string | null;
+  thinkingMaxEffort?: string | null;
+  thinkingMinBudgetToken?: number | null;
+  thinkingMaxBudgetToken?: number | null;
   contextWindow: number | null;
   maxOutputTokens: number | null;
   routeCount: number;

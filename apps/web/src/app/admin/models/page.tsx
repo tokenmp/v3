@@ -10,12 +10,9 @@ import { Modal } from '@/components/ui/modal';
 import {
   Field,
   FormActions,
-  FormSection,
-  NumberField,
-  SwitchField,
   TextField,
 } from '@/components/ui/field';
-import { CompileButton } from '@/components/compile-button';
+import { PublishStatusHint } from '@/components/publish-status-hint';
 import {
   Table,
   TableBody,
@@ -47,6 +44,16 @@ const CAPABILITY_ORDER: CapabilityKey[] = [
   'thinking',
   'image',
 ];
+
+const THINKING_EFFORTS = [
+  { value: 'none', label: '无', description: '不使用思考' },
+  { value: 'minimal', label: '最小', description: '最少的思考' },
+  { value: 'low', label: '低', description: '轻度思考' },
+  { value: 'medium', label: '中', description: '平衡思考' },
+  { value: 'high', label: '高', description: '深度思考' },
+  { value: 'xhigh', label: '极高', description: '非常深度的思考' },
+  { value: 'max', label: '最大', description: '最大思考深度' },
+] as const;
 
 const FILTER_OPTIONS: { value: CapabilityKey | undefined; label: string }[] = [
   { value: undefined, label: '全部' },
@@ -96,7 +103,8 @@ export default function AdminModelsPage() {
   const deleteMutation = useMutation({
     mutationFn: (id: string) => adminConfigApi.deleteModel(id),
     onSuccess: () => {
-      toast.success('已删除');
+      toast.success('已删除（需点编译并发布生效）');
+      setEditing(null);
       void queryClient.invalidateQueries({ queryKey: QUERY_KEY });
     },
     onError: (e: unknown) => {
@@ -112,9 +120,9 @@ export default function AdminModelsPage() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
-        <h1 className="text-lg font-semibold">模型管理</h1>
+        <h1 className="text-lg font-semibold">模型配置</h1>
         <div className="ml-auto">
-          <CompileButton size="sm" />
+          <PublishStatusHint />
         </div>
       </div>
 
@@ -148,7 +156,7 @@ export default function AdminModelsPage() {
       </div>
 
       {/* Table */}
-      <div className="overflow-x-auto rounded-md border border-border">
+      <div className="hidden md:block overflow-x-auto rounded-md border border-border">
         <Table>
           <TableHeader>
             <TableRow>
@@ -234,6 +242,40 @@ export default function AdminModelsPage() {
         </Table>
       </div>
 
+      {/* Mobile card list */}
+      <div className="md:hidden space-y-3">
+        {isLoading ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">加载中…</p>
+        ) : filtered.length === 0 ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">暂无模型配置</p>
+        ) : filtered.map((m) => (
+          <button
+            key={m.id}
+            type="button"
+            onClick={() => setEditing(m)}
+            className="w-full text-left rounded-lg border bg-card p-3 space-y-2 active:bg-accent/50 transition-colors"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <p className="text-sm font-medium truncate">{m.displayName}</p>
+                <p className="font-mono text-[10px] text-muted-foreground truncate">{m.id}</p>
+              </div>
+              <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground tabular-nums">{m.routeCount} 路由</span>
+            </div>
+            <div className="flex flex-wrap gap-1">
+              {m.capabilities.map((cap) => (
+                <span key={cap} className={cn('rounded-full px-1.5 py-0.5 text-[10px] font-medium', capabilityTone(cap))}>
+                  {capabilityLabel(cap)}
+                </span>
+              ))}
+            </div>
+            <span className={cn('rounded-full px-1.5 py-0.5 text-[10px] font-medium', m.thinkingSupported ? 'bg-emerald-50 text-emerald-600' : 'bg-muted text-muted-foreground')}>
+              {m.thinkingSupported ? '支持思考' : '不支持思考'}
+            </span>
+          </button>
+        ))}
+      </div>
+
       {creating ? (
         <ModelFormModal
           onClose={() => setCreating(false)}
@@ -251,11 +293,16 @@ export default function AdminModelsPage() {
             setEditing(null);
             void queryClient.invalidateQueries({ queryKey: QUERY_KEY });
           }}
+          onDelete={() => onDelete(editing)}
         />
       ) : null}
     </div>
   );
 }
+
+/* -------------------------------------------------------------------------- */
+/* Capability Editor                                                          */
+/* -------------------------------------------------------------------------- */
 
 function CapabilityEditor({
   value,
@@ -300,28 +347,49 @@ function CapabilityEditor({
   );
 }
 
+/* -------------------------------------------------------------------------- */
+/* Model Form Modal with tabs                                                 */
+/* -------------------------------------------------------------------------- */
+
+type TabKey = 'basic' | 'thinking' | 'capacity';
+
 function ModelFormModal({
   item,
   onClose,
   onSaved,
+  onDelete,
 }: {
   item?: AdminModelConfig;
   onClose: () => void;
   onSaved: () => void;
+  onDelete?: () => void;
 }) {
   const isEdit = Boolean(item);
+  const [tab, setTab] = useState<TabKey>('basic');
+
+  // Basic info
   const [id, setId] = useState(item?.id ?? '');
   const [displayName, setDisplayName] = useState(item?.displayName ?? '');
   const [capabilities, setCapabilities] = useState<string[]>(
     item?.capabilities ?? ['text'],
   );
+
+  // Thinking
   const [thinkingSupported, setThinkingSupported] = useState(
     item?.thinkingSupported ?? false,
   );
-  const [contextWindow, setContextWindow] = useState<string>(
+  const [maxEffort, setMaxEffort] = useState<string>(
+    item?.thinkingMaxEffort ?? 'high',
+  );
+  const [defaultEffort, setDefaultEffort] = useState<string>(
+    item?.thinkingDefaultEffort ?? 'medium',
+  );
+
+  // Capacity
+  const [contextWindow, setContextWindow] = useState(
     item?.contextWindow != null ? String(item.contextWindow) : '',
   );
-  const [maxOutputTokens, setMaxOutputTokens] = useState<string>(
+  const [maxOutputTokens, setMaxOutputTokens] = useState(
     item?.maxOutputTokens != null ? String(item.maxOutputTokens) : '',
   );
 
@@ -358,7 +426,6 @@ function ModelFormModal({
   const submitting = createMutation.isPending || updateMutation.isPending;
   const canSubmit = isEdit ? displayName.trim().length > 0 : id.trim().length > 0 && displayName.trim().length > 0;
 
-  /** Parse empty string → null, non-empty → number */
   const parseNullableInt = (v: string): number | null => {
     const trimmed = v.trim();
     if (trimmed === '') return null;
@@ -368,55 +435,94 @@ function ModelFormModal({
 
   const submit = () => {
     if (!canSubmit) return;
-    const cw = parseNullableInt(contextWindow);
-    const mot = parseNullableInt(maxOutputTokens);
+    const payload = {
+      displayName: displayName.trim(),
+      capabilities,
+      thinkingSupported,
+      thinkingDefaultEffort: thinkingSupported ? defaultEffort : null,
+      thinkingMaxEffort: thinkingSupported ? maxEffort : null,
+      contextWindow: parseNullableInt(contextWindow),
+      maxOutputTokens: parseNullableInt(maxOutputTokens),
+    };
     if (isEdit) {
-      updateMutation.mutate({
-        displayName: displayName.trim(),
-        capabilities,
-        thinkingSupported,
-        contextWindow: cw,
-        maxOutputTokens: mot,
-      });
+      updateMutation.mutate(payload);
     } else {
-      createMutation.mutate({
-        id: id.trim(),
-        displayName: displayName.trim(),
-        capabilities,
-        thinkingSupported,
-        contextWindow: cw,
-        maxOutputTokens: mot,
-      });
+      createMutation.mutate({ id: id.trim(), ...payload });
     }
   };
+
+  const tabs: { key: TabKey; label: string }[] = [
+    { key: 'basic', label: '基本信息' },
+    { key: 'thinking', label: '思考深度' },
+    { key: 'capacity', label: '容量限制' },
+  ];
 
   return (
     <Modal
       open
-      title={isEdit ? `编辑 ${item!.id}` : '新建模型'}
+      title={isEdit ? item!.displayName : '新建模型'}
       onClose={onClose}
       maxWidth="lg"
       footer={
-        <FormActions
-          onCancel={onClose}
-          onSubmit={submit}
-          submitLabel={isEdit ? '保存' : '创建'}
-          submitting={submitting}
-          disabled={!canSubmit}
-        />
+        <div className="flex items-center justify-between w-full">
+          {isEdit && onDelete ? (
+            <button
+              type="button"
+              onClick={onDelete}
+              className="text-sm text-destructive hover:underline"
+            >
+              删除模型
+            </button>
+          ) : (
+            <div />
+          )}
+          <FormActions
+            onCancel={onClose}
+            onSubmit={submit}
+            submitLabel={isEdit ? '保存' : '创建'}
+            submitting={submitting}
+            disabled={!canSubmit}
+          />
+        </div>
       }
     >
-      <div className="space-y-5">
-        <FormSection title="基本信息" cols={2}>
-          <Field label="模型 ID" required>
-            <TextField
-              value={id}
-              onChange={setId}
-              placeholder="gpt-4o-mini"
-              disabled={isEdit}
-              className="font-mono"
-            />
-          </Field>
+      {/* Tabs */}
+      <div className="flex border-b mb-4">
+        {tabs.map((t) => (
+          <button
+            key={t.key}
+            type="button"
+            onClick={() => setTab(t.key)}
+            className={cn(
+              'flex-1 py-2.5 text-sm font-medium border-b-2 transition-colors',
+              tab === t.key
+                ? 'border-primary text-primary'
+                : 'border-transparent text-muted-foreground hover:text-foreground',
+            )}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Tab content */}
+      {tab === 'basic' && (
+        <div className="space-y-4">
+          {isEdit && (
+            <div className="rounded-lg bg-muted/50 p-3">
+              <p className="font-mono text-xs text-muted-foreground">{item!.id}</p>
+            </div>
+          )}
+          {!isEdit && (
+            <Field label="模型 ID" required>
+              <TextField
+                value={id}
+                onChange={setId}
+                placeholder="gpt-4o-mini"
+                className="font-mono"
+              />
+            </Field>
+          )}
           <Field label="显示名" required>
             <TextField
               value={displayName}
@@ -424,40 +530,116 @@ function ModelFormModal({
               placeholder="GPT-4o mini"
             />
           </Field>
-        </FormSection>
-
-        <FormSection title="能力标签" cols={1} description="点击切换模型支持的能力">
-          <CapabilityEditor value={capabilities} onChange={setCapabilities} />
-        </FormSection>
-
-        <FormSection title="思考能力" cols={1}>
-          <Field label="Thinking 支持">
-            <SwitchField
-              checked={thinkingSupported}
-              onChange={setThinkingSupported}
-            />
+          <Field label="能力标签" hint="点击切换">
+            <CapabilityEditor value={capabilities} onChange={setCapabilities} />
           </Field>
-        </FormSection>
+        </div>
+      )}
 
-        <FormSection title="容量限制" cols={2} description="留空表示使用默认值">
-          <Field label="上下文窗口（token）" hint="留空使用默认">
-            <NumberField
+      {tab === 'thinking' && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <span className="text-sm">启用 Thinking</span>
+            <button
+              type="button"
+              onClick={() => setThinkingSupported(!thinkingSupported)}
+              className={cn(
+                'relative inline-flex h-6 w-11 items-center rounded-full transition-colors',
+                thinkingSupported ? 'bg-primary' : 'bg-muted',
+              )}
+            >
+              <span
+                className={cn(
+                  'inline-block h-4 w-4 transform rounded-full bg-white transition-transform',
+                  thinkingSupported ? 'translate-x-6' : 'translate-x-1',
+                )}
+              />
+            </button>
+          </div>
+
+          {thinkingSupported && (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <p className="text-sm font-medium">支持的思考深度</p>
+                <p className="text-xs text-muted-foreground">勾选的即为可用，点击切换</p>
+                <div className="space-y-2">
+                  {THINKING_EFFORTS.map((effort) => {
+                    const effortIdx = THINKING_EFFORTS.findIndex((e) => e.value === effort.value);
+                    const maxIdx = THINKING_EFFORTS.findIndex((e) => e.value === maxEffort);
+                    const isSelected = effortIdx <= maxIdx;
+                    return (
+                      <label
+                        key={effort.value}
+                        className="flex items-center gap-3 rounded-lg border p-3 cursor-pointer hover:bg-accent/50 transition-colors"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => setMaxEffort(effort.value)}
+                          className="h-4 w-4 rounded border-input"
+                        />
+                        <div className="flex-1">
+                          <span className="text-sm font-medium">{effort.label}</span>
+                          <span className="text-xs text-muted-foreground ml-2">{effort.value}</span>
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <p className="text-sm font-medium">默认思考深度</p>
+                <select
+                  className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
+                  value={defaultEffort}
+                  onChange={(e) => setDefaultEffort(e.target.value)}
+                >
+                  {THINKING_EFFORTS.filter((e) => {
+                    const maxIdx = THINKING_EFFORTS.findIndex((x) => x.value === maxEffort);
+                    return THINKING_EFFORTS.findIndex((x) => x.value === e.value) <= maxIdx;
+                  }).map((effort) => (
+                    <option key={effort.value} value={effort.value}>
+                      {effort.label} ({effort.value})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          )}
+
+          {!thinkingSupported && (
+            <p className="text-sm text-muted-foreground text-center py-8">
+              该模型不支持 Thinking
+            </p>
+          )}
+        </div>
+      )}
+
+      {tab === 'capacity' && (
+        <div className="space-y-4">
+          <Field label="上下文窗口（token）" hint="留空使用默认值">
+            <input
+              type="number"
               value={contextWindow}
-              onChange={setContextWindow}
+              onChange={(e) => setContextWindow(e.target.value)}
               placeholder="留空使用默认"
               min={1}
+              className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
             />
           </Field>
-          <Field label="最大输出 Token" hint="留空使用默认">
-            <NumberField
+          <Field label="最大输出 Token" hint="留空使用默认值">
+            <input
+              type="number"
               value={maxOutputTokens}
-              onChange={setMaxOutputTokens}
+              onChange={(e) => setMaxOutputTokens(e.target.value)}
               placeholder="留空使用默认"
               min={1}
+              className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
             />
           </Field>
-        </FormSection>
-      </div>
+        </div>
+      )}
     </Modal>
   );
 }

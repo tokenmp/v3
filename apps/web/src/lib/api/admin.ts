@@ -51,9 +51,13 @@ async function realListUsers(
   page = 1,
   pageSize = 20,
   search = '',
+  status = '',
+  role = '',
 ): Promise<AdminUserListResponse> {
   const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
   if (search) params.set('search', search);
+  if (status) params.set('status', status);
+  if (role) params.set('role', role);
   const res = await request<{ users: AdminUser[]; total: number }>(
     `/api/v1/admin/users?${params}`,
     { baseUrl: ADMIN_BASE },
@@ -233,8 +237,8 @@ export const adminApi = {
   getDashboardStats: async (days = 15): Promise<AdminDashboardStats> => realDashboard(days),
 
   // ---- Users ----
-  listUsers: async (page = 1, pageSize = 20, search = ''): Promise<AdminUserListResponse> => {
-    const res = await realListUsers(page, pageSize, search);
+  listUsers: async (page = 1, pageSize = 20, search = '', status = '', role = ''): Promise<AdminUserListResponse> => {
+    const res = await realListUsers(page, pageSize, search, status, role);
     // Map snake_case → camelCase if the backend returns snake_case.
     const raw = res.users as unknown as Record<string, unknown>[];
     const isSnake = raw.length > 0 && raw[0] && 'created_at' in (raw[0] as object) && !('createdAt' in (raw[0] as object));
@@ -543,6 +547,10 @@ function mapModelConfig(m: Record<string, unknown>): AdminModelConfig {
     displayName: String(m.display_name ?? m.displayName ?? ''),
     capabilities,
     thinkingSupported: Boolean(m.thinking_supported ?? m.thinkingSupported ?? false),
+    thinkingDefaultEffort: m.thinking_default_effort != null ? String(m.thinking_default_effort) : (m.thinkingDefaultEffort != null ? String(m.thinkingDefaultEffort) : null),
+    thinkingMaxEffort: m.thinking_max_effort != null ? String(m.thinking_max_effort) : (m.thinkingMaxEffort != null ? String(m.thinkingMaxEffort) : null),
+    thinkingMinBudgetToken: m.thinking_min_budget_token != null ? Number(m.thinking_min_budget_token) : (m.thinkingMinBudgetToken != null ? Number(m.thinkingMinBudgetToken) : null),
+    thinkingMaxBudgetToken: m.thinking_max_budget_token != null ? Number(m.thinking_max_budget_token) : (m.thinkingMaxBudgetToken != null ? Number(m.thinkingMaxBudgetToken) : null),
     contextWindow: m.context_window != null ? Number(m.context_window) : (m.contextWindow != null ? Number(m.contextWindow) : null),
     maxOutputTokens: m.max_output_tokens != null ? Number(m.max_output_tokens) : (m.maxOutputTokens != null ? Number(m.maxOutputTokens) : null),
     routeCount: Number(m.route_count ?? m.routeCount ?? 0),
@@ -683,7 +691,7 @@ export const adminConfigApi = {
     const items = Array.isArray(res) ? res : (res.items ?? []);
     return items.map((m) => mapModelConfig(m as unknown as Record<string, unknown>));
   },
-  createModel: async (input: { id: string; displayName: string; capabilities?: string[]; thinkingSupported?: boolean; contextWindow?: number | null; maxOutputTokens?: number | null }): Promise<AdminModelConfig> => {
+  createModel: async (input: { id: string; displayName: string; capabilities?: string[]; thinkingSupported?: boolean; thinkingDefaultEffort?: string | null; thinkingMaxEffort?: string | null; contextWindow?: number | null; maxOutputTokens?: number | null }): Promise<AdminModelConfig> => {
     return request<AdminModelConfig>('/api/v1/admin/models', {
       method: 'POST',
       body: {
@@ -691,6 +699,8 @@ export const adminConfigApi = {
         display_name: input.displayName,
         capabilities: input.capabilities ?? ['text'],
         thinking_supported: input.thinkingSupported ?? false,
+        thinking_default_effort: input.thinkingDefaultEffort ?? null,
+        thinking_max_effort: input.thinkingMaxEffort ?? null,
         context_window: input.contextWindow ?? null,
         max_output_tokens: input.maxOutputTokens ?? null,
         status: 'active',
@@ -702,6 +712,8 @@ export const adminConfigApi = {
     const fields: Record<string, unknown> = {};
     if (input.displayName !== undefined) fields.display_name = input.displayName;
     if (input.thinkingSupported !== undefined) fields.thinking_supported = input.thinkingSupported;
+    if (input.thinkingDefaultEffort !== undefined) fields.thinking_default_effort = input.thinkingDefaultEffort;
+    if (input.thinkingMaxEffort !== undefined) fields.thinking_max_effort = input.thinkingMaxEffort;
     if (input.capabilities !== undefined) fields.capabilities = input.capabilities;
     if (input.contextWindow !== undefined) fields.context_window = input.contextWindow;
     if (input.maxOutputTokens !== undefined) fields.max_output_tokens = input.maxOutputTokens;

@@ -13,6 +13,7 @@ import { FilterChip } from '@/components/filter-chip';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { toast } from 'sonner';
 import type { AdminApiKey } from '@/types/admin';
+import { BottomSheet } from '@/components/ui/bottom-sheet';
 
 function formatTime(iso: string | null) {
   return iso ? new Date(iso).toLocaleString('zh-CN') : '—';
@@ -24,6 +25,7 @@ export default function AdminApiKeysPage() {
   const [search, setSearch] = useState('');
   const [statusF, setStatusF] = useState<string | undefined>(undefined);
   const [revokeTarget, setRevokeTarget] = useState<AdminApiKey | null>(null);
+  const [actionKey, setActionKey] = useState<AdminApiKey | null>(null);
 
   const { data } = useQuery({
     queryKey: ['admin', 'keys', page],
@@ -34,6 +36,7 @@ export default function AdminApiKeysPage() {
     mutationFn: (id: string) => userApi.revokeKey(id),
     onSuccess: () => {
       setRevokeTarget(null);
+      setActionKey(null);
       queryClient.invalidateQueries({ queryKey: ['admin', 'keys'] });
       toast.success('密钥已撤销');
     },
@@ -80,7 +83,7 @@ export default function AdminApiKeysPage() {
       </div>
 
       {/* 表格 */}
-      <div className="rounded-md border border-border bg-card">
+      <div className="hidden md:block rounded-md border border-border bg-card">
         <div className="overflow-x-auto">
           <Table>
             <TableHeader>
@@ -132,6 +135,84 @@ export default function AdminApiKeysPage() {
           </Table>
         </div>
       </div>
+
+      {/* Mobile card list */}
+      <div className="md:hidden space-y-3">
+        {filtered.map((k: AdminApiKey) => (
+          <button
+            key={k.id}
+            type="button"
+            onClick={() => setActionKey(k)}
+            className="w-full text-left rounded-lg border bg-card p-3 space-y-2 active:bg-accent/50 transition-colors"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-sm font-medium truncate">{k.name}</span>
+              <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${k.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-muted text-muted-foreground'}`}>
+                {k.status === 'active' ? '活跃' : '已禁用'}
+              </span>
+            </div>
+            <p className="text-xs text-muted-foreground truncate">{k.userEmail}</p>
+            <p className="font-mono text-xs text-muted-foreground">{k.keyPrefix}…{k.keySuffix}</p>
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span>创建：{formatTime(k.createdAt)}</span>
+              <span>最近：{formatTime(k.lastUsedAt)}</span>
+            </div>
+          </button>
+        ))}
+        {filtered.length === 0 && (
+          <p className="py-8 text-center text-sm text-muted-foreground">暂无 API 密钥</p>
+        )}
+      </div>
+
+      {/* Mobile action sheet */}
+      <BottomSheet open={!!actionKey} onOpenChange={(open) => !open && setActionKey(null)}>
+        {actionKey && (
+          <div className="px-4 pb-6">
+            <div className="mb-4">
+              <h3 className="font-medium">{actionKey.name}</h3>
+              <p className="text-sm text-muted-foreground">密钥详情与操作</p>
+            </div>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-muted-foreground">用户</span>
+                  <span className="text-sm truncate ml-2">{actionKey.userEmail}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-muted-foreground">密钥</span>
+                  <span className="font-mono text-xs">{actionKey.keyPrefix}…{actionKey.keySuffix}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-muted-foreground">状态</span>
+                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${actionKey.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-muted text-muted-foreground'}`}>
+                    {actionKey.status === 'active' ? '活跃' : '已禁用'}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-muted-foreground">创建时间</span>
+                  <span className="text-sm">{formatTime(actionKey.createdAt)}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-muted-foreground">最近使用</span>
+                  <span className="text-sm">{formatTime(actionKey.lastUsedAt)}</span>
+                </div>
+              </div>
+
+              {actionKey.status === 'active' && (
+                <div className="pt-2 border-t">
+                  <Button
+                    variant="destructive"
+                    className="w-full"
+                    onClick={() => setRevokeTarget(actionKey)}
+                  >
+                    撤销密钥
+                  </Button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </BottomSheet>
 
       {/* 分页 */}
       <div className="flex items-center justify-between gap-4 px-1 py-1 text-sm">

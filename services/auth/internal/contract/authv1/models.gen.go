@@ -318,6 +318,42 @@ func (e VerifiedIdentityStatus) Valid() bool {
 	}
 }
 
+// Defines values for AuthAdminListUsersParamsStatus.
+const (
+	AuthAdminListUsersParamsStatusActive   AuthAdminListUsersParamsStatus = "active"
+	AuthAdminListUsersParamsStatusDisabled AuthAdminListUsersParamsStatus = "disabled"
+)
+
+// Valid indicates whether the value is a known member of the AuthAdminListUsersParamsStatus enum.
+func (e AuthAdminListUsersParamsStatus) Valid() bool {
+	switch e {
+	case AuthAdminListUsersParamsStatusActive:
+		return true
+	case AuthAdminListUsersParamsStatusDisabled:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AuthAdminListUsersParamsRole.
+const (
+	AuthAdminListUsersParamsRoleAdmin AuthAdminListUsersParamsRole = "admin"
+	AuthAdminListUsersParamsRoleUser  AuthAdminListUsersParamsRole = "user"
+)
+
+// Valid indicates whether the value is a known member of the AuthAdminListUsersParamsRole enum.
+func (e AuthAdminListUsersParamsRole) Valid() bool {
+	switch e {
+	case AuthAdminListUsersParamsRoleAdmin:
+		return true
+	case AuthAdminListUsersParamsRoleUser:
+		return true
+	default:
+		return false
+	}
+}
+
 // AdminApiKey Admin API key view (cross-user). Includes `user_id` for ownership.
 // Key secrets are never returned.
 type AdminApiKey struct {
@@ -562,10 +598,22 @@ type AuthAdminListKeysParams struct {
 // AuthAdminListUsersParams defines parameters for AuthAdminListUsers.
 type AuthAdminListUsersParams struct {
 	// Search Optional email substring filter.
-	Search   *string `form:"search,omitempty" json:"search,omitempty"`
-	Page     *int    `form:"page,omitempty" json:"page,omitempty"`
-	PageSize *int    `form:"pageSize,omitempty" json:"pageSize,omitempty"`
+	Search *string `form:"search,omitempty" json:"search,omitempty"`
+
+	// Status Optional status filter (active or disabled).
+	Status *AuthAdminListUsersParamsStatus `form:"status,omitempty" json:"status,omitempty"`
+
+	// Role Optional role filter (user or admin).
+	Role     *AuthAdminListUsersParamsRole `form:"role,omitempty" json:"role,omitempty"`
+	Page     *int                          `form:"page,omitempty" json:"page,omitempty"`
+	PageSize *int                          `form:"pageSize,omitempty" json:"pageSize,omitempty"`
 }
+
+// AuthAdminListUsersParamsStatus defines parameters for AuthAdminListUsers.
+type AuthAdminListUsersParamsStatus string
+
+// AuthAdminListUsersParamsRole defines parameters for AuthAdminListUsers.
+type AuthAdminListUsersParamsRole string
 
 // AuthAdminUpdateUserJSONRequestBody defines body for AuthAdminUpdateUser for application/json ContentType.
 type AuthAdminUpdateUserJSONRequestBody = AdminUpdateUserRequest

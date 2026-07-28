@@ -301,7 +301,7 @@ func (h *Handlers) AdminListUsers(w http.ResponseWriter, r *http.Request) {
 	}
 	bearer := bearerFromRequest(r)
 	q := r.URL.Query()
-	result, err := h.Auth.ListUsers(r.Context(), bearer, q.Get("search"),
+	result, err := h.Auth.ListUsers(r.Context(), bearer, q.Get("search"), q.Get("status"), q.Get("role"),
 		parsePositiveInt(q.Get("page"), 1), parsePositiveInt(q.Get("pageSize"), 20))
 	if err != nil {
 		h.handleAuthErr(w, err)
@@ -500,7 +500,7 @@ func (h *Handlers) AdminDashboardStats(w http.ResponseWriter, r *http.Request) {
 	var totalUsers int
 	if h.Auth != nil && h.Auth.Available() {
 		bearer := bearerFromRequest(r)
-		result, err := h.Auth.ListUsers(r.Context(), bearer, "", 1, 1)
+		result, err := h.Auth.ListUsers(r.Context(), bearer, "", "", "", 1, 1)
 		if err == nil {
 			totalUsers = result.Total
 		}

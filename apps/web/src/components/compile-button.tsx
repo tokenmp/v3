@@ -5,6 +5,7 @@ import { RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import { adminConfigApi } from '@/lib/api/admin';
 import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 
 /**
  * CompileButton publishes a new config snapshot via the Config Service
@@ -17,18 +18,31 @@ import { Button } from '@/components/ui/button';
  * is the explicit "make my changes live" action. Without it, /v1/models and
  * the routing table stay stale and there is no error surfaced.
  */
-export function CompileButton({ size = 'default' }: { size?: 'default' | 'sm' }) {
+export function CompileButton({
+  size = 'default',
+  className,
+}: {
+  size?: 'default' | 'sm';
+  className?: string;
+}) {
   const qc = useQueryClient();
   const compile = useMutation({
     mutationFn: () => adminConfigApi.compile(),
-    onSuccess: () => {
-      toast.success('已重新编译并发布 snapshot，约 10 秒后 executor 热加载生效');
+    onSuccess: (res) => {
+      const suffix = res.revision ? `（revision ${res.revision}）` : '';
+      toast.success(`已重新编译并发布 snapshot${suffix}，约 10 秒后 executor 热加载生效`);
       void qc.invalidateQueries();
     },
     onError: () => toast.error('编译失败，请检查配置'),
   });
   return (
-    <Button variant="default" size={size} onClick={() => compile.mutate()} disabled={compile.isPending}>
+    <Button
+      variant="default"
+      size={size}
+      className={cn(className)}
+      onClick={() => compile.mutate()}
+      disabled={compile.isPending}
+    >
       <RefreshCw className={`h-4 w-4 ${size === 'sm' ? '' : 'mr-1'} ${compile.isPending ? 'animate-spin' : ''}`} />
       {compile.isPending ? '编译中…' : '编译并发布'}
     </Button>

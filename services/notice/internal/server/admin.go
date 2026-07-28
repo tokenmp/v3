@@ -371,6 +371,10 @@ type adminSendNotificationBody struct {
 	Action *models.NotificationAction `json:"action,omitempty"`
 }
 
+// BroadcastUserID is the sentinel UUID used for broadcast notifications
+// (user_id column is NOT NULL, so we cannot use an empty string).
+const BroadcastUserID = "00000000-0000-0000-0000-000000000000"
+
 func (s *Server) handleAdminSendNotification(w http.ResponseWriter, r *http.Request) {
 	var body adminSendNotificationBody
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxAdminBodyBytes)).Decode(&body); err != nil {
@@ -385,12 +389,19 @@ func (s *Server) handleAdminSendNotification(w http.ResponseWriter, r *http.Requ
 		body.Type = "info"
 	}
 
+	// For broadcast notifications (no userId), use the sentinel UUID
+	// because user_id column is NOT NULL.
+	userID := body.UserID
+	if userID == "" {
+		userID = BroadcastUserID
+	}
+
 	// Async send: if userID is empty (broadcast), we insert a single row
 	// with user_id="" which clients can match as a broadcast. Otherwise we
 	// insert directly. This is a synchronous DB insert for now; a background
 	// worker queue can be layered in later without changing the API.
 	n := &models.Notification{
-		UserID: body.UserID,
+		UserID: userID,
 		Type:   body.Type,
 		Title:  body.Title,
 		Body:   body.Body,

@@ -104,11 +104,17 @@ type UpdateUserRequest struct {
 
 // ListUsers calls GET /api/v1/auth/admin/users on Auth, forwarding the
 // client Bearer token so Auth can verify role=admin.
-func (c *AuthClient) ListUsers(ctx context.Context, bearer, search string, page, pageSize int) (ListUsersResult, error) {
+func (c *AuthClient) ListUsers(ctx context.Context, bearer, search, status, role string, page, pageSize int) (ListUsersResult, error) {
 	var res ListUsersResult
 	q := url.Values{}
 	if search != "" {
 		q.Set("search", search)
+	}
+	if status != "" {
+		q.Set("status", status)
+	}
+	if role != "" {
+		q.Set("role", role)
 	}
 	q.Set("page", strconv.Itoa(page))
 	q.Set("pageSize", strconv.Itoa(pageSize))

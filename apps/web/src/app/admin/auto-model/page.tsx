@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowDown, ArrowUp, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { adminConfigApi } from '@/lib/api/admin';
-import { CompileButton } from '@/components/compile-button';
+import { PublishStatusHint } from '@/components/publish-status-hint';
 import {
   Table,
   TableBody,
@@ -26,7 +26,7 @@ import type { AdminModelConfig } from '@/types/admin';
  * ordered pool (Global.AutoModelIDs). Without an explicit config the
  * executor falls back to all active models sorted by ID — which is rarely
  * what an operator wants. This page lets admins pick which active models
- * join the auto pool and in what order, then publish via CompileButton.
+ * join the auto pool and in what order, then publish from System Settings.
  */
 export default function AdminAutoModelPage() {
   const qc = useQueryClient();
@@ -103,12 +103,12 @@ export default function AdminAutoModelPage() {
       <div className="flex items-center gap-2">
         <h1 className="text-lg font-semibold">Auto 模型</h1>
         <div className="ml-auto">
-          <CompileButton size="sm" />
+          <PublishStatusHint />
         </div>
       </div>
 
       <p className="text-sm text-muted-foreground">
-        客户端请求 <code className="rounded bg-muted px-1">model=auto</code> 时，executor 从下方已选模型池中按顺序选第一个可用的。拖动顺序或勾选模型，保存后点「编译并发布」生效。
+        客户端请求 <code className="rounded bg-muted px-1">model=auto</code> 时，executor 从下方已选模型池中按顺序选第一个可用的。拖动顺序或勾选模型，保存后到系统设置统一发布生效。
       </p>
 
       <div className="flex items-center gap-2">
@@ -128,7 +128,8 @@ export default function AdminAutoModelPage() {
       {loading ? (
         <div className="rounded-lg border p-8 text-center text-sm text-muted-foreground">加载中…</div>
       ) : (
-        <div className="rounded-lg border">
+        <>
+        <div className="hidden md:block rounded-lg border">
           <Table>
             <TableHeader>
               <TableRow>
@@ -192,6 +193,62 @@ export default function AdminAutoModelPage() {
             </TableBody>
           </Table>
         </div>
+
+        <div className="md:hidden space-y-3">
+          {allModels.length === 0 ? (
+            <p className="py-8 text-center text-sm text-muted-foreground">暂无模型</p>
+          ) : allModels.map((m: AdminModelConfig) => {
+            const inPool = selectedSet.has(m.id);
+            const orderIdx = inPool ? draft.indexOf(m.id) : -1;
+            return (
+              <div key={m.id} className={cn('rounded-lg border bg-card p-3 space-y-2', !inPool && 'opacity-60')}>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium truncate">{m.displayName}</p>
+                    <p className="font-mono text-[10px] text-muted-foreground truncate">{m.id}</p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={inPool}
+                    onChange={() => toggle(m.id)}
+                    className="h-4 w-4 rounded border-input"
+                  />
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  {(m.capabilities ?? []).join(', ') || '—'}
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-muted-foreground tabular-nums">
+                    序 {orderIdx >= 0 ? orderIdx + 1 : '—'}
+                  </span>
+                  {inPool && (
+                    <div className="flex gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 w-7 p-0"
+                        onClick={() => move(m.id, -1)}
+                        disabled={orderIdx === 0}
+                      >
+                        <ArrowUp className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 w-7 p-0"
+                        onClick={() => move(m.id, 1)}
+                        disabled={orderIdx === draft.length - 1}
+                      >
+                        <ArrowDown className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        </>
       )}
     </div>
   );

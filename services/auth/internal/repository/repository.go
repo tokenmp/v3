@@ -135,14 +135,20 @@ func (r *UserRepository) FindByID(ctx context.Context, id string) (*models.User,
 	return &u, nil
 }
 
-// ListAll returns a paginated list of users optionally filtered by an email
-// substring. The search is applied as a case-insensitive ILIKE on email.
-// Results are ordered by created_at descending. total is the count before
-// pagination.
-func (r *UserRepository) ListAll(ctx context.Context, search string, limit, offset int) ([]models.User, int, error) {
+// ListAll returns a paginated list of users optionally filtered by email
+// substring, status, and role. The search is applied as a case-insensitive
+// ILIKE on email. Results are ordered by created_at descending. total is
+// the count before pagination.
+func (r *UserRepository) ListAll(ctx context.Context, search string, status string, role string, limit, offset int) ([]models.User, int, error) {
 	tx := withTx(ctx, r.db).Model(&models.User{})
 	if search != "" {
 		tx = tx.Where("email ILIKE ?", "%"+search+"%")
+	}
+	if status != "" {
+		tx = tx.Where("status = ?", status)
+	}
+	if role != "" {
+		tx = tx.Where("role = ?", role)
 	}
 	var total int64
 	if err := tx.Count(&total).Error; err != nil {

@@ -6,7 +6,6 @@ import { useMutation } from '@tanstack/react-query';
 import { Sun, Moon, ChevronDown, KeyRound, Laptop, LogOut, ChevronRight, ArrowLeft } from 'lucide-react';
 import { toast } from 'sonner';
 import { TokenMPLogoMark } from '@/components/tokenmp-logo';
-import { AdminMobileNav } from '@/components/admin-mobile-nav';
 import { useTheme } from '@/components/theme-provider';
 import { useAuthStore } from '@/lib/auth';
 import { authApi } from '@/lib/api/auth';
@@ -53,9 +52,8 @@ export function AdminHeader() {
 
   return (
     <header className="flex h-16 items-center justify-between border-b bg-card px-4 sm:px-6">
-      {/* Left: mobile nav + logo (mobile) + breadcrumb */}
+      {/* Left: logo (mobile) + breadcrumb */}
       <div className="flex items-center gap-2 min-w-0">
-        <AdminMobileNav />
         <div className="md:hidden">
           <TokenMPLogoMark className="h-7 w-7" />
         </div>

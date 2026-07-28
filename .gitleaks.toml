@@ -1,0 +1,10 @@
+title = "TokenMP v3 gitleaks config"
+
+[[allowlists]]
+description = "Allow documented dummy API key used only by Playwright test fixtures"
+paths = [
+  '''e2e/utils/test-utils\.ts''',
+]
+regexes = [
+  '''sk-test123456789''',
+]

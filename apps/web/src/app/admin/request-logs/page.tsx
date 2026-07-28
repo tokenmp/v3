@@ -82,7 +82,7 @@ export default function AdminRequestLogsPage() {
       </div>
 
       {/* 表格 */}
-      <div className="rounded-md border border-border bg-card">
+      <div className="hidden md:block rounded-md border border-border bg-card">
         <div className="overflow-x-auto">
           <Table>
             <TableHeader>
@@ -148,6 +148,33 @@ export default function AdminRequestLogsPage() {
             </TableBody>
           </Table>
         </div>
+      </div>
+
+      {/* Mobile card list */}
+      <div className="md:hidden space-y-3">
+        {filtered.map((log) => (
+          <Link
+            key={log.requestId}
+            href={`/admin/request-logs/${log.requestId}`}
+            className="block rounded-lg border bg-card p-3 hover:bg-accent/50 transition-colors"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-sm font-medium truncate">{log.model || '—'}</span>
+              <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${log.status === 'success' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                {log.status === 'success' ? '成功' : '失败'}
+              </span>
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground truncate">{formatUser(log)}</p>
+            <div className="mt-2 flex items-center justify-between text-xs text-muted-foreground">
+              <span>{log.durationMs ?? '—'}ms</span>
+              <span className="tabular-nums">{(log.inputTokens ?? 0).toLocaleString()} / {(log.outputTokens ?? 0).toLocaleString()}</span>
+            </div>
+            <p className="mt-1 text-[10px] text-muted-foreground">{formatTime(log.createdAt)}</p>
+          </Link>
+        ))}
+        {filtered.length === 0 && (
+          <p className="py-8 text-center text-sm text-muted-foreground">暂无请求记录</p>
+        )}
       </div>
 
       {/* 分页 */}

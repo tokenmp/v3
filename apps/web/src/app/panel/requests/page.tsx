@@ -39,8 +39,6 @@ export default function RequestsPage() {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-lg font-semibold">请求日志</h1>
-
       {/* 工具栏：搜索框左 + 筛选 chip 右 */}
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex flex-1 items-center gap-2">
@@ -60,7 +58,7 @@ export default function RequestsPage() {
       </div>
 
       {/* 表格 */}
-      <div className="rounded-md border border-border bg-card">
+      <div className="hidden md:block rounded-md border border-border bg-card">
         <div className="overflow-x-auto">
           <Table>
             <TableHeader>
@@ -98,6 +96,28 @@ export default function RequestsPage() {
             </TableBody>
           </Table>
         </div>
+      </div>
+
+      {/* Mobile card list */}
+      <div className="md:hidden space-y-3">
+        {filtered.map((r: RequestLog) => (
+          <div key={r.requestId} className="rounded-lg border bg-card p-3 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-sm font-medium truncate">{r.model || '—'}</span>
+              <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${r.status === 'success' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                {r.status === 'success' ? '成功' : '失败'}
+              </span>
+            </div>
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span>{r.durationMs ?? '—'}ms</span>
+              <span className="tabular-nums">{(r.inputTokens ?? 0).toLocaleString()} / {(r.outputTokens ?? 0).toLocaleString()}</span>
+            </div>
+            <p className="text-[10px] text-muted-foreground">{formatTime(r.createdAt)}</p>
+          </div>
+        ))}
+        {filtered.length === 0 && (
+          <p className="py-8 text-center text-sm text-muted-foreground">暂无请求记录</p>
+        )}
       </div>
 
       {/* 分页 */}

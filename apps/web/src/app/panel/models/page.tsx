@@ -68,40 +68,67 @@ export default function PanelModelsPage() {
       ) : models.length === 0 ? (
         <div className="rounded-lg border p-8 text-center text-sm text-muted-foreground">暂无可用模型</div>
       ) : (
-        <div className="rounded-lg border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>模型 ID</TableHead>
-                <TableHead>能力</TableHead>
-                <TableHead>思考</TableHead>
-                <TableHead>提供方</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {models.map((m) => (
-                <TableRow key={m.id}>
-                  <TableCell className="font-mono text-xs">{m.id}</TableCell>
-                  <TableCell>
-                    <div className="flex flex-wrap gap-1">
-                      {(m.capabilities ?? []).map((cap) => (
-                        <Badge key={cap} variant="secondary" className="text-xs">
-                          {CAP_LABEL[cap] ?? cap}
-                        </Badge>
-                      ))}
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
-                    {m.thinking?.supported
-                      ? `支持（${m.thinking.default_effort ?? 'medium'} / ${m.thinking.max_effort ?? 'high'}）`
-                      : '不支持'}
-                  </TableCell>
-                  <TableCell className="text-xs text-muted-foreground">{m.owned_by ?? '—'}</TableCell>
+        <>
+          {/* Desktop table */}
+          <div className="hidden md:block rounded-lg border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>模型 ID</TableHead>
+                  <TableHead>能力</TableHead>
+                  <TableHead>思考</TableHead>
+                  <TableHead>提供方</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
+              </TableHeader>
+              <TableBody>
+                {models.map((m) => (
+                  <TableRow key={m.id}>
+                    <TableCell className="font-mono text-xs">{m.id}</TableCell>
+                    <TableCell>
+                      <div className="flex flex-wrap gap-1">
+                        {(m.capabilities ?? []).map((cap) => (
+                          <Badge key={cap} variant="secondary" className="text-xs">
+                            {CAP_LABEL[cap] ?? cap}
+                          </Badge>
+                        ))}
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {m.thinking?.supported
+                        ? `支持（${m.thinking.default_effort ?? 'medium'} / ${m.thinking.max_effort ?? 'high'}）`
+                        : '不支持'}
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground">{m.owned_by ?? '—'}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+
+          {/* Mobile card list */}
+          <div className="md:hidden space-y-3">
+            {models.map((m) => (
+              <div key={m.id} className="rounded-lg border bg-card p-3 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-mono text-xs font-medium truncate">{m.id}</span>
+                  <span className="text-xs text-muted-foreground shrink-0">{m.owned_by ?? '—'}</span>
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {(m.capabilities ?? []).map((cap) => (
+                    <Badge key={cap} variant="secondary" className="text-[10px]">
+                      {CAP_LABEL[cap] ?? cap}
+                    </Badge>
+                  ))}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {m.thinking?.supported
+                    ? `思考：${m.thinking.default_effort ?? 'medium'} / ${m.thinking.max_effort ?? 'high'}`
+                    : '不支持思考'}
+                </p>
+              </div>
+            ))}
+          </div>
+        </>
       )}
     </div>
   );

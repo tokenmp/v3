@@ -17,7 +17,7 @@ import {
   TabField,
   TextField,
 } from '@/components/ui/field';
-import { CompileButton } from '@/components/compile-button';
+import { PublishStatusHint } from '@/components/publish-status-hint';
 import {
   Table,
   TableBody,
@@ -111,7 +111,7 @@ export default function AdminProvidersPage() {
   const deleteMutation = useMutation({
     mutationFn: (id: string) => adminConfigApi.deleteProvider(id),
     onSuccess: () => {
-      toast.success('已删除 Provider');
+      toast.success('已删除 Provider（需点编译并发布生效）');
       void queryClient.invalidateQueries({ queryKey: ['admin', 'providers'] });
     },
     onError: (e: unknown) => {
@@ -129,7 +129,7 @@ export default function AdminProvidersPage() {
       <div className="flex items-center gap-2">
         <h1 className="text-lg font-semibold">Provider 管理</h1>
         <div className="ml-auto">
-          <CompileButton size="sm" />
+          <PublishStatusHint />
         </div>
       </div>
 
@@ -166,7 +166,7 @@ export default function AdminProvidersPage() {
       </div>
 
       {/* Table */}
-      <div className="rounded-md border border-border bg-card">
+      <div className="hidden md:block rounded-md border border-border bg-card">
         <div className="overflow-x-auto">
           <Table>
             <TableHeader>
@@ -244,6 +244,38 @@ export default function AdminProvidersPage() {
             </TableBody>
           </Table>
         </div>
+      </div>
+
+      {/* Mobile cards */}
+      <div className="md:hidden space-y-3">
+        {isLoading ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">加载中…</p>
+        ) : filtered.length === 0 ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">暂无 Provider</p>
+        ) : (
+          filtered.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              onClick={() => setEditItem(p)}
+              className="w-full text-left rounded-lg border bg-card p-3 space-y-2 active:bg-accent/50 transition-colors"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium truncate font-mono">{p.name}</p>
+                  <p className="text-xs text-muted-foreground truncate">{p.displayLabel || '-'}</p>
+                </div>
+                <StatusBadge status={p.status} />
+              </div>
+              <p className="font-mono text-[10px] text-muted-foreground truncate" title={p.baseURL}>
+                {p.baseURL}
+              </p>
+              <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                {p.sdkKind}
+              </span>
+            </button>
+          ))
+        )}
       </div>
 
       {createOpen ? (
@@ -559,7 +591,7 @@ function EndpointsModal({
   const deleteMutation = useMutation({
     mutationFn: (id: number) => adminConfigApi.deleteEndpoint(id),
     onSuccess: () => {
-      toast.success('已删除端点');
+      toast.success('已删除端点（需点编译并发布生效）');
       void queryClient.invalidateQueries({ queryKey: ['admin', 'provider-endpoints', provider.id] });
     },
     onError: (e: unknown) => {
