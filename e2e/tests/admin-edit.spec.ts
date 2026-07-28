@@ -150,10 +150,17 @@ test.describe('Admin 后台 - 套餐管理', () => {
     await page.waitForTimeout(500);
     
     await page.locator('input[placeholder="套餐名称"]').fill('E2E测试套餐');
+    
+    // 选择套餐类型
+    const typeSelect = page.locator('select');
+    if (await typeSelect.isVisible()) {
+      await typeSelect.selectOption('token');
+    }
+    
     await page.locator('input[placeholder*="1000"]').first().fill('99');
     await page.locator('input[placeholder*="500000"]').first().fill('1000000');
     
-    await page.getByRole('button', { name: '保存' }).click({ force: true });
+    await page.getByRole('button', { name: /创建|保存/ }).click({ force: true });
     await page.waitForTimeout(2000);
     
     await expect(page.getByText('E2E测试套餐').first()).toBeVisible({ timeout: 5000 });

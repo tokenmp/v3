@@ -62,6 +62,17 @@ func (r *GormRepository) ListAllUserPlans(ctx context.Context, limit, offset int
 	return ups, int(total), nil
 }
 
+// EnsureUser creates a user row if it does not already exist. This is
+// needed when assigning a plan to a user who was created in Auth but not
+// yet synced to Billing.
+func (r *GormRepository) EnsureUser(ctx context.Context, userID string) error {
+	const q = `INSERT INTO users (id, status) VALUES (?, 'active') ON CONFLICT (id) DO NOTHING`
+	if err := r.db.WithContext(ctx).Exec(q, userID).Error; err != nil {
+		return ErrInsertFailed
+	}
+	return nil
+}
+
 // AssignUserPlan creates a new active user_plan binding.
 func (r *GormRepository) AssignUserPlan(ctx context.Context, up *UserPlan) error {
 	if up.Status == "" {
@@ -74,6 +85,11 @@ func (r *GormRepository) AssignUserPlan(ctx context.Context, up *UserPlan) error
 			return ErrNotFound
 		}
 		up.PlanType = p.PlanType
+	}
+	// Ensure the user exists in the billing users table before inserting
+	// the user_plan row (foreign key constraint).
+	if err := r.EnsureUser(ctx, up.UserID); err != nil {
+		return err
 	}
 	if err := r.db.WithContext(ctx).Create(up).Error; err != nil {
 		return ErrInsertFailed

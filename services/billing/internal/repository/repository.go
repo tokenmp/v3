@@ -285,6 +285,11 @@ ON CONFLICT (idempotency_key) DO NOTHING`
 // DO NOTHING, so no duplicate rows are created.
 func (r *GormRepository) Reserve(ctx context.Context, reservationID, userID, requestID, billingPlan string, reservedReqs int, reservedTokens int64, expiresAt *time.Time) error {
 	now := time.Now().UTC()
+	// Ensure the user exists in the billing users table before inserting
+	// the reservation row (foreign key constraint).
+	if err := r.EnsureUser(ctx, userID); err != nil {
+		return err
+	}
 	tx := r.db.WithContext(ctx).Begin()
 	if tx.Error != nil {
 		return ErrInsertFailed
