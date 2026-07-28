@@ -355,12 +355,13 @@ func (r *APIKeyRepository) FindByHash(ctx context.Context, hash []byte) (*models
 	return &key, nil
 }
 
-// ListByUser returns all non-revoked API keys for a user, newest first.
-// Disabled keys remain visible to their owner for lifecycle management.
+// ListByUser returns all active API keys for a user, newest first. A deleted
+// (disabled) key is hidden from its owner — deletion is final from the user's
+// perspective. Admin views use ListAll to see disabled keys too.
 func (r *APIKeyRepository) ListByUser(ctx context.Context, userID string) ([]models.APIKey, error) {
 	var keys []models.APIKey
 	if err := withTx(ctx, r.db).
-		Where("user_id = ? AND status <> ?", userID, "revoked").
+		Where("user_id = ? AND status = ?", userID, "active").
 		Order("created_at DESC").
 		Find(&keys).Error; err != nil {
 		return nil, classify(err)
