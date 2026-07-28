@@ -106,7 +106,7 @@ func (a *StrictAdapter) AuthVerifyKey(ctx context.Context, req authv1.AuthVerify
 		}, nil
 	}
 
-	hash, err := apikey.Hash(req.Body.ApiKey)
+	hashes, err := apikey.HashCandidates(req.Body.ApiKey)
 	if err != nil {
 		// Malformed key — same response as invalid to avoid enumeration.
 		return authv1.AuthVerifyKey401JSONResponse{
@@ -115,9 +115,19 @@ func (a *StrictAdapter) AuthVerifyKey(ctx context.Context, req authv1.AuthVerify
 		}, nil
 	}
 
-	vk, err := a.keyVerifier.VerifyByKey(ctx, hash)
-	if err != nil {
-		if errors.Is(err, errKeyNotFound) || errors.Is(err, errKeyDisabled) {
+	var vk VerifiedKey
+	var verifyErr error
+	for _, hash := range hashes {
+		vk, verifyErr = a.keyVerifier.VerifyByKey(ctx, hash)
+		if verifyErr == nil {
+			break
+		}
+		if !errors.Is(verifyErr, errKeyNotFound) {
+			break
+		}
+	}
+	if verifyErr != nil {
+		if errors.Is(verifyErr, errKeyNotFound) || errors.Is(verifyErr, errKeyDisabled) {
 			return authv1.AuthVerifyKey401JSONResponse{
 				Body:    errResp(authv1.Unauthorized, "invalid or expired key"),
 				Headers: authv1.AuthVerifyKey401ResponseHeaders(errHeaders()),

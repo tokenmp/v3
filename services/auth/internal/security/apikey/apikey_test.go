@@ -93,3 +93,32 @@ func TestHash_Malformed(t *testing.T) {
 		})
 	}
 }
+
+func TestHashCandidates_LegacySKKey(t *testing.T) {
+	t.Setenv("AUTH_LEGACY_API_KEY_PEPPER", "pepper")
+	key := "sk-legacy-tokenmp-key"
+	hashes, err := HashCandidates(key)
+	if err != nil {
+		t.Fatalf("HashCandidates legacy: %v", err)
+	}
+	if len(hashes) != 2 {
+		t.Fatalf("len(hashes) = %d, want 2", len(hashes))
+	}
+	if !bytes.Equal(hashes[0], hashFullKey(key)) {
+		t.Error("first candidate should be unpeppered SHA-256")
+	}
+	if !bytes.Equal(hashes[1], hashPepperedKey("pepper", key)) {
+		t.Error("second candidate should be legacy peppered SHA-256")
+	}
+}
+
+func TestHashCandidates_RejectMalformedLegacy(t *testing.T) {
+	for _, key := range []string{"sk-", "sk-bad\nkey", "other_key"} {
+		t.Run(key, func(t *testing.T) {
+			_, err := HashCandidates(key)
+			if !errors.Is(err, ErrMalformedKey) {
+				t.Errorf("HashCandidates(%q) error = %v, want ErrMalformedKey", key, err)
+			}
+		})
+	}
+}

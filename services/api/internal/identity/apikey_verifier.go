@@ -12,11 +12,16 @@ import (
 	"github.com/tokenmp/v3/packages/go/httpresp"
 )
 
-// APIKeyPrefix is the prefix that identifies an API key (vs a JWT).
-const APIKeyPrefix = "tmp_"
+// API key prefixes that identify opaque API keys (vs a JWT). tmp_ is the V3
+// format; sk- is the legacy TokenMP prod format accepted during migration.
+const (
+	APIKeyPrefix       = "tmp_"
+	LegacyAPIKeyPrefix = "sk-"
+)
 
 // APIKeyVerifier verifies API keys by calling the Auth service's verify-key
-// endpoint. It is used when the Bearer token starts with "tmp_".
+// endpoint. It is used when the Bearer token starts with a supported API-key
+// prefix.
 type APIKeyVerifier struct {
 	authURL string
 	http    *http.Client
@@ -89,7 +94,7 @@ func NewCompositeVerifier(jwt Verifier, apiKey *APIKeyVerifier) Verifier {
 }
 
 func (c *compositeVerifier) Verify(ctx context.Context, token string) (Claims, error) {
-	if strings.HasPrefix(token, APIKeyPrefix) {
+	if strings.HasPrefix(token, APIKeyPrefix) || strings.HasPrefix(token, LegacyAPIKeyPrefix) {
 		return c.apiKey.Verify(ctx, token)
 	}
 	return c.jwt.Verify(ctx, token)

@@ -10,7 +10,9 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
+	"os"
 	"strings"
+	"unicode/utf8"
 )
 
 // PrefixMarker distinguishes Auth API keys from refresh tokens and other
@@ -48,14 +50,31 @@ func Generate() (fullKey string, hash []byte, err error) {
 // Hash validates a complete API key and returns SHA-256 of its full string.
 // Invalid input is rejected before any repository lookup.
 func Hash(fullKey string) ([]byte, error) {
-	if !strings.HasPrefix(fullKey, PrefixMarker) {
-		return nil, ErrMalformedKey
-	}
-	raw, err := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(fullKey, PrefixMarker))
-	if err != nil || len(raw) != TokenLength {
-		return nil, ErrMalformedKey
+	if err := validateGeneratedKey(fullKey); err != nil {
+		return nil, err
 	}
 	return hashFullKey(fullKey), nil
+}
+
+// HashCandidates returns all safe hash candidates for a supplied API key.
+//
+// V3 keys use the strict tmp_ format and are stored as SHA-256(raw key). Legacy
+// TokenMP prod keys used sk-* strings and stored SHA-256(API_KEY_PEPPER + raw
+// key). During prod data migration we need verify-key to accept both shapes.
+// The legacy pepper is read from AUTH_LEGACY_API_KEY_PEPPER, with API_KEY_PEPPER
+// as a compatibility fallback for ops migrations.
+func HashCandidates(fullKey string) ([][]byte, error) {
+	if err := validateGeneratedKey(fullKey); err == nil {
+		return [][]byte{hashFullKey(fullKey)}, nil
+	}
+	if !validLegacyKey(fullKey) {
+		return nil, ErrMalformedKey
+	}
+	candidates := [][]byte{hashFullKey(fullKey)}
+	if pepper := legacyPepper(); pepper != "" {
+		candidates = append(candidates, hashPepperedKey(pepper, fullKey))
+	}
+	return candidates, nil
 }
 
 // Prefix returns the first 12 characters for display. It never validates or
@@ -75,7 +94,42 @@ func Suffix(fullKey string) string {
 	return fullKey[len(fullKey)-suffixLength:]
 }
 
+func validateGeneratedKey(fullKey string) error {
+	if !strings.HasPrefix(fullKey, PrefixMarker) {
+		return ErrMalformedKey
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(fullKey, PrefixMarker))
+	if err != nil || len(raw) != TokenLength {
+		return ErrMalformedKey
+	}
+	return nil
+}
+
+func validLegacyKey(fullKey string) bool {
+	if !strings.HasPrefix(fullKey, "sk-") || len(fullKey) <= len("sk-") || len(fullKey) > 512 || !utf8.ValidString(fullKey) {
+		return false
+	}
+	for _, r := range fullKey {
+		if r < 0x21 || r > 0x7e {
+			return false
+		}
+	}
+	return true
+}
+
+func legacyPepper() string {
+	if v := os.Getenv("AUTH_LEGACY_API_KEY_PEPPER"); v != "" {
+		return v
+	}
+	return os.Getenv("API_KEY_PEPPER")
+}
+
 func hashFullKey(fullKey string) []byte {
 	hash := sha256.Sum256([]byte(fullKey))
+	return hash[:]
+}
+
+func hashPepperedKey(pepper, fullKey string) []byte {
+	hash := sha256.Sum256([]byte(pepper + fullKey))
 	return hash[:]
 }
