@@ -153,6 +153,7 @@ function AttemptNode({ a, isLast }: { a: RequestLogAttempt; isLast: boolean }) {
   const retryClassified = a.retryClassified ?? a.retry_classified;
   const metadata = a.metadata as Record<string, string> | undefined;
   const upstreamMessage = metadata?.upstream_message ?? metadata?.upstreamMessage;
+  const retryStop = metadata?.retry_stop ?? metadata?.retryStop;
   const createdAt = a.created_at ?? a.createdAt;
 
   return (
@@ -193,8 +194,10 @@ function AttemptNode({ a, isLast }: { a: RequestLogAttempt; isLast: boolean }) {
         )}
         {errorCode ? <span className="text-destructive">err: {String(errorCode)}</span> : null}
         {errorType && errorType !== errorCode ? <span>type: {String(errorType)}</span> : null}
-        {retryClassified ? (
-          <Badge variant="outline" className="text-[10px] py-0 px-1.5">重试: {retryStopLabel(String(retryClassified))}</Badge>
+        {retryStop ? (
+          <Badge variant="outline" className="text-[10px] py-0 px-1.5">重试: {retryStopLabel(String(retryStop))}</Badge>
+        ) : retryClassified ? (
+          <Badge variant="outline" className="text-[10px] py-0 px-1.5">重试: {String(retryClassified)}</Badge>
         ) : null}
         {createdAt ? <span>{formatTime(String(createdAt))}</span> : null}
       </div>
