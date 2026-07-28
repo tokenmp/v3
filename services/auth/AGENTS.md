@@ -116,7 +116,7 @@ go test -tags=integration -race ./test/integration/...
 - 允许访问：自身 module、`tokenmp_auth` 数据库、公开依赖（chi、gorm、pgx 驱动）。
 - 禁止访问：其他服务的私有源码或私有数据库；其他服务的 migration。
 - 数据所有权：`tokenmp_auth` 数据库中的 `users`、`auth_sessions` 与 `api_keys` 表，由本服务独占；`api_keys` 统一取代旧版重叠的 `api_keys`、`user_api_keys` 与 `bot_keys`，只存 API key 的 SHA-256 hash。
-- Legacy API Key 兼容：V3 与 prod 都使用 `sk-` 前缀。新 V3 key hash 为 `sha256(rawKey)`，旧 prod key hash 为 `sha256(API_KEY_PEPPER + rawKey)`。`apikey.HashCandidates` 对任何合法 `sk-` key 返回 unpeppered 与（若配置 pepper）peppered hash 候选，逐个查库。运行时需注入 `AUTH_LEGACY_API_KEY_PEPPER`（回退 `API_KEY_PEPPER`）以匹配 prod 迁移过来的旧 key；未配置时旧 prod key 只能匹配已改写为 unpeppered hash 的记录，其余会 401。新 V3 key 不受影响（无 pepper 时只走 unpeppered 候选）。部署侧需用私有 env 文件（如 `.agents/local.md` 记录的路径，600 权限）注入该 pepper，不得提交明文。
+- Legacy API Key 兼容：V3 与 prod 都使用 `sk-` 前缀。新 V3 key 由 32 字节随机熵经 base62（`0-9A-Za-z`，43 字符）编码，hash 为 `sha256(rawKey)`；旧 prod key 为 base64url payload（含 `-_`），hash 为 `sha256(API_KEY_PEPPER + rawKey)`。`apikey.HashCandidates` 对任何合法 `sk-` key 返回 unpeppered 与（若配置 pepper）peppered hash 候选，逐个查库。运行时需注入 `AUTH_LEGACY_API_KEY_PEPPER`（回退 `API_KEY_PEPPER`）以匹配 prod 迁移过来的旧 key；未配置时旧 prod key 只能匹配已改写为 unpeppered hash 的记录，其余会 401。新 V3 key 不受影响（无 pepper 时只走 unpeppered 候选）。部署侧需用私有 env 文件（如 `.agents/local.md` 记录的路径，600 权限）注入该 pepper，不得提交明文。
 - 配置和环境变量：仅 `AUTH_*`（见 README 表格）；`AUTH_DATABASE_URL` 必填，严格解析
   （仅 postgres/postgresql、必有 host、非空 user、path 精确 `tokenmp_auth`）；
   所有 `AUTH_DB_MAX_*` / lifetime / shutdown timeout 非法值 fail-fast，不静默 fallback；

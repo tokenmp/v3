@@ -1,19 +1,19 @@
 // Package apikey generates and hashes opaque Auth API keys.
 //
-// An API key is "sk-" followed by 32 crypto/rand bytes encoded as base64url
-// without padding. PostgreSQL stores only SHA-256 of the complete key string;
-// the complete key is returned to its caller only at creation time.
+// An API key is "sk-" followed by 43 base62 characters (0-9A-Za-z) encoding
+// 32 crypto/rand bytes. PostgreSQL stores only SHA-256 of the complete key
+// string; the complete key is returned to its caller only at creation time.
 //
-// Legacy TokenMP prod keys also used the "sk-" prefix but without the strict
-// 32-byte base64url payload, and were hashed as SHA-256(pepper + rawKey).
-// HashCandidates therefore accepts both shapes by returning unpeppered and
-// peppered hash candidates for any valid sk- key.
+// Legacy TokenMP prod keys also used the "sk-" prefix but with a different
+// payload encoding (base64url, containing - and _), and were hashed as
+// SHA-256(API_KEY_PEPPER + rawKey). HashCandidates therefore accepts both
+// shapes by returning unpeppered and peppered hash candidates for any valid
+// sk- key.
 package apikey
 
 import (
 	"crypto/rand"
 	"crypto/sha256"
-	"encoding/base64"
 	"errors"
 	"os"
 	"strings"
@@ -24,13 +24,20 @@ import (
 // opaque credentials.
 const PrefixMarker = "sk-"
 
-// TokenLength is the number of random bytes encoded after PrefixMarker.
+// TokenLength is the number of random bytes of entropy encoded after
+// PrefixMarker.
 const TokenLength = 32
+
+// EncodedLength is the number of base62 characters produced from TokenLength
+// bytes: ceil(256 / log2(62)) = 43.
+const EncodedLength = 43
 
 const (
 	prefixLength = 12
 	suffixLength = 4
 )
+
+const alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 
 var (
 	// ErrGenerate indicates crypto/rand failed to provide API-key entropy.
@@ -43,17 +50,17 @@ var (
 // Generate creates a new API key and its SHA-256 hash. The full key must be
 // returned only once to the caller and must never be persisted or logged.
 func Generate() (fullKey string, hash []byte, err error) {
-	raw := make([]byte, TokenLength)
-	if _, err := rand.Read(raw); err != nil {
-		return "", nil, ErrGenerate
+	payload, err := randomBase62(EncodedLength)
+	if err != nil {
+		return "", nil, err
 	}
-	fullKey = PrefixMarker + base64.RawURLEncoding.EncodeToString(raw)
+	fullKey = PrefixMarker + payload
 	return fullKey, hashFullKey(fullKey), nil
 }
 
-// Hash validates a V3 API key (sk- + 32-byte base64url payload) and returns
-// SHA-256 of its full string. It does not accept legacy prod keys; use
-// HashCandidates for verify-key. Invalid input is rejected before any lookup.
+// Hash validates a V3 API key (sk- + 43 base62 chars) and returns SHA-256 of
+// its full string. It does not accept legacy prod keys; use HashCandidates
+// for verify-key. Invalid input is rejected before any lookup.
 func Hash(fullKey string) ([]byte, error) {
 	if err := validateGeneratedKey(fullKey); err != nil {
 		return nil, err
@@ -63,11 +70,11 @@ func Hash(fullKey string) ([]byte, error) {
 
 // HashCandidates returns all safe hash candidates for a supplied API key.
 //
-// V3 keys use sk- + 32-byte base64url payload and are stored as
-// SHA-256(raw key). Legacy TokenMP prod keys also used sk-* strings but were
-// stored as SHA-256(API_KEY_PEPPER + raw key). Since both share the sk- prefix,
-// any valid sk- key returns both unpeppered and (when pepper is configured)
-// peppered candidates, and the repository resolves the first match.
+// V3 keys use sk- + base62 payload and are stored as SHA-256(raw key). Legacy
+// TokenMP prod keys also used sk-* strings but were stored as
+// SHA-256(API_KEY_PEPPER + raw key). Since both share the sk- prefix, any valid
+// sk- key returns both unpeppered and (when pepper is configured) peppered
+// candidates, and the repository resolves the first match.
 // The legacy pepper is read from AUTH_LEGACY_API_KEY_PEPPER, with API_KEY_PEPPER
 // as a compatibility fallback for ops migrations.
 func HashCandidates(fullKey string) ([][]byte, error) {
@@ -98,15 +105,20 @@ func Suffix(fullKey string) string {
 	return fullKey[len(fullKey)-suffixLength:]
 }
 
-// validateGeneratedKey validates the strict V3 format: sk- + base64url payload
-// decoding to exactly TokenLength bytes.
+// validateGeneratedKey validates the strict V3 format: sk- + exactly
+// EncodedLength base62 characters.
 func validateGeneratedKey(fullKey string) error {
 	if !strings.HasPrefix(fullKey, PrefixMarker) {
 		return ErrMalformedKey
 	}
-	raw, err := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(fullKey, PrefixMarker))
-	if err != nil || len(raw) != TokenLength {
+	payload := fullKey[len(PrefixMarker):]
+	if len(payload) != EncodedLength {
 		return ErrMalformedKey
+	}
+	for i := 0; i < len(payload); i++ {
+		if !isBase62(payload[i]) {
+			return ErrMalformedKey
+		}
 	}
 	return nil
 }
@@ -124,6 +136,33 @@ func validSKKey(fullKey string) bool {
 		}
 	}
 	return true
+}
+
+// randomBase62 returns n base62 characters using rejection sampling to avoid
+// modulo bias: a byte >= 248 (256 - 256%62) is discarded.
+func randomBase62(n int) (string, error) {
+	const maxByte = byte(256 - 256%len(alphabet)) // 248
+	buf := make([]byte, 0, n)
+	randBuf := make([]byte, n+8)
+	for len(buf) < n {
+		if _, err := rand.Read(randBuf); err != nil {
+			return "", ErrGenerate
+		}
+		for _, b := range randBuf {
+			if b >= maxByte {
+				continue
+			}
+			buf = append(buf, alphabet[int(b)%len(alphabet)])
+			if len(buf) == n {
+				break
+			}
+		}
+	}
+	return string(buf), nil
+}
+
+func isBase62(c byte) bool {
+	return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
 }
 
 func legacyPepper() string {

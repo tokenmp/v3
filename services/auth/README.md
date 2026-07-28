@@ -42,7 +42,7 @@ Implemented:
   no trim/NFKC)
 - `internal/security/refresh`: 32-byte base64url refresh token generation +
   SHA-256 hashing
-- `internal/security/apikey`: `sk-`-prefixed 32-byte base64url API key
+- `internal/security/apikey`: `sk-`-prefixed 43-char base62 (0-9A-Za-z) API key encoding 32 random bytes
   generation + SHA-256 hashing; plaintext keys are never persisted
 - `internal/repository`: GORM user/session/API-key repos + `TxRunner`;
   classified errors (`ErrDuplicateEmail` / `ErrNotFound` / `ErrConstraint` /
