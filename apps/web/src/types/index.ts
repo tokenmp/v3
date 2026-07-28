@@ -52,7 +52,7 @@ export interface ApiErrorBody {
 // camelCase matches the contract field names exactly. The mock layer returns
 // the same shape so swapping to the real API is transparent to components.
 
-export type ApiKeyStatus = 'active' | 'disabled';
+export type ApiKeyStatus = 'active' | 'disabled' | 'revoked';
 
 export interface ApiKey {
   id: string;

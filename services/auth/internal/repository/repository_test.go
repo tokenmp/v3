@@ -216,6 +216,31 @@ func TestAPIKeyRepository_Flow(t *testing.T) {
 		t.Fatalf("ListByUser = %+v, want only key %s", listed, key.ID)
 	}
 
+	// A disabled (deleted) key must be hidden from the user's own list.
+	disabledFull, disabledHash, err := apikey.Generate()
+	if err != nil {
+		t.Fatalf("apikey.Generate disabled: %v", err)
+	}
+	disabledKey := &models.APIKey{
+		UserID:    user.ID,
+		Name:      "disabled-key",
+		KeyHash:   disabledHash,
+		KeyPrefix: apikey.Prefix(disabledFull),
+		KeySuffix: apikey.Suffix(disabledFull),
+		Role:      models.RoleUser,
+		Status:    "disabled",
+	}
+	if err := keys.Create(ctx, disabledKey); err != nil {
+		t.Fatalf("Create disabled-key: %v", err)
+	}
+	listed, err = keys.ListByUser(ctx, user.ID)
+	if err != nil {
+		t.Fatalf("ListByUser after disable: %v", err)
+	}
+	if len(listed) != 1 || listed[0].ID != key.ID {
+		t.Errorf("ListByUser after disable = %+v, want only active key %s", listed, key.ID)
+	}
+
 	before := time.Now().UTC()
 	if err := keys.UpdateLastUsed(ctx, key.ID); err != nil {
 		t.Fatalf("UpdateLastUsed: %v", err)
