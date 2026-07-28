@@ -146,8 +146,12 @@ function mapRequestLogAttempt(a: Record<string, unknown>): Record<string, unknow
     attemptIndex: a.attempt_index ?? a.attemptIndex,
     upstreamModel: a.upstream_model ?? a.upstreamModel,
     httpStatus: a.http_status ?? a.httpStatus,
+    upstreamHttpStatus: a.upstream_http_status ?? a.upstreamHttpStatus ?? a.upstreamHttpStatus,
     latencyMs: a.latency_ms ?? a.latencyMs,
     errorCode: a.error_code ?? a.errorCode,
+    errorType: a.error_type ?? a.errorType,
+    retryClassified: a.retry_classified ?? a.retryClassified,
+    metadata: a.metadata,
   };
 }
 
@@ -177,6 +181,7 @@ function mapRequestLog(r: Record<string, unknown>): AdminRequestLog {
     protocol: r.protocol != null ? String(r.protocol) : null,
     stream: r.stream != null ? Boolean(r.stream) : null,
     httpStatus: r.http_status != null ? Number(r.http_status) : null,
+    upstreamHttpStatus: r.upstream_http_status != null ? Number(r.upstream_http_status) : null,
     errorCode: r.error_code != null ? String(r.error_code) : null,
     errorType: r.error_type != null ? String(r.error_type) : null,
     errorMessage: r.error_message != null ? String(r.error_message) : null,

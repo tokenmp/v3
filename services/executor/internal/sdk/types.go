@@ -285,6 +285,7 @@ type ClassifiedError struct {
 	typ           string
 	retryAfter    time.Duration
 	hasRetryAfter bool
+	upstreamMsg   string
 }
 
 // NewClassifiedError returns a classified error. Unknown kinds are reduced to
@@ -409,6 +410,58 @@ func (e *ClassifiedError) RetryAfter() (time.Duration, bool) {
 		return 0, false
 	}
 	return e.retryAfter, true
+}
+
+// maxUpstreamMessageBytes bounds the length of a sanitized upstream error
+// message retained for admin diagnostics. It is deliberately larger than
+// maxSafeTokenBytes (which bounds codes/types/request-IDs) to retain useful
+// diagnostic text while still preventing unbounded flooding.
+const maxUpstreamMessageBytes = 512
+
+// WithUpstreamMessage attaches a bounded, sanitized upstream error message to
+// the classified error for admin diagnostics only. The message is never
+// returned by Error() and never reaches a client response; it is surfaced
+// solely through execution logs. Sanitization: valid UTF-8, no control
+// characters, byte length bounded by [maxUpstreamMessageBytes]. Anything
+// outside that policy is reduced to empty.
+func (e *ClassifiedError) WithUpstreamMessage(msg string) *ClassifiedError {
+	if e == nil {
+		return e
+	}
+	e.upstreamMsg = sanitizeUpstreamMessage(msg)
+	return e
+}
+
+// UpstreamMessage returns the sanitized upstream error message retained for
+// admin diagnostics, or empty if none was set.
+func (e *ClassifiedError) UpstreamMessage() string {
+	if e == nil {
+		return ""
+	}
+	return e.upstreamMsg
+}
+
+// sanitizeUpstreamMessage bounds and sanitizes an upstream-supplied error
+// message for admin-only logging. It permits printable ASCII and printable
+// Unicode (including spaces and common punctuation) while rejecting control
+// characters and oversized input.
+func sanitizeUpstreamMessage(v string) string {
+	if len(v) == 0 || !utf8.ValidString(v) {
+		return ""
+	}
+	if len(v) > maxUpstreamMessageBytes {
+		// Truncate on a rune boundary to avoid splitting a multi-byte sequence.
+		v = v[:maxUpstreamMessageBytes]
+		for len(v) > 0 && !utf8.ValidString(v) {
+			v = v[:len(v)-1]
+		}
+	}
+	for _, r := range v {
+		if unicode.IsControl(r) {
+			return ""
+		}
+	}
+	return v
 }
 
 // NewClassifiedErrorWithRetryAfter returns a classified error with an optional

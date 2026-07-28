@@ -161,12 +161,14 @@ func extractOpenAIChatUsage(raw json.RawMessage) (sdk.Usage, bool) {
 func classifyError(err error, response *http.Response) *sdk.ClassifiedError {
 	var apiErr *openai.Error
 	status, requestID, code, typ := 0, "", "", ""
+	var upstreamMsg string
 	if response != nil {
 		status = response.StatusCode
 		requestID = response.Header.Get("x-request-id")
 	}
 	if errors.As(err, &apiErr) {
 		status, code, typ = apiErr.StatusCode, apiErr.Code, apiErr.Type
+		upstreamMsg = apiErr.Message
 		if apiErr.Response != nil {
 			requestID = apiErr.Response.Header.Get("x-request-id")
 		}
@@ -184,10 +186,10 @@ func classifyError(err error, response *http.Response) *sdk.ClassifiedError {
 	// Parse Retry-After only for retryable statuses (429, 5xx).
 	if isRetryableHTTPStatus(status) && response != nil {
 		if ra, ok := sdk.ParseRetryAfter(response.Header); ok {
-			return sdk.NewClassifiedErrorWithRetryAfter(kind, status, requestID, code, typ, ra, true)
+			return sdk.NewClassifiedErrorWithRetryAfter(kind, status, requestID, code, typ, ra, true).WithUpstreamMessage(upstreamMsg)
 		}
 	}
-	return sdk.NewClassifiedError(kind, status, requestID, code, typ)
+	return sdk.NewClassifiedError(kind, status, requestID, code, typ).WithUpstreamMessage(upstreamMsg)
 }
 
 // isRetryableHTTPStatus reports whether the HTTP status is retryable and

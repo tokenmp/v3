@@ -105,13 +105,14 @@ func TestResolverPreparePinsPrivateConfigAndRedactsReference(t *testing.T) {
 
 	// All exported mutable prepared fields are fresh copies rather than aliases
 	// into the Resolver-owned snapshot or a later prepared attempt.
+	ruleCount := len(prepared.Retry.Rules)
 	prepared.Adapter.Request.AllowedHeaders[0] = "mutated"
 	prepared.Retry.Rules = append(prepared.Retry.Rules, adapter.RetryRule{ID: "mutated"})
 	again, err := resolver.Prepare(candidate)
 	if err != nil {
 		t.Fatalf("Prepare second: %v", err)
 	}
-	if again.Adapter.Request.AllowedHeaders[0] != "X-Test" || len(again.Retry.Rules) != 0 {
+	if again.Adapter.Request.AllowedHeaders[0] != "X-Test" || len(again.Retry.Rules) != ruleCount {
 		t.Fatalf("prepared attempt retained external mutation: %+v", again.Adapter)
 	}
 }

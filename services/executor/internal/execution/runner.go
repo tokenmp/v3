@@ -697,9 +697,14 @@ func (r *Runner) logFailure(ctx context.Context, in Input, prepared routing.Prep
 	if classified != nil {
 		event.Code = mapped.ErrorCode
 		event.Type = mapped.ErrorType
+		event.HTTPStatus = mapped.HTTPStatus
+		event.UpstreamStatus = classified.Status()
+		event.UpstreamRequestID = classified.RequestID()
+		event.UpstreamMessage = classified.UpstreamMessage()
 	}
 	event.RuleID = decision.RuleID
 	event.Action = string(decision.Action)
+	event.RetryStop = string(decision.Stop)
 	// Logs never alter the verdict: a recording error is intentionally ignored.
 	logCtx, cancel := r.logContext(ctx)
 	defer cancel()

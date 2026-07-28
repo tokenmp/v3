@@ -66,6 +66,21 @@ type ExecutionEvent struct {
 	// Latency is the wall-clock duration of the attempt. It is non-zero only
 	// for Kind=attempt events.
 	Latency time.Duration
+	// HTTPStatus is the mapped client-facing HTTP status (from adapter
+	// MapResponse) for Kind=attempt failure events.
+	HTTPStatus int
+	// UpstreamStatus is the real upstream HTTP status for Kind=attempt
+	// failure events (e.g. 401). 0 when no upstream response was received.
+	UpstreamStatus int
+	// UpstreamRequestID is the sanitized upstream x-request-id for
+	// Kind=attempt failure events.
+	UpstreamRequestID string
+	// UpstreamMessage is the sanitized upstream error message retained for
+	// admin diagnostics. Never returned to clients.
+	UpstreamMessage string
+	// RetryStop is the retry State stop reason for Kind=attempt failure
+	// events (e.g. "no_match", "retry_none", "max_total_attempts").
+	RetryStop string
 	// Usage carries bounded token counters when available.
 	Usage ExecutionUsage
 	// UsageKnown reports whether Usage was explicitly confirmed by the
