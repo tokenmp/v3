@@ -701,6 +701,7 @@ func (r *Runner) logFailure(ctx context.Context, in Input, prepared routing.Prep
 		event.UpstreamStatus = classified.Status()
 		event.UpstreamRequestID = classified.RequestID()
 		event.UpstreamMessage = classified.UpstreamMessage()
+		event.UpstreamResponseBody = classified.UpstreamBody()
 	}
 	event.RuleID = decision.RuleID
 	event.Action = string(decision.Action)
