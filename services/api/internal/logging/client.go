@@ -27,24 +27,24 @@ var ErrUnavailable = errors.New("logging: service unavailable")
 // RequestLog 对应 Logging Service 返回的单条请求日志摘要（snake_case JSON）。
 // 字段与 services/logging/internal/repository.RequestLog 的 json tag 对齐。
 type RequestLog struct {
-	RequestID    string    `json:"request_id"`
-	UserID       string    `json:"user_id,omitempty"`
-	UserEmail    string    `json:"user_email,omitempty"`
-	ModelName    string    `json:"resolved_model,omitempty"`
-	ProviderID   string    `json:"provider_id,omitempty"`
-	Protocol     string    `json:"protocol,omitempty"`
-	Stream       bool      `json:"stream"`
-	FinalStatus  string    `json:"final_status"`
-	HTTPStatus   int       `json:"http_status,omitempty"`
-	UpstreamHTTPStatus int `json:"upstream_http_status,omitempty"`
-	InputTokens  int       `json:"input_tokens,omitempty"`
-	OutputTokens int       `json:"output_tokens,omitempty"`
-	TotalTokens  int       `json:"total_tokens,omitempty"`
-	LatencyMS    int       `json:"latency_ms,omitempty"`
-	ErrorCode    string    `json:"error_code,omitempty"`
-	ErrorType    string    `json:"error_type,omitempty"`
-	BillingPlan  string    `json:"billing_plan,omitempty"`
-	CreatedAt    time.Time `json:"created_at"`
+	RequestID          string    `json:"request_id"`
+	UserID             string    `json:"user_id,omitempty"`
+	UserEmail          string    `json:"user_email,omitempty"`
+	ModelName          string    `json:"resolved_model,omitempty"`
+	ProviderID         string    `json:"provider_id,omitempty"`
+	Protocol           string    `json:"protocol,omitempty"`
+	Stream             bool      `json:"stream"`
+	FinalStatus        string    `json:"final_status"`
+	HTTPStatus         int       `json:"http_status,omitempty"`
+	UpstreamHTTPStatus int       `json:"upstream_http_status,omitempty"`
+	InputTokens        int       `json:"input_tokens,omitempty"`
+	OutputTokens       int       `json:"output_tokens,omitempty"`
+	TotalTokens        int       `json:"total_tokens,omitempty"`
+	LatencyMS          int       `json:"latency_ms,omitempty"`
+	ErrorCode          string    `json:"error_code,omitempty"`
+	ErrorType          string    `json:"error_type,omitempty"`
+	BillingPlan        string    `json:"billing_plan,omitempty"`
+	CreatedAt          time.Time `json:"created_at"`
 }
 
 // Attempt 对应 Logging Service 返回的单个 attempt。
