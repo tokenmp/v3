@@ -100,15 +100,17 @@ async function realListLogs(
 }
 
 async function realGetLog(id: string): Promise<AdminRequestLog> {
-  // The detail endpoint returns { log: {...}, attempts: [...] }; unwrap the
-  // log object and attach attempts so mapRequestLog maps snake_case fields.
-  const res = await request<{ log?: Record<string, unknown>; attempts?: unknown[] } & Record<string, unknown>>(
+  // The detail endpoint returns { log: {...}, attempts: [...], events: [...] };
+  // unwrap the log object and attach attempts + events so mapRequestLog maps
+  // snake_case fields.
+  const res = await request<{ log?: Record<string, unknown>; attempts?: unknown[]; events?: unknown[] } & Record<string, unknown>>(
     `/api/v1/admin/request-logs/${id}`,
     { baseUrl: ADMIN_BASE },
   );
   const log = res.log ?? res;
   const merged: Record<string, unknown> = { ...log };
   if (Array.isArray(res.attempts)) merged.attempts = res.attempts;
+  if (Array.isArray(res.events)) merged.events = res.events;
   return mapRequestLog(merged);
 }
 
@@ -144,7 +146,10 @@ function mapRequestLogAttempt(a: Record<string, unknown>): Record<string, unknow
   return {
     ...a,
     attemptIndex: a.attempt_index ?? a.attemptIndex,
+    routeId: a.route_id ?? a.routeId,
+    credentialId: a.credential_id ?? a.credentialId,
     upstreamModel: a.upstream_model ?? a.upstreamModel,
+    upstreamUrl: a.upstream_url ?? a.upstreamUrl,
     httpStatus: a.http_status ?? a.httpStatus,
     upstreamHttpStatus: a.upstream_http_status ?? a.upstreamHttpStatus ?? a.upstreamHttpStatus,
     latencyMs: a.latency_ms ?? a.latencyMs,
@@ -152,6 +157,20 @@ function mapRequestLogAttempt(a: Record<string, unknown>): Record<string, unknow
     errorType: a.error_type ?? a.errorType,
     retryClassified: a.retry_classified ?? a.retryClassified,
     metadata: a.metadata,
+  };
+}
+
+function mapRequestLogEvent(e: Record<string, unknown>): Record<string, unknown> {
+  return {
+    ...e,
+    source: e.source,
+    stage: e.stage,
+    status: e.status,
+    attemptIndex: e.attempt_index ?? e.attemptIndex,
+    durationMs: e.duration_ms ?? e.durationMs,
+    message: e.message,
+    metadata: e.metadata,
+    createdAt: e.created_at ?? e.createdAt,
   };
 }
 
@@ -165,19 +184,30 @@ function mapRequestLog(r: Record<string, unknown>): AdminRequestLog {
     ? rawAttempts.map((a: Record<string, unknown>) => mapRequestLogAttempt(a))
     : undefined;
 
+  const rawEvents = r.events;
+  const events = Array.isArray(rawEvents)
+    ? rawEvents.map((e: Record<string, unknown>) => mapRequestLogEvent(e))
+    : undefined;
+
   const base: AdminRequestLog = {
     requestId: String(r.request_id ?? r.requestId ?? ''),
     userId: r.user_id != null && String(r.user_id) !== '' ? String(r.user_id) : null,
     userEmail: r.user_email != null && String(r.user_email) !== '' ? String(r.user_email) : null,
+    clientKeyId: r.client_key_id != null && String(r.client_key_id) !== '' ? String(r.client_key_id) : null,
     model: String(r.resolved_model ?? r.model ?? ''),
     status,
     inputTokens: r.input_tokens != null ? Number(r.input_tokens) : null,
     outputTokens: r.output_tokens != null ? Number(r.output_tokens) : null,
     totalTokens: r.total_tokens != null ? Number(r.total_tokens) : null,
+    cacheTokens: r.cache_tokens != null ? Number(r.cache_tokens) : null,
     cost: null,
     durationMs: r.latency_ms != null ? Number(r.latency_ms) : null,
+    ttftMs: r.ttft_ms != null ? Number(r.ttft_ms) : null,
     createdAt: String(r.created_at ?? r.createdAt ?? ''),
+    completedAt: r.completed_at != null ? String(r.completed_at) : null,
+    routeId: r.route_id != null ? String(r.route_id) : null,
     provider: r.provider_id != null ? String(r.provider_id) : null,
+    credentialId: r.credential_id != null ? String(r.credential_id) : null,
     protocol: r.protocol != null ? String(r.protocol) : null,
     stream: r.stream != null ? Boolean(r.stream) : null,
     httpStatus: r.http_status != null ? Number(r.http_status) : null,
@@ -185,12 +215,16 @@ function mapRequestLog(r: Record<string, unknown>): AdminRequestLog {
     errorCode: r.error_code != null ? String(r.error_code) : null,
     errorType: r.error_type != null ? String(r.error_type) : null,
     errorMessage: r.error_message != null ? String(r.error_message) : null,
+    usageStatus: r.usage_status != null ? String(r.usage_status) : null,
+    thinkingMode: r.thinking_mode != null ? String(r.thinking_mode) : null,
+    thinkingEffort: r.thinking_effort != null ? String(r.thinking_effort) : null,
+    reservationId: r.reservation_id != null ? String(r.reservation_id) : null,
     billingPlan: r.billing_plan != null ? String(r.billing_plan) : null,
   };
 
-  // For detail responses (realGetLog), attach the mapped attempts array.
+  // For detail responses (realGetLog), attach the mapped attempts + events arrays.
   if (attempts) {
-    return { ...base, attempts } as AdminRequestLog;
+    return { ...base, attempts, events } as AdminRequestLog;
   }
 
   return base;

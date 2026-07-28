@@ -144,6 +144,12 @@ export interface RequestLogAttempt {
   [key: string]: unknown;
 }
 
+export interface RequestLogEvent {
+  // The contract leaves event item fields open; the backend fills them.
+  // Kept as a loose record so the detail view can render whatever is present.
+  [key: string]: unknown;
+}
+
 export interface UsageStatsByModel {
   model: string;
   requests: number;

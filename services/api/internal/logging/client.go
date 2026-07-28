@@ -27,32 +27,45 @@ var ErrUnavailable = errors.New("logging: service unavailable")
 // RequestLog 对应 Logging Service 返回的单条请求日志摘要（snake_case JSON）。
 // 字段与 services/logging/internal/repository.RequestLog 的 json tag 对齐。
 type RequestLog struct {
-	RequestID          string    `json:"request_id"`
-	UserID             string    `json:"user_id,omitempty"`
-	UserEmail          string    `json:"user_email,omitempty"`
-	ModelName          string    `json:"resolved_model,omitempty"`
-	ProviderID         string    `json:"provider_id,omitempty"`
-	Protocol           string    `json:"protocol,omitempty"`
-	Stream             bool      `json:"stream"`
-	FinalStatus        string    `json:"final_status"`
-	HTTPStatus         int       `json:"http_status,omitempty"`
-	UpstreamHTTPStatus int       `json:"upstream_http_status,omitempty"`
-	InputTokens        int       `json:"input_tokens,omitempty"`
-	OutputTokens       int       `json:"output_tokens,omitempty"`
-	TotalTokens        int       `json:"total_tokens,omitempty"`
-	LatencyMS          int       `json:"latency_ms,omitempty"`
-	ErrorCode          string    `json:"error_code,omitempty"`
-	ErrorType          string    `json:"error_type,omitempty"`
-	BillingPlan        string    `json:"billing_plan,omitempty"`
-	CreatedAt          time.Time `json:"created_at"`
+	RequestID          string     `json:"request_id"`
+	UserID             string     `json:"user_id,omitempty"`
+	UserEmail          string     `json:"user_email,omitempty"`
+	ClientKeyID        string     `json:"client_key_id,omitempty"`
+	ModelName          string     `json:"resolved_model,omitempty"`
+	RouteID            string     `json:"route_id,omitempty"`
+	ProviderID         string     `json:"provider_id,omitempty"`
+	CredentialID       string     `json:"credential_id,omitempty"`
+	Protocol           string     `json:"protocol,omitempty"`
+	Stream             bool       `json:"stream"`
+	FinalStatus        string     `json:"final_status"`
+	HTTPStatus         int        `json:"http_status,omitempty"`
+	UpstreamHTTPStatus int        `json:"upstream_http_status,omitempty"`
+	InputTokens        int        `json:"input_tokens,omitempty"`
+	OutputTokens       int        `json:"output_tokens,omitempty"`
+	TotalTokens        int        `json:"total_tokens,omitempty"`
+	CacheTokens        int        `json:"cache_tokens,omitempty"`
+	LatencyMS          int        `json:"latency_ms,omitempty"`
+	TTFTMS             int        `json:"ttft_ms,omitempty"`
+	ErrorCode          string     `json:"error_code,omitempty"`
+	ErrorType          string     `json:"error_type,omitempty"`
+	UsageStatus        string     `json:"usage_status,omitempty"`
+	ThinkingMode       string     `json:"thinking_mode,omitempty"`
+	ThinkingEffort     string     `json:"thinking_effort,omitempty"`
+	ReservationID      string     `json:"reservation_id,omitempty"`
+	BillingPlan        string     `json:"billing_plan,omitempty"`
+	CreatedAt          time.Time  `json:"created_at"`
+	CompletedAt        *time.Time `json:"completed_at,omitempty"`
 }
 
 // Attempt 对应 Logging Service 返回的单个 attempt。
 type Attempt struct {
 	RequestID          string          `json:"request_id"`
 	AttemptIndex       int             `json:"attempt_index"`
+	RouteID            string          `json:"route_id,omitempty"`
 	ProviderID         string          `json:"provider_id,omitempty"`
+	CredentialID       string          `json:"credential_id,omitempty"`
 	UpstreamModel      string          `json:"upstream_model,omitempty"`
+	UpstreamURL        string          `json:"upstream_url,omitempty"`
 	Status             string          `json:"status"`
 	HTTPStatus         int             `json:"http_status,omitempty"`
 	UpstreamHTTPStatus int             `json:"upstream_http_status,omitempty"`
