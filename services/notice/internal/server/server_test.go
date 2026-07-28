@@ -634,6 +634,21 @@ func TestAdminSendNotification_ResponseShape(t *testing.T) {
 	}
 }
 
+func TestAdminSendNotification_BroadcastUsesSentinel(t *testing.T) {
+	store := &fakeStore{}
+	s := newTestServer(t, store, adminVerifier())
+	rec := doAdminPost(s, "/api/v1/notice/admin/notifications/send", `{"type":"system","title":"T","body":"B"}`)
+	if rec.Code != 202 {
+		t.Fatalf("got %d: %s", rec.Code, rec.Body.String())
+	}
+	if store.createdNotification == nil {
+		t.Fatal("notification was not created")
+	}
+	if store.createdNotification.UserID != models.BroadcastUserID {
+		t.Fatalf("userID=%q want broadcast sentinel", store.createdNotification.UserID)
+	}
+}
+
 func TestAdminForbidden_NonAdmin(t *testing.T) {
 	s := newTestServer(t, &fakeStore{}, &fakeVerifier{subject: jwtverifier.Subject{UserID: "u1", Role: "user"}})
 	rec := doGet(s, "/api/v1/notice/admin/announcements", "user-token")
