@@ -5,25 +5,30 @@ import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { adminApi } from '@/lib/api/admin';
-import type { RequestLogAttempt } from '@/types';
+import type { RequestLogAttempt, RequestLogEvent } from '@/types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { copyText } from '@/lib/utils';
 import {
-  ArrowDownToLine,
   ArrowLeft,
-  ArrowUpFromLine,
   Calendar,
   Check,
   Clock,
   Copy,
   Cpu,
+  KeyRound,
   Layers,
   Radio,
   Server,
+  Route as RouteIcon,
+  Link2,
   Zap,
   AlertTriangle,
+  CheckCircle2,
+  XCircle,
+  Timer,
+  Activity,
 } from 'lucide-react';
 
 /* -------------------------------------------------------------------------- */
@@ -58,6 +63,23 @@ function protocolLabel(p: string | null | undefined): string {
   }
 }
 
+function statusLabel(s: string | null | undefined): { label: string; tone: 'success' | 'destructive' | 'secondary' } {
+  switch (s) {
+    case 'success':
+      return { label: '成功', tone: 'success' };
+    case 'upstream_error':
+      return { label: '上游错误', tone: 'destructive' };
+    case 'timeout':
+      return { label: '超时', tone: 'destructive' };
+    case 'transport_error':
+      return { label: '传输错误', tone: 'destructive' };
+    case 'client_error':
+      return { label: '客户端错误', tone: 'destructive' };
+    default:
+      return { label: s ?? '未知', tone: 'secondary' };
+  }
+}
+
 function attemptStatus(a: RequestLogAttempt): 'success' | 'error' {
   return String(a.status ?? a.final_status ?? '') === 'success' ? 'success' : 'error';
 }
@@ -75,6 +97,33 @@ function retryStopLabel(stop: string): string {
     case 'canceled': return '已取消';
     case 'unclassified': return '未分类错误';
     default: return stop || '—';
+  }
+}
+
+function stageLabel(stage: string): string {
+  switch (stage) {
+    case 'received': return '收到请求';
+    case 'key_verified': return '密钥验证';
+    case 'route_selected': return '路由选择';
+    case 'quota_reserved': return '配额预留';
+    case 'upstream_started': return '上游开始';
+    case 'upstream_finished': return '上游完成';
+    case 'terminal': return '终态';
+    case 'completed': return '完成';
+    default: return stage;
+  }
+}
+
+function eventStatusIcon(status: string): { icon: React.ComponentType<{ className?: string }>; color: string } {
+  switch (status) {
+    case 'success':
+      return { icon: CheckCircle2, color: 'text-emerald-500' };
+    case 'failed':
+      return { icon: XCircle, color: 'text-destructive' };
+    case 'skipped':
+      return { icon: CheckCircle2, color: 'text-muted-foreground' };
+    default:
+      return { icon: Activity, color: 'text-blue-500' };
   }
 }
 
@@ -136,6 +185,21 @@ function InfoRow({
   );
 }
 
+function InfoRowWithCopy({ label, value }: { label: string; value: string | null | undefined }) {
+  return (
+    <InfoRow label={label}>
+      {value ? (
+        <span className="flex items-center gap-1.5">
+          <span className="font-mono text-sm break-all">{value}</span>
+          <CopyButton text={value} />
+        </span>
+      ) : (
+        <span className="text-muted-foreground">—</span>
+      )}
+    </InfoRow>
+  );
+}
+
 /* -------------------------------------------------------------------------- */
 /* Attempt timeline node                                                       */
 /* -------------------------------------------------------------------------- */
@@ -144,7 +208,10 @@ function AttemptNode({ a, isLast }: { a: RequestLogAttempt; isLast: boolean }) {
   const ok = attemptStatus(a);
   const idx = a.attemptIndex ?? a.attempt_index;
   const provider = a.providerId ?? a.provider_id ?? a.provider;
+  const routeId = a.routeId ?? a.route_id;
+  const credentialId = a.credentialId ?? a.credential_id;
   const upstreamModel = a.upstreamModel ?? a.upstream_model;
+  const upstreamUrl = a.upstreamUrl ?? a.upstream_url;
   const httpStatus = a.httpStatus ?? a.http_status;
   const upstreamHttpStatus = a.upstreamHttpStatus ?? a.upstream_http_status ?? a.upstreamHttpStatus;
   const latency = a.latencyMs ?? a.latency_ms;
@@ -158,7 +225,6 @@ function AttemptNode({ a, isLast }: { a: RequestLogAttempt; isLast: boolean }) {
 
   return (
     <li className="relative pl-8">
-      {/* timeline rail + dot */}
       {!isLast && (
         <span className="absolute left-[11px] top-6 bottom-0 w-px bg-border" aria-hidden />
       )}
@@ -170,7 +236,12 @@ function AttemptNode({ a, isLast }: { a: RequestLogAttempt; isLast: boolean }) {
       />
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <span className="text-sm font-semibold">#{String(idx ?? '?')}</span>
-        {provider ? <span className="text-sm text-muted-foreground">{String(provider)}</span> : null}
+        {provider ? (
+          <span className="inline-flex items-center gap-1 text-sm text-muted-foreground">
+            <Server className="h-3.5 w-3.5" />
+            {String(provider)}
+          </span>
+        ) : null}
         {upstreamModel ? (
           <span className="inline-flex items-center gap-1 text-sm">
             <Cpu className="h-3.5 w-3.5 text-muted-foreground" />
@@ -187,6 +258,28 @@ function AttemptNode({ a, isLast }: { a: RequestLogAttempt; isLast: boolean }) {
           </span>
         )}
       </div>
+      {/* routing/credential detail */}
+      <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+        {routeId ? (
+          <span className="inline-flex items-center gap-1">
+            <RouteIcon className="h-3 w-3" />
+            路由：<span className="font-mono">{String(routeId)}</span>
+          </span>
+        ) : null}
+        {credentialId ? (
+          <span className="inline-flex items-center gap-1">
+            <KeyRound className="h-3 w-3" />
+            凭据：<span className="font-mono">{String(credentialId)}</span>
+          </span>
+        ) : null}
+        {upstreamUrl ? (
+          <span className="inline-flex items-center gap-1 min-w-0">
+            <Link2 className="h-3 w-3 shrink-0" />
+            <span className="font-mono truncate" title={String(upstreamUrl)}>{String(upstreamUrl)}</span>
+          </span>
+        ) : null}
+      </div>
+      {/* error detail */}
       <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
         {httpStatus != null && Number(httpStatus) > 0 && <span>HTTP {String(httpStatus)}</span>}
         {upstreamHttpStatus != null && Number(upstreamHttpStatus) > 0 && (
@@ -202,9 +295,56 @@ function AttemptNode({ a, isLast }: { a: RequestLogAttempt; isLast: boolean }) {
         {createdAt ? <span>{formatTime(String(createdAt))}</span> : null}
       </div>
       {upstreamMessage ? (
-        <div className="mt-1 rounded bg-muted/50 px-2 py-1 text-xs text-muted-foreground">
+        <div className="mt-1 rounded bg-muted/50 px-2 py-1 text-xs text-muted-foreground break-all">
           上游错误：{String(upstreamMessage)}
         </div>
+      ) : null}
+    </li>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Event timeline node (trace)                                                 */
+/* -------------------------------------------------------------------------- */
+
+function EventNode({ e, isLast }: { e: RequestLogEvent; isLast: boolean }) {
+  const stage = String(e.stage ?? '');
+  const status = String(e.status ?? 'info');
+  const source = String(e.source ?? '');
+  const { icon: Icon, color } = eventStatusIcon(status);
+  const createdAt = e.created_at ?? e.createdAt;
+  const duration = e.duration_ms ?? e.durationMs;
+  const message = e.message;
+  const attemptIdx = e.attempt_index ?? e.attemptIndex;
+
+  return (
+    <li className="relative pl-8">
+      {!isLast && (
+        <span className="absolute left-[11px] top-5 bottom-0 w-px bg-border" aria-hidden />
+      )}
+      <Icon className={`absolute left-0 top-0.5 h-4 w-4 ${color}`} aria-hidden />
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+        <span className="text-sm font-medium">{stageLabel(stage)}</span>
+        {source && (
+          <Badge variant="outline" className="text-[10px] py-0 px-1.5">
+            {source === 'edge' ? 'Edge' : source === 'executor' ? 'Executor' : source}
+          </Badge>
+        )}
+        {attemptIdx != null && (
+          <Badge variant="secondary" className="text-[10px] py-0 px-1.5">#{String(attemptIdx)}</Badge>
+        )}
+        {duration != null && Number(duration) > 0 && (
+          <span className="inline-flex items-center gap-0.5 text-xs text-muted-foreground">
+            <Timer className="h-3 w-3" />
+            {formatMs(Number(duration))}
+          </span>
+        )}
+        {createdAt ? (
+          <span className="text-xs text-muted-foreground">{formatTime(String(createdAt))}</span>
+        ) : null}
+      </div>
+      {message ? (
+        <p className="mt-0.5 text-xs text-muted-foreground break-all">{String(message)}</p>
       ) : null}
     </li>
   );
@@ -247,7 +387,9 @@ export default function RequestLogDetailPage() {
 
   const isSuccess = log.status === 'success';
   const attempts = log.attempts ?? [];
+  const events = log.events ?? [];
   const hasError = !!log.errorMessage || !!log.errorCode;
+  const st = statusLabel(isSuccess ? 'success' : (log.errorType ?? 'error'));
 
   return (
     <div className="space-y-6">
@@ -266,9 +408,7 @@ export default function RequestLogDetailPage() {
             <div className="space-y-1.5 min-w-0">
               <div className="flex items-center gap-2.5">
                 <h1 className="text-lg font-semibold">请求详情</h1>
-                <Badge variant={isSuccess ? 'success' : 'destructive'}>
-                  {isSuccess ? '成功' : '失败'}
-                </Badge>
+                <Badge variant={st.tone}>{st.label}</Badge>
               </div>
               <div className="flex items-center gap-1.5">
                 <span className="font-mono text-sm text-muted-foreground break-all">{log.requestId}</span>
@@ -283,46 +423,63 @@ export default function RequestLogDetailPage() {
         </CardContent>
       </Card>
 
-      {/* KPI stats */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatTile icon={Clock} label="总耗时" value={formatMs(log.durationMs)} tone="blue" />
-        <StatTile
-          icon={ArrowDownToLine}
-          label="输入 Token"
-          value={(log.inputTokens ?? 0).toLocaleString()}
-          tone="green"
-        />
-        <StatTile
-          icon={ArrowUpFromLine}
-          label="输出 Token"
-          value={(log.outputTokens ?? 0).toLocaleString()}
-          tone="orange"
-        />
-        <StatTile
-          icon={Zap}
-          label="总 Token"
-          value={(log.totalTokens ?? (log.inputTokens ?? 0) + (log.outputTokens ?? 0)).toLocaleString()}
-          tone="purple"
-        />
-      </div>
+      {/* KPI stats — only for successful requests (failed requests show error banner instead) */}
+      {isSuccess && (
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <StatTile icon={Clock} label="总耗时" value={formatMs(log.durationMs)} tone="blue" />
+          {log.ttftMs != null && log.ttftMs > 0 && (
+            <StatTile icon={Zap} label="首字耗时" value={formatMs(log.ttftMs)} tone="purple" />
+          )}
+          <StatTile
+            icon={Activity}
+            label="输入 Token"
+            value={(log.inputTokens ?? 0).toLocaleString()}
+            tone="green"
+          />
+          <StatTile
+            icon={Activity}
+            label="输出 Token"
+            value={(log.outputTokens ?? 0).toLocaleString()}
+            tone="orange"
+          />
+          <StatTile
+            icon={Zap}
+            label="总 Token"
+            value={(log.totalTokens ?? (log.inputTokens ?? 0) + (log.outputTokens ?? 0)).toLocaleString()}
+            tone="purple"
+          />
+        </div>
+      )}
 
-      {/* Error banner */}
+      {/* Error banner — only for failed requests */}
       {hasError && (
         <Card className="border-destructive/40">
           <CardContent className="flex items-start gap-3 p-4">
             <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
-            <div className="min-w-0 space-y-1">
+            <div className="min-w-0 space-y-1.5">
               <p className="text-sm font-medium text-destructive">请求失败</p>
               {log.errorCode && (
                 <p className="text-xs text-muted-foreground">
                   错误码：<span className="font-mono">{log.errorCode}</span>
                   {log.errorType ? ` · 类型：${log.errorType}` : ''}
                   {log.upstreamHttpStatus ? ` · 上游 HTTP ${log.upstreamHttpStatus}` : ''}
+                  {log.httpStatus ? ` · 返回 HTTP ${log.httpStatus}` : ''}
                 </p>
               )}
               {log.errorMessage && (
                 <p className="text-sm break-all">{log.errorMessage}</p>
               )}
+              {/* upstream error message from attempts metadata */}
+              {(() => {
+                const firstAttemptMsg = attempts
+                  .map((a) => (a.metadata as Record<string, string> | undefined)?.upstream_message ?? (a.metadata as Record<string, string> | undefined)?.upstreamMessage)
+                  .find(Boolean);
+                return firstAttemptMsg ? (
+                  <p className="mt-1 rounded bg-muted/50 px-2 py-1 text-xs text-muted-foreground break-all">
+                    上游返回：{String(firstAttemptMsg)}
+                  </p>
+                ) : null;
+              })()}
             </div>
           </CardContent>
         </Card>
@@ -338,15 +495,10 @@ export default function RequestLogDetailPage() {
             <InfoRow label="用户邮箱">
               <span>{log.userEmail ?? '—'}</span>
             </InfoRow>
-            <div className="flex flex-col gap-1 py-2.5 sm:flex-row sm:items-center sm:gap-4">
-              <dt className="w-32 shrink-0 text-xs font-medium text-muted-foreground">用户 ID</dt>
-              <dd>
-                <span className="flex items-center gap-1.5">
-                  <span className="font-mono text-sm break-all">{log.userId ?? '—'}</span>
-                  {log.userId && <CopyButton text={log.userId} />}
-                </span>
-              </dd>
-            </div>
+            <InfoRowWithCopy label="用户 ID" value={log.userId} />
+            {log.clientKeyId ? (
+              <InfoRowWithCopy label="客户端密钥" value={log.clientKeyId} />
+            ) : null}
             <InfoRow label="模型">
               <span className="inline-flex items-center gap-1.5">
                 <Cpu className="h-4 w-4 text-muted-foreground" />
@@ -359,6 +511,22 @@ export default function RequestLogDetailPage() {
                 {log.provider ?? '—'}
               </span>
             </InfoRow>
+            {log.routeId ? (
+              <InfoRow label="路由">
+                <span className="inline-flex items-center gap-1.5">
+                  <RouteIcon className="h-4 w-4 text-muted-foreground" />
+                  <span className="font-mono text-sm">{log.routeId}</span>
+                </span>
+              </InfoRow>
+            ) : null}
+            {log.credentialId ? (
+              <InfoRow label="凭据">
+                <span className="inline-flex items-center gap-1.5">
+                  <KeyRound className="h-4 w-4 text-muted-foreground" />
+                  <span className="font-mono text-sm">{log.credentialId}</span>
+                </span>
+              </InfoRow>
+            ) : null}
             <InfoRow label="协议">
               <span className="inline-flex items-center gap-1.5">
                 <Layers className="h-4 w-4 text-muted-foreground" />
@@ -371,12 +539,41 @@ export default function RequestLogDetailPage() {
                 {log.stream == null ? '—' : log.stream ? '是' : '否'}
               </span>
             </InfoRow>
+            {log.thinkingMode ? (
+              <InfoRow label="思考模式">
+                <span>{log.thinkingMode}{log.thinkingEffort ? ` · ${log.thinkingEffort}` : ''}</span>
+              </InfoRow>
+            ) : null}
             <InfoRow label="计费套餐">
               {log.billingPlan ?? '—'}
             </InfoRow>
+            {log.completedAt ? (
+              <InfoRow label="完成时间">
+                <span>{formatTime(log.completedAt)}</span>
+              </InfoRow>
+            ) : null}
           </dl>
         </CardContent>
       </Card>
+
+      {/* Events trace timeline */}
+      {events.length > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center justify-between text-base">
+              <span>事件时间线</span>
+              <Badge variant="secondary">{events.length} 条</Badge>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <ul className="space-y-3 py-2">
+              {events.map((e, i) => (
+                <EventNode key={i} e={e} isLast={i === events.length - 1} />
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Attempts timeline */}
       <Card>
