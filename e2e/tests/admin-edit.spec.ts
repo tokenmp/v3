@@ -160,7 +160,11 @@ test.describe('Admin 后台 - 套餐管理', () => {
     await page.locator('input[placeholder*="1000"]').first().fill('99');
     await page.locator('input[placeholder*="500000"]').first().fill('1000000');
     
-    await page.getByRole('button', { name: /创建|保存/ }).click({ force: true });
+    // 使用 JavaScript 点击按钮
+    await page.evaluate(() => {
+      const btn = document.querySelector('button[type="button"]');
+      if (btn) btn.click();
+    });
     await page.waitForTimeout(2000);
     
     await expect(page.getByText('E2E测试套餐').first()).toBeVisible({ timeout: 5000 });
