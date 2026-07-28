@@ -562,9 +562,13 @@ type AuthAdminListKeysParams struct {
 // AuthAdminListUsersParams defines parameters for AuthAdminListUsers.
 type AuthAdminListUsersParams struct {
 	// Search Optional email substring filter.
-	Search   *string `form:"search,omitempty" json:"search,omitempty"`
-	Page     *int    `form:"page,omitempty" json:"page,omitempty"`
-	PageSize *int    `form:"pageSize,omitempty" json:"pageSize,omitempty"`
+	Search *string `form:"search,omitempty" json:"search,omitempty"`
+	// Status Optional status filter (active or disabled).
+	Status *string `form:"status,omitempty" json:"status,omitempty"`
+	// Role Optional role filter (user or admin).
+	Role   *string `form:"role,omitempty" json:"role,omitempty"`
+	Page   *int    `form:"page,omitempty" json:"page,omitempty"`
+	PageSize *int  `form:"pageSize,omitempty" json:"pageSize,omitempty"`
 }
 
 // AuthAdminUpdateUserJSONRequestBody defines body for AuthAdminUpdateUser for application/json ContentType.

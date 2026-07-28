@@ -17,8 +17,9 @@ import (
 
 // AdminUserStore is the admin port for user management.
 type AdminUserStore interface {
-	// ListAll returns a paginated list of users optionally filtered by email.
-	ListAll(ctx context.Context, search string, limit, offset int) ([]models.User, int, error)
+	// ListAll returns a paginated list of users optionally filtered by email,
+	// status, and role.
+	ListAll(ctx context.Context, search string, status string, role string, limit, offset int) ([]models.User, int, error)
 	// FindByID loads a single user by primary key.
 	FindByID(ctx context.Context, id string) (*models.User, error)
 	// UpdateFields modifies role and/or status.
@@ -41,8 +42,8 @@ func NewAdminUserRepoAdapter(repo *repository.UserRepository) *AdminUserRepoAdap
 	return &AdminUserRepoAdapter{repo: repo}
 }
 
-func (a *AdminUserRepoAdapter) ListAll(ctx context.Context, search string, limit, offset int) ([]models.User, int, error) {
-	return a.repo.ListAll(ctx, search, limit, offset)
+func (a *AdminUserRepoAdapter) ListAll(ctx context.Context, search string, status string, role string, limit, offset int) ([]models.User, int, error) {
+	return a.repo.ListAll(ctx, search, status, role, limit, offset)
 }
 
 func (a *AdminUserRepoAdapter) FindByID(ctx context.Context, id string) (*models.User, error) {
@@ -91,7 +92,15 @@ func (a *StrictAdapter) AuthAdminListUsers(ctx context.Context, req authv1.AuthA
 	if req.Params.Search != nil {
 		search = *req.Params.Search
 	}
-	users, total, err := a.adminUsers.ListAll(ctx, search, pageSize, (page-1)*pageSize)
+	status := ""
+	if req.Params.Status != nil {
+		status = *req.Params.Status
+	}
+	role := ""
+	if req.Params.Role != nil {
+		role = *req.Params.Role
+	}
+	users, total, err := a.adminUsers.ListAll(ctx, search, status, role, pageSize, (page-1)*pageSize)
 	if err != nil {
 		return authv1.AuthAdminListUsers500JSONResponse{Body: errResp(authv1.InternalError, "internal error"), Headers: authv1.AuthAdminListUsers500ResponseHeaders(errHeaders())}, nil
 	}

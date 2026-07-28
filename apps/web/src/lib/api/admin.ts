@@ -51,9 +51,13 @@ async function realListUsers(
   page = 1,
   pageSize = 20,
   search = '',
+  status = '',
+  role = '',
 ): Promise<AdminUserListResponse> {
   const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
   if (search) params.set('search', search);
+  if (status) params.set('status', status);
+  if (role) params.set('role', role);
   const res = await request<{ users: AdminUser[]; total: number }>(
     `/api/v1/admin/users?${params}`,
     { baseUrl: ADMIN_BASE },
@@ -233,8 +237,8 @@ export const adminApi = {
   getDashboardStats: async (days = 15): Promise<AdminDashboardStats> => realDashboard(days),
 
   // ---- Users ----
-  listUsers: async (page = 1, pageSize = 20, search = ''): Promise<AdminUserListResponse> => {
-    const res = await realListUsers(page, pageSize, search);
+  listUsers: async (page = 1, pageSize = 20, search = '', status = '', role = ''): Promise<AdminUserListResponse> => {
+    const res = await realListUsers(page, pageSize, search, status, role);
     // Map snake_case → camelCase if the backend returns snake_case.
     const raw = res.users as unknown as Record<string, unknown>[];
     const isSnake = raw.length > 0 && raw[0] && 'created_at' in (raw[0] as object) && !('createdAt' in (raw[0] as object));

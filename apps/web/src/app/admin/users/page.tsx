@@ -47,8 +47,8 @@ export default function AdminUsersPage() {
   const queryClient = useQueryClient();
 
   const { data } = useQuery({
-    queryKey: ['admin', 'users', page, search],
-    queryFn: () => adminApi.listUsers(page, 20, search),
+    queryKey: ['admin', 'users', page, search, statusF, roleF],
+    queryFn: () => adminApi.listUsers(page, 20, search, statusF ?? '', roleF ?? ''),
   });
 
   const updateMutation = useMutation({
@@ -61,12 +61,6 @@ export default function AdminUsersPage() {
   const users = data?.users ?? [];
   const total = data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / 20));
-
-  const filtered = users.filter((u) => {
-    if (roleF && u.role !== roleF) return false;
-    if (statusF && u.status !== statusF) return false;
-    return true;
-  });
 
   // Confirm dialog state
   const [confirm, setConfirm] = useState<{
@@ -208,7 +202,7 @@ export default function AdminUsersPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filtered.map((user) => (
+              {users.map((user) => (
                 <TableRow key={user.id}>
                   <TableCell>
                     <Link href={`/admin/users/${user.id}`} className="text-sm font-medium hover:underline">
@@ -245,7 +239,7 @@ export default function AdminUsersPage() {
                   </TableCell>
                 </TableRow>
               ))}
-              {filtered.length === 0 && (
+              {users.length === 0 && (
                 <TableRow>
                   <TableCell colSpan={5} className="py-8 text-center text-sm text-muted-foreground">
                     暂无用户数据
@@ -259,7 +253,7 @@ export default function AdminUsersPage() {
 
       {/* Mobile card list */}
       <div className="md:hidden space-y-3">
-        {filtered.map((user) => (
+        {users.map((user) => (
           <button
             key={user.id}
             type="button"
@@ -280,7 +274,7 @@ export default function AdminUsersPage() {
             </div>
           </button>
         ))}
-        {filtered.length === 0 && (
+        {users.length === 0 && (
           <p className="py-8 text-center text-sm text-muted-foreground">暂无用户数据</p>
         )}
       </div>

@@ -901,8 +901,8 @@ paths:
       summary: List users (admin)
       description: |
         Requires a Bearer access token with role=admin. Returns a paginated
-        list of all users, optionally filtered by email substring search.
-        Password hashes are never returned.
+        list of all users, optionally filtered by email substring search,
+        status, and role. Password hashes are never returned.
       operationId: authAdminListUsers
       security:
         - bearerAuth: []
@@ -913,6 +913,18 @@ paths:
           schema:
             type: string
             maxLength: 255
+        - name: status
+          in: query
+          description: Optional status filter (active or disabled).
+          schema:
+            type: string
+            enum: [active, disabled]
+        - name: role
+          in: query
+          description: Optional role filter (user or admin).
+          schema:
+            type: string
+            enum: [user, admin]
         - name: page
           in: query
           schema:
