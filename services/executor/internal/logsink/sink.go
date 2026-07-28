@@ -356,7 +356,7 @@ func buildBatch(e requestlog.ExecutionEvent) (batch, bool) {
 			ErrorCode:     e.Code,
 			ErrorType:     e.Type,
 			UpstreamHTTPStatus: e.UpstreamStatus,
-			RetryClassified:    e.RetryStop,
+			RetryClassified:    mapRetryClassified(e.RetryStop),
 			Metadata:           buildAttemptMetadata(e),
 			CreatedAt:          e.Timestamp,
 		}}
@@ -428,18 +428,41 @@ func buildEventMetadata(e requestlog.ExecutionEvent) json.RawMessage {
 	return b
 }
 
-// buildAttemptMetadata carries structured upstream detail for the attempt row
-// as bounded JSON. It includes the upstream request ID and error message.
-func buildAttemptMetadata(e requestlog.ExecutionEvent) json.RawMessage {
-	if e.UpstreamRequestID == "" && e.UpstreamMessage == "" {
-		return nil
+// mapRetryClassified maps the executor retry State stop reason to the
+// Logging DB retry_classified enum: retryable, non_retryable, terminal.
+// The detailed stop reason string is preserved in the attempt metadata.
+func mapRetryClassified(stop string) string {
+	switch stop {
+	case "":
+		return ""
+	case "committed":
+		return "terminal"
+	case "canceled":
+		return "terminal"
+	default:
+		// All other stop reasons (no_match, retry_none, max_total_attempts,
+		// max_same_target_attempts, max_total_duration, deadline, no_candidate,
+		// unclassified) mean the request will not be retried.
+		return "non_retryable"
 	}
+}
+
+// buildAttemptMetadata carries structured upstream detail for the attempt row
+// as bounded JSON. It includes the upstream request ID, error message, and
+// the detailed retry stop reason.
+func buildAttemptMetadata(e requestlog.ExecutionEvent) json.RawMessage {
 	m := map[string]string{}
 	if e.UpstreamRequestID != "" {
 		m["upstream_request_id"] = e.UpstreamRequestID
 	}
 	if e.UpstreamMessage != "" {
 		m["upstream_message"] = e.UpstreamMessage
+	}
+	if e.RetryStop != "" {
+		m["retry_stop"] = e.RetryStop
+	}
+	if len(m) == 0 {
+		return nil
 	}
 	b, err := json.Marshal(m)
 	if err != nil {
