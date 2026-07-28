@@ -94,6 +94,21 @@ func TestHash_Malformed(t *testing.T) {
 	}
 }
 
+func TestHashCandidates_V3Key(t *testing.T) {
+	key, _, err := Generate()
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	// No pepper configured: only the unpeppered candidate.
+	hashes, err := HashCandidates(key)
+	if err != nil {
+		t.Fatalf("HashCandidates: %v", err)
+	}
+	if len(hashes) != 1 || !bytes.Equal(hashes[0], hashFullKey(key)) {
+		t.Fatalf("candidates = %v, want [unpeppered]", hashes)
+	}
+}
+
 func TestHashCandidates_LegacySKKey(t *testing.T) {
 	t.Setenv("AUTH_LEGACY_API_KEY_PEPPER", "pepper")
 	key := "sk-legacy-tokenmp-key"
@@ -112,8 +127,29 @@ func TestHashCandidates_LegacySKKey(t *testing.T) {
 	}
 }
 
+func TestHashCandidates_V3KeyWithPepper(t *testing.T) {
+	t.Setenv("AUTH_LEGACY_API_KEY_PEPPER", "pepper")
+	key, _, err := Generate()
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	hashes, err := HashCandidates(key)
+	if err != nil {
+		t.Fatalf("HashCandidates: %v", err)
+	}
+	if len(hashes) != 2 {
+		t.Fatalf("len(hashes) = %d, want 2", len(hashes))
+	}
+	if !bytes.Equal(hashes[0], hashFullKey(key)) {
+		t.Error("first candidate should be unpeppered SHA-256")
+	}
+	if !bytes.Equal(hashes[1], hashPepperedKey("pepper", key)) {
+		t.Error("second candidate should be peppered SHA-256")
+	}
+}
+
 func TestHashCandidates_RejectMalformedLegacy(t *testing.T) {
-	for _, key := range []string{"sk-", "sk-bad\nkey", "other_key"} {
+	for _, key := range []string{"sk-", "sk-bad\nkey", "other_key", "tmp_abc"} {
 		t.Run(key, func(t *testing.T) {
 			_, err := HashCandidates(key)
 			if !errors.Is(err, ErrMalformedKey) {

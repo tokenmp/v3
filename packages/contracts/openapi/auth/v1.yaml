@@ -259,7 +259,7 @@ paths:
     post:
       summary: Verify an API key
       description: |
-        Verifies an opaque API key (`tmp_` prefix) and returns the owning
+        Verifies an opaque API key (`sk-` prefix) and returns the owning
         user identity. This is an internal service-to-service endpoint used
         by the Edge/BFF to accept API-key authentication from clients.
         No Bearer JWT is required; the API key is supplied in the request body.
@@ -1394,7 +1394,7 @@ components:
       properties:
         api_key:
           type: string
-          description: Opaque API key with `tmp_` prefix.
+          description: Opaque API key with `sk-` prefix.
     VerifiedIdentity:
       type: object
       required: [user_id, role, status]

@@ -17,7 +17,7 @@ CREATE TABLE api_keys (
     -- SHA-256 of the complete API key string. The plaintext key is returned
     -- only at creation time and is never stored in this database.
     key_hash        BYTEA        NOT NULL CHECK (length(key_hash) > 0),
-    -- Display-only identifiers, e.g. "tmp_abc1...wxyz". They must never be
+    -- Display-only identifiers, e.g. "sk-abc1...wxyz". They must never be
     -- used for authentication or lookup in place of key_hash.
     key_prefix      VARCHAR(16)  NOT NULL,
     key_suffix      VARCHAR(8)   NOT NULL,

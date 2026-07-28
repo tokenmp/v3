@@ -82,7 +82,7 @@ func (AuthSession) TableName() string { return "auth_sessions" }
 // APIKey mirrors the api_keys table, which unifies the legacy api_keys,
 // user_api_keys, and bot_keys tables into a single identity-owned table.
 // The full API key string is never persisted; only its SHA-256 hash is stored.
-// KeyPrefix and KeySuffix are for display only (for example, "tmp_abc1...wxyz").
+// KeyPrefix and KeySuffix are for display only (for example, "sk-abc1...wxyz").
 type APIKey struct {
 	ID         string     `gorm:"primaryKey;type:uuid;column:id;default:gen_random_uuid()"`
 	UserID     string     `gorm:"type:uuid;column:user_id"`

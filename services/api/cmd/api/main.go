@@ -45,7 +45,7 @@ func run() error {
 		return fmt.Errorf("identity verifier: %w", err)
 	}
 
-	// When Auth URL is configured, the edge also accepts API keys (tmp_ prefix)
+	// When Auth URL is configured, the edge also accepts API keys (sk- prefix)
 	// by verifying them against Auth's /api/v1/auth/verify-key endpoint.
 	var apiKeyVerifier *identity.APIKeyVerifier
 	if cfg.AuthURL != "" {
