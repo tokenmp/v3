@@ -25,6 +25,11 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import {
+  Dialog,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
   Table,
   TableBody,
   TableCell,
@@ -104,7 +109,7 @@ function RetryRuleEditor({
           ))}
         </select>
       </Field>
-      <Field label="优先级（数字越小越先匹配）">
+      <Field label="优先级">
         <Input
           type="number"
           value={rule.priority}
@@ -148,7 +153,7 @@ function RetryPolicyEditor({
   return (
     <div className="space-y-4">
       {/* params */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3">
         <Field label="最大尝试次数">
           <Input
             type="number"
@@ -213,51 +218,53 @@ function RetryPolicyEditor({
       </div>
 
       {/* quick presets */}
-      <div className="flex flex-wrap gap-2 rounded-lg bg-muted/40 p-3">
+      <div className="flex flex-col sm:flex-row flex-wrap gap-2 rounded-lg bg-muted/40 p-3">
         <span className="text-xs text-muted-foreground self-center mr-1">快速模板：</span>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() =>
-            onChange({
-              maxTotalAttempts: 3,
-              maxSameTargetAttempts: 2,
-              backoff: '500ms',
-              maxTotalDuration: '45s',
-              rules: [
-                { id: 'retry-429', priority: 10, httpStatuses: [429], action: 'next_credential' },
-                { id: 'retry-5xx', priority: 20, httpStatuses: [500, 502, 503, 504], action: 'next_route' },
-              ],
-            })
-          }
-        >
-          标准（429→换密钥，5xx→换路由）
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() =>
-            onChange({
-              maxTotalAttempts: 2,
-              maxSameTargetAttempts: 2,
-              backoff: '300ms',
-              maxTotalDuration: '30s',
-              rules: [
-                { id: 'retry-503', priority: 10, httpStatuses: [503], action: 'same_credential' },
-                { id: 'retry-429', priority: 20, httpStatuses: [429], action: 'next_credential' },
-              ],
-            })
-          }
-        >
-          保守（503→同目标，429→换密钥）
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => onChange({ maxTotalAttempts: 1, maxSameTargetAttempts: 1, rules: [] })}
-        >
-          禁用重试
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() =>
+              onChange({
+                maxTotalAttempts: 3,
+                maxSameTargetAttempts: 2,
+                backoff: '500ms',
+                maxTotalDuration: '45s',
+                rules: [
+                  { id: 'retry-429', priority: 10, httpStatuses: [429], action: 'next_credential' },
+                  { id: 'retry-5xx', priority: 20, httpStatuses: [500, 502, 503, 504], action: 'next_route' },
+                ],
+              })
+            }
+          >
+            标准
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() =>
+              onChange({
+                maxTotalAttempts: 2,
+                maxSameTargetAttempts: 2,
+                backoff: '300ms',
+                maxTotalDuration: '30s',
+                rules: [
+                  { id: 'retry-503', priority: 10, httpStatuses: [503], action: 'same_credential' },
+                  { id: 'retry-429', priority: 20, httpStatuses: [429], action: 'next_credential' },
+                ],
+              })
+            }
+          >
+            保守
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => onChange({ maxTotalAttempts: 1, maxSameTargetAttempts: 1, rules: [] })}
+          >
+            禁用重试
+          </Button>
+        </div>
       </div>
     </div>
   );
@@ -332,7 +339,7 @@ function RouteRetryCard() {
     queryKey: ['admin', 'routes'],
     queryFn: () => adminConfigApi.listRoutes(),
   });
-  const [editing, setEditing] = useState<string | null>(null);
+  const [editing, setEditing] = useState<AdminRouteConfig | null>(null);
   const [draft, setDraft] = useState<RetryPolicy | null>(null);
 
   const save = useMutation({
@@ -349,7 +356,7 @@ function RouteRetryCard() {
   });
 
   const startEdit = (r: AdminRouteConfig) => {
-    setEditing(r.id);
+    setEditing(r);
     setDraft(r.retryPolicy ?? { rules: [] });
   };
 
@@ -370,6 +377,8 @@ function RouteRetryCard() {
         <p className="text-xs text-muted-foreground">
           为单个路由配置覆盖全局的策略。留空表示继承全局策略。
         </p>
+
+        {/* Desktop table */}
         <div className="hidden md:block">
           <Table>
             <TableHeader>
@@ -388,7 +397,7 @@ function RouteRetryCard() {
                   <TableCell>{r.modelId}</TableCell>
                   <TableCell>{r.providerId}</TableCell>
                   <TableCell>
-                    {editing === r.id ? (
+                    {editing?.id === r.id ? (
                       <span className="text-xs text-amber-600">编辑中…</span>
                     ) : r.retryPolicy?.rules?.length ? (
                       <div className="flex flex-wrap gap-1">
@@ -403,24 +412,9 @@ function RouteRetryCard() {
                     )}
                   </TableCell>
                   <TableCell className="text-right">
-                    {editing === r.id ? (
-                      <div className="flex justify-end gap-1">
-                        <Button
-                          size="sm"
-                          onClick={() => save.mutate({ id: r.id, policy: draft })}
-                          disabled={save.isPending}
-                        >
-                          保存
-                        </Button>
-                        <Button size="sm" variant="ghost" onClick={() => setEditing(null)}>
-                          取消
-                        </Button>
-                      </div>
-                    ) : (
-                      <Button size="sm" variant="outline" onClick={() => startEdit(r)}>
-                        编辑
-                      </Button>
-                    )}
+                    <Button size="sm" variant="outline" onClick={() => startEdit(r)}>
+                      编辑
+                    </Button>
                   </TableCell>
                 </TableRow>
               ))}
@@ -428,40 +422,27 @@ function RouteRetryCard() {
           </Table>
         </div>
 
+        {/* Mobile card list */}
         <div className="md:hidden space-y-3">
           {(routes ?? []).length === 0 ? (
             <p className="py-8 text-center text-sm text-muted-foreground">暂无路由</p>
           ) : (routes ?? []).map((r) => (
-            <div key={r.id} className="rounded-lg border bg-card p-3 space-y-2">
+            <button
+              key={r.id}
+              type="button"
+              onClick={() => startEdit(r)}
+              className="w-full text-left rounded-lg border bg-card p-3 space-y-2 active:bg-accent/50 transition-colors"
+            >
               <div className="flex items-center justify-between gap-2">
                 <span className="font-mono text-xs truncate">{r.id}</span>
-                {editing === r.id ? (
-                  <div className="flex shrink-0 gap-1">
-                    <Button
-                      size="sm"
-                      onClick={() => save.mutate({ id: r.id, policy: draft })}
-                      disabled={save.isPending}
-                    >
-                      保存
-                    </Button>
-                    <Button size="sm" variant="ghost" onClick={() => setEditing(null)}>
-                      取消
-                    </Button>
-                  </div>
-                ) : (
-                  <Button size="sm" variant="outline" onClick={() => startEdit(r)}>
-                    编辑
-                  </Button>
-                )}
+                <span className="text-xs text-muted-foreground shrink-0">{r.modelId}</span>
               </div>
-              <p className="text-xs text-muted-foreground">{r.modelId} · {r.providerId}</p>
+              <p className="text-xs text-muted-foreground">{r.providerId}</p>
               <p className="text-xs">
-                {editing === r.id ? (
-                  <span className="text-amber-600">编辑中…</span>
-                ) : r.retryPolicy?.rules?.length ? (
+                {r.retryPolicy?.rules?.length ? (
                   <span className="flex flex-wrap gap-1">
                     {r.retryPolicy.rules.map((rule) => (
-                      <Badge key={rule.id} variant="secondary" className="font-normal">
+                      <Badge key={rule.id} variant="secondary" className="font-normal text-[10px]">
                         {rule.httpStatuses.join(',')}/{actionLabel(rule.action)}
                       </Badge>
                     ))}
@@ -470,16 +451,42 @@ function RouteRetryCard() {
                   <span className="text-muted-foreground">继承全局</span>
                 )}
               </p>
-            </div>
+            </button>
           ))}
         </div>
 
-        {editing && draft && (
-          <div className="rounded-lg border bg-muted/20 p-4">
-            <p className="mb-3 text-sm font-medium">编辑：{editing}</p>
-            <RetryPolicyEditor policy={draft} onChange={setDraft} />
-          </div>
-        )}
+        {/* Edit dialog (mobile & desktop) */}
+        <Dialog open={!!editing} onOpenChange={(open) => !open && setEditing(null)}>
+          {editing && draft && (
+            <>
+              <DialogHeader>
+                <DialogTitle className="font-mono text-sm">{editing.id}</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4 py-2 max-h-[70vh] overflow-y-auto">
+                <div className="text-xs text-muted-foreground">
+                  {editing.modelId} · {editing.providerId}
+                </div>
+                <RetryPolicyEditor policy={draft} onChange={setDraft} />
+                <div className="flex gap-2 pt-2 border-t">
+                  <Button
+                    variant="outline"
+                    className="flex-1"
+                    onClick={() => setEditing(null)}
+                  >
+                    取消
+                  </Button>
+                  <Button
+                    className="flex-1"
+                    onClick={() => save.mutate({ id: editing.id, policy: draft })}
+                    disabled={save.isPending}
+                  >
+                    {save.isPending ? '保存中…' : '保存'}
+                  </Button>
+                </div>
+              </div>
+            </>
+          )}
+        </Dialog>
       </CardContent>
     </Card>
   );
@@ -502,14 +509,14 @@ export default function RetryPolicyPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="text-lg font-semibold">重试策略</h1>
           <p className="text-sm text-muted-foreground">
-            配置上游错误（429/503/5xx）的重试行为：换路由、换密钥或同目标重试。
+            配置上游错误（429/503/5xx）的重试行为。
           </p>
         </div>
-        <Button variant="default" onClick={() => compile.mutate()} disabled={compile.isPending}>
+        <Button variant="default" onClick={() => compile.mutate()} disabled={compile.isPending} className="w-full sm:w-auto">
           <RefreshCw className={`h-4 w-4 mr-1 ${compile.isPending ? 'animate-spin' : ''}`} />
           {compile.isPending ? '编译中…' : '编译并发布'}
         </Button>

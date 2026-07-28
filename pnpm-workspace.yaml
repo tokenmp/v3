@@ -3,5 +3,6 @@ packages:
   - "services/*"
   - "packages/*"
   - "tools/*"
+  - "e2e"
 allowBuilds:
   sharp: true

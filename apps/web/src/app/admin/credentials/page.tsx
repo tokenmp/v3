@@ -247,7 +247,12 @@ export default function AdminCredentialsPage() {
               ? `${c.keyPrefix ?? '-'}…${c.keySuffix ?? '-'}`
               : '-';
             return (
-              <div key={c.id} className="rounded-lg border bg-card p-3 space-y-2">
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => setEditItem(c)}
+                className="w-full text-left rounded-lg border bg-card p-3 space-y-2 active:bg-accent/50 transition-colors"
+              >
                 <div className="flex items-center justify-between gap-2">
                   <span className="font-mono text-xs truncate">{c.id}</span>
                   <StatusBadge status={c.status} />
@@ -258,27 +263,7 @@ export default function AdminCredentialsPage() {
                   <span>优先级 {c.priority}</span>
                   <span>并发 {c.maxConcurrency != null ? c.maxConcurrency : '∞'}</span>
                 </div>
-                <div className="flex justify-end gap-1">
-                  <button
-                    type="button"
-                    onClick={() => setEditItem(c)}
-                    className="rounded-sm p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-                    aria-label="编辑"
-                    title="编辑"
-                  >
-                    <Pencil className="size-3.5" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleDelete(c)}
-                    className="rounded-sm p-1.5 text-muted-foreground hover:bg-red-100 hover:text-red-700"
-                    aria-label="删除"
-                    title="删除"
-                  >
-                    <Trash2 className="size-3.5" />
-                  </button>
-                </div>
-              </div>
+              </button>
             );
           })
         )}

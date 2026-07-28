@@ -66,10 +66,10 @@ export function AdminSidebar() {
                       href={item.href}
                       title={isCollapsed ? item.label : undefined}
                       className={cn(
-                        'focus-nav group relative flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
+                        'group relative flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors focus-nav',
                         active
-                          ? 'bg-primary/10 text-primary'
-                          : 'text-muted-foreground hover:bg-accent hover:text-foreground',
+                          ? 'bg-primary/10 text-primary border-l-2 border-primary'
+                          : 'text-muted-foreground hover:bg-accent hover:text-foreground border-l-2 border-transparent',
                         isCollapsed && 'justify-center',
                       )}
                     >

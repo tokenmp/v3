@@ -254,7 +254,12 @@ export default function AdminProvidersPage() {
           <p className="py-8 text-center text-sm text-muted-foreground">暂无 Provider</p>
         ) : (
           filtered.map((p) => (
-            <div key={p.id} className="rounded-lg border bg-card p-3 space-y-2">
+            <button
+              key={p.id}
+              type="button"
+              onClick={() => setEditItem(p)}
+              className="w-full text-left rounded-lg border bg-card p-3 space-y-2 active:bg-accent/50 transition-colors"
+            >
               <div className="flex items-center justify-between gap-2">
                 <div className="min-w-0">
                   <p className="text-sm font-medium truncate font-mono">{p.name}</p>
@@ -265,41 +270,10 @@ export default function AdminProvidersPage() {
               <p className="font-mono text-[10px] text-muted-foreground truncate" title={p.baseURL}>
                 {p.baseURL}
               </p>
-              <div className="flex items-center justify-between">
-                <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
-                  {p.sdkKind}
-                </span>
-                <div className="flex gap-1">
-                  <button
-                    type="button"
-                    onClick={() => setEndpointsProvider(p)}
-                    className="rounded-sm p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-                    aria-label="端点"
-                    title="管理端点"
-                  >
-                    <Network className="size-3.5" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setEditItem(p)}
-                    className="rounded-sm p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-                    aria-label="编辑"
-                    title="编辑"
-                  >
-                    <Pencil className="size-3.5" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleDelete(p)}
-                    className="rounded-sm p-1.5 text-muted-foreground hover:bg-red-100 hover:text-red-700"
-                    aria-label="删除"
-                    title="删除"
-                  >
-                    <Trash2 className="size-3.5" />
-                  </button>
-                </div>
-              </div>
-            </div>
+              <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                {p.sdkKind}
+              </span>
+            </button>
           ))
         )}
       </div>
