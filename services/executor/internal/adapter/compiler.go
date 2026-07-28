@@ -518,6 +518,13 @@ func compileRetry(raw RetryPolicy, parent CompiledRetry) (CompiledRetry, error) 
 	if raw.Rules != nil {
 		o.Rules = cloneRetryRules(sortedRetry(raw.Rules))
 	}
+	// If no retry rules are configured at any level, inject sensible defaults
+	// so transient failures (429, 5xx, timeout, transport) actually retry.
+	// Authentication errors (401/403) are deliberately excluded: retrying with
+	// the same credential cannot fix an auth failure.
+	if len(o.Rules) == 0 {
+		o.Rules = defaultRetryRules()
+	}
 	if err = validateRetryRules(o.Rules); err != nil {
 		return o, err
 	}
@@ -1151,6 +1158,21 @@ func validateRetryRules(rs []RetryRule) error {
 		conflicts[key] = true
 	}
 	return nil
+}
+
+// defaultRetryRules returns sensible retry rules used when no rules are
+// explicitly configured. Transient failures retry with the next route so that
+// a different provider/credential can be tried. Authentication errors (401,
+// 403) are deliberately excluded: retrying with the same credential cannot fix
+// an auth failure, and next-credential retry is only safe when an alternative
+// credential exists on the same route.
+func defaultRetryRules() []RetryRule {
+	return []RetryRule{
+		{ID: "default-429", Priority: 10, HTTPStatuses: []int{429}, Action: RetryNextRoute},
+		{ID: "default-5xx", Priority: 20, HTTPStatuses: []int{500, 502, 503, 504}, Action: RetryNextRoute},
+		{ID: "default-timeout", Priority: 30, ErrorTypes: []string{"timeout"}, Action: RetryNextRoute},
+		{ID: "default-transport", Priority: 40, ErrorTypes: []string{"transport"}, Action: RetryNextRoute},
+	}
 }
 func sortedResponse(in []ResponseRule) []ResponseRule {
 	o := append([]ResponseRule(nil), in...)

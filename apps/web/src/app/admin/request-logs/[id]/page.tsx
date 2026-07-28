@@ -62,6 +62,22 @@ function attemptStatus(a: RequestLogAttempt): 'success' | 'error' {
   return String(a.status ?? a.final_status ?? '') === 'success' ? 'success' : 'error';
 }
 
+function retryStopLabel(stop: string): string {
+  switch (stop) {
+    case 'no_match': return '无匹配规则';
+    case 'retry_none': return '规则禁止';
+    case 'max_total_attempts': return '达总次数上限';
+    case 'max_same_target_attempts': return '达同目标上限';
+    case 'max_total_duration': return '达总时长上限';
+    case 'deadline': return '超时截止';
+    case 'no_candidate': return '无候选';
+    case 'committed': return '已提交';
+    case 'canceled': return '已取消';
+    case 'unclassified': return '未分类错误';
+    default: return stop || '—';
+  }
+}
+
 /* -------------------------------------------------------------------------- */
 /* KPI stat tile                                                               */
 /* -------------------------------------------------------------------------- */
@@ -130,8 +146,13 @@ function AttemptNode({ a, isLast }: { a: RequestLogAttempt; isLast: boolean }) {
   const provider = a.providerId ?? a.provider_id ?? a.provider;
   const upstreamModel = a.upstreamModel ?? a.upstream_model;
   const httpStatus = a.httpStatus ?? a.http_status;
+  const upstreamHttpStatus = a.upstreamHttpStatus ?? a.upstream_http_status ?? a.upstreamHttpStatus;
   const latency = a.latencyMs ?? a.latency_ms;
   const errorCode = a.errorCode ?? a.error_code;
+  const errorType = a.errorType ?? a.error_type;
+  const retryClassified = a.retryClassified ?? a.retry_classified;
+  const metadata = a.metadata as Record<string, string> | undefined;
+  const upstreamMessage = metadata?.upstream_message ?? metadata?.upstreamMessage;
   const createdAt = a.created_at ?? a.createdAt;
 
   return (
@@ -167,9 +188,21 @@ function AttemptNode({ a, isLast }: { a: RequestLogAttempt; isLast: boolean }) {
       </div>
       <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
         {httpStatus != null && Number(httpStatus) > 0 && <span>HTTP {String(httpStatus)}</span>}
+        {upstreamHttpStatus != null && Number(upstreamHttpStatus) > 0 && (
+          <span className="font-medium text-amber-600 dark:text-amber-500">上游 {String(upstreamHttpStatus)}</span>
+        )}
         {errorCode ? <span className="text-destructive">err: {String(errorCode)}</span> : null}
+        {errorType && errorType !== errorCode ? <span>type: {String(errorType)}</span> : null}
+        {retryClassified ? (
+          <Badge variant="outline" className="text-[10px] py-0 px-1.5">重试: {retryStopLabel(String(retryClassified))}</Badge>
+        ) : null}
         {createdAt ? <span>{formatTime(String(createdAt))}</span> : null}
       </div>
+      {upstreamMessage ? (
+        <div className="mt-1 rounded bg-muted/50 px-2 py-1 text-xs text-muted-foreground">
+          上游错误：{String(upstreamMessage)}
+        </div>
+      ) : null}
     </li>
   );
 }
@@ -281,6 +314,7 @@ export default function RequestLogDetailPage() {
                 <p className="text-xs text-muted-foreground">
                   错误码：<span className="font-mono">{log.errorCode}</span>
                   {log.errorType ? ` · 类型：${log.errorType}` : ''}
+                  {log.upstreamHttpStatus ? ` · 上游 HTTP ${log.upstreamHttpStatus}` : ''}
                 </p>
               )}
               {log.errorMessage && (

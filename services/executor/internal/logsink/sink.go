@@ -14,6 +14,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -335,6 +336,8 @@ func buildBatch(e requestlog.ExecutionEvent) (batch, bool) {
 	// Error fields.
 	log.ErrorCode = e.Code
 	log.ErrorType = e.Type
+	log.UpstreamHTTPStatus = e.UpstreamStatus
+	log.HTTPStatus = e.HTTPStatus
 
 	b := batch{Log: log}
 
@@ -348,11 +351,14 @@ func buildBatch(e requestlog.ExecutionEvent) (batch, bool) {
 			CredentialID:  e.Candidate.CredentialID,
 			UpstreamModel: e.Candidate.ModelID,
 			Status:        mapAttemptStatus(e),
-			HTTPStatus:    parseHTTPStatus(e.Code),
+			HTTPStatus:    e.HTTPStatus,
 			LatencyMS:     int(e.Latency / time.Millisecond),
 			ErrorCode:     e.Code,
 			ErrorType:     e.Type,
-			CreatedAt:     e.Timestamp,
+			UpstreamHTTPStatus: e.UpstreamStatus,
+			RetryClassified:    e.RetryStop,
+			Metadata:           buildAttemptMetadata(e),
+			CreatedAt:          e.Timestamp,
 		}}
 	}
 
@@ -365,27 +371,81 @@ func buildBatch(e requestlog.ExecutionEvent) (batch, bool) {
 		Status:       mapEventStatus(e.Status, e.Kind),
 		AttemptIndex: ptrIfPositive(idx),
 		DurationMS:   int(e.Latency / time.Millisecond),
+		Message:      buildEventMessage(e),
+		Metadata:     buildEventMetadata(e),
 		CreatedAt:    e.Timestamp,
 	}}
 
 	return b, true
 }
 
-// parseHTTPStatus tries to parse a 3-digit HTTP status from a code string.
-func parseHTTPStatus(code string) int {
-	if len(code) == 3 {
-		n := 0
-		for _, c := range code {
-			if c < '0' || c > '9' {
-				return 0
-			}
-			n = n*10 + int(c-'0')
-		}
-		if n >= 100 && n < 600 {
-			return n
-		}
+// buildEventMessage constructs a human-readable, sanitized summary for the
+// timeline event. It surfaces the real upstream HTTP status and error
+// code/type for admin diagnostics without echoing raw response bodies.
+func buildEventMessage(e requestlog.ExecutionEvent) string {
+	if e.Kind != requestlog.KindAttempt {
+		return ""
 	}
-	return 0
+	if e.Status == "success" {
+		return ""
+	}
+	parts := make([]string, 0, 4)
+	if e.UpstreamStatus > 0 {
+		parts = append(parts, fmt.Sprintf("upstream %d", e.UpstreamStatus))
+	}
+	if e.Code != "" {
+		parts = append(parts, fmt.Sprintf("code=%s", e.Code))
+	}
+	if e.Type != "" && e.Type != e.Code {
+		parts = append(parts, fmt.Sprintf("type=%s", e.Type))
+	}
+	if e.RetryStop != "" {
+		parts = append(parts, fmt.Sprintf("retry_stop=%s", e.RetryStop))
+	}
+	return strings.Join(parts, " ")
+}
+
+// buildEventMetadata carries structured upstream detail for the timeline event
+// as bounded JSON. It includes the upstream request ID and error message.
+func buildEventMetadata(e requestlog.ExecutionEvent) json.RawMessage {
+	if e.Kind != requestlog.KindAttempt {
+		return nil
+	}
+	if e.UpstreamRequestID == "" && e.UpstreamMessage == "" {
+		return nil
+	}
+	m := map[string]string{}
+	if e.UpstreamRequestID != "" {
+		m["upstream_request_id"] = e.UpstreamRequestID
+	}
+	if e.UpstreamMessage != "" {
+		m["upstream_message"] = e.UpstreamMessage
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		return nil
+	}
+	return b
+}
+
+// buildAttemptMetadata carries structured upstream detail for the attempt row
+// as bounded JSON. It includes the upstream request ID and error message.
+func buildAttemptMetadata(e requestlog.ExecutionEvent) json.RawMessage {
+	if e.UpstreamRequestID == "" && e.UpstreamMessage == "" {
+		return nil
+	}
+	m := map[string]string{}
+	if e.UpstreamRequestID != "" {
+		m["upstream_request_id"] = e.UpstreamRequestID
+	}
+	if e.UpstreamMessage != "" {
+		m["upstream_message"] = e.UpstreamMessage
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		return nil
+	}
+	return b
 }
 
 // ptrIfPositive returns a pointer to v if v > 0, else nil.

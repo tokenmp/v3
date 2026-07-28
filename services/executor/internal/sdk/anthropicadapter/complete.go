@@ -170,6 +170,7 @@ func extractAnthropicMessagesUsage(raw json.RawMessage) (sdk.Usage, bool) {
 func classifyError(err error, response *http.Response) *sdk.ClassifiedError {
 	var apiErr *anthropic.Error
 	status, requestID, code, typ := 0, "", "", ""
+	var upstreamMsg string
 	if response != nil {
 		status = response.StatusCode
 		requestID = response.Header.Get("request-id")
@@ -179,6 +180,10 @@ func classifyError(err error, response *http.Response) *sdk.ClassifiedError {
 		if apiErr.RequestID != "" {
 			requestID = apiErr.RequestID
 		}
+		// Extract the human-readable message from the Anthropic error envelope
+		// {"error":{"type":"...","message":"..."}}. The raw JSON is never
+		// retained verbatim; only the sanitized message is kept for admin logs.
+		upstreamMsg = extractAnthropicMessage(apiErr.RawJSON())
 		// Anthropic errors carry no "code" field; the error type is the only
 		// sanitized classifier. RawJSON is never retained or echoed.
 	}
@@ -195,10 +200,10 @@ func classifyError(err error, response *http.Response) *sdk.ClassifiedError {
 	// Parse Retry-After only for retryable statuses (429, 5xx, including 529).
 	if isRetryableHTTPStatus(status) && response != nil {
 		if ra, ok := sdk.ParseRetryAfter(response.Header); ok {
-			return sdk.NewClassifiedErrorWithRetryAfter(kind, status, requestID, code, typ, ra, true)
+			return sdk.NewClassifiedErrorWithRetryAfter(kind, status, requestID, code, typ, ra, true).WithUpstreamMessage(upstreamMsg)
 		}
 	}
-	return sdk.NewClassifiedError(kind, status, requestID, code, typ)
+	return sdk.NewClassifiedError(kind, status, requestID, code, typ).WithUpstreamMessage(upstreamMsg)
 }
 
 // isRetryableHTTPStatus reports whether the HTTP status is retryable and
@@ -224,4 +229,23 @@ func kindForHTTPStatus(status int) error {
 	default:
 		return sdk.ErrUpstream
 	}
+}
+
+// extractAnthropicMessage parses the Anthropic error envelope
+// {"error":{"type":"...","message":"..."}} to extract the human-readable
+// message. Returns empty if the envelope or message field is absent or
+// unparseable. The raw JSON is never retained beyond this function.
+func extractAnthropicMessage(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	var env struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if json.Unmarshal([]byte(raw), &env) != nil {
+		return ""
+	}
+	return env.Error.Message
 }

@@ -43,6 +43,7 @@ export interface AdminRequestLog extends RequestLog {
   protocol?: string | null;
   stream?: boolean | null;
   httpStatus?: number | null;
+  upstreamHttpStatus?: number | null;
   errorCode?: string | null;
   errorType?: string | null;
   errorMessage?: string | null;
