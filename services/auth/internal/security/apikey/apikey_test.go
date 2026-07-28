@@ -3,7 +3,6 @@ package apikey
 import (
 	"bytes"
 	"crypto/sha256"
-	"encoding/base64"
 	"errors"
 	"strings"
 	"testing"
@@ -26,15 +25,13 @@ func TestGenerate_LengthEntropyAndHash(t *testing.T) {
 			t.Errorf("key %q missing prefix %q", key, PrefixMarker)
 		}
 		payload := strings.TrimPrefix(key, PrefixMarker)
-		if strings.Contains(payload, "=") {
-			t.Errorf("key payload has base64 padding: %q", payload)
+		if len(payload) != EncodedLength {
+			t.Errorf("payload length = %d, want %d", len(payload), EncodedLength)
 		}
-		raw, err := base64.RawURLEncoding.DecodeString(payload)
-		if err != nil {
-			t.Errorf("key payload is not base64url: %v", err)
-		}
-		if len(raw) != TokenLength {
-			t.Errorf("decoded length = %d, want %d", len(raw), TokenLength)
+		for i := 0; i < len(payload); i++ {
+			if !isBase62(payload[i]) {
+				t.Errorf("payload %q contains non-base62 char %q", payload, payload[i])
+			}
 		}
 	}
 	if len(hash1) != sha256.Size || len(hash2) != sha256.Size {
@@ -83,8 +80,9 @@ func TestPrefixAndSuffix(t *testing.T) {
 }
 
 func TestHash_Malformed(t *testing.T) {
-	wrongLength := PrefixMarker + base64.RawURLEncoding.EncodeToString([]byte("short"))
-	for _, key := range []string{"", "other_key", PrefixMarker, PrefixMarker + "not!!!base64", wrongLength} {
+	wrongLength := PrefixMarker + "abc"
+	withDash := PrefixMarker + "has-dash-in-payload-but-otherwise-long-enough-string-here"
+	for _, key := range []string{"", "other_key", PrefixMarker, wrongLength, withDash} {
 		t.Run(key, func(t *testing.T) {
 			_, err := Hash(key)
 			if !errors.Is(err, ErrMalformedKey) {
