@@ -33,7 +33,7 @@
 | `POST /api/v1/notifications/{id}/read` | Bearer | 204 幂等；404 | stable | 同上 |
 | `POST /api/v1/notifications/read-all` | Bearer | 204 幂等 | stable | 同上 |
 
-通知 `action` 为 nullable JSONB：`null` 表示纯信息性；非空时为 `{type:"link",label,href}`。客户端必须按数据渲染，未知 `type` 应优雅忽略。响应统一 `{error:{code,message}}`，不泄露 PG/DSN。所有响应 `Cache-Control: no-store`。
+通知 `action` 为 nullable JSONB：`null` 表示纯信息性；非空时为 `{type:"link",label,href}`。客户端必须按数据渲染，未知 `type` 应优雅忽略。广播通知使用 `models.BroadcastUserID` sentinel row 表示，用户侧列表/未读/标记已读会把该 sentinel 与当前用户 ID 一并纳入；当前广播已读状态是共享的，未来如需 per-user broadcast read state 应改为异步展开或独立读状态表。响应统一 `{error:{code,message}}`，不泄露 PG/DSN。所有响应 `Cache-Control: no-store`。
 
 ## 鉴权
 

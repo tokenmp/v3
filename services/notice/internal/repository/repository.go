@@ -126,13 +126,15 @@ func (r *Repository) GetChangelog(ctx context.Context, id string) (models.Change
 	return c, nil
 }
 
-// ListNotifications returns notifications for userID newest-first.
+// ListNotifications returns direct and broadcast notifications for userID
+// newest-first. Broadcast rows use models.BroadcastUserID because user_id is
+// NOT NULL; they are included here so "send to all" is visible to users.
 func (r *Repository) ListNotifications(ctx context.Context, userID string, limit, offset int) ([]models.Notification, int, error) {
 	limit = clampLimit(limit)
 	offset = clampOffset(offset)
 	var items []models.Notification
 	q := r.db.WithContext(ctx).
-		Where("user_id = ?", userID).
+		Where("user_id IN ?", []string{userID, models.BroadcastUserID}).
 		Order("created_at DESC")
 	var total int64
 	if err := q.Model(&models.Notification{}).Count(&total).Error; err != nil {
@@ -144,12 +146,15 @@ func (r *Repository) ListNotifications(ctx context.Context, userID string, limit
 	return items, int(total), nil
 }
 
-// UnreadCount returns the number of unread notifications for userID.
+// UnreadCount returns the number of unread direct and broadcast notifications
+// for userID. Broadcast read state is shared while broadcasts are represented
+// by a single sentinel row; per-user broadcast read state requires a future
+// expansion table/queue.
 func (r *Repository) UnreadCount(ctx context.Context, userID string) (int, error) {
 	var total int64
 	err := r.db.WithContext(ctx).
 		Model(&models.Notification{}).
-		Where("user_id = ? AND read_at IS NULL", userID).
+		Where("user_id IN ? AND read_at IS NULL", []string{userID, models.BroadcastUserID}).
 		Count(&total).Error
 	if err != nil {
 		return 0, &classifiedError{sentinel: ErrInternal, driver: err}
@@ -157,14 +162,14 @@ func (r *Repository) UnreadCount(ctx context.Context, userID string) (int, error
 	return int(total), nil
 }
 
-// MarkRead marks a single notification as read for userID. Idempotent: an
-// already-read notification still returns nil. A notification not owned by
+// MarkRead marks a single direct or broadcast notification as read. Idempotent:
+// an already-read notification still returns nil. A notification not visible to
 // userID returns ErrNotFound (not a read error) to avoid cross-user probing.
 func (r *Repository) MarkRead(ctx context.Context, userID, id string) error {
 	now := time.Now().UTC()
 	res := r.db.WithContext(ctx).
 		Model(&models.Notification{}).
-		Where("user_id = ? AND id = ?", userID, id).
+		Where("user_id IN ? AND id = ?", []string{userID, models.BroadcastUserID}, id).
 		Update("read_at", &now)
 	if res.Error != nil {
 		return &classifiedError{sentinel: ErrInternal, driver: res.Error}
@@ -175,12 +180,13 @@ func (r *Repository) MarkRead(ctx context.Context, userID, id string) error {
 	return nil
 }
 
-// MarkAllRead marks all notifications as read for userID. Idempotent.
+// MarkAllRead marks all direct and broadcast notifications as read for userID.
+// Idempotent. Broadcast read state is shared while represented by a sentinel row.
 func (r *Repository) MarkAllRead(ctx context.Context, userID string) error {
 	now := time.Now().UTC()
 	res := r.db.WithContext(ctx).
 		Model(&models.Notification{}).
-		Where("user_id = ? AND read_at IS NULL", userID).
+		Where("user_id IN ? AND read_at IS NULL", []string{userID, models.BroadcastUserID}).
 		Update("read_at", &now)
 	if res.Error != nil {
 		return &classifiedError{sentinel: ErrInternal, driver: res.Error}

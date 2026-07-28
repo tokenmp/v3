@@ -11,6 +11,11 @@ import (
 	"time"
 )
 
+// BroadcastUserID is the sentinel UUID used for broadcast notifications.
+// notifications.user_id is NOT NULL, so broadcasts cannot use NULL. User-facing
+// list/unread queries include this sentinel alongside the authenticated user ID.
+const BroadcastUserID = "00000000-0000-0000-0000-000000000000"
+
 // NotificationAction is the generic, data-driven affordance stored as JSONB
 // on a notification. It is nullable at the database level (NULL means the
 // notification is purely informational). The client renders the action purely
