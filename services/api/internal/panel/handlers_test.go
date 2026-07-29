@@ -247,6 +247,27 @@ func TestListRequestLogs_OK(t *testing.T) {
 	}
 }
 
+func TestListRequestLogs_ProcessingStatus(t *testing.T) {
+	body := `{"items":[{"request_id":"r-processing","user_id":"user-1","resolved_model":"gpt-4","final_status":"processing","created_at":"2026-01-01T00:00:00Z"}],"total":1,"page":1,"pageSize":20}`
+	b := newStubBackend(map[string]struct {
+		status int
+		body   string
+	}{"/v1/logs": {200, body}})
+	defer b.close()
+	h, _ := newTestRouter(t, b.srv.URL, "", nil)
+	rec := doAuth(t, h, http.MethodGet, "/api/v1/request-logs?status=processing", "user-1", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		Logs []apiv1.RequestLog `json:"logs"`
+	}
+	decodeData(t, rec, &out)
+	if len(out.Logs) != 1 || out.Logs[0].Status != apiv1.RequestLogStatusProcessing {
+		t.Fatalf("logs = %+v, want processing", out.Logs)
+	}
+}
+
 func TestGetRequestLog_NotFound(t *testing.T) {
 	b := newStubBackend(map[string]struct {
 		status int

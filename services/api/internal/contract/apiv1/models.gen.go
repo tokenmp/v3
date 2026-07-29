@@ -80,14 +80,17 @@ func (e PlanStatus) Valid() bool {
 
 // Defines values for RequestLogStatus.
 const (
-	RequestLogStatusError   RequestLogStatus = "error"
-	RequestLogStatusSuccess RequestLogStatus = "success"
+	RequestLogStatusError      RequestLogStatus = "error"
+	RequestLogStatusProcessing RequestLogStatus = "processing"
+	RequestLogStatusSuccess    RequestLogStatus = "success"
 )
 
 // Valid indicates whether the value is a known member of the RequestLogStatus enum.
 func (e RequestLogStatus) Valid() bool {
 	switch e {
 	case RequestLogStatusError:
+		return true
+	case RequestLogStatusProcessing:
 		return true
 	case RequestLogStatusSuccess:
 		return true
@@ -98,14 +101,17 @@ func (e RequestLogStatus) Valid() bool {
 
 // Defines values for RequestLogDetailStatus.
 const (
-	RequestLogDetailStatusError   RequestLogDetailStatus = "error"
-	RequestLogDetailStatusSuccess RequestLogDetailStatus = "success"
+	RequestLogDetailStatusError      RequestLogDetailStatus = "error"
+	RequestLogDetailStatusProcessing RequestLogDetailStatus = "processing"
+	RequestLogDetailStatusSuccess    RequestLogDetailStatus = "success"
 )
 
 // Valid indicates whether the value is a known member of the RequestLogDetailStatus enum.
 func (e RequestLogDetailStatus) Valid() bool {
 	switch e {
 	case RequestLogDetailStatusError:
+		return true
+	case RequestLogDetailStatusProcessing:
 		return true
 	case RequestLogDetailStatusSuccess:
 		return true
@@ -191,9 +197,10 @@ func (e UpdateApiKeyJSONBodyStatus) Valid() bool {
 
 // Defines values for ListRequestLogsParamsStatus.
 const (
-	ListRequestLogsParamsStatusAll     ListRequestLogsParamsStatus = "all"
-	ListRequestLogsParamsStatusError   ListRequestLogsParamsStatus = "error"
-	ListRequestLogsParamsStatusSuccess ListRequestLogsParamsStatus = "success"
+	ListRequestLogsParamsStatusAll        ListRequestLogsParamsStatus = "all"
+	ListRequestLogsParamsStatusError      ListRequestLogsParamsStatus = "error"
+	ListRequestLogsParamsStatusProcessing ListRequestLogsParamsStatus = "processing"
+	ListRequestLogsParamsStatusSuccess    ListRequestLogsParamsStatus = "success"
 )
 
 // Valid indicates whether the value is a known member of the ListRequestLogsParamsStatus enum.
@@ -202,6 +209,8 @@ func (e ListRequestLogsParamsStatus) Valid() bool {
 	case ListRequestLogsParamsStatusAll:
 		return true
 	case ListRequestLogsParamsStatusError:
+		return true
+	case ListRequestLogsParamsStatusProcessing:
 		return true
 	case ListRequestLogsParamsStatusSuccess:
 		return true
