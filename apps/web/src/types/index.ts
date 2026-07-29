@@ -98,7 +98,7 @@ export interface Plan {
   status: PlanStatus;
 }
 
-export type UserPlanStatus = 'active' | 'expired' | 'disabled';
+export type UserPlanStatus = 'active' | 'expired' | 'disabled' | 'cancelled';
 
 /** Rate-limit window scope for an active coding plan. */
 export type UsageWindowScope = 'hour5' | 'weekly' | 'period';

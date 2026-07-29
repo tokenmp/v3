@@ -61,9 +61,8 @@ keys/codes/errors/models/plans/providers，recharts 用量图表。
 ```
 /admin                          → 控制台（概览）
 /admin/users                    → 用户管理
-/admin/users/[id]               → 用户详情（密钥/套餐/用量/日志聚合）
+/admin/users/[id]               → 用户详情（用户信息/套餐管理/API 密钥/最近请求聚合）
 /admin/plans                    → 套餐管理（CRUD）
-/admin/user-plans               → 用户套餐绑定（分配/撤销）
 /admin/api-keys                 → 全局 API 密钥（只读 + 禁用/撤销）
 /admin/request-logs             → 请求日志（全局，跨用户）
 /admin/request-logs/[id]        → 请求详情（attempts/events）
@@ -85,7 +84,7 @@ keys/codes/errors/models/plans/providers，recharts 用量图表。
 | **用户域** | 用户管理 | Users | auth.users |
 | | API 密钥 | Key | auth.api_keys |
 | | 套餐 | Package | billing.plans |
-| | 用户套餐 | UserCheck | billing.user_plans |
+| | 用户详情内套餐管理 | Users | billing.user_plans |
 | **运营** | 请求日志 | ScrollText | logging.request_logs |
 | | 用量统计 | BarChart3 | logging.stats + billing.ledger |
 | **内容** | 公告 | Megaphone | notice.announcements |
@@ -159,18 +158,24 @@ keys/codes/errors/models/plans/providers，recharts 用量图表。
 - `GET/POST /api/v1/admin/plans`
 - `GET/PATCH/DELETE /api/v1/admin/plans/{id}`
 
-### 4.5 用户套餐 `/admin/user-plans`
+### 4.5 用户详情内套餐管理 `/admin/users/[id]`
 
-**列表**（按用户）：
-- user(email) / plan / planType / status / 激活时间 / 到期时间 / remaining
+独立 `/admin/user-plans` 页面已移除；管理员先在用户管理中搜索用户，再进入用户详情查看/编辑其套餐。
 
-**操作**：
-- 分配套餐（Modal：选用户 + 选套餐 + 激活/到期）
+**页面顺序**：
+- 用户信息 → 套餐 → API 密钥（最近 5 条）→ 最近请求（5 条）
+
+**套餐操作**：
+- 分配套餐（Modal：选套餐 + 到期时间；user 由详情页固定）
 - 撤销套餐（status→cancelled）
+- active coding user_plan 支持 reset/bonus limit override：重置 5小时/周/周期窗口或临时加额，并可查看历史与软撤销 override。
 
 **后端需求**：
-- `GET/POST /api/v1/admin/user-plans`
-- `PATCH/DELETE /api/v1/admin/user-plans/{id}`
+- `GET /api/v1/admin/users/{id}` 聚合用户信息 + userPlans + 5 条 API Key + 5 条最近请求
+- `POST /api/v1/admin/user-plans`
+- `POST /api/v1/admin/user-plans/{id}/cancel`
+- `POST/GET /api/v1/admin/user-plans/{id}/limit-overrides`
+- `POST /api/v1/admin/limit-overrides/{id}/revoke`
 
 ### 4.6 请求日志 `/admin/request-logs`
 
@@ -312,7 +317,8 @@ keys/codes/errors/models/plans/providers，recharts 用量图表。
 
 ### Phase 3（套餐计费）✅ 前端已完成
 - 套餐 CRUD
-- 用户套餐分配/撤销
+- 用户详情内套餐分配/撤销
+- active coding 套餐 reset/bonus override 与历史撤销
 - 用量统计（BarChart + AreaChart）
 
 ### Phase 4（执行配置）✅ 前端已完成（只读）

@@ -3,7 +3,6 @@ import {
   Users,
   Key,
   Package,
-  UserCheck,
   ScrollText,
   BarChart3,
   Megaphone,
@@ -42,7 +41,6 @@ export const adminNavGroups: AdminNavGroup[] = [
       { label: '用户管理', href: '/admin/users', icon: Users },
       { label: 'API 密钥', href: '/admin/api-keys', icon: Key },
       { label: '套餐', href: '/admin/plans', icon: Package },
-      { label: '用户套餐', href: '/admin/user-plans', icon: UserCheck },
     ],
   },
   {
@@ -102,7 +100,6 @@ export const adminMobileMoreGroups: { label: string; items: AdminNavItem[] }[] =
     items: [
       { label: 'API 密钥', href: '/admin/api-keys', icon: Key },
       { label: '套餐', href: '/admin/plans', icon: Package },
-      { label: '用户套餐', href: '/admin/user-plans', icon: UserCheck },
     ],
   },
   {

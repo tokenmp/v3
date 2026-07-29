@@ -32,8 +32,7 @@ export function AdminBottomNav() {
     if (href === '/admin/users') {
       return pathname.startsWith('/admin/users')
         || pathname.startsWith('/admin/api-keys')
-        || pathname.startsWith('/admin/plans')
-        || pathname.startsWith('/admin/user-plans');
+        || pathname.startsWith('/admin/plans');
     }
     return pathname.startsWith(href);
   };

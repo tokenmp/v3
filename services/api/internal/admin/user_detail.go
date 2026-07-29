@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -36,14 +37,31 @@ type apiKeyResp struct {
 }
 
 type userPlanResp struct {
-	ID             string     `json:"id"`
-	PlanID         string     `json:"planId"`
-	PlanType       string     `json:"planType"`
-	TotalQuota     string     `json:"totalQuota"`
-	RemainingQuota string     `json:"remainingQuota"`
-	Status         string     `json:"status"`
-	ActivatedAt    time.Time  `json:"activatedAt"`
-	ExpiresAt      *time.Time `json:"expiresAt,omitempty"`
+	ID             string            `json:"id"`
+	PlanID         string            `json:"planId"`
+	PlanName       string            `json:"planName,omitempty"`
+	PlanType       string            `json:"planType"`
+	Category       string            `json:"category,omitempty"`
+	Price          *float64          `json:"price,omitempty"`
+	HourlyLimit    *int              `json:"hourlyLimit,omitempty"`
+	WeeklyLimit    *int              `json:"weeklyLimit,omitempty"`
+	MonthlyLimit   *int              `json:"monthlyLimit,omitempty"`
+	TokenLimit     *string           `json:"tokenLimit,omitempty"`
+	TotalQuota     string            `json:"totalQuota"`
+	RemainingQuota string            `json:"remainingQuota"`
+	Status         string            `json:"status"`
+	ActivatedAt    time.Time         `json:"activatedAt"`
+	ExpiresAt      *time.Time        `json:"expiresAt,omitempty"`
+	UsageWindows   []usageWindowResp `json:"usageWindows,omitempty"`
+}
+
+type usageWindowResp struct {
+	Scope       string     `json:"scope"`
+	Limit       *int       `json:"limit"`
+	Consumed    int        `json:"consumed"`
+	Remaining   int        `json:"remaining"`
+	WindowStart time.Time  `json:"windowStart"`
+	WindowEnd   *time.Time `json:"windowEnd"`
 }
 
 type requestLogResp struct {
@@ -80,7 +98,7 @@ func (h *Handlers) adminGetUserDetail(w http.ResponseWriter, r *http.Request, be
 		RecentRequests: []requestLogResp{},
 	}
 
-	// 2. API Keys from Auth — list all and filter by user_id.
+	// 2. API Keys from Auth — list and return at most 5 for the detail summary.
 	if keysResult, err := h.Auth.ListKeys(r.Context(), bearer, 1, 100); err == nil {
 		for _, k := range keysResult.Keys {
 			if k.UserID == userID {
@@ -94,6 +112,9 @@ func (h *Handlers) adminGetUserDetail(w http.ResponseWriter, r *http.Request, be
 					ExpiresAt:  k.ExpiresAt,
 					CreatedAt:  k.CreatedAt,
 				})
+				if len(resp.APIKeys) >= 5 {
+					break
+				}
 			}
 		}
 	}
@@ -101,26 +122,13 @@ func (h *Handlers) adminGetUserDetail(w http.ResponseWriter, r *http.Request, be
 	// 3. User plans from Billing.
 	if h.Billing != nil && h.Billing.Available() {
 		if plans, err := h.Billing.ListUserPlans(r.Context(), userID); err == nil {
-			// Try to get balance for remaining quota.
 			var balance *billing.Balance
 			if b, bErr := h.Billing.GetBalance(r.Context(), userID); bErr == nil {
 				balance = &b
 			}
+			windows, winErr := h.Billing.GetUsageWindows(r.Context(), userID)
 			for _, p := range plans {
-				var remaining string
-				if balance != nil {
-					remaining = balance.TokenRemaining
-				}
-				resp.UserPlans = append(resp.UserPlans, userPlanResp{
-					ID:             formatInt64(p.ID),
-					PlanID:         formatInt64(p.PlanID),
-					PlanType:       p.PlanType,
-					TotalQuota:     "", // Billing doesn't return plan token_limit here
-					RemainingQuota: remaining,
-					Status:         p.Status,
-					ActivatedAt:    p.ActivatedAt,
-					ExpiresAt:      p.ExpiresAt,
-				})
+				resp.UserPlans = append(resp.UserPlans, mapAdminUserPlanResp(p, balance, windows, winErr))
 			}
 		}
 	}
@@ -130,7 +138,7 @@ func (h *Handlers) adminGetUserDetail(w http.ResponseWriter, r *http.Request, be
 		logsResult, err := h.Logging.ListLogs(r.Context(), logging.ListFilter{
 			UserID:   userID,
 			Page:     1,
-			PageSize: 10,
+			PageSize: 5,
 		})
 		if err == nil {
 			resp.TotalRequests = logsResult.Total
@@ -141,6 +149,71 @@ func (h *Handlers) adminGetUserDetail(w http.ResponseWriter, r *http.Request, be
 	}
 
 	httpresp.OK(w, resp)
+}
+
+func mapAdminUserPlanResp(p billing.UserPlan, balance *billing.Balance, windows []billing.UsageWindow, winErr error) userPlanResp {
+	remaining := "0"
+	if balance != nil {
+		if p.PlanType == "token" {
+			remaining = balance.TokenRemaining
+		} else {
+			remaining = balance.CodingRemaining
+		}
+	}
+	totalQuota := "0"
+	if p.PlanType == "token" && p.TokenLimit != nil {
+		totalQuota = strconv.FormatInt(*p.TokenLimit, 10)
+	} else if p.MonthlyLimit != nil {
+		totalQuota = strconv.Itoa(*p.MonthlyLimit)
+	}
+	out := userPlanResp{
+		ID:             formatInt64(p.ID),
+		PlanID:         formatInt64(p.PlanID),
+		PlanName:       p.PlanName,
+		PlanType:       p.PlanType,
+		Category:       p.Category,
+		Price:          floatPtr(p.Price),
+		HourlyLimit:    p.HourlyLimit,
+		WeeklyLimit:    p.WeeklyLimit,
+		MonthlyLimit:   p.MonthlyLimit,
+		TokenLimit:     int64StringPtr(p.TokenLimit),
+		TotalQuota:     totalQuota,
+		RemainingQuota: remaining,
+		Status:         p.Status,
+		ActivatedAt:    p.ActivatedAt,
+		ExpiresAt:      p.ExpiresAt,
+	}
+	if p.PlanType == "coding" && winErr == nil && len(windows) > 0 {
+		out.UsageWindows = make([]usageWindowResp, 0, len(windows))
+		for _, w := range windows {
+			out.UsageWindows = append(out.UsageWindows, usageWindowResp{
+				Scope:       w.Scope,
+				Limit:       w.Limit,
+				Consumed:    w.Consumed,
+				Remaining:   w.Remaining,
+				WindowStart: w.WindowStart,
+				WindowEnd:   w.WindowEnd,
+			})
+		}
+	} else if errors.Is(winErr, billing.NotFound) {
+		out.UsageWindows = nil
+	}
+	return out
+}
+
+func floatPtr(v float64) *float64 {
+	if v == 0 {
+		return nil
+	}
+	return &v
+}
+
+func int64StringPtr(v *int64) *string {
+	if v == nil {
+		return nil
+	}
+	s := strconv.FormatInt(*v, 10)
+	return &s
 }
 
 func mapLogToResp(lg logging.RequestLog) requestLogResp {
