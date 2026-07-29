@@ -283,6 +283,7 @@ func buildBatch(e requestlog.ExecutionEvent) (batch, bool) {
 		CredentialID:  e.Candidate.CredentialID,
 		Protocol:      e.Protocol,
 		ReservationID: e.ReservationID,
+		Stream:       e.Stream,
 		CreatedAt:     e.Timestamp,
 	}
 

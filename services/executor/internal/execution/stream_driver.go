@@ -505,6 +505,7 @@ func (d *StreamDriver) logSuccess(ctx context.Context, in StreamInput, prepared 
 	event.Latency = latency
 	event.Committed = true
 	event.TTFT = outcome.TTFT
+	event.Stream = true
 	if outcome.UsageKnown {
 		event.Usage = requestlog.ExecutionUsage{
 			InputTokens:  uint64(outcome.Usage.PromptTokens),
@@ -526,6 +527,7 @@ func (d *StreamDriver) logFailure(ctx context.Context, in StreamInput, prepared 
 	event.Status = "failed"
 	event.Latency = latency
 	event.Committed = committed
+	event.Stream = true
 	if classified != nil {
 		event.Code = classified.Code()
 		event.Type = classified.Type()

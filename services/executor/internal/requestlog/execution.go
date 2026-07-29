@@ -90,6 +90,9 @@ type ExecutionEvent struct {
 	// measured the elapsed time from stream start to first committed
 	// semantic event.
 	TTFT time.Duration
+	// Stream reports whether the request was a streaming request.
+	// Set by the StreamDriver for streaming attempts.
+	Stream bool
 	// Usage carries bounded token counters when available.
 	Usage ExecutionUsage
 	// UsageKnown reports whether Usage was explicitly confirmed by the
