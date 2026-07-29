@@ -78,6 +78,11 @@ export default function PanelSettingsPage() {
   const email = user?.email ?? '';
   const initial = email.charAt(0).toUpperCase() || '?';
   const isAdmin = user?.role === 'admin';
+  const createdAt = user?.created_at
+    ? new Date(user.created_at).toLocaleString('zh-CN', {
+      year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false,
+    })
+    : null;
 
   const noticeEntries = [
     { href: '/panel/announcements', icon: Megaphone, label: '公告' },
@@ -100,8 +105,8 @@ export default function PanelSettingsPage() {
           </div>
           <div className="min-w-0 flex-1">
             <div className="font-semibold truncate">{email || '用户'}</div>
-            <div className="text-xs text-muted-foreground mt-0.5">
-              {isAdmin ? '管理员' : '普通用户'}
+            <div className="mt-0.5 text-xs text-muted-foreground">
+              {isAdmin ? '管理员' : '普通用户'}{createdAt ? ` · 注册于 ${createdAt}` : ''}
             </div>
           </div>
           {isAdmin && (

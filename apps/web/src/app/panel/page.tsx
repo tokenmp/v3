@@ -3,7 +3,6 @@
 import type { ComponentType } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
-import { useAuthStore } from '@/lib/auth';
 import { userApi } from '@/lib/api/user';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -22,7 +21,6 @@ import {
   Gauge,
   KeyRound,
   ShieldCheck,
-  User,
   Zap,
 } from 'lucide-react';
 import type { RequestLog, UserPlan } from '@/types';
@@ -233,8 +231,6 @@ function requestSpeed(r: RequestLog) {
 }
 
 export default function OverviewPage() {
-  const user = useAuthStore((s) => s.user);
-
   const { data: balance } = useQuery({
     queryKey: ['balance'],
     queryFn: () => userApi.getBalance(),
@@ -273,21 +269,7 @@ export default function OverviewPage() {
         </Link>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <Card>
-          <CardHeader className="flex flex-row items-center gap-3 pb-2">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
-              <User className="h-4 w-4" />
-            </div>
-            <CardTitle className="text-base">账户</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-1 text-sm">
-            <p className="truncate text-muted-foreground">{user?.email ?? '—'}</p>
-            <p>角色：<span className="text-foreground">{user?.role === 'admin' ? '管理员' : '用户'}</span></p>
-            <p>注册时间：<span className="text-foreground">{user?.created_at ? formatTime(user.created_at) : '—'}</span></p>
-          </CardContent>
-        </Card>
-
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <QuotaSummaryCard
           title="编程请求额度"
           icon={Zap}
