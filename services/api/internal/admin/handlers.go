@@ -507,7 +507,7 @@ func (h *Handlers) adminSwitchLikeUserPlan(w http.ResponseWriter, r *http.Reques
 	}
 	if err != nil {
 		if errors.Is(err, billing.BadRequest) {
-			httpresp.Error(w, httpresp.CodeBadRequest, "目标套餐不能低于当前套餐")
+			httpresp.Error(w, httpresp.CodeBadRequest, "目标套餐类型或额度不能低于当前套餐")
 			return
 		}
 		h.logger().Warn("admin switch user plan failed", "error", err)

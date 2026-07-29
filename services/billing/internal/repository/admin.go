@@ -152,7 +152,8 @@ func (r *GormRepository) UpgradeUserPlan(ctx context.Context, id int64, newPlanI
 // the new plan. It is intentionally explicit rather than mutating plan_id in
 // place so historical reservations remain attributable to the original plan
 // period. The target plan must be comparable and not lower than the current
-// plan: same plan_type, price not lower, and relevant quota limits not lower.
+// plan: same plan_type and relevant quota limits not lower. Price is not used
+// as grade because operational/free gift plans can have higher quota at price 0.
 func (r *GormRepository) SwitchUserPlan(ctx context.Context, id int64, newPlanID int64, expiresAt *time.Time) (UserPlan, error) {
 	var created UserPlan
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -189,9 +190,6 @@ func (r *GormRepository) SwitchUserPlan(ctx context.Context, id int64, newPlanID
 
 func canSwitchPlan(current Plan, target Plan) bool {
 	if current.PlanType != target.PlanType {
-		return false
-	}
-	if target.Price < current.Price {
 		return false
 	}
 	switch current.PlanType {

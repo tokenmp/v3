@@ -263,9 +263,7 @@ export default function AdminUserDetailPage() {
   }
 
   const switchCandidates = renewSwitchForm?.mode === 'switch'
-    ? plans.filter((p) => p.status === 'active'
-      && p.planType === renewSwitchForm.userPlan.planType
-      && Number(p.price ?? 0) >= Number(renewSwitchForm.userPlan.price ?? 0))
+    ? plans.filter((p) => p.status === 'active' && p.planType === renewSwitchForm.userPlan.planType)
     : [];
 
   if (isLoading) {
@@ -562,7 +560,7 @@ export default function AdminUserDetailPage() {
                     <option key={p.id} value={p.id}>{p.name}</option>
                   ))}
                 </select>
-                <p className="text-xs text-muted-foreground">只显示同类型、价格不低于当前套餐的候选；后端还会校验具体用量不能降低。</p>
+                <p className="text-xs text-muted-foreground">只显示同类型候选；后端会校验目标套餐用量不能低于当前套餐。</p>
               </div>
             )}
             <div className="space-y-2">
