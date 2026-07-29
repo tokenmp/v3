@@ -587,6 +587,7 @@ func TestWireShapeAlignsWithRepository(t *testing.T) {
 			TraceID:                "tid",
 			UserID:                 "uid",
 			ClientKeyID:            "ckid",
+			UserAgent:              "client/1.0",
 			ModelName:              "mn",
 			ResolvedModel:          "rm",
 			RouteID:                "rid2",
@@ -671,7 +672,7 @@ func TestWireShapeAlignsWithRepository(t *testing.T) {
 
 	// Per-row field sets mirror the repository json tags exactly. The id
 	// field is json:"-" so it must never appear.
-	wantLog := []string{"request_id", "trace_id", "user_id", "client_key_id", "model_name", "resolved_model", "route_id", "provider_id", "credential_id", "protocol", "stream", "final_status", "http_status", "input_tokens", "output_tokens", "total_tokens", "cache_tokens", "latency_ms", "ttft_ms", "error_code", "error_type", "upstream_http_status", "usage_status", "thinking_mode", "thinking_effort", "thinking_effort_degraded", "reservation_id", "billing_plan", "created_at", "completed_at"}
+	wantLog := []string{"request_id", "trace_id", "user_id", "client_key_id", "user_agent", "model_name", "resolved_model", "route_id", "provider_id", "credential_id", "protocol", "stream", "final_status", "http_status", "input_tokens", "output_tokens", "total_tokens", "cache_tokens", "latency_ms", "ttft_ms", "error_code", "error_type", "upstream_http_status", "usage_status", "thinking_mode", "thinking_effort", "thinking_effort_degraded", "reservation_id", "billing_plan", "created_at", "completed_at"}
 	assertObjectKeySet(t, decoded["log"], wantLog, "log")
 	wantAttempt := []string{"request_log_id", "request_id", "attempt_index", "route_id", "provider_id", "credential_id", "upstream_model", "upstream_url", "status", "http_status", "latency_ms", "error_code", "error_type", "upstream_http_status", "retry_classified", "metadata", "created_at"}
 	assertKeySet(t, decoded["attempts"], wantAttempt, "attempts")

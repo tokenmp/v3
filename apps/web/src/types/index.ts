@@ -126,10 +126,17 @@ export interface RequestLog {
   status: RequestLogStatus;
   inputTokens: number | null;
   outputTokens: number | null;
+  totalTokens?: number | null;
+  cacheTokens?: number | null;
   /** Decimal cost as a string. */
   cost: string | null;
   durationMs: number | null;
+  ttftMs?: number | null;
+  protocol?: string | null;
+  stream?: boolean | null;
+  thinkingEffort?: string | null;
   createdAt: string;
+  completedAt?: string | null;
 }
 
 export interface RequestLogDetail extends RequestLog {

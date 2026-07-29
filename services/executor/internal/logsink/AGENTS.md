@@ -5,7 +5,7 @@
 ## 模块职责
 
 - 负责：将 executor 执行生命周期事件异步推送到 Logging Service `/v1/logs/ingest`。
-- `RemoteSink` 包装内存 `ExecutionPort`（保留本地查询能力），在每次 `RecordExecution` 时同步 post 单事件 batch 到 Logging Service（用 `context.Background()`，吞错误不阻塞 executor 主路径）。
+- `RemoteSink` 包装内存 `ExecutionPort`（保留本地查询能力）。除首 token `KindStarted` 外，每次 `RecordExecution` 同步 post 单事件 batch；`KindStarted` 在本地有序记录后异步 post，确保 Logging HTTP 延迟不阻塞 SSE。所有 post 用 `context.Background()`，错误吞并不改变主路径。
 - 不负责：缓冲/批量聚合（当前每事件一次 post）、Logging Service 分区管理、Edge 日志推送。
 
 ## 对外能力
@@ -13,7 +13,7 @@
 | 导出 | 输入 | 返回/错误 | 稳定性 |
 |---|---|---|---|
 | `NewRemoteSink(Options)` | Endpoint（http(s) base URL，无 path/query/fragment/userinfo）、Local（非 nil ExecutionPort）、HTTPClient（可选）、PostTimeout（可选，默认 10s） | `(*RemoteSink, error)`；URL 校验失败返回 `ErrSinkBlankURL`/`ErrSinkInvalidURL` | internal |
-| `RemoteSink.RecordExecution` | ctx、ExecutionEvent | 先 inner.RecordExecution，再 post；post 错误吞掉（slog.Warn），**永不返回 post 错误** | internal |
+| `RemoteSink.RecordExecution` | ctx、ExecutionEvent | 先 inner.RecordExecution；KindStarted 异步 post，其余同步 post；post 错误吞掉（slog.Warn），**永不返回 post 错误** | internal |
 | `RemoteSink.QueryEvents` | ctx、ExecutionFilter | 委托 inner 本地查询 | internal |
 | `RemoteSink.post` | batch | `ErrSinkUnavailable`（HTTP 失败/非 2xx/redirect）、`ErrSinkOversized`（>2 MiB）；**不泄漏 URL/host/port/body** | internal（测试可见） |
 
@@ -38,11 +38,12 @@
 | ReservationID | Log.ReservationID |
 | Usage (UsageKnown=true) | Log.{Input,Output,Total}Tokens + UsageStatus="final" |
 | Latency | Log.LatencyMS, Attempt.LatencyMS, Event.DurationMS |
+| TTFT + Stream | KindStarted 时 Log.TTFTMS/Stream=true + Event.Stage=upstream_started/Event.DurationMS=TTFT |
 | Code | Log.ErrorCode, Attempt.ErrorCode, Attempt.HTTPStatus（3 位数时） |
 | Type | Log.ErrorType, Attempt.ErrorType |
 | Kind=attempt | 产生 1 行 Attempt |
 | Kind=finalized/released | Log.CompletedAt = Timestamp |
-| 所有 Kind | 产生 1 行 Event（Source="executor", Stage=Kind） |
+| 所有 Kind | 产生 1 行 Event（Source="executor"；reserved→quota_reserved、started→upstream_started、attempt→upstream_finished、terminal/completed） |
 
 ## 验证
 

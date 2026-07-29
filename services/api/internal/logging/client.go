@@ -32,6 +32,7 @@ type RequestLog struct {
 	UserID             string     `json:"user_id,omitempty"`
 	UserEmail          string     `json:"user_email,omitempty"`
 	ClientKeyID        string     `json:"client_key_id,omitempty"`
+	UserAgent          string     `json:"user_agent,omitempty"`
 	ModelName          string     `json:"resolved_model,omitempty"`
 	RouteID            string     `json:"route_id,omitempty"`
 	ProviderID         string     `json:"provider_id,omitempty"`
@@ -270,6 +271,7 @@ type IngestLog struct {
 	RequestID   string    `json:"request_id"`
 	UserID      string    `json:"user_id,omitempty"`
 	ClientKeyID string    `json:"client_key_id,omitempty"`
+	UserAgent   string    `json:"user_agent,omitempty"`
 	FinalStatus string    `json:"final_status"`
 	CreatedAt   time.Time `json:"created_at"`
 }

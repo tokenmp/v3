@@ -224,7 +224,7 @@ func TestListUserPlans_OK(t *testing.T) {
 // ----- 请求日志 -----
 
 func TestListRequestLogs_OK(t *testing.T) {
-	body := `{"items":[{"request_id":"r1","user_id":"user-1","resolved_model":"gpt-4","final_status":"success","created_at":"2026-01-01T00:00:00Z"}],"total":1,"page":1,"pageSize":20}`
+	body := `{"items":[{"request_id":"r1","user_id":"user-1","resolved_model":"gpt-4","protocol":"openai_chat","stream":true,"final_status":"success","input_tokens":12,"output_tokens":34,"total_tokens":46,"cache_tokens":5,"latency_ms":2500,"ttft_ms":400,"thinking_effort":"high","created_at":"2026-01-01T00:00:00Z","completed_at":"2026-01-01T00:00:02.5Z"}],"total":1,"page":1,"pageSize":20}`
 	b := newStubBackend(map[string]struct {
 		status int
 		body   string
@@ -243,7 +243,13 @@ func TestListRequestLogs_OK(t *testing.T) {
 	}
 	decodeData(t, rec, &out)
 	if out.Total != 1 || len(out.Logs) != 1 || out.Logs[0].Status != "success" {
-		t.Errorf("out = %+v", out)
+		t.Fatalf("out = %+v", out)
+	}
+	got := out.Logs[0]
+	if got.Protocol == nil || *got.Protocol != "openai_chat" || got.Stream == nil || !*got.Stream ||
+		got.TtftMs == nil || *got.TtftMs != 400 || got.TotalTokens == nil || *got.TotalTokens != 46 ||
+		got.CacheTokens == nil || *got.CacheTokens != 5 || got.ThinkingEffort == nil || *got.ThinkingEffort != "high" || got.CompletedAt == nil {
+		t.Fatalf("rich log fields = %+v", got)
 	}
 }
 

@@ -11,6 +11,15 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { copyText } from '@/lib/utils';
 import {
+  formatDuration,
+  formatTokens,
+  formatTokensPerSecond,
+  calcTokensPerSecond,
+  protocolLabelFull,
+  streamLabel,
+  thinkingLabel,
+} from '@/lib/request-log-metrics';
+import {
   ArrowLeft,
   Calendar,
   Check,
@@ -29,6 +38,8 @@ import {
   XCircle,
   Timer,
   Activity,
+  Gauge,
+  Globe,
 } from 'lucide-react';
 
 /* -------------------------------------------------------------------------- */
@@ -40,27 +51,6 @@ function formatTime(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleString('zh-CN', { hour12: false });
-}
-
-function formatMs(ms: number | null | undefined): string {
-  if (ms == null) return '—';
-  if (ms < 1000) return `${ms} ms`;
-  return `${(ms / 1000).toFixed(2)} s`;
-}
-
-function protocolLabel(p: string | null | undefined): string {
-  switch (p) {
-    case 'openai_chat':
-      return 'OpenAI Chat';
-    case 'anthropic_messages':
-      return 'Anthropic Messages';
-    case 'openai_responses':
-      return 'OpenAI Responses';
-    case 'openai_images':
-      return 'OpenAI Images';
-    default:
-      return p ?? '—';
-  }
 }
 
 function statusLabel(s: string | null | undefined): { label: string; tone: 'success' | 'destructive' | 'secondary' } {
@@ -257,7 +247,7 @@ function AttemptNode({ a, isLast }: { a: RequestLogAttempt; isLast: boolean }) {
         {latency != null && (
           <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
             <Clock className="h-3.5 w-3.5" />
-            {formatMs(Number(latency))}
+            {formatDuration(Number(latency))}
           </span>
         )}
       </div>
@@ -345,7 +335,7 @@ function EventNode({ e, isLast }: { e: RequestLogEvent; isLast: boolean }) {
         {duration != null && Number(duration) > 0 && (
           <span className="inline-flex items-center gap-0.5 text-xs text-muted-foreground">
             <Timer className="h-3 w-3" />
-            {formatMs(Number(duration))}
+            {formatDuration(Number(duration))}
           </span>
         )}
         {createdAt ? (
@@ -404,6 +394,17 @@ export default function RequestLogDetailPage() {
   const hasError = !isProcessing && (!!log.errorMessage || !!log.errorCode);
   const st = statusLabel(isProcessing ? 'processing' : (isSuccess ? 'success' : (log.errorType ?? 'error')));
 
+  // Compute tokens/s for KPI
+  const tokensPerSec = calcTokensPerSecond({
+    outputTokens: log.outputTokens,
+    durationMs: log.durationMs,
+    ttftMs: log.ttftMs,
+    stream: log.stream,
+  });
+
+  // Total tokens: prefer explicit field, fallback to sum
+  const totalTokens = log.totalTokens ?? ((log.inputTokens ?? 0) + (log.outputTokens ?? 0));
+
   return (
     <div className="space-y-6">
       {/* Back */}
@@ -439,28 +440,20 @@ export default function RequestLogDetailPage() {
       {/* KPI stats — show for successful and processing requests (failed requests show error banner instead) */}
       {(isSuccess || isProcessing) && (
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <StatTile icon={Clock} label="总耗时" value={formatMs(log.durationMs)} tone="blue" />
-          {log.ttftMs != null && log.ttftMs > 0 && (
-            <StatTile icon={Zap} label="首字耗时" value={formatMs(log.ttftMs)} tone="purple" />
+          <StatTile icon={Clock} label="总耗时" value={formatDuration(log.durationMs)} tone="blue" />
+          {log.ttftMs != null && log.ttftMs > 0 && log.stream === true && (
+            <StatTile icon={Zap} label="首字耗时 (TTFT)" value={formatDuration(log.ttftMs)} tone="purple" />
           )}
           <StatTile
             icon={Activity}
-            label="输入 Token"
-            value={(log.inputTokens ?? 0).toLocaleString()}
+            label="Token (入/出)"
+            value={`${formatTokens(log.inputTokens)} / ${formatTokens(log.outputTokens)}`}
+            hint={log.cacheTokens != null && log.cacheTokens > 0 ? `缓存 ${formatTokens(log.cacheTokens)} · 总计 ${formatTokens(totalTokens)}` : `总计 ${formatTokens(totalTokens)}`}
             tone="green"
           />
-          <StatTile
-            icon={Activity}
-            label="输出 Token"
-            value={(log.outputTokens ?? 0).toLocaleString()}
-            tone="orange"
-          />
-          <StatTile
-            icon={Zap}
-            label="总 Token"
-            value={(log.totalTokens ?? (log.inputTokens ?? 0) + (log.outputTokens ?? 0)).toLocaleString()}
-            tone="purple"
-          />
+          {tokensPerSec != null && (
+            <StatTile icon={Gauge} label="生成速度" value={formatTokensPerSecond(tokensPerSec)} tone="orange" />
+          )}
         </div>
       )}
 
@@ -555,28 +548,43 @@ export default function RequestLogDetailPage() {
             <InfoRow label="协议">
               <span className="inline-flex items-center gap-1.5">
                 <Layers className="h-4 w-4 text-muted-foreground" />
-                {protocolLabel(log.protocol)}
+                {protocolLabelFull(log.protocol)}
               </span>
             </InfoRow>
             <InfoRow label="流式">
               <span className="inline-flex items-center gap-1.5">
                 <Radio className="h-4 w-4 text-muted-foreground" />
-                {log.stream == null ? '—' : log.stream ? '是' : '否'}
+                {streamLabel(log.stream)}
               </span>
             </InfoRow>
-            {log.thinkingMode ? (
-              <InfoRow label="思考模式">
-                <span>{log.thinkingMode}{log.thinkingEffort ? ` · ${log.thinkingEffort}` : ''}</span>
+            {(log.thinkingMode || log.thinkingEffort) ? (
+              <InfoRow label="思考">
+                <span>{thinkingLabel(log.thinkingEffort, log.thinkingMode)}</span>
               </InfoRow>
             ) : null}
             <InfoRow label="计费套餐">
               {log.billingPlan ?? '—'}
+            </InfoRow>
+            <InfoRow label="开始时间">
+              <span>{formatTime(log.createdAt)}</span>
             </InfoRow>
             {log.completedAt ? (
               <InfoRow label="完成时间">
                 <span>{formatTime(log.completedAt)}</span>
               </InfoRow>
             ) : null}
+            {/* User-Agent — full value, copyable */}
+            <InfoRow label="User-Agent">
+              {log.userAgent ? (
+                <span className="flex items-start gap-1.5">
+                  <Globe className="h-4 w-4 shrink-0 text-muted-foreground mt-0.5" />
+                  <span className="font-mono text-sm break-all whitespace-pre-wrap">{log.userAgent}</span>
+                  <CopyButton text={log.userAgent} />
+                </span>
+              ) : (
+                <span className="text-muted-foreground">—</span>
+              )}
+            </InfoRow>
           </dl>
         </CardContent>
       </Card>

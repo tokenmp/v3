@@ -205,6 +205,7 @@ type requestLog struct {
 	TraceID                string     `json:"trace_id,omitempty"`
 	UserID                 string     `json:"user_id,omitempty"`
 	ClientKeyID            string     `json:"client_key_id,omitempty"`
+	UserAgent              string     `json:"user_agent,omitempty"`
 	ModelName              string     `json:"model_name,omitempty"`
 	ResolvedModel          string     `json:"resolved_model,omitempty"`
 	RouteID                string     `json:"route_id,omitempty"`
