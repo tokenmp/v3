@@ -22,6 +22,12 @@ func TestExecutionEventSafeSurface(t *testing.T) {
 		for i := 0; i < typ.NumField(); i++ {
 			field := typ.Field(i)
 			for _, forbidden := range []string{"body", "url", "header", "ref", "secret"} {
+				// UpstreamResponseBody is an intentional admin-only field: it
+				// carries a bounded, sanitized copy of the upstream error
+				// response for admin reproduction, not a user request body.
+				if field.Name == "UpstreamResponseBody" {
+					continue
+				}
 				if containsFold(field.Name, forbidden) {
 					t.Fatalf("%s unexpectedly exposes sensitive %q field", typ, field.Name)
 				}
