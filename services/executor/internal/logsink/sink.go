@@ -200,38 +200,42 @@ func (s *RemoteSink) post(b batch) error {
 
 // requestLog mirrors repository.RequestLog.
 type requestLog struct {
-	ID                     int64      `json:"-"`
-	RequestID              string     `json:"request_id"`
-	TraceID                string     `json:"trace_id,omitempty"`
-	UserID                 string     `json:"user_id,omitempty"`
-	ClientKeyID            string     `json:"client_key_id,omitempty"`
-	UserAgent              string     `json:"user_agent,omitempty"`
-	ModelName              string     `json:"model_name,omitempty"`
-	ResolvedModel          string     `json:"resolved_model,omitempty"`
-	RouteID                string     `json:"route_id,omitempty"`
-	ProviderID             string     `json:"provider_id,omitempty"`
-	CredentialID           string     `json:"credential_id,omitempty"`
-	Protocol               string     `json:"protocol,omitempty"`
-	Stream                 bool       `json:"stream"`
-	FinalStatus            string     `json:"final_status"`
-	HTTPStatus             int        `json:"http_status,omitempty"`
-	InputTokens            int        `json:"input_tokens,omitempty"`
-	OutputTokens           int        `json:"output_tokens,omitempty"`
-	TotalTokens            int        `json:"total_tokens,omitempty"`
-	CacheTokens            int        `json:"cache_tokens,omitempty"`
-	LatencyMS              int        `json:"latency_ms,omitempty"`
-	TTFTMS                 int        `json:"ttft_ms,omitempty"`
-	ErrorCode              string     `json:"error_code,omitempty"`
-	ErrorType              string     `json:"error_type,omitempty"`
-	UpstreamHTTPStatus     int        `json:"upstream_http_status,omitempty"`
-	UsageStatus            string     `json:"usage_status,omitempty"`
-	ThinkingMode           string     `json:"thinking_mode,omitempty"`
-	ThinkingEffort         string     `json:"thinking_effort,omitempty"`
-	ThinkingEffortDegraded string     `json:"thinking_effort_degraded,omitempty"`
-	ReservationID          string     `json:"reservation_id,omitempty"`
-	BillingPlan            string     `json:"billing_plan,omitempty"`
-	CreatedAt              time.Time  `json:"created_at"`
-	CompletedAt            *time.Time `json:"completed_at,omitempty"`
+	ID                      int64      `json:"-"`
+	RequestID               string     `json:"request_id"`
+	TraceID                 string     `json:"trace_id,omitempty"`
+	UserID                  string     `json:"user_id,omitempty"`
+	ClientKeyID             string     `json:"client_key_id,omitempty"`
+	UserAgent               string     `json:"user_agent,omitempty"`
+	ModelName               string     `json:"model_name,omitempty"`
+	ResolvedModel           string     `json:"resolved_model,omitempty"`
+	RouteID                 string     `json:"route_id,omitempty"`
+	ProviderID              string     `json:"provider_id,omitempty"`
+	CredentialID            string     `json:"credential_id,omitempty"`
+	Protocol                string     `json:"protocol,omitempty"`
+	Stream                  bool       `json:"stream"`
+	FinalStatus             string     `json:"final_status"`
+	HTTPStatus              int        `json:"http_status,omitempty"`
+	InputTokens             int        `json:"input_tokens,omitempty"`
+	OutputTokens            int        `json:"output_tokens,omitempty"`
+	TotalTokens             int        `json:"total_tokens,omitempty"`
+	CacheTokens             int        `json:"cache_tokens,omitempty"`
+	LatencyMS               int        `json:"latency_ms,omitempty"`
+	TTFTMS                  int        `json:"ttft_ms,omitempty"`
+	ErrorCode               string     `json:"error_code,omitempty"`
+	ErrorType               string     `json:"error_type,omitempty"`
+	UpstreamHTTPStatus      int        `json:"upstream_http_status,omitempty"`
+	UsageStatus             string     `json:"usage_status,omitempty"`
+	ThinkingMode            string     `json:"thinking_mode,omitempty"`
+	ThinkingEffort          string     `json:"thinking_effort,omitempty"`
+	ThinkingEffortDegraded  string     `json:"thinking_effort_degraded,omitempty"`
+	ThinkingRequestedEffort string     `json:"thinking_requested_effort,omitempty"`
+	ThinkingEffectiveEffort string     `json:"thinking_effective_effort,omitempty"`
+	ThinkingRequestedBudget int        `json:"thinking_requested_budget,omitempty"`
+	ThinkingEffectiveBudget int        `json:"thinking_effective_budget,omitempty"`
+	ReservationID           string     `json:"reservation_id,omitempty"`
+	BillingPlan             string     `json:"billing_plan,omitempty"`
+	CreatedAt               time.Time  `json:"created_at"`
+	CompletedAt             *time.Time `json:"completed_at,omitempty"`
 }
 
 // attempt mirrors repository.Attempt.
@@ -298,6 +302,7 @@ func buildBatch(e requestlog.ExecutionEvent) (batch, bool) {
 		Stream:        e.Stream,
 		CreatedAt:     e.Timestamp,
 	}
+	applyThinkingToLog(&log, e)
 
 	// TTFT for streaming events (non-zero only for stream attempts).
 	if e.TTFT > 0 {
@@ -306,7 +311,7 @@ func buildBatch(e requestlog.ExecutionEvent) (batch, bool) {
 
 	// Final status from event status or kind. The Logging DB final_status
 	// CHECK constraint accepts: processing, success, client_error,
-	// upstream_error, timeout, transport_error. The executor's coarse
+	// client_cancelled, upstream_error, timeout, transport_error. The executor's coarse
 	// FailureCategory (set by the Runner from SDK classification) maps
 	// directly to these enum values for failure events.
 	switch e.Kind {
@@ -393,6 +398,25 @@ func buildBatch(e requestlog.ExecutionEvent) (batch, bool) {
 	}}
 
 	return b, true
+}
+
+func applyThinkingToLog(log *requestLog, e requestlog.ExecutionEvent) {
+	if log == nil {
+		return
+	}
+	log.ThinkingMode = e.ThinkingMode
+	log.ThinkingRequestedEffort = e.ThinkingRequestedEffort
+	log.ThinkingEffectiveEffort = e.ThinkingEffectiveEffort
+	log.ThinkingRequestedBudget = e.ThinkingRequestedBudget
+	log.ThinkingEffectiveBudget = e.ThinkingEffectiveBudget
+	if e.ThinkingEffectiveEffort != "" {
+		// Compatibility alias used by existing API/frontend code. It represents
+		// the actual provider-bound execution effort, not caller intent.
+		log.ThinkingEffort = e.ThinkingEffectiveEffort
+	}
+	if e.ThinkingDegraded {
+		log.ThinkingEffortDegraded = "true"
+	}
 }
 
 func eventDurationMS(e requestlog.ExecutionEvent) int {

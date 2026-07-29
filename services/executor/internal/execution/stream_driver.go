@@ -173,14 +173,14 @@ func (d *StreamDriver) Run(ctx context.Context, in StreamInput) (StreamResult, e
 			}
 			classified := classifyStreamError(openErr)
 			if classified == nil {
-				d.logFailure(ctx, in, prepared, attemptNo, latency, false, nil, retry.Decision{})
+				d.logFailure(ctx, in, prepared, attemptNo, latency, preparedCall.applied.Thinking, false, nil, retry.Decision{})
 				_ = state.Cancel()
 				if errors.Is(openErr, ErrMisconfigured) {
 					return StreamResult{}, d.releaseFailureWithLog(ctx, terminalizer, ErrMisconfigured, in, prepared, attemptNo)
 				}
 				return StreamResult{}, d.releaseFailureWithLog(ctx, terminalizer, ErrUnclassified, in, prepared, attemptNo)
 			}
-			if result, next, done, err := d.retryPrecommit(ctx, terminalizer, state, attempt, policy, prepared, classified, in, attemptNo, latency); done {
+			if result, next, done, err := d.retryPrecommit(ctx, terminalizer, state, attempt, policy, prepared, classified, in, attemptNo, latency, preparedCall.applied.Thinking); done {
 				return result, err
 			} else {
 				candidate = next
@@ -211,7 +211,7 @@ func (d *StreamDriver) Run(ctx context.Context, in StreamInput) (StreamResult, e
 			inner: sink,
 			onCommit: func() {
 				committedAt := d.now()
-				d.logStarted(ctx, in, prepared, attemptNo, committedAt.Sub(attemptStart), committedAt)
+				d.logStarted(ctx, in, prepared, attemptNo, committedAt.Sub(attemptStart), committedAt, preparedCall.applied.Thinking)
 			},
 		}
 		bridge := streaming.Bridge{Source: source, Sink: observedSink, Timeouts: streamTimeouts(prepared)}
@@ -239,10 +239,10 @@ func (d *StreamDriver) Run(ctx context.Context, in StreamInput) (StreamResult, e
 			if parentErr := ctx.Err(); parentErr != nil {
 				_ = state.Cancel()
 				if err := d.settleCommitted(ctx, terminalizer, outcome); err != nil {
-					d.logFailure(ctx, in, prepared, attemptNo, latency, true, source.LastClassified(), retry.Decision{})
+					d.logFailure(ctx, in, prepared, attemptNo, latency, preparedCall.applied.Thinking, true, source.LastClassified(), retry.Decision{})
 					return StreamResult{}, errors.Join(parentErr, terminalizationError("terminal"))
 				}
-				d.logFailure(ctx, in, prepared, attemptNo, latency, true, source.LastClassified(), retry.Decision{})
+				d.logFailure(ctx, in, prepared, attemptNo, latency, preparedCall.applied.Thinking, true, source.LastClassified(), retry.Decision{})
 				d.logReleased(ctx, in, prepared, attemptNo, releaseReason(parentErr))
 				return StreamResult{}, parentErr
 			}
@@ -251,22 +251,22 @@ func (d *StreamDriver) Run(ctx context.Context, in StreamInput) (StreamResult, e
 				_ = state.RecordSuccess(ctx, attempt)
 			}
 			if err := d.settleCommitted(ctx, terminalizer, outcome); err != nil {
-				d.logFailure(ctx, in, prepared, attemptNo, latency, true, source.LastClassified(), retry.Decision{})
+				d.logFailure(ctx, in, prepared, attemptNo, latency, preparedCall.applied.Thinking, true, source.LastClassified(), retry.Decision{})
 				d.logTerminalizationUnknown(ctx, in, prepared, attemptNo)
 				return StreamResult{}, terminalizationError("terminal")
 			}
 			if outcome.State == streaming.StateCompleted {
-				d.logSuccess(ctx, in, prepared, attemptNo, latency, outcome, attemptStart, bridgeStart)
+				d.logSuccess(ctx, in, prepared, attemptNo, latency, outcome, attemptStart, bridgeStart, preparedCall.applied.Thinking)
 				d.logCommitted(ctx, in, prepared, attemptNo, outcome)
 				d.logFinalized(ctx, in, prepared, attemptNo, outcome)
 			} else {
-				d.logFailure(ctx, in, prepared, attemptNo, latency, true, source.LastClassified(), retry.Decision{})
+				d.logFailure(ctx, in, prepared, attemptNo, latency, preparedCall.applied.Thinking, true, source.LastClassified(), retry.Decision{})
 				d.logFinalized(ctx, in, prepared, attemptNo, outcome)
 			}
 			return StreamResult{Outcome: outcome}, nil
 		}
 		if err := ctx.Err(); err != nil {
-			d.logFailure(ctx, in, prepared, attemptNo, latency, false, source.LastClassified(), retry.Decision{})
+			d.logFailure(ctx, in, prepared, attemptNo, latency, preparedCall.applied.Thinking, false, source.LastClassified(), retry.Decision{})
 			_ = state.Cancel()
 			return StreamResult{}, d.releaseFailureWithLog(ctx, terminalizer, err, in, prepared, attemptNo)
 		}
@@ -274,17 +274,17 @@ func (d *StreamDriver) Run(ctx context.Context, in StreamInput) (StreamResult, e
 		// parent cancellation already won above; an attempt-only deadline remains
 		// a safe timeout classification and may use the frozen retry policy.
 		if bridgeErr == nil && outcome.State == streaming.StateClientCancelled && !errors.Is(attemptCtx.Err(), context.DeadlineExceeded) {
-			d.logFailure(ctx, in, prepared, attemptNo, latency, false, source.LastClassified(), retry.Decision{})
+			d.logFailure(ctx, in, prepared, attemptNo, latency, preparedCall.applied.Thinking, false, source.LastClassified(), retry.Decision{})
 			_ = state.Cancel()
 			return StreamResult{}, d.releaseFailureWithLog(ctx, terminalizer, context.Canceled, in, prepared, attemptNo)
 		}
 		classified := classifyBridgeError(bridgeErr, source.LastClassified(), attemptCtx.Err())
 		if classified == nil {
-			d.logFailure(ctx, in, prepared, attemptNo, latency, false, nil, retry.Decision{})
+			d.logFailure(ctx, in, prepared, attemptNo, latency, preparedCall.applied.Thinking, false, nil, retry.Decision{})
 			_ = state.Cancel()
 			return StreamResult{}, d.releaseFailureWithLog(ctx, terminalizer, ErrUnclassified, in, prepared, attemptNo)
 		}
-		if result, next, done, err := d.retryPrecommit(ctx, terminalizer, state, attempt, policy, prepared, classified, in, attemptNo, latency); done {
+		if result, next, done, err := d.retryPrecommit(ctx, terminalizer, state, attempt, policy, prepared, classified, in, attemptNo, latency, preparedCall.applied.Thinking); done {
 			return result, err
 		} else {
 			candidate = next
@@ -292,7 +292,7 @@ func (d *StreamDriver) Run(ctx context.Context, in StreamInput) (StreamResult, e
 	}
 }
 
-func (d *StreamDriver) retryPrecommit(ctx context.Context, terminalizer *Terminalizer, state *retry.State, attempt retry.Attempt, policy adapter.CompiledRetry, prepared routing.PreparedAttempt, classified *sdk.ClassifiedError, in StreamInput, attemptNo int, latency time.Duration) (StreamResult, routing.Candidate, bool, error) {
+func (d *StreamDriver) retryPrecommit(ctx context.Context, terminalizer *Terminalizer, state *retry.State, attempt retry.Attempt, policy adapter.CompiledRetry, prepared routing.PreparedAttempt, classified *sdk.ClassifiedError, in StreamInput, attemptNo int, latency time.Duration, thinking adapter.EffectiveThinking) (StreamResult, routing.Candidate, bool, error) {
 	var retryAfter *time.Duration
 	if ra, ok := classified.RetryAfter(); ok {
 		retryAfter = &ra
@@ -303,28 +303,28 @@ func (d *StreamDriver) retryPrecommit(ctx context.Context, terminalizer *Termina
 		resultErr := d.releaseFailureWithLog(ctx, terminalizer, parentError(ctx, ErrBudgetExhausted), in, prepared, attemptNo)
 		// This is terminal (or safely terminalization-unknown), so logging may
 		// record failure but never claims a confirmed successful outcome.
-		d.logFailure(ctx, in, prepared, attemptNo, latency, false, classified, retry.Decision{})
+		d.logFailure(ctx, in, prepared, attemptNo, latency, thinking, false, classified, retry.Decision{})
 		return StreamResult{}, routing.Candidate{}, true, resultErr
 	}
 	if !decision.Retry() {
 		mapped := (adapter.Engine{}).MapResponse(prepared.Adapter, classified.ToUpstreamResponse())
 		releaseReasonVal := releaseReason(classified)
 		if err := d.releaseCleanupReason(ctx, terminalizer, releaseReasonVal); err != nil {
-			d.logFailure(ctx, in, prepared, attemptNo, latency, false, classified, decision)
+			d.logFailure(ctx, in, prepared, attemptNo, latency, thinking, false, classified, decision)
 			d.logTerminalizationUnknown(ctx, in, prepared, attemptNo)
 			return StreamResult{}, routing.Candidate{}, true, errors.Join(classified, terminalizationError("release"))
 		}
-		d.logFailure(ctx, in, prepared, attemptNo, latency, false, classified, decision)
+		d.logFailure(ctx, in, prepared, attemptNo, latency, thinking, false, classified, decision)
 		d.logReleased(ctx, in, prepared, attemptNo, releaseReasonVal)
 		applyRetryAfter(&mapped, classified)
 		return StreamResult{Failure: &mapped}, routing.Candidate{}, true, nil
 	}
 	// A retry decision is an attempt observation, not a terminal outcome.
-	d.logFailure(ctx, in, prepared, attemptNo, latency, false, classified, decision)
+	d.logFailure(ctx, in, prepared, attemptNo, latency, thinking, false, classified, decision)
 	if err := d.sleeper().Sleep(ctx, decision.Delay); err != nil {
 		_ = state.Cancel()
 		resultErr := d.releaseFailureWithLog(ctx, terminalizer, parentError(ctx, err), in, prepared, attemptNo)
-		d.logFailure(ctx, in, prepared, attemptNo, latency, false, classified, retry.Decision{})
+		d.logFailure(ctx, in, prepared, attemptNo, latency, thinking, false, classified, retry.Decision{})
 		return StreamResult{}, routing.Candidate{}, true, resultErr
 	}
 	return StreamResult{}, decision.Candidate, false, nil
@@ -508,11 +508,12 @@ func (d *StreamDriver) logReserved(ctx context.Context, in StreamInput, prepared
 	_ = d.Logger.RecordExecution(logCtx, event)
 }
 
-func (d *StreamDriver) logStarted(ctx context.Context, in StreamInput, prepared routing.PreparedAttempt, attemptNo int, ttft time.Duration, committedAt time.Time) {
+func (d *StreamDriver) logStarted(ctx context.Context, in StreamInput, prepared routing.PreparedAttempt, attemptNo int, ttft time.Duration, committedAt time.Time, thinking adapter.EffectiveThinking) {
 	if d == nil || isNilInterface(d.Logger) {
 		return
 	}
 	event := d.baseEvent(in, prepared, attemptNo)
+	applyThinkingToEvent(&event, thinking)
 	event.Kind = requestlog.KindStarted
 	event.Status = "info"
 	event.Timestamp = committedAt
@@ -524,11 +525,12 @@ func (d *StreamDriver) logStarted(ctx context.Context, in StreamInput, prepared 
 	_ = d.Logger.RecordExecution(logCtx, event)
 }
 
-func (d *StreamDriver) logSuccess(ctx context.Context, in StreamInput, prepared routing.PreparedAttempt, attemptNo int, latency time.Duration, outcome streaming.Outcome, attemptStart, bridgeStart time.Time) {
+func (d *StreamDriver) logSuccess(ctx context.Context, in StreamInput, prepared routing.PreparedAttempt, attemptNo int, latency time.Duration, outcome streaming.Outcome, attemptStart, bridgeStart time.Time, thinking adapter.EffectiveThinking) {
 	if d == nil || isNilInterface(d.Logger) {
 		return
 	}
 	event := d.baseEvent(in, prepared, attemptNo)
+	applyThinkingToEvent(&event, thinking)
 	event.Status = "success"
 	event.Latency = latency
 	event.Committed = true
@@ -549,11 +551,12 @@ func (d *StreamDriver) logSuccess(ctx context.Context, in StreamInput, prepared 
 	_ = d.Logger.RecordExecution(logCtx, event)
 }
 
-func (d *StreamDriver) logFailure(ctx context.Context, in StreamInput, prepared routing.PreparedAttempt, attemptNo int, latency time.Duration, committed bool, classified *sdk.ClassifiedError, decision retry.Decision) {
+func (d *StreamDriver) logFailure(ctx context.Context, in StreamInput, prepared routing.PreparedAttempt, attemptNo int, latency time.Duration, thinking adapter.EffectiveThinking, committed bool, classified *sdk.ClassifiedError, decision retry.Decision) {
 	if d == nil || isNilInterface(d.Logger) {
 		return
 	}
 	event := d.baseEvent(in, prepared, attemptNo)
+	applyThinkingToEvent(&event, thinking)
 	event.Status = "failed"
 	event.Latency = latency
 	event.Committed = committed

@@ -32,6 +32,7 @@ Logging Service 是 TokenMP V3 分层架构的**业务平面**日志服务：
 - `migrations/000002_add_processing_status.{up,down}.sql`：为 `request_logs.final_status` 增加非终态 `processing`。
 - `migrations/000003_add_user_agent.{up,down}.sql`：新增可空 `request_logs.user_agent`；仅存有界清洗后的 User-Agent。
 - `migrations/000004_add_client_cancelled_status.{up,down}.sql`：新增终态 `client_cancelled`，用于 Edge 在客户端断开时关闭 processing 行。
+- `migrations/000005_add_thinking_execution_fields.{up,down}.sql`：新增 thinking requested/effective effort 与 budget 字段；`thinking_effort` 继续作为实际执行 effort 的兼容别名，降级由 requested/effective 差异与 `thinking_effort_degraded` 表达。
 
 ## 验证
 

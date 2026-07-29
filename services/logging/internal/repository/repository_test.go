@@ -119,32 +119,37 @@ func TestInsertRequestLog_Success(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	complete := now.Add(120 * time.Millisecond)
 	log := RequestLog{
-		RequestID:      "req-success-1",
-		TraceID:        "trace-1",
-		UserID:         "u-1",
-		ClientKeyID:    "key-1",
-		ModelName:      "gpt-test",
-		ResolvedModel:  "gpt-test-resolved",
-		RouteID:        "route-1",
-		ProviderID:     "prov-1",
-		CredentialID:   "cred-1",
-		Protocol:       "openai_chat",
-		Stream:         false,
-		FinalStatus:    "success",
-		HTTPStatus:     200,
-		InputTokens:    10,
-		OutputTokens:   20,
-		TotalTokens:    30,
-		CacheTokens:    5,
-		LatencyMS:      150,
-		TTFTMS:         40,
-		UsageStatus:    "final",
-		ThinkingMode:   "enabled",
-		ThinkingEffort: "medium",
-		ReservationID:  "res-1",
-		BillingPlan:    "plan-1",
-		CreatedAt:      now,
-		CompletedAt:    &complete,
+		RequestID:               "req-success-1",
+		TraceID:                 "trace-1",
+		UserID:                  "u-1",
+		ClientKeyID:             "key-1",
+		ModelName:               "gpt-test",
+		ResolvedModel:           "gpt-test-resolved",
+		RouteID:                 "route-1",
+		ProviderID:              "prov-1",
+		CredentialID:            "cred-1",
+		Protocol:                "openai_chat",
+		Stream:                  false,
+		FinalStatus:             "success",
+		HTTPStatus:              200,
+		InputTokens:             10,
+		OutputTokens:            20,
+		TotalTokens:             30,
+		CacheTokens:             5,
+		LatencyMS:               150,
+		TTFTMS:                  40,
+		UsageStatus:             "final",
+		ThinkingMode:            "enabled",
+		ThinkingEffort:          "high",
+		ThinkingEffortDegraded:  "true",
+		ThinkingRequestedEffort: "max",
+		ThinkingEffectiveEffort: "high",
+		ThinkingRequestedBudget: 12000,
+		ThinkingEffectiveBudget: 8000,
+		ReservationID:           "res-1",
+		BillingPlan:             "plan-1",
+		CreatedAt:               now,
+		CompletedAt:             &complete,
 	}
 	id, err := repo.InsertRequestLog(context.Background(), log)
 	if err != nil {
@@ -209,8 +214,10 @@ func TestInsertRequestLog_Success(t *testing.T) {
 	if got.UsageStatus != "final" {
 		t.Errorf("usage_status = %q", got.UsageStatus)
 	}
-	if got.ThinkingMode != "enabled" || got.ThinkingEffort != "medium" {
-		t.Errorf("thinking = %q/%q", got.ThinkingMode, got.ThinkingEffort)
+	if got.ThinkingMode != "enabled" || got.ThinkingEffort != "high" || got.ThinkingEffortDegraded != "true" ||
+		got.ThinkingRequestedEffort != "max" || got.ThinkingEffectiveEffort != "high" ||
+		got.ThinkingRequestedBudget != 12000 || got.ThinkingEffectiveBudget != 8000 {
+		t.Errorf("thinking = %+v", got)
 	}
 	if got.ReservationID != "res-1" {
 		t.Errorf("reservation_id = %q", got.ReservationID)

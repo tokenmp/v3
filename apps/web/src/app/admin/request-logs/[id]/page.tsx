@@ -562,7 +562,7 @@ export default function RequestLogDetailPage() {
             </InfoRow>
             {(log.thinkingMode || log.thinkingEffort) ? (
               <InfoRow label="思考">
-                <span>{thinkingLabel(log.thinkingEffort, log.thinkingMode)}</span>
+                <span>{thinkingLabel(log.thinkingEffectiveEffort ?? log.thinkingEffort, log.thinkingMode, log.thinkingRequestedEffort, log.thinkingEffortDegraded)}</span>
               </InfoRow>
             ) : null}
             <InfoRow label="计费套餐">

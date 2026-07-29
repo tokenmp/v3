@@ -619,6 +619,22 @@ components:
           nullable: true
         thinkingEffort:
           type: string
+          description: Effective thinking effort actually executed.
+          nullable: true
+        thinkingRequestedEffort:
+          type: string
+          nullable: true
+        thinkingEffectiveEffort:
+          type: string
+          nullable: true
+        thinkingRequestedBudget:
+          type: integer
+          nullable: true
+        thinkingEffectiveBudget:
+          type: integer
+          nullable: true
+        thinkingEffortDegraded:
+          type: boolean
           nullable: true
         createdAt:
           type: string
@@ -673,6 +689,22 @@ components:
           nullable: true
         thinkingEffort:
           type: string
+          description: Effective thinking effort actually executed.
+          nullable: true
+        thinkingRequestedEffort:
+          type: string
+          nullable: true
+        thinkingEffectiveEffort:
+          type: string
+          nullable: true
+        thinkingRequestedBudget:
+          type: integer
+          nullable: true
+        thinkingEffectiveBudget:
+          type: integer
+          nullable: true
+        thinkingEffortDegraded:
+          type: boolean
           nullable: true
         completedAt:
           type: string

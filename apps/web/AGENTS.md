@@ -40,7 +40,7 @@ Next.js 16 (App Router) + React 19 + Tailwind CSS v4 + `@tokenmp/ui-tokens` + sh
 - `src/lib/api/auth.ts` 默认走 **mock auth**（`mock-auth.ts`），无需后端即可登录。设 `NEXT_PUBLIC_USE_MOCK_AUTH=0` 切回真实 fetch 客户端。
 - Mock 凭据（仅 mock 模式）：`demo@tokenmp.cn` / `demo1234`（user）；`admin@tokenmp.cn` / `admin1234`（admin）。任意邮箱 + 12 位以上密码可注册。
 - 真实后端凭据（dev 部署）：`demo@tokenmp.cn` / `demo12345678`（user）；`admin@tokenmp.cn` / `admin12345678`（admin）。Auth 密码策略要求 12–128 runes。
-- Panel 数据 API：`src/lib/api/user.ts` 已通过 Edge 对接 keys/requests/quota。请求日志列表按旧版信息顺序展示请求 ID 缩略、模型、协议（OpenAI/Responses/Anthropic）、状态、输入/输出/缓存 Token、TTFT、生成速度、总耗时、thinking 与时间；管理日志额外展示 provider 与有界清洗后的 User-Agent，并由详情 trace 展示完整生命周期。
+- Panel 数据 API：`src/lib/api/user.ts` 已通过 Edge 对接 keys/requests/quota。请求日志列表按旧版信息顺序展示请求 ID 缩略、模型、协议（OpenAI/Responses/Anthropic）、状态、输入/输出/缓存 Token、TTFT、生成速度、总耗时、thinking 与时间；thinking 显示实际执行 effective effort，发生降级时显示“由 requested 降级”；管理日志额外展示 provider 与有界清洗后的 User-Agent，并由详情 trace 展示完整生命周期。
 - Notice API：`src/lib/api/notice.ts`（`noticeApi`）对接 Notice Service（`packages/contracts/openapi/notice/v1.yaml`）。公告/changelog/通知，默认 mock（`NEXT_PUBLIC_USE_MOCK_NOTICE` 默认启用），`NEXT_PUBLIC_USE_MOCK_NOTICE=0` 切真实 fetch。通知 `action` 由通用 `NotificationAction` 组件数据驱动渲染，不写死跳转。
 - 契约来源：Auth 使用 `packages/contracts/openapi/auth/v1.yaml`；Panel 请求日志使用 `packages/contracts/openapi/api/v1.yaml`（前端类型手动对齐，未生成 TS client）。
 

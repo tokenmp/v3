@@ -39,6 +39,7 @@
 | Usage (UsageKnown=true) | Log.{Input,Output,Total}Tokens + UsageStatus="final" |
 | Latency | Log.LatencyMS, Attempt.LatencyMS, Event.DurationMS |
 | TTFT + Stream | KindStarted 时 Log.TTFTMS/Stream=true + Event.Stage=upstream_started/Event.DurationMS=TTFT |
+| Thinking effective execution | Log.ThinkingMode + ThinkingEffort/effective/requested/budget/degraded；`thinking_effort` 是实际执行 effort 的兼容别名，不是用户请求原值 |
 | Code | Log.ErrorCode, Attempt.ErrorCode, Attempt.HTTPStatus（3 位数时） |
 | Type | Log.ErrorType, Attempt.ErrorType |
 | Kind=attempt | 产生 1 行 Attempt |

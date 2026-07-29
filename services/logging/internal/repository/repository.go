@@ -27,38 +27,42 @@ import (
 // PK is (id, created_at)). It holds the request-level summary with no
 // plaintext body.
 type RequestLog struct {
-	ID                     int64      `json:"-" gorm:"column:id"`
-	RequestID              string     `json:"request_id" gorm:"column:request_id"`
-	TraceID                string     `json:"trace_id,omitempty" gorm:"column:trace_id"`
-	UserID                 string     `json:"user_id,omitempty" gorm:"column:user_id"`
-	ClientKeyID            string     `json:"client_key_id,omitempty" gorm:"column:client_key_id"`
-	UserAgent              string     `json:"user_agent,omitempty" gorm:"column:user_agent"`
-	ModelName              string     `json:"model_name,omitempty" gorm:"column:model_name"`
-	ResolvedModel          string     `json:"resolved_model,omitempty" gorm:"column:resolved_model"`
-	RouteID                string     `json:"route_id,omitempty" gorm:"column:route_id"`
-	ProviderID             string     `json:"provider_id,omitempty" gorm:"column:provider_id"`
-	CredentialID           string     `json:"credential_id,omitempty" gorm:"column:credential_id"`
-	Protocol               string     `json:"protocol,omitempty" gorm:"column:protocol"`
-	Stream                 bool       `json:"stream" gorm:"column:stream"`
-	FinalStatus            string     `json:"final_status" gorm:"column:final_status"`
-	HTTPStatus             int        `json:"http_status,omitempty" gorm:"column:http_status"`
-	InputTokens            int        `json:"input_tokens,omitempty" gorm:"column:input_tokens"`
-	OutputTokens           int        `json:"output_tokens,omitempty" gorm:"column:output_tokens"`
-	TotalTokens            int        `json:"total_tokens,omitempty" gorm:"column:total_tokens"`
-	CacheTokens            int        `json:"cache_tokens,omitempty" gorm:"column:cache_tokens"`
-	LatencyMS              int        `json:"latency_ms,omitempty" gorm:"column:latency_ms"`
-	TTFTMS                 int        `json:"ttft_ms,omitempty" gorm:"column:ttft_ms"`
-	ErrorCode              string     `json:"error_code,omitempty" gorm:"column:error_code"`
-	ErrorType              string     `json:"error_type,omitempty" gorm:"column:error_type"`
-	UpstreamHTTPStatus     int        `json:"upstream_http_status,omitempty" gorm:"column:upstream_http_status"`
-	UsageStatus            string     `json:"usage_status,omitempty" gorm:"column:usage_status"`
-	ThinkingMode           string     `json:"thinking_mode,omitempty" gorm:"column:thinking_mode"`
-	ThinkingEffort         string     `json:"thinking_effort,omitempty" gorm:"column:thinking_effort"`
-	ThinkingEffortDegraded string     `json:"thinking_effort_degraded,omitempty" gorm:"column:thinking_effort_degraded"`
-	ReservationID          string     `json:"reservation_id,omitempty" gorm:"column:reservation_id"`
-	BillingPlan            string     `json:"billing_plan,omitempty" gorm:"column:billing_plan"`
-	CreatedAt              time.Time  `json:"created_at" gorm:"column:created_at"`
-	CompletedAt            *time.Time `json:"completed_at,omitempty" gorm:"column:completed_at"`
+	ID                      int64      `json:"-" gorm:"column:id"`
+	RequestID               string     `json:"request_id" gorm:"column:request_id"`
+	TraceID                 string     `json:"trace_id,omitempty" gorm:"column:trace_id"`
+	UserID                  string     `json:"user_id,omitempty" gorm:"column:user_id"`
+	ClientKeyID             string     `json:"client_key_id,omitempty" gorm:"column:client_key_id"`
+	UserAgent               string     `json:"user_agent,omitempty" gorm:"column:user_agent"`
+	ModelName               string     `json:"model_name,omitempty" gorm:"column:model_name"`
+	ResolvedModel           string     `json:"resolved_model,omitempty" gorm:"column:resolved_model"`
+	RouteID                 string     `json:"route_id,omitempty" gorm:"column:route_id"`
+	ProviderID              string     `json:"provider_id,omitempty" gorm:"column:provider_id"`
+	CredentialID            string     `json:"credential_id,omitempty" gorm:"column:credential_id"`
+	Protocol                string     `json:"protocol,omitempty" gorm:"column:protocol"`
+	Stream                  bool       `json:"stream" gorm:"column:stream"`
+	FinalStatus             string     `json:"final_status" gorm:"column:final_status"`
+	HTTPStatus              int        `json:"http_status,omitempty" gorm:"column:http_status"`
+	InputTokens             int        `json:"input_tokens,omitempty" gorm:"column:input_tokens"`
+	OutputTokens            int        `json:"output_tokens,omitempty" gorm:"column:output_tokens"`
+	TotalTokens             int        `json:"total_tokens,omitempty" gorm:"column:total_tokens"`
+	CacheTokens             int        `json:"cache_tokens,omitempty" gorm:"column:cache_tokens"`
+	LatencyMS               int        `json:"latency_ms,omitempty" gorm:"column:latency_ms"`
+	TTFTMS                  int        `json:"ttft_ms,omitempty" gorm:"column:ttft_ms"`
+	ErrorCode               string     `json:"error_code,omitempty" gorm:"column:error_code"`
+	ErrorType               string     `json:"error_type,omitempty" gorm:"column:error_type"`
+	UpstreamHTTPStatus      int        `json:"upstream_http_status,omitempty" gorm:"column:upstream_http_status"`
+	UsageStatus             string     `json:"usage_status,omitempty" gorm:"column:usage_status"`
+	ThinkingMode            string     `json:"thinking_mode,omitempty" gorm:"column:thinking_mode"`
+	ThinkingEffort          string     `json:"thinking_effort,omitempty" gorm:"column:thinking_effort"`
+	ThinkingEffortDegraded  string     `json:"thinking_effort_degraded,omitempty" gorm:"column:thinking_effort_degraded"`
+	ThinkingRequestedEffort string     `json:"thinking_requested_effort,omitempty" gorm:"column:thinking_requested_effort"`
+	ThinkingEffectiveEffort string     `json:"thinking_effective_effort,omitempty" gorm:"column:thinking_effective_effort"`
+	ThinkingRequestedBudget int        `json:"thinking_requested_budget,omitempty" gorm:"column:thinking_requested_budget"`
+	ThinkingEffectiveBudget int        `json:"thinking_effective_budget,omitempty" gorm:"column:thinking_effective_budget"`
+	ReservationID           string     `json:"reservation_id,omitempty" gorm:"column:reservation_id"`
+	BillingPlan             string     `json:"billing_plan,omitempty" gorm:"column:billing_plan"`
+	CreatedAt               time.Time  `json:"created_at" gorm:"column:created_at"`
+	CompletedAt             *time.Time `json:"completed_at,omitempty" gorm:"column:completed_at"`
 }
 
 // Attempt corresponds to the request_attempts table (daily RANGE partitioned;
@@ -214,6 +218,7 @@ const insertRequestLogSQL = `INSERT INTO request_logs (
   http_status, input_tokens, output_tokens, total_tokens, cache_tokens,
   latency_ms, ttft_ms, error_code, error_type, upstream_http_status,
   usage_status, thinking_mode, thinking_effort, thinking_effort_degraded,
+  thinking_requested_effort, thinking_effective_effort, thinking_requested_budget, thinking_effective_budget,
   reservation_id, billing_plan, created_at, completed_at, user_agent
 ) VALUES (
   ?, ?, ?, ?, ?, ?,
@@ -221,6 +226,7 @@ const insertRequestLogSQL = `INSERT INTO request_logs (
   ?, ?, ?, ?, ?,
   ?, ?, ?, ?, ?,
   NULLIF(?, '')::text, ?, ?, ?,
+  ?, ?, ?, ?,
   ?, ?, ?, ?, ?
 )
 RETURNING id`
@@ -280,14 +286,18 @@ const upsertRequestLogSQL = `UPDATE request_logs SET
   thinking_mode = COALESCE(NULLIF($23, ''), thinking_mode),
   thinking_effort = COALESCE(NULLIF($24, ''), thinking_effort),
   thinking_effort_degraded = COALESCE(NULLIF($25, ''), thinking_effort_degraded),
-  reservation_id = COALESCE(NULLIF($26, ''), reservation_id),
-  billing_plan = COALESCE(NULLIF($27, ''), billing_plan),
+  thinking_requested_effort = COALESCE(NULLIF($26, ''), thinking_requested_effort),
+  thinking_effective_effort = COALESCE(NULLIF($27, ''), thinking_effective_effort),
+  thinking_requested_budget = COALESCE(NULLIF($28, 0), thinking_requested_budget),
+  thinking_effective_budget = COALESCE(NULLIF($29, 0), thinking_effective_budget),
+  reservation_id = COALESCE(NULLIF($30, ''), reservation_id),
+  billing_plan = COALESCE(NULLIF($31, ''), billing_plan),
   completed_at = CASE
     WHEN final_status <> 'processing' AND NULLIF($11, '') IS NOT NULL AND $11 <> 'processing' AND $11 <> final_status AND NOT ($11 = 'client_cancelled' AND final_status <> 'success') THEN completed_at
-    ELSE COALESCE($28, completed_at)
+    ELSE COALESCE($32, completed_at)
   END,
-  stream = ($29 OR stream),
-  user_agent = COALESCE(NULLIF($30, ''), user_agent)
+  stream = ($33 OR stream),
+  user_agent = COALESCE(NULLIF($34, ''), user_agent)
 WHERE request_id = $1
 RETURNING id`
 
@@ -324,6 +334,7 @@ func (r *GormRepository) upsertRequestLog(ctx TxContext, log RequestLog) (int64,
 		log.HTTPStatus, log.InputTokens, log.OutputTokens, log.TotalTokens, log.CacheTokens,
 		log.LatencyMS, log.TTFTMS, log.ErrorCode, log.ErrorType, log.UpstreamHTTPStatus,
 		log.UsageStatus, log.ThinkingMode, log.ThinkingEffort, log.ThinkingEffortDegraded,
+		log.ThinkingRequestedEffort, log.ThinkingEffectiveEffort, log.ThinkingRequestedBudget, log.ThinkingEffectiveBudget,
 		log.ReservationID, log.BillingPlan, log.CompletedAt, log.Stream, log.UserAgent,
 	).Scan(&id).Error
 	if err != nil {
@@ -339,6 +350,7 @@ func (r *GormRepository) upsertRequestLog(ctx TxContext, log RequestLog) (int64,
 		log.HTTPStatus, log.InputTokens, log.OutputTokens, log.TotalTokens, log.CacheTokens,
 		log.LatencyMS, log.TTFTMS, log.ErrorCode, log.ErrorType, log.UpstreamHTTPStatus,
 		log.UsageStatus, log.ThinkingMode, log.ThinkingEffort, log.ThinkingEffortDegraded,
+		log.ThinkingRequestedEffort, log.ThinkingEffectiveEffort, log.ThinkingRequestedBudget, log.ThinkingEffectiveBudget,
 		log.ReservationID, log.BillingPlan, log.CreatedAt, log.CompletedAt, log.UserAgent,
 	).Scan(&id).Error; err != nil {
 		return 0, ErrInsertFailed
@@ -367,6 +379,7 @@ func (r *GormRepository) InsertRequestLog(ctx context.Context, log RequestLog) (
 		log.HTTPStatus, log.InputTokens, log.OutputTokens, log.TotalTokens, log.CacheTokens,
 		log.LatencyMS, log.TTFTMS, log.ErrorCode, log.ErrorType, log.UpstreamHTTPStatus,
 		log.UsageStatus, log.ThinkingMode, log.ThinkingEffort, log.ThinkingEffortDegraded,
+		log.ThinkingRequestedEffort, log.ThinkingEffectiveEffort, log.ThinkingRequestedBudget, log.ThinkingEffectiveBudget,
 		log.ReservationID, log.BillingPlan, log.CreatedAt, log.CompletedAt, log.UserAgent,
 	).Scan(&id).Error; err != nil {
 		return 0, ErrInsertFailed
@@ -545,6 +558,7 @@ SELECT id, request_id, trace_id, user_id, client_key_id, user_agent, model_name,
        http_status, input_tokens, output_tokens, total_tokens, cache_tokens,
        latency_ms, ttft_ms, error_code, error_type, upstream_http_status,
        usage_status, thinking_mode, thinking_effort, thinking_effort_degraded,
+       thinking_requested_effort, thinking_effective_effort, thinking_requested_budget, thinking_effective_budget,
        reservation_id, billing_plan, created_at, completed_at
 FROM request_logs
 WHERE request_id = ?
@@ -600,6 +614,7 @@ const logListColumns = `id, request_id, trace_id, user_id, client_key_id, user_a
        http_status, input_tokens, output_tokens, total_tokens, cache_tokens,
        latency_ms, ttft_ms, error_code, error_type, upstream_http_status,
        usage_status, thinking_mode, thinking_effort, thinking_effort_degraded,
+       thinking_requested_effort, thinking_effective_effort, thinking_requested_budget, thinking_effective_budget,
        reservation_id, billing_plan, created_at, completed_at`
 
 // applyListFilter returns the WHERE clause and bind args for a ListFilter on

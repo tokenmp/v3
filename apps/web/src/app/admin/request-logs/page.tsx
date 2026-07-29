@@ -196,7 +196,7 @@ export default function AdminRequestLogsPage() {
                     </TableCell>
                     <TableCell className="text-sm whitespace-nowrap">
                       <Link href={`/admin/request-logs/${log.requestId}`} className="block">
-                        {thinkingLabel(log.thinkingEffort, log.thinkingMode)}
+                        {thinkingLabel(log.thinkingEffectiveEffort ?? log.thinkingEffort, log.thinkingMode, log.thinkingRequestedEffort, log.thinkingEffortDegraded)}
                       </Link>
                     </TableCell>
                     <TableCell className="text-sm max-w-[160px]">
@@ -274,7 +274,7 @@ export default function AdminRequestLogsPage() {
                   <span>TTFT {formatDuration(log.ttftMs)}</span>
                 )}
                 {speed != null && <span>{formatTokensPerSecond(speed)}</span>}
-                {log.thinkingEffort && <span>思考: {thinkingLabel(log.thinkingEffort, log.thinkingMode)}</span>}
+                {(log.thinkingEffectiveEffort ?? log.thinkingEffort) && <span>思考: {thinkingLabel(log.thinkingEffectiveEffort ?? log.thinkingEffort, log.thinkingMode, log.thinkingRequestedEffort, log.thinkingEffortDegraded)}</span>}
               </div>
               {/* UA + time */}
               <div className="mt-1.5 flex items-center justify-between text-[10px] text-muted-foreground">

@@ -221,6 +221,11 @@ function mapRequestLog(r: Record<string, unknown>): AdminRequestLog {
     usageStatus: r.usage_status != null ? String(r.usage_status) : null,
     thinkingMode: r.thinking_mode != null ? String(r.thinking_mode) : null,
     thinkingEffort: r.thinking_effort != null ? String(r.thinking_effort) : null,
+    thinkingRequestedEffort: r.thinking_requested_effort != null ? String(r.thinking_requested_effort) : null,
+    thinkingEffectiveEffort: r.thinking_effective_effort != null ? String(r.thinking_effective_effort) : null,
+    thinkingRequestedBudget: r.thinking_requested_budget != null ? Number(r.thinking_requested_budget) : null,
+    thinkingEffectiveBudget: r.thinking_effective_budget != null ? Number(r.thinking_effective_budget) : null,
+    thinkingEffortDegraded: r.thinking_effort_degraded === true || r.thinking_effort_degraded === 'true',
     reservationId: r.reservation_id != null ? String(r.reservation_id) : null,
     billingPlan: r.billing_plan != null ? String(r.billing_plan) : null,
   };
