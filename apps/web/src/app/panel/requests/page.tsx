@@ -130,7 +130,7 @@ export default function RequestsPage() {
                     <TableCell className="text-sm text-right tabular-nums">{formatDuration(r.ttftMs)}</TableCell>
                     <TableCell className="text-sm text-right tabular-nums">{formatTokensPerSecond(speed)}</TableCell>
                     <TableCell className="text-sm text-right tabular-nums">{formatDuration(r.durationMs)}</TableCell>
-                    <TableCell className="text-sm whitespace-nowrap">{thinkingLabel(r.thinkingEffort)}</TableCell>
+                    <TableCell className="text-sm whitespace-nowrap">{thinkingLabel(r.thinkingEffectiveEffort ?? r.thinkingEffort, null, r.thinkingRequestedEffort, r.thinkingEffortDegraded)}</TableCell>
                     <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{formatTime(r.createdAt)}</TableCell>
                   </TableRow>
                 );
@@ -189,7 +189,7 @@ export default function RequestsPage() {
                   <span>TTFT {formatDuration(r.ttftMs)}</span>
                 )}
                 {speed != null && <span>{formatTokensPerSecond(speed)}</span>}
-                {r.thinkingEffort && <span>思考: {thinkingLabel(r.thinkingEffort)}</span>}
+                {(r.thinkingEffectiveEffort ?? r.thinkingEffort) && <span>思考: {thinkingLabel(r.thinkingEffectiveEffort ?? r.thinkingEffort, null, r.thinkingRequestedEffort, r.thinkingEffortDegraded)}</span>}
               </div>
               <p className="text-[10px] text-muted-foreground">{formatTime(r.createdAt)}</p>
             </div>

@@ -94,6 +94,17 @@ type ExecutionEvent struct {
 	// Stream reports whether the request was a streaming request.
 	// Set by the StreamDriver for streaming attempts.
 	Stream bool
+	// ThinkingMode reports the effective execution mode (enabled/disabled).
+	// Thinking* fields describe the adapter.Engine EffectiveThinking outcome:
+	// requested values are caller intent after normalization, effective values
+	// are what the provider-bound adapter actually executed. They never carry
+	// model reasoning text or prompt/response body content.
+	ThinkingMode            string
+	ThinkingRequestedEffort string
+	ThinkingEffectiveEffort string
+	ThinkingRequestedBudget int
+	ThinkingEffectiveBudget int
+	ThinkingDegraded        bool
 	// Usage carries bounded token counters when available.
 	Usage ExecutionUsage
 	// UsageKnown reports whether Usage was explicitly confirmed by the

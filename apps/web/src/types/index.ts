@@ -135,6 +135,11 @@ export interface RequestLog {
   protocol?: string | null;
   stream?: boolean | null;
   thinkingEffort?: string | null;
+  thinkingRequestedEffort?: string | null;
+  thinkingEffectiveEffort?: string | null;
+  thinkingRequestedBudget?: number | null;
+  thinkingEffectiveBudget?: number | null;
+  thinkingEffortDegraded?: boolean | null;
   createdAt: string;
   completedAt?: string | null;
 }

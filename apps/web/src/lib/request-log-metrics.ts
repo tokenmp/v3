@@ -107,11 +107,20 @@ export function truncateUA(ua: string | null | undefined, max = 28): string {
   return ua.slice(0, max) + '…';
 }
 
-/** Thinking effort display */
-export function thinkingLabel(effort: string | null | undefined, mode?: string | null): string {
-  if (!effort && !mode) return '—';
+/** Thinking effort display. Prefer effective execution effort over requested intent. */
+export function thinkingLabel(
+  effort: string | null | undefined,
+  mode?: string | null,
+  requestedEffort?: string | null,
+  degraded?: boolean | null,
+): string {
+  if (!effort && (!mode || mode === 'disabled')) return '—';
   const parts: string[] = [];
-  if (mode) parts.push(mode);
+  if (mode && mode !== 'enabled' && mode !== 'disabled') parts.push(mode);
   if (effort) parts.push(effort);
-  return parts.join(' · ');
+  const base = parts.join(' · ') || '—';
+  if (degraded && requestedEffort && effort && requestedEffort !== effort) {
+    return `${base}（由 ${requestedEffort} 降级）`;
+  }
+  return base;
 }

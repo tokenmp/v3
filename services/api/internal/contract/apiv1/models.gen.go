@@ -314,19 +314,26 @@ type RequestLog struct {
 	CompletedAt *time.Time `json:"completedAt,omitempty"`
 
 	// Cost Cost as string (bigint, in smallest unit)
-	Cost           *string          `json:"cost,omitempty"`
-	CreatedAt      time.Time        `json:"createdAt"`
-	DurationMs     *int             `json:"durationMs,omitempty"`
-	InputTokens    *int             `json:"inputTokens,omitempty"`
-	Model          string           `json:"model"`
-	OutputTokens   *int             `json:"outputTokens,omitempty"`
-	Protocol       *string          `json:"protocol,omitempty"`
-	RequestId      string           `json:"requestId"`
-	Status         RequestLogStatus `json:"status"`
-	Stream         *bool            `json:"stream,omitempty"`
-	ThinkingEffort *string          `json:"thinkingEffort,omitempty"`
-	TotalTokens    *int             `json:"totalTokens,omitempty"`
-	TtftMs         *int             `json:"ttftMs,omitempty"`
+	Cost                    *string          `json:"cost,omitempty"`
+	CreatedAt               time.Time        `json:"createdAt"`
+	DurationMs              *int             `json:"durationMs,omitempty"`
+	InputTokens             *int             `json:"inputTokens,omitempty"`
+	Model                   string           `json:"model"`
+	OutputTokens            *int             `json:"outputTokens,omitempty"`
+	Protocol                *string          `json:"protocol,omitempty"`
+	RequestId               string           `json:"requestId"`
+	Status                  RequestLogStatus `json:"status"`
+	Stream                  *bool            `json:"stream,omitempty"`
+	ThinkingEffectiveBudget *int             `json:"thinkingEffectiveBudget,omitempty"`
+	ThinkingEffectiveEffort *string          `json:"thinkingEffectiveEffort,omitempty"`
+
+	// ThinkingEffort Effective thinking effort actually executed.
+	ThinkingEffort          *string `json:"thinkingEffort,omitempty"`
+	ThinkingEffortDegraded  *bool   `json:"thinkingEffortDegraded,omitempty"`
+	ThinkingRequestedBudget *int    `json:"thinkingRequestedBudget,omitempty"`
+	ThinkingRequestedEffort *string `json:"thinkingRequestedEffort,omitempty"`
+	TotalTokens             *int    `json:"totalTokens,omitempty"`
+	TtftMs                  *int    `json:"ttftMs,omitempty"`
 }
 
 // RequestLogStatus defines model for RequestLog.Status.
@@ -342,23 +349,30 @@ type RequestLogDetail struct {
 		Provider   *string    `json:"provider,omitempty"`
 		Status     *string    `json:"status,omitempty"`
 	} `json:"attempts,omitempty"`
-	CacheTokens    *int                   `json:"cacheTokens,omitempty"`
-	CompletedAt    *time.Time             `json:"completedAt,omitempty"`
-	Cost           *string                `json:"cost,omitempty"`
-	CreatedAt      time.Time              `json:"createdAt"`
-	DurationMs     *int                   `json:"durationMs,omitempty"`
-	ErrorMessage   *string                `json:"errorMessage,omitempty"`
-	InputTokens    *int                   `json:"inputTokens,omitempty"`
-	Model          string                 `json:"model"`
-	OutputTokens   *int                   `json:"outputTokens,omitempty"`
-	Protocol       *string                `json:"protocol,omitempty"`
-	Provider       *string                `json:"provider,omitempty"`
-	RequestId      string                 `json:"requestId"`
-	Status         RequestLogDetailStatus `json:"status"`
-	Stream         *bool                  `json:"stream,omitempty"`
-	ThinkingEffort *string                `json:"thinkingEffort,omitempty"`
-	TotalTokens    *int                   `json:"totalTokens,omitempty"`
-	TtftMs         *int                   `json:"ttftMs,omitempty"`
+	CacheTokens             *int                   `json:"cacheTokens,omitempty"`
+	CompletedAt             *time.Time             `json:"completedAt,omitempty"`
+	Cost                    *string                `json:"cost,omitempty"`
+	CreatedAt               time.Time              `json:"createdAt"`
+	DurationMs              *int                   `json:"durationMs,omitempty"`
+	ErrorMessage            *string                `json:"errorMessage,omitempty"`
+	InputTokens             *int                   `json:"inputTokens,omitempty"`
+	Model                   string                 `json:"model"`
+	OutputTokens            *int                   `json:"outputTokens,omitempty"`
+	Protocol                *string                `json:"protocol,omitempty"`
+	Provider                *string                `json:"provider,omitempty"`
+	RequestId               string                 `json:"requestId"`
+	Status                  RequestLogDetailStatus `json:"status"`
+	Stream                  *bool                  `json:"stream,omitempty"`
+	ThinkingEffectiveBudget *int                   `json:"thinkingEffectiveBudget,omitempty"`
+	ThinkingEffectiveEffort *string                `json:"thinkingEffectiveEffort,omitempty"`
+
+	// ThinkingEffort Effective thinking effort actually executed.
+	ThinkingEffort          *string `json:"thinkingEffort,omitempty"`
+	ThinkingEffortDegraded  *bool   `json:"thinkingEffortDegraded,omitempty"`
+	ThinkingRequestedBudget *int    `json:"thinkingRequestedBudget,omitempty"`
+	ThinkingRequestedEffort *string `json:"thinkingRequestedEffort,omitempty"`
+	TotalTokens             *int    `json:"totalTokens,omitempty"`
+	TtftMs                  *int    `json:"ttftMs,omitempty"`
 }
 
 // RequestLogDetailStatus defines model for RequestLogDetail.Status.

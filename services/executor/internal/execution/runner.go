@@ -331,7 +331,7 @@ func (r *Runner) Run(ctx context.Context, in Input) (Result, error) {
 		// racing with a provider result cannot enter response mapping or retry.
 		if parentErr := ctx.Err(); parentErr != nil {
 			_ = state.Cancel()
-			r.logFailure(ctx, in, prepared, attemptNo, latency, nil, adapter.MappedResponse{}, retry.Decision{})
+			r.logFailure(ctx, in, prepared, attemptNo, latency, preparedCall.applied.Thinking, nil, adapter.MappedResponse{}, retry.Decision{})
 			return Result{}, r.releaseFailureWithLog(ctx, terminalizer, parentErr, in, prepared, attemptNo)
 		}
 		if err == nil {
@@ -378,7 +378,7 @@ func (r *Runner) Run(ctx context.Context, in Input) (Result, error) {
 				r.logTerminalizationUnknown(ctx, in, prepared, attemptNo)
 				return Result{}, terminalizationError("finalize")
 			}
-			r.logSuccess(ctx, in, prepared, attemptNo, latency, completion)
+			r.logSuccess(ctx, in, prepared, attemptNo, latency, preparedCall.applied.Thinking, completion)
 			r.logFinalized(ctx, in, prepared, attemptNo, finalizeOutcome)
 			return Result{Completion: completion}, nil
 		}
@@ -389,7 +389,7 @@ func (r *Runner) Run(ctx context.Context, in Input) (Result, error) {
 		// attempt context (or a provider timeout) and is safe to classify.
 		if errors.Is(err, context.Canceled) {
 			_ = state.Cancel()
-			r.logFailure(ctx, in, prepared, attemptNo, latency, nil, adapter.MappedResponse{}, retry.Decision{})
+			r.logFailure(ctx, in, prepared, attemptNo, latency, preparedCall.applied.Thinking, nil, adapter.MappedResponse{}, retry.Decision{})
 			return Result{}, r.releaseFailureWithLog(ctx, terminalizer, context.Canceled, in, prepared, attemptNo)
 		}
 
@@ -407,7 +407,7 @@ func (r *Runner) Run(ctx context.Context, in Input) (Result, error) {
 			// Unclassified failures are fail-closed: never retry, release, and
 			// return a generic sentinel so the raw error cannot leak.
 			_ = state.Cancel()
-			r.logFailure(ctx, in, prepared, attemptNo, latency, nil, adapter.MappedResponse{}, retry.Decision{})
+			r.logFailure(ctx, in, prepared, attemptNo, latency, preparedCall.applied.Thinking, nil, adapter.MappedResponse{}, retry.Decision{})
 			return Result{}, r.releaseFailureWithLog(ctx, terminalizer, ErrUnclassified, in, prepared, attemptNo)
 		}
 
@@ -423,13 +423,13 @@ func (r *Runner) Run(ctx context.Context, in Input) (Result, error) {
 			if cerr := ctx.Err(); cerr != nil {
 				primary = cerr
 			}
-			r.logFailure(ctx, in, prepared, attemptNo, latency, classified, (adapter.Engine{}).MapResponse(prepared.Adapter, classified.ToUpstreamResponse()), decision)
+			r.logFailure(ctx, in, prepared, attemptNo, latency, preparedCall.applied.Thinking, classified, (adapter.Engine{}).MapResponse(prepared.Adapter, classified.ToUpstreamResponse()), decision)
 			return Result{}, r.releaseFailureWithLog(ctx, terminalizer, primary, in, prepared, attemptNo)
 		}
 		// The attempt log is best-effort: a recording fault never changes the
 		// verdict or the retry decision already recorded by the State.
 		mapped := (adapter.Engine{}).MapResponse(prepared.Adapter, classified.ToUpstreamResponse())
-		r.logFailure(ctx, in, prepared, attemptNo, latency, classified, mapped, decision)
+		r.logFailure(ctx, in, prepared, attemptNo, latency, preparedCall.applied.Thinking, classified, mapped, decision)
 
 		if !decision.Retry() {
 			// The mapped Failure is a confirmed terminal Result only after Release
@@ -635,6 +635,22 @@ func (r *Runner) baseEvent(in Input, prepared routing.PreparedAttempt, attemptNo
 	}
 }
 
+func applyThinkingToEvent(event *requestlog.ExecutionEvent, thinking adapter.EffectiveThinking) {
+	if event == nil {
+		return
+	}
+	if thinking == (adapter.EffectiveThinking{}) {
+		event.ThinkingMode = "disabled"
+		return
+	}
+	event.ThinkingMode = "enabled"
+	event.ThinkingRequestedEffort = string(thinking.RequestedEffort)
+	event.ThinkingEffectiveEffort = string(thinking.EffectiveEffort)
+	event.ThinkingRequestedBudget = thinking.RequestedBudget
+	event.ThinkingEffectiveBudget = thinking.EffectiveBudget
+	event.ThinkingDegraded = thinking.Degraded
+}
+
 func (r *Runner) logReserved(ctx context.Context, in Input, prepared routing.PreparedAttempt) {
 	if isNilInterface(r.Logger) {
 		return
@@ -662,11 +678,12 @@ func (r *Runner) logReserved(ctx context.Context, in Input, prepared routing.Pre
 	_ = r.Logger.RecordExecution(logCtx, event)
 }
 
-func (r *Runner) logSuccess(ctx context.Context, in Input, prepared routing.PreparedAttempt, attemptNo int, latency time.Duration, completion sdk.Completion) {
+func (r *Runner) logSuccess(ctx context.Context, in Input, prepared routing.PreparedAttempt, attemptNo int, latency time.Duration, thinking adapter.EffectiveThinking, completion sdk.Completion) {
 	if isNilInterface(r.Logger) {
 		return
 	}
 	event := r.baseEvent(in, prepared, attemptNo)
+	applyThinkingToEvent(&event, thinking)
 	event.Status = "success"
 	event.Latency = latency
 	if completion.Known && completion.Usage.Valid() {
@@ -683,11 +700,12 @@ func (r *Runner) logSuccess(ctx context.Context, in Input, prepared routing.Prep
 	_ = r.Logger.RecordExecution(logCtx, event)
 }
 
-func (r *Runner) logFailure(ctx context.Context, in Input, prepared routing.PreparedAttempt, attemptNo int, latency time.Duration, classified *sdk.ClassifiedError, mapped adapter.MappedResponse, decision retry.Decision) {
+func (r *Runner) logFailure(ctx context.Context, in Input, prepared routing.PreparedAttempt, attemptNo int, latency time.Duration, thinking adapter.EffectiveThinking, classified *sdk.ClassifiedError, mapped adapter.MappedResponse, decision retry.Decision) {
 	if isNilInterface(r.Logger) {
 		return
 	}
 	event := r.baseEvent(in, prepared, attemptNo)
+	applyThinkingToEvent(&event, thinking)
 	event.Status = "failed"
 	event.FailureCategory = classifyFailure(classified)
 	event.Latency = latency

@@ -119,21 +119,27 @@ func TestRecordExecutionPostsBatchAndPreservesLocalQuery(t *testing.T) {
 
 	sink, local := remoteSinkWithServer(t, srv.URL)
 	event := requestlog.ExecutionEvent{
-		RequestID:     "req-1",
-		ReservationID: "res-1",
-		Attempt:       2,
-		Candidate:     requestlog.ExecutionCandidate{ModelID: "gpt-x", ProviderID: "openai", RouteID: "r", CredentialID: "cred", AdapterID: "a"},
-		Protocol:      "openai_chat",
-		Kind:          requestlog.KindAttempt,
-		Status:        "success",
-		Code:          "",
-		Type:          "",
-		Timestamp:     time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC),
-		Subject:       "user-1",
-		KeyID:         "key-1",
-		Latency:       250 * time.Millisecond,
-		Usage:         requestlog.ExecutionUsage{InputTokens: 10, OutputTokens: 20, TotalTokens: 30},
-		UsageKnown:    true,
+		RequestID:               "req-1",
+		ReservationID:           "res-1",
+		Attempt:                 2,
+		Candidate:               requestlog.ExecutionCandidate{ModelID: "gpt-x", ProviderID: "openai", RouteID: "r", CredentialID: "cred", AdapterID: "a"},
+		Protocol:                "openai_chat",
+		Kind:                    requestlog.KindAttempt,
+		Status:                  "success",
+		Code:                    "",
+		Type:                    "",
+		Timestamp:               time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC),
+		Subject:                 "user-1",
+		KeyID:                   "key-1",
+		Latency:                 250 * time.Millisecond,
+		Usage:                   requestlog.ExecutionUsage{InputTokens: 10, OutputTokens: 20, TotalTokens: 30},
+		UsageKnown:              true,
+		ThinkingMode:            "enabled",
+		ThinkingRequestedEffort: "max",
+		ThinkingEffectiveEffort: "high",
+		ThinkingRequestedBudget: 12000,
+		ThinkingEffectiveBudget: 8000,
+		ThinkingDegraded:        true,
 	}
 	if err := sink.RecordExecution(context.Background(), event); err != nil {
 		t.Fatalf("RecordExecution() error = %v", err)
@@ -187,6 +193,10 @@ func TestRecordExecutionPostsBatchAndPreservesLocalQuery(t *testing.T) {
 	}
 	if b.Log.UsageStatus != "final" {
 		t.Errorf("batch.Log.UsageStatus = %q, want final", b.Log.UsageStatus)
+	}
+	if b.Log.ThinkingMode != "enabled" || b.Log.ThinkingEffort != "high" || b.Log.ThinkingRequestedEffort != "max" || b.Log.ThinkingEffectiveEffort != "high" ||
+		b.Log.ThinkingRequestedBudget != 12000 || b.Log.ThinkingEffectiveBudget != 8000 || b.Log.ThinkingEffortDegraded != "true" {
+		t.Errorf("batch.Log thinking = %+v", b.Log)
 	}
 	if b.Log.ReservationID != "res-1" {
 		t.Errorf("batch.Log.ReservationID = %q", b.Log.ReservationID)
@@ -582,38 +592,42 @@ func TestWireShapeAlignsWithRepository(t *testing.T) {
 	meta := json.RawMessage(`{"k":"v"}`)
 	b := batch{
 		Log: requestLog{
-			ID:                     42,
-			RequestID:              "rid",
-			TraceID:                "tid",
-			UserID:                 "uid",
-			ClientKeyID:            "ckid",
-			UserAgent:              "client/1.0",
-			ModelName:              "mn",
-			ResolvedModel:          "rm",
-			RouteID:                "rid2",
-			ProviderID:             "pid",
-			CredentialID:           "cid",
-			Protocol:               "p",
-			Stream:                 true,
-			FinalStatus:            "ok",
-			HTTPStatus:             200,
-			InputTokens:            1,
-			OutputTokens:           2,
-			TotalTokens:            3,
-			CacheTokens:            4,
-			LatencyMS:              5,
-			TTFTMS:                 6,
-			ErrorCode:              "EC",
-			ErrorType:              "ET",
-			UpstreamHTTPStatus:     502,
-			UsageStatus:            "final",
-			ThinkingMode:           "on",
-			ThinkingEffort:         "high",
-			ThinkingEffortDegraded: "true",
-			ReservationID:          "res",
-			BillingPlan:            "plan",
-			CreatedAt:              time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC),
-			CompletedAt:            &completed,
+			ID:                      42,
+			RequestID:               "rid",
+			TraceID:                 "tid",
+			UserID:                  "uid",
+			ClientKeyID:             "ckid",
+			UserAgent:               "client/1.0",
+			ModelName:               "mn",
+			ResolvedModel:           "rm",
+			RouteID:                 "rid2",
+			ProviderID:              "pid",
+			CredentialID:            "cid",
+			Protocol:                "p",
+			Stream:                  true,
+			FinalStatus:             "ok",
+			HTTPStatus:              200,
+			InputTokens:             1,
+			OutputTokens:            2,
+			TotalTokens:             3,
+			CacheTokens:             4,
+			LatencyMS:               5,
+			TTFTMS:                  6,
+			ErrorCode:               "EC",
+			ErrorType:               "ET",
+			UpstreamHTTPStatus:      502,
+			UsageStatus:             "final",
+			ThinkingMode:            "on",
+			ThinkingEffort:          "high",
+			ThinkingEffortDegraded:  "true",
+			ThinkingRequestedEffort: "max",
+			ThinkingEffectiveEffort: "high",
+			ThinkingRequestedBudget: 12000,
+			ThinkingEffectiveBudget: 8000,
+			ReservationID:           "res",
+			BillingPlan:             "plan",
+			CreatedAt:               time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC),
+			CompletedAt:             &completed,
 		},
 		Attempts: []attempt{{
 			ID:                 7,
@@ -672,7 +686,7 @@ func TestWireShapeAlignsWithRepository(t *testing.T) {
 
 	// Per-row field sets mirror the repository json tags exactly. The id
 	// field is json:"-" so it must never appear.
-	wantLog := []string{"request_id", "trace_id", "user_id", "client_key_id", "user_agent", "model_name", "resolved_model", "route_id", "provider_id", "credential_id", "protocol", "stream", "final_status", "http_status", "input_tokens", "output_tokens", "total_tokens", "cache_tokens", "latency_ms", "ttft_ms", "error_code", "error_type", "upstream_http_status", "usage_status", "thinking_mode", "thinking_effort", "thinking_effort_degraded", "reservation_id", "billing_plan", "created_at", "completed_at"}
+	wantLog := []string{"request_id", "trace_id", "user_id", "client_key_id", "user_agent", "model_name", "resolved_model", "route_id", "provider_id", "credential_id", "protocol", "stream", "final_status", "http_status", "input_tokens", "output_tokens", "total_tokens", "cache_tokens", "latency_ms", "ttft_ms", "error_code", "error_type", "upstream_http_status", "usage_status", "thinking_mode", "thinking_effort", "thinking_effort_degraded", "thinking_requested_effort", "thinking_effective_effort", "thinking_requested_budget", "thinking_effective_budget", "reservation_id", "billing_plan", "created_at", "completed_at"}
 	assertObjectKeySet(t, decoded["log"], wantLog, "log")
 	wantAttempt := []string{"request_log_id", "request_id", "attempt_index", "route_id", "provider_id", "credential_id", "upstream_model", "upstream_url", "status", "http_status", "latency_ms", "error_code", "error_type", "upstream_http_status", "retry_classified", "metadata", "created_at"}
 	assertKeySet(t, decoded["attempts"], wantAttempt, "attempts")

@@ -347,24 +347,29 @@ type modelStatRow struct {
 
 // requestLogDetailResponse 对齐契约 RequestLogDetail。
 type requestLogDetailResponse struct {
-	RequestID      string       `json:"requestId"`
-	Model          string       `json:"model"`
-	Provider       string       `json:"provider,omitempty"`
-	Status         string       `json:"status"`
-	ErrorMessage   string       `json:"errorMessage,omitempty"`
-	InputTokens    *int         `json:"inputTokens,omitempty"`
-	OutputTokens   *int         `json:"outputTokens,omitempty"`
-	TotalTokens    *int         `json:"totalTokens,omitempty"`
-	CacheTokens    *int         `json:"cacheTokens,omitempty"`
-	Cost           string       `json:"cost,omitempty"`
-	DurationMs     *int         `json:"durationMs,omitempty"`
-	TTFTMS         *int         `json:"ttftMs,omitempty"`
-	Protocol       *string      `json:"protocol,omitempty"`
-	Stream         *bool        `json:"stream,omitempty"`
-	ThinkingEffort *string      `json:"thinkingEffort,omitempty"`
-	Attempts       []attemptRow `json:"attempts"`
-	CreatedAt      time.Time    `json:"createdAt"`
-	CompletedAt    *time.Time   `json:"completedAt,omitempty"`
+	RequestID               string       `json:"requestId"`
+	Model                   string       `json:"model"`
+	Provider                string       `json:"provider,omitempty"`
+	Status                  string       `json:"status"`
+	ErrorMessage            string       `json:"errorMessage,omitempty"`
+	InputTokens             *int         `json:"inputTokens,omitempty"`
+	OutputTokens            *int         `json:"outputTokens,omitempty"`
+	TotalTokens             *int         `json:"totalTokens,omitempty"`
+	CacheTokens             *int         `json:"cacheTokens,omitempty"`
+	Cost                    string       `json:"cost,omitempty"`
+	DurationMs              *int         `json:"durationMs,omitempty"`
+	TTFTMS                  *int         `json:"ttftMs,omitempty"`
+	Protocol                *string      `json:"protocol,omitempty"`
+	Stream                  *bool        `json:"stream,omitempty"`
+	ThinkingEffort          *string      `json:"thinkingEffort,omitempty"`
+	ThinkingRequestedEffort *string      `json:"thinkingRequestedEffort,omitempty"`
+	ThinkingEffectiveEffort *string      `json:"thinkingEffectiveEffort,omitempty"`
+	ThinkingRequestedBudget *int         `json:"thinkingRequestedBudget,omitempty"`
+	ThinkingEffectiveBudget *int         `json:"thinkingEffectiveBudget,omitempty"`
+	ThinkingEffortDegraded  *bool        `json:"thinkingEffortDegraded,omitempty"`
+	Attempts                []attemptRow `json:"attempts"`
+	CreatedAt               time.Time    `json:"createdAt"`
+	CompletedAt             *time.Time   `json:"completedAt,omitempty"`
 }
 
 // attemptRow 对齐契约 RequestLogDetail.attempts 项。
@@ -415,6 +420,12 @@ func mapStatusFilter(status string) []string {
 func strPtr(s string) *string { return &s }
 func intPtr(n int) *int       { return &n }
 func boolPtr(v bool) *bool    { return &v }
+func boolPtrOrNil(v bool, ok bool) *bool {
+	if !ok {
+		return nil
+	}
+	return &v
+}
 
 // int64ToUUID 把 billing 的 int64 id 确定性映射为公开契约的 UUID（大端写入高 8
 // 字节，其余置 0）。这是 Edge facade 的公开标识映射，保证同一内部 id 始终映射到
@@ -497,21 +508,26 @@ func mapUserPlan(up billing.UserPlan, bal billing.Balance, balErr error) apiv1.U
 // mapRequestLog 把 Logging 日志摘要映射为契约 RequestLog。
 func mapRequestLog(l logging.RequestLog) apiv1.RequestLog {
 	return apiv1.RequestLog{
-		RequestId:      l.RequestID,
-		Model:          l.ModelName,
-		Status:         apiv1.RequestLogStatus(mapLogStatus(l.FinalStatus)),
-		InputTokens:    intPtrOrNil(l.InputTokens),
-		OutputTokens:   intPtrOrNil(l.OutputTokens),
-		TotalTokens:    intPtrOrNil(l.TotalTokens),
-		CacheTokens:    intPtrOrNil(l.CacheTokens),
-		Cost:           strPtrOrNil("0"),
-		DurationMs:     intPtrOrNil(l.LatencyMS),
-		TtftMs:         intPtrOrNil(l.TTFTMS),
-		Protocol:       strPtrOrNil(l.Protocol),
-		Stream:         boolPtr(l.Stream),
-		ThinkingEffort: strPtrOrNil(l.ThinkingEffort),
-		CreatedAt:      l.CreatedAt,
-		CompletedAt:    l.CompletedAt,
+		RequestId:               l.RequestID,
+		Model:                   l.ModelName,
+		Status:                  apiv1.RequestLogStatus(mapLogStatus(l.FinalStatus)),
+		InputTokens:             intPtrOrNil(l.InputTokens),
+		OutputTokens:            intPtrOrNil(l.OutputTokens),
+		TotalTokens:             intPtrOrNil(l.TotalTokens),
+		CacheTokens:             intPtrOrNil(l.CacheTokens),
+		Cost:                    strPtrOrNil("0"),
+		DurationMs:              intPtrOrNil(l.LatencyMS),
+		TtftMs:                  intPtrOrNil(l.TTFTMS),
+		Protocol:                strPtrOrNil(l.Protocol),
+		Stream:                  boolPtr(l.Stream),
+		ThinkingEffort:          strPtrOrNil(l.ThinkingEffort),
+		ThinkingRequestedEffort: strPtrOrNil(l.ThinkingRequestedEffort),
+		ThinkingEffectiveEffort: strPtrOrNil(l.ThinkingEffectiveEffort),
+		ThinkingRequestedBudget: intPtrOrNil(l.ThinkingRequestedBudget),
+		ThinkingEffectiveBudget: intPtrOrNil(l.ThinkingEffectiveBudget),
+		ThinkingEffortDegraded:  boolPtrOrNil(l.ThinkingEffortDegraded == "true", l.ThinkingEffortDegraded != ""),
+		CreatedAt:               l.CreatedAt,
+		CompletedAt:             l.CompletedAt,
 	}
 }
 
@@ -529,24 +545,29 @@ func mapRequestLogDetail(d logging.LogDetail) requestLogDetailResponse {
 		})
 	}
 	return requestLogDetailResponse{
-		RequestID:      d.Log.RequestID,
-		Model:          d.Log.ModelName,
-		Provider:       d.Log.ProviderID,
-		Status:         mapLogStatus(d.Log.FinalStatus),
-		ErrorMessage:   d.Log.ErrorCode,
-		InputTokens:    intPtrOrNil(d.Log.InputTokens),
-		OutputTokens:   intPtrOrNil(d.Log.OutputTokens),
-		TotalTokens:    intPtrOrNil(d.Log.TotalTokens),
-		CacheTokens:    intPtrOrNil(d.Log.CacheTokens),
-		Cost:           "0",
-		DurationMs:     intPtrOrNil(d.Log.LatencyMS),
-		TTFTMS:         intPtrOrNil(d.Log.TTFTMS),
-		Protocol:       strPtrOrNil(d.Log.Protocol),
-		Stream:         boolPtr(d.Log.Stream),
-		ThinkingEffort: strPtrOrNil(d.Log.ThinkingEffort),
-		Attempts:       attempts,
-		CreatedAt:      d.Log.CreatedAt,
-		CompletedAt:    d.Log.CompletedAt,
+		RequestID:               d.Log.RequestID,
+		Model:                   d.Log.ModelName,
+		Provider:                d.Log.ProviderID,
+		Status:                  mapLogStatus(d.Log.FinalStatus),
+		ErrorMessage:            d.Log.ErrorCode,
+		InputTokens:             intPtrOrNil(d.Log.InputTokens),
+		OutputTokens:            intPtrOrNil(d.Log.OutputTokens),
+		TotalTokens:             intPtrOrNil(d.Log.TotalTokens),
+		CacheTokens:             intPtrOrNil(d.Log.CacheTokens),
+		Cost:                    "0",
+		DurationMs:              intPtrOrNil(d.Log.LatencyMS),
+		TTFTMS:                  intPtrOrNil(d.Log.TTFTMS),
+		Protocol:                strPtrOrNil(d.Log.Protocol),
+		Stream:                  boolPtr(d.Log.Stream),
+		ThinkingEffort:          strPtrOrNil(d.Log.ThinkingEffort),
+		ThinkingRequestedEffort: strPtrOrNil(d.Log.ThinkingRequestedEffort),
+		ThinkingEffectiveEffort: strPtrOrNil(d.Log.ThinkingEffectiveEffort),
+		ThinkingRequestedBudget: intPtrOrNil(d.Log.ThinkingRequestedBudget),
+		ThinkingEffectiveBudget: intPtrOrNil(d.Log.ThinkingEffectiveBudget),
+		ThinkingEffortDegraded:  boolPtrOrNil(d.Log.ThinkingEffortDegraded == "true", d.Log.ThinkingEffortDegraded != ""),
+		Attempts:                attempts,
+		CreatedAt:               d.Log.CreatedAt,
+		CompletedAt:             d.Log.CompletedAt,
 	}
 }
 
