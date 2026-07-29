@@ -76,6 +76,19 @@ type UsageWindow struct {
 	WindowEnd   *time.Time `json:"window_end,omitempty"`
 }
 
+type LimitOverride struct {
+	ID             int64      `json:"id"`
+	UserPlanID     int64      `json:"user_plan_id"`
+	Kind           string     `json:"kind"`
+	Scope          string     `json:"scope"`
+	EffectiveFrom  time.Time  `json:"effective_from"`
+	EffectiveUntil *time.Time `json:"effective_until,omitempty"`
+	BonusRequests  *int       `json:"bonus_requests,omitempty"`
+	Reason         string     `json:"reason,omitempty"`
+	CreatedBy      string     `json:"created_by,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+}
+
 // Client 调用 Billing Service 只读端点。baseURL 为空时返回降级客户端。
 type Client struct {
 	httpClient *http.Client
@@ -159,6 +172,31 @@ func (c *Client) GetUsageWindows(ctx context.Context, userID string) ([]UsageWin
 	return out.Windows, nil
 }
 
+func (c *Client) CreateLimitOverride(ctx context.Context, userPlanID string, body map[string]any) (LimitOverride, error) {
+	var out LimitOverride
+	if err := c.post(ctx, "/v1/billing/admin/user-plans/"+url.PathEscape(userPlanID)+"/limit-overrides", body, &out); err != nil {
+		return out, err
+	}
+	return out, nil
+}
+
+func (c *Client) ListLimitOverrides(ctx context.Context, userPlanID string) ([]LimitOverride, error) {
+	var out struct {
+		Overrides []LimitOverride `json:"overrides"`
+	}
+	if err := c.get(ctx, "/v1/billing/admin/user-plans/"+url.PathEscape(userPlanID)+"/limit-overrides", &out); err != nil {
+		return nil, err
+	}
+	if out.Overrides == nil {
+		out.Overrides = []LimitOverride{}
+	}
+	return out.Overrides, nil
+}
+
+func (c *Client) RevokeLimitOverride(ctx context.Context, overrideID string) error {
+	return c.post(ctx, "/v1/billing/admin/limit-overrides/"+url.PathEscape(overrideID)+"/revoke", map[string]any{}, &struct{}{})
+}
+
 // ListAllUserPlans calls GET /v1/billing/admin/user-plans (cross-user admin list).
 // Billing returns {userPlans:[...], total, page, pageSize} inside the envelope;
 // we decode the userPlans array and return it (nil → empty slice).
@@ -180,6 +218,22 @@ var NotFound = errors.New("billing: not found")
 
 // get 执行 GET 请求并将响应解码到 dst。非 2xx 归一为 ErrUnavailable（404 为
 // NotFound）。响应体限制 1 MiB，禁止重定向，不泄漏 URL/响应体到错误信息。
+func (c *Client) post(ctx context.Context, path string, body any, dst any) error {
+	if !c.Available() {
+		return ErrUnavailable
+	}
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return ErrUnavailable
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, strings.NewReader(string(payload)))
+	if err != nil {
+		return ErrUnavailable
+	}
+	req.Header.Set("Content-Type", "application/json")
+	return c.do(req, dst)
+}
+
 func (c *Client) get(ctx context.Context, path string, dst any) error {
 	if !c.Available() {
 		return ErrUnavailable
@@ -188,6 +242,10 @@ func (c *Client) get(ctx context.Context, path string, dst any) error {
 	if err != nil {
 		return ErrUnavailable
 	}
+	return c.do(req, dst)
+}
+
+func (c *Client) do(req *http.Request, dst any) error {
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return ErrUnavailable
@@ -199,6 +257,9 @@ func (c *Client) get(ctx context.Context, path string, dst any) error {
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return ErrUnavailable
+	}
+	if dst == nil {
+		return nil
 	}
 	if err := httpresp.UnwrapData(data, dst); err != nil {
 		return ErrUnavailable

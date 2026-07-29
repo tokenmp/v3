@@ -14,6 +14,58 @@ import (
 	"github.com/tokenmp/v3/services/billing/internal/repository"
 )
 
+type fakeAdminStore struct {
+	createPlanErr     error
+	createdPlan       *repository.Plan
+	updateErr         error
+	deleteErr         error
+	listUserPlansErr  error
+	userPlans         []repository.UserPlan
+	userPlansTotal    int
+	assignErr         error
+	assignedUserPlan  *repository.UserPlan
+	cancelErr         error
+	usageStatsErr     error
+	usageStatsRows    []repository.UsageStatRow
+	createOverrideErr error
+	createdOverride   *repository.UserPlanLimitOverride
+	listOverrideErr   error
+	listOverrides     []repository.UserPlanLimitOverride
+	listOverrideID    int64
+	revokeErr         error
+	revokeID          int64
+}
+
+func (f *fakeAdminStore) CreatePlan(_ context.Context, p *repository.Plan) error {
+	f.createdPlan = p
+	return f.createPlanErr
+}
+func (f *fakeAdminStore) UpdatePlan(context.Context, int64, map[string]any) error { return f.updateErr }
+func (f *fakeAdminStore) DeletePlan(context.Context, int64) error                 { return f.deleteErr }
+func (f *fakeAdminStore) ListAllUserPlans(context.Context, int, int) ([]repository.UserPlan, int, error) {
+	return f.userPlans, f.userPlansTotal, f.listUserPlansErr
+}
+func (f *fakeAdminStore) AssignUserPlan(_ context.Context, up *repository.UserPlan) error {
+	f.assignedUserPlan = up
+	return f.assignErr
+}
+func (f *fakeAdminStore) CancelUserPlan(context.Context, int64) error { return f.cancelErr }
+func (f *fakeAdminStore) GetUsageStats(context.Context, int, string) ([]repository.UsageStatRow, error) {
+	return f.usageStatsRows, f.usageStatsErr
+}
+func (f *fakeAdminStore) CreateLimitOverride(_ context.Context, o *repository.UserPlanLimitOverride) error {
+	f.createdOverride = o
+	return f.createOverrideErr
+}
+func (f *fakeAdminStore) ListLimitOverrides(_ context.Context, userPlanID int64) ([]repository.UserPlanLimitOverride, error) {
+	f.listOverrideID = userPlanID
+	return f.listOverrides, f.listOverrideErr
+}
+func (f *fakeAdminStore) RevokeLimitOverride(_ context.Context, id int64) error {
+	f.revokeID = id
+	return f.revokeErr
+}
+
 type fakePinger struct{ err error }
 
 func (f fakePinger) Ping(context.Context) error { return f.err }
@@ -115,6 +167,10 @@ func newServerWithBalance(plans *fakePlanReader, userPlans *fakeUserPlanReader, 
 
 func newServerWithUsageWindows(plans *fakePlanReader, userPlans *fakeUserPlanReader, quota *fakeQuotaManager, ledger *fakeLedgerReader, balance *fakeBalanceReader, uw *fakeUsageWindowsReader, pinger fakePinger) *Server {
 	return New(plans, userPlans, quota, ledger, balance, uw, nil, pinger, nil)
+}
+
+func newServerWithAdmin(pinger fakePinger, admin *fakeAdminStore) *Server {
+	return New(&fakePlanReader{}, &fakeUserPlanReader{}, &fakeQuotaManager{}, &fakeLedgerReader{}, &fakeBalanceReader{}, nil, admin, pinger, nil)
 }
 
 func do(t *testing.T, s *Server, method, target string, body string) *httptest.ResponseRecorder {
@@ -427,5 +483,127 @@ func TestGetUsageWindows_QueryError(t *testing.T) {
 	rec := do(t, s, http.MethodGet, "/v1/billing/users/u1/usage-windows", "")
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+}
+
+// ---- limit override admin endpoint tests ----
+
+func TestAdminCreateLimitOverride_OK(t *testing.T) {
+	admin := &fakeAdminStore{}
+	s := newServerWithAdmin(fakePinger{}, admin)
+	body := `{"kind":"bonus","scope":"hour5","bonus_requests":5,"reason":"grant","created_by":"admin1"}`
+	rec := do(t, s, http.MethodPost, "/v1/billing/admin/user-plans/42/limit-overrides", body)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201, body=%s", rec.Code, rec.Body.String())
+	}
+	if admin.createdOverride == nil || admin.createdOverride.UserPlanID != 42 || admin.createdOverride.Kind != "bonus" || admin.createdOverride.Scope != "hour5" {
+		t.Fatalf("created override = %+v", admin.createdOverride)
+	}
+	if admin.createdOverride.BonusRequests == nil || *admin.createdOverride.BonusRequests != 5 {
+		t.Fatalf("bonus_requests = %v", admin.createdOverride.BonusRequests)
+	}
+	if admin.createdOverride.EffectiveFrom.IsZero() {
+		t.Fatalf("effective_from default not set")
+	}
+	var out repository.UserPlanLimitOverride
+	decode(t, rec, &out)
+	if out.UserPlanID != 42 || out.Kind != "bonus" {
+		t.Errorf("response = %+v", out)
+	}
+}
+
+func TestAdminCreateLimitOverride_InvalidKind(t *testing.T) {
+	admin := &fakeAdminStore{}
+	s := newServerWithAdmin(fakePinger{}, admin)
+	rec := do(t, s, http.MethodPost, "/v1/billing/admin/user-plans/42/limit-overrides", `{"kind":"nope","scope":"hour5"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+	if admin.createdOverride != nil {
+		t.Fatalf("store should not be called")
+	}
+}
+
+func TestAdminCreateLimitOverride_BonusMissingRequests(t *testing.T) {
+	admin := &fakeAdminStore{}
+	s := newServerWithAdmin(fakePinger{}, admin)
+	rec := do(t, s, http.MethodPost, "/v1/billing/admin/user-plans/42/limit-overrides", `{"kind":"bonus","scope":"hour5"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestAdminCreateLimitOverride_ResetOK(t *testing.T) {
+	admin := &fakeAdminStore{}
+	s := newServerWithAdmin(fakePinger{}, admin)
+	rec := do(t, s, http.MethodPost, "/v1/billing/admin/user-plans/1/limit-overrides", `{"kind":"reset","scope":"period"}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", rec.Code)
+	}
+	if admin.createdOverride.Kind != "reset" || admin.createdOverride.Scope != "period" || admin.createdOverride.BonusRequests != nil {
+		t.Fatalf("override = %+v", admin.createdOverride)
+	}
+}
+
+func TestAdminCreateLimitOverride_NotFound(t *testing.T) {
+	admin := &fakeAdminStore{createOverrideErr: repository.ErrNotFound}
+	s := newServerWithAdmin(fakePinger{}, admin)
+	rec := do(t, s, http.MethodPost, "/v1/billing/admin/user-plans/99/limit-overrides", `{"kind":"reset","scope":"weekly"}`)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+}
+
+func TestAdminCreateLimitOverride_InvalidID(t *testing.T) {
+	s := newServerWithAdmin(fakePinger{}, &fakeAdminStore{})
+	rec := do(t, s, http.MethodPost, "/v1/billing/admin/user-plans/abc/limit-overrides", `{"kind":"reset","scope":"weekly"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestAdminListLimitOverrides_OK(t *testing.T) {
+	admin := &fakeAdminStore{listOverrides: []repository.UserPlanLimitOverride{{ID: 1, Kind: "bonus", Scope: "hour5"}}}
+	s := newServerWithAdmin(fakePinger{}, admin)
+	rec := do(t, s, http.MethodGet, "/v1/billing/admin/user-plans/7/limit-overrides", "")
+	if rec.Code != http.StatusOK || admin.listOverrideID != 7 {
+		t.Fatalf("status/id = %d/%d", rec.Code, admin.listOverrideID)
+	}
+	var out struct {
+		Overrides []repository.UserPlanLimitOverride `json:"overrides"`
+	}
+	decode(t, rec, &out)
+	if len(out.Overrides) != 1 || out.Overrides[0].ID != 1 {
+		t.Errorf("overrides = %+v", out.Overrides)
+	}
+}
+
+func TestAdminRevokeLimitOverride_OK(t *testing.T) {
+	admin := &fakeAdminStore{}
+	s := newServerWithAdmin(fakePinger{}, admin)
+	rec := do(t, s, http.MethodPost, "/v1/billing/admin/limit-overrides/5/revoke", "")
+	if rec.Code != http.StatusOK || admin.revokeID != 5 {
+		t.Fatalf("status/id = %d/%d", rec.Code, admin.revokeID)
+	}
+	var out map[string]any
+	decode(t, rec, &out)
+	if out["status"] != "revoked" {
+		t.Errorf("status = %v", out["status"])
+	}
+}
+
+func TestAdminRevokeLimitOverride_NotFound(t *testing.T) {
+	s := newServerWithAdmin(fakePinger{}, &fakeAdminStore{revokeErr: repository.ErrNotFound})
+	rec := do(t, s, http.MethodPost, "/v1/billing/admin/limit-overrides/5/revoke", "")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+}
+
+func TestAdminLimitOverride_NoAdminConfigured(t *testing.T) {
+	s := newServer(&fakePlanReader{}, &fakeUserPlanReader{}, &fakeQuotaManager{}, &fakeLedgerReader{}, fakePinger{})
+	rec := do(t, s, http.MethodPost, "/v1/billing/admin/user-plans/1/limit-overrides", `{"kind":"reset","scope":"weekly"}`)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", rec.Code)
 	}
 }

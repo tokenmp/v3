@@ -22,6 +22,7 @@ Billing Service 是 TokenMP V3 分层架构的**业务平面**计费服务：
   - `GormRepository` 实现。reserve/charge/refund 用 ledger delta 有符号方向（reserve/charge 负、refund 正）。idempotency_key UNIQUE 保证账本幂等。
   - sentinel：`ErrNotFound`/`ErrQueryFailed`/`ErrInsertFailed`/`ErrConflict`/`ErrQuotaExceeded`，不泄漏 DSN/SQL；`*QuotaExceededError` 携带 scope（hour5/weekly/period）与计费数，`Error()` 为安全常量，`Unwrap()` 返回 `ErrQuotaExceeded`。
   - coding 窗口配额 enforcement（Reserve 内）：`billing_plan='coding'` 时以 `pg_advisory_xact_lock(hashtext(user_id))` 按用户串行化，幂等重复 Reserve 先短路（不重检），随后查活跃 coding user_plan+plan limits 并以 finalized `charge` ledger 行（`-SUM(request_delta)`）计数消耗：`hourly_limit`→5 小时滚动、`weekly_limit`→周一 00:00 UTC→下周一 00:00 UTC（Go 侧计算 boundary，避免 DB 时区依赖）、`monthly_limit`→`activated_at`→`expires_at` 计划期。任一超限返回 `*QuotaExceededError`（对应 scope）；无活跃 coding 套餐 fail-closed（period, limit 0）。超限不写 reservation/ledger。
+  - Phase 2 limit overrides（`internal/repository/overrides.go`）：`user_plan_limit_overrides` 表按 user_plan+scope 维度施加覆盖。`kind='reset'` 将该 scope 的 effective window start 前移至 `max(baseStart, latest active reset effective_from)`（原谅该时间点之前的消耗）；`kind='bonus'` 在生效区间（`now >= effective_from` 且 `effective_until IS NULL OR now < effective_until`）为 limit 追加 `bonus_requests`。revoke 为软失效（`effective_until = now()`，无需 status 列）。`overrideEffects`/`computeWindow` 被 Reserve enforcement、`GetUsageWindows`（返回 adjusted limit=base+active bonus、consumed since effective start、remaining）与 `GetBalance`（period scope 复用同一计算）共用。请求时间戳（usage_ledger.created_at 等）绝不修改，仅影响读取窗口与限额计算。`UserPlanLimitOverride` 结构体 + `CreateLimitOverride`/`ListLimitOverrides`/`RevokeLimitOverride` admin 方法（FK 违反→ErrInsertFailed，revoked 幂等，缺失→ErrNotFound）。
 - `internal/server`：HTTP（chi）。
   - `GET /healthz`、`GET /readyz`。
   - `GET /v1/billing/plans`、`GET /v1/billing/plans/{id}`。
@@ -29,9 +30,11 @@ Billing Service 是 TokenMP V3 分层架构的**业务平面**计费服务：
   - `POST /v1/billing/quota/reserve`、`/finalize`、`/release`（2 MiB body 限，幂等冲突映射 200）。Reserve 对 `*QuotaExceededError` 返回 429 + `quota_exceeded: <scope>`（scope=hour5/weekly/period），仅暴露 scope 不泄露 SQL/DSN。
   - `GET /v1/billing/users/{user_id}/ledger`。
   - `GET /v1/billing/users/{user_id}/balance`：返回 `{coding_remaining, token_remaining}` 十进制字符串。Coding=active coding 套餐月配额减本月已 charge 请求数；Token=active token 套餐 token_limit 加 net token_delta（全期），二者均钳到 >=0；无套餐/无账本返回 0，永不 ErrNotFound。
-  - `GET /v1/billing/users/{user_id}/usage-windows`：返回活跃 coding 套餐的 hour5/weekly/period 窗口（limit/consumed/remaining/window_start/window_end），与 Reserve enforcement 同源计数；无活跃 coding 套餐返回空数组。
+  - `GET /v1/billing/users/{user_id}/usage-windows`：返回活跃 coding 套餐的 hour5/weekly/period 窗口（limit/consumed/remaining/window_start/window_end），与 Reserve enforcement 同源计数；limit 为 override-adjusted（base+active bonus），window_start 为 effective start（max base start, latest active reset effective_from），无活跃 coding 套餐返回空数组。
+  - Phase 2 admin endpoints：`POST /v1/billing/admin/user-plans/{id}/limit-overrides`（create，校验 kind/scope/bonus_requests，effective_from 默认 now，支持 RFC3339 effective_from/effective_until）、`GET /v1/billing/admin/user-plans/{id}/limit-overrides`（list，newest-first）、`POST /v1/billing/admin/limit-overrides/{id}/revoke`（soft-revoke，幂等，not-found 404）。
   - 协议原生 JSON 错误，不泄漏 DSN/SQL/凭据；所有响应 `Cache-Control: no-store`。
 - `migrations/000001_init.{up,down}.sql`：Billing DB schema（从 `infra/db/migrations/billing/0001_init.sql` 转换为 golang-migrate 格式）。
+- `migrations/000002_limit_overrides.{up,down}.sql`：Phase 2 `user_plan_limit_overrides` 表（kind reset/bonus、scope hour5/weekly/period、user_plan_id FK、effective_from、effective_until nullable、bonus_requests nullable、reason、created_by、created_at）。镜像 `infra/db/migrations/billing/0002_limit_overrides.sql`。
 
 ## 验证
 
@@ -47,7 +50,7 @@ BILLING_DATABASE_URL=... BILLING_HTTP_ADDR=127.0.0.1:18085 go run ./cmd/billing
 ```
 
 - gofmt/vet/build 通过。
-- repository 集成测试：reserve→finalize→release 完整流、幂等、not-found、ledger 查询、plan/user_plan 查询。
+- repository 集成测试：reserve→finalize→release 完整流、幂等、not-found、ledger 查询、plan/user_plan 查询、Phase 2 limit overrides（bonus 提升 enforcement/window、reset 前移 window start、revoke 软失效与幂等、expired bonus 不生效）。
 - process smoke test：healthz/readyz 200、list plans/get user plan 200、reserve/finalize/release 200（幂等）、ledger 2 条（重复调用未产生重复）、missing field 400。
 
 ## 待实现（后续）
