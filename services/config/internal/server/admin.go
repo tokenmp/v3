@@ -146,9 +146,17 @@ func (s *Server) handleAdminCreateProvider(w http.ResponseWriter, r *http.Reques
 	if err := decodeAdminBody(w, r, &p); err != nil {
 		return
 	}
-	if p.ID == "" || p.Name == "" || p.BaseURL == "" || p.SDKKind == "" || p.Protocol == "" {
+	if p.ID == "" || p.Name == "" || p.BaseURL == "" {
 		httpresp.Error(w, httpresp.CodeBadRequest, "missing required fields")
 		return
+	}
+	// Provider SDK/protocol are legacy DB fields kept for compatibility while
+	// routing semantics move protocol selection to routes/adapters/endpoints.
+	if p.SDKKind == "" {
+		p.SDKKind = "openai"
+	}
+	if p.Protocol == "" {
+		p.Protocol = "openai_chat"
 	}
 	if err := s.adminWriter.CreateProvider(r.Context(), &p); err != nil {
 		writeAdminWriteErr(w, err)

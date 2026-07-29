@@ -328,13 +328,16 @@ func rejectUnsupportedEnabledRoutes(compiled adapter.CompiledConfig, registry *e
 		if !route.Enabled {
 			continue
 		}
-		provider, ok := compiled.Providers[route.ProviderID]
-		if !ok {
+		if _, ok := compiled.Providers[route.ProviderID]; !ok {
 			// The compiler already rejects providerless enabled routes; a
 			// missing provider here is a compile/config invariant violation.
 			return ErrUnsupportedRoute
 		}
-		key := execution.SDKClientKey{SDKKind: provider.SDKKind, Protocol: route.Protocol}
+		adapterEntry, ok := compiled.Adapters[route.AdapterID]
+		if !ok || adapterEntry.Protocol != route.Protocol {
+			return ErrUnsupportedRoute
+		}
+		key := execution.SDKClientKey{SDKKind: adapterEntry.SDKKind, Protocol: route.Protocol}
 		if _, supported := supportedSDKPairs[key]; !supported || registry == nil {
 			return ErrUnsupportedRoute
 		}
@@ -345,12 +348,6 @@ func rejectUnsupportedEnabledRoutes(compiled adapter.CompiledConfig, registry *e
 			if _, err := registry.StreamClient(key.SDKKind, key.Protocol); err != nil {
 				return ErrUnsupportedRoute
 			}
-		}
-		// The adapter's SDKKind/Protocol must also agree with the provider, an
-		// invariant the compiler enforces; check it here for defense-in-depth.
-		adapterEntry, ok := compiled.Adapters[route.AdapterID]
-		if !ok || adapterEntry.SDKKind != provider.SDKKind || adapterEntry.Protocol != route.Protocol {
-			return ErrUnsupportedRoute
 		}
 	}
 	return nil

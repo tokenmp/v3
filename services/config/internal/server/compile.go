@@ -432,31 +432,16 @@ func compileSnapshot(
 		}
 	}
 
-	// ---- Adapters: build from DB adapters + auto-generate for providers without one ----
-	// Index DB adapters by (sdk_kind, protocol) for provider lookup.
-	dbAdapterBySDKProto := make(map[string]repository.Adapter) // key = "sdk_kind|protocol"
-	for _, a := range adapters {
-		if a.Status == "deleted" {
-			continue
-		}
-		key := a.SDKKind + "|" + a.Protocol
-		dbAdapterBySDKProto[key] = a
-	}
-
-	// Track which providers have a DB adapter (via provider_id or sdk_kind+protocol match).
-	providerHasDBAdapter := make(map[string]bool)
-	for _, a := range adapters {
-		if a.Status == "deleted" {
-			continue
-		}
-		if a.ProviderID != nil && *a.ProviderID != "" {
-			providerHasDBAdapter[*a.ProviderID] = true
-		}
-	}
-
+	// ---- Adapters: build from DB adapters + auto-generate protocol-scoped defaults ----
+	// Providers are protocol-neutral. A route without an explicit adapter uses a
+	// provider-specific adapter for its protocol when one exists, then a generic
+	// DB adapter for the route SDK/protocol, and finally an auto-generated
+	// adapter for that provider+protocol.
 	wireAdapters := make(map[string]wireAdapter)
+	providerAdapterByProtocol := make(map[string]map[string]string)
+	genericAdapterBySDKProtocol := make(map[string]string)
 
-	// First, include DB adapters.
+	// First, include DB adapters and index them for default route lookup.
 	for _, a := range adapters {
 		if a.Status == "deleted" {
 			continue
@@ -466,22 +451,45 @@ func compileSnapshot(
 			return nil, fmt.Errorf("adapter %s: %w", a.ID, err)
 		}
 		wireAdapters[a.ID] = wa
+		if a.ProviderID != nil && *a.ProviderID != "" {
+			byProtocol := providerAdapterByProtocol[*a.ProviderID]
+			if byProtocol == nil {
+				byProtocol = make(map[string]string)
+				providerAdapterByProtocol[*a.ProviderID] = byProtocol
+			}
+			if _, exists := byProtocol[a.Protocol]; !exists {
+				byProtocol[a.Protocol] = a.ID
+			}
+			continue
+		}
+		key := a.SDKKind + "|" + a.Protocol
+		if _, exists := genericAdapterBySDKProtocol[key]; !exists {
+			genericAdapterBySDKProtocol[key] = a.ID
+		}
 	}
 
-	// Auto-generate adapters for providers that don't have a DB adapter.
+	protocolsByProvider := routeProtocolsByProvider(routes)
 	for _, p := range providers {
 		if p.Status == "deleted" {
 			continue
 		}
-		if providerHasDBAdapter[p.ID] {
-			continue
+		protocols := protocolsByProvider[p.ID]
+		if len(protocols) == 0 && p.Protocol != "" {
+			// Backward-compatible behavior for legacy provider-scoped protocol
+			// rows with no routes yet: still expose the historical default adapter.
+			protocols = []string{p.Protocol}
 		}
-		adapterID := "adapter-" + p.ID
-		if _, exists := wireAdapters[adapterID]; exists {
-			continue
+		for _, protocol := range protocols {
+			if existingDefaultAdapterID(p.ID, protocol, providerAdapterByProtocol, genericAdapterBySDKProtocol) != "" {
+				continue
+			}
+			adapterID := autoAdapterID(p.ID, protocol, len(protocols) > 1)
+			if _, exists := wireAdapters[adapterID]; exists {
+				continue
+			}
+			wa := autoGenerateAdapter(p, protocol, sdkKindForProtocol(protocol), adapterID)
+			wireAdapters[adapterID] = wa
 		}
-		wa := autoGenerateAdapter(p, credentialsByProvider)
-		wireAdapters[adapterID] = wa
 	}
 
 	// ---- Providers ----
@@ -517,10 +525,18 @@ func compileSnapshot(
 			continue
 		}
 
-		// Determine adapter ID.
-		adapterID := "adapter-" + rm.ProviderID
+		// Determine adapter ID. Providers are protocol-neutral, so implicit
+		// adapters are selected per route protocol rather than per provider row.
+		adapterID := ""
 		if rm.AdapterID != nil && *rm.AdapterID != "" {
 			adapterID = *rm.AdapterID
+		}
+		if adapterID == "" {
+			adapterID = existingDefaultAdapterID(rm.ProviderID, rm.Protocol, providerAdapterByProtocol, genericAdapterBySDKProtocol)
+		}
+		if adapterID == "" {
+			protocolCount := len(protocolsByProvider[rm.ProviderID])
+			adapterID = autoAdapterID(rm.ProviderID, rm.Protocol, protocolCount > 1)
 		}
 
 		// Determine credentials for this route.
@@ -692,18 +708,67 @@ func dbAdapterToWire(a repository.Adapter, credentialsByProvider map[string][]re
 	}, nil
 }
 
-// autoGenerateAdapter creates a default adapter for a provider that has no
-// DB adapter record. The adapter ID is "adapter-<provider_id>".
-func autoGenerateAdapter(p repository.Provider, credentialsByProvider map[string][]repository.UpstreamCredential) wireAdapter {
-	adapterID := "adapter-" + p.ID
+func routeProtocolsByProvider(routes []repository.RouteMapping) map[string][]string {
+	seen := make(map[string]map[string]bool)
+	for _, route := range routes {
+		if route.Status == "deleted" || route.ProviderID == "" || route.Protocol == "" || route.AdapterID != nil && *route.AdapterID != "" {
+			continue
+		}
+		byProtocol := seen[route.ProviderID]
+		if byProtocol == nil {
+			byProtocol = make(map[string]bool)
+			seen[route.ProviderID] = byProtocol
+		}
+		byProtocol[route.Protocol] = true
+	}
+	out := make(map[string][]string, len(seen))
+	for providerID, byProtocol := range seen {
+		protocols := make([]string, 0, len(byProtocol))
+		for protocol := range byProtocol {
+			protocols = append(protocols, protocol)
+		}
+		sort.Strings(protocols)
+		out[providerID] = protocols
+	}
+	return out
+}
 
+func sdkKindForProtocol(protocol string) string {
+	switch protocol {
+	case "anthropic_messages":
+		return "anthropic"
+	default:
+		return "openai"
+	}
+}
+
+func existingDefaultAdapterID(providerID, protocol string, providerAdapters map[string]map[string]string, genericAdapters map[string]string) string {
+	if byProtocol := providerAdapters[providerID]; byProtocol != nil {
+		if id := byProtocol[protocol]; id != "" {
+			return id
+		}
+	}
+	return genericAdapters[sdkKindForProtocol(protocol)+"|"+protocol]
+}
+
+func autoAdapterID(providerID, protocol string, providerHasMultipleProtocols bool) string {
+	if providerHasMultipleProtocols {
+		return "adapter-" + providerID + "-" + protocol
+	}
+	return "adapter-" + providerID
+}
+
+// autoGenerateAdapter creates a default adapter for a provider/protocol pair
+// that has no DB adapter record. Providers are protocol-neutral; SDKKind and
+// protocol come from the route's protocol, not from the provider row.
+func autoGenerateAdapter(p repository.Provider, protocol, sdkKind, adapterID string) wireAdapter {
 	// Determine auth config based on SDK kind and protocol.
 	auth := wireAuth{}
 	capability := wireCapability{}
 	allowedHeaders := []string{"Content-Type", "Accept"}
 	var responseRules []wireResponseRule
 
-	switch p.SDKKind {
+	switch sdkKind {
 	case "openai", "generic_http":
 		auth = wireAuth{
 			Kind:   "bearer_header",
@@ -771,8 +836,8 @@ func autoGenerateAdapter(p repository.Provider, credentialsByProvider map[string
 		ID:         adapterID,
 		Name:       p.Name + " Adapter",
 		Version:    1,
-		SDKKind:    p.SDKKind,
-		Protocol:   p.Protocol,
+		SDKKind:    sdkKind,
+		Protocol:   protocol,
 		Auth:       auth,
 		Capability: capability,
 		Thinking:   thinking,

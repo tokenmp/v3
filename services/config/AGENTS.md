@@ -6,7 +6,7 @@
 
 Config Service 是 TokenMP V3 分层架构的**控制平面**配置服务：
 
-- 管理 Config DB（`infra/db/migrations/config/`）中的 provider/model/route/credential/adapter 配置。
+- 管理 Config DB（`infra/db/migrations/config/`）中的 provider/model/route/credential/adapter 配置。Provider 是协议中立的供应商/账号池维度；protocol 由 route/adapter/endpoint 表达，legacy `providers.sdk_kind`/`providers.protocol` 仅用于兼容旧行和默认值。
 - 发布版本化的配置快照（`config_revisions` draft/published/archived + `config_revision_snapshots.snapshot_json`）。
 - 通过 HTTP `GET /v1/config/snapshots/latest` 把最新 published 的 raw `ConfigSnapshot` JSON 下发给 executor。
 
@@ -26,6 +26,7 @@ executor 不直连 Config DB；Config Service 是唯一读写方。
 ## 待实现（后续）
 
 - 草稿/发布写路径（admin API：draft → publish → archive，写 `config_revisions`/`config_revision_snapshots`）。
+- 清理历史 AI 生成的重复 Provider 数据：同一供应商保留一个 Provider，把不同协议保留在 route/adapter/endpoint 维度；第一轮合并不重命名 `credential_ref`，避免同时改 secret/env mapping。
 - `config_audit_log` 写入。
 - executor 端 `configsource.LoadFromConfigService`（HTTP pull snapshot_json → 本地 `snapshot.Compile` → 发布，对接现有热重载）。
 - 配置热重载：Config Service push + executor SIGHUP（或 executor 轮询 latest revision）。

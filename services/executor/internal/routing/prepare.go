@@ -122,11 +122,11 @@ func (r *Resolver) preparedConfig(candidate Candidate) (adapter.CompiledRoute, a
 			continue
 		}
 		provider, ok := r.config.Providers[route.ProviderID]
-		if !ok || provider.ID != candidate.Provider.ID || provider.Selector != candidate.Provider.Selector || provider.Protocol != route.Protocol {
+		if !ok || provider.ID != candidate.Provider.ID || provider.Selector != candidate.Provider.Selector {
 			continue
 		}
 		compiledAdapter, ok := r.config.Adapters[route.AdapterID]
-		if !ok || compiledAdapter.ID != candidate.AdapterID || compiledAdapter.Protocol != route.Protocol || compiledAdapter.SDKKind != provider.SDKKind {
+		if !ok || compiledAdapter.ID != candidate.AdapterID || compiledAdapter.Protocol != route.Protocol {
 			continue
 		}
 		if compiledAdapter.Auth.Kind == adapter.AuthNone {
