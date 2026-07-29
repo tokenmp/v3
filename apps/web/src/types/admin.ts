@@ -246,6 +246,16 @@ export interface AdminUserPlanInput {
   expiresAt: string | null;
 }
 
+export interface AdminUserPlanRenewInput {
+  extendDays?: number | null;
+  expiresAt?: string | null;
+}
+
+export interface AdminUserPlanUpgradeInput {
+  planId: string;
+  expiresAt?: string | null;
+}
+
 // ---- Provider config (read-only for now, write TBD via Config Service) ----
 
 export interface AdminProvider {

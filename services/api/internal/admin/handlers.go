@@ -62,6 +62,8 @@ func (h *Handlers) Routes(r chi.Router) {
 	r.Patch("/api/v1/admin/plans/{planId}", h.AdminUpdatePlan)
 	r.Delete("/api/v1/admin/plans/{planId}", h.AdminDeletePlan)
 	r.Post("/api/v1/admin/user-plans", h.AdminAssignUserPlan)
+	r.Post("/api/v1/admin/user-plans/{userPlanId}/renew", h.AdminRenewUserPlan)
+	r.Post("/api/v1/admin/user-plans/{userPlanId}/upgrade", h.AdminUpgradeUserPlan)
 	r.Post("/api/v1/admin/user-plans/{userPlanId}/cancel", h.AdminCancelUserPlan)
 	r.Get("/api/v1/admin/user-plans/{userPlanId}/limit-overrides", h.AdminListLimitOverrides)
 	r.Post("/api/v1/admin/user-plans/{userPlanId}/limit-overrides", h.AdminCreateLimitOverride)
@@ -451,6 +453,44 @@ func (h *Handlers) AdminDeletePlan(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handlers) AdminAssignUserPlan(w http.ResponseWriter, r *http.Request) {
 	h.proxyBillingAdmin(w, r, http.MethodPost, "/v1/billing/admin/user-plans")
+}
+
+func (h *Handlers) AdminRenewUserPlan(w http.ResponseWriter, r *http.Request) {
+	if h.Billing == nil || !h.Billing.Available() {
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "billing unavailable")
+		return
+	}
+	var body map[string]any
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&body); err != nil {
+		httpresp.Error(w, httpresp.CodeInvalidJSON, "invalid body")
+		return
+	}
+	up, err := h.Billing.RenewUserPlan(r.Context(), chi.URLParam(r, "userPlanId"), body)
+	if err != nil {
+		h.logger().Warn("admin renew user plan failed", "error", err)
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "billing unavailable")
+		return
+	}
+	httpresp.OK(w, up)
+}
+
+func (h *Handlers) AdminUpgradeUserPlan(w http.ResponseWriter, r *http.Request) {
+	if h.Billing == nil || !h.Billing.Available() {
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "billing unavailable")
+		return
+	}
+	var body map[string]any
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&body); err != nil {
+		httpresp.Error(w, httpresp.CodeInvalidJSON, "invalid body")
+		return
+	}
+	up, err := h.Billing.UpgradeUserPlan(r.Context(), chi.URLParam(r, "userPlanId"), body)
+	if err != nil {
+		h.logger().Warn("admin upgrade user plan failed", "error", err)
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "billing unavailable")
+		return
+	}
+	httpresp.Created(w, up)
 }
 
 func (h *Handlers) AdminCreateLimitOverride(w http.ResponseWriter, r *http.Request) {

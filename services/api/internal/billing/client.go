@@ -197,6 +197,22 @@ func (c *Client) RevokeLimitOverride(ctx context.Context, overrideID string) err
 	return c.post(ctx, "/v1/billing/admin/limit-overrides/"+url.PathEscape(overrideID)+"/revoke", map[string]any{}, &struct{}{})
 }
 
+func (c *Client) RenewUserPlan(ctx context.Context, userPlanID string, body map[string]any) (UserPlan, error) {
+	var out UserPlan
+	if err := c.post(ctx, "/v1/billing/admin/user-plans/"+url.PathEscape(userPlanID)+"/renew", body, &out); err != nil {
+		return out, err
+	}
+	return out, nil
+}
+
+func (c *Client) UpgradeUserPlan(ctx context.Context, userPlanID string, body map[string]any) (UserPlan, error) {
+	var out UserPlan
+	if err := c.post(ctx, "/v1/billing/admin/user-plans/"+url.PathEscape(userPlanID)+"/upgrade", body, &out); err != nil {
+		return out, err
+	}
+	return out, nil
+}
+
 // ListAllUserPlans calls GET /v1/billing/admin/user-plans (cross-user admin list).
 // Billing returns {userPlans:[...], total, page, pageSize} inside the envelope;
 // we decode the userPlans array and return it (nil → empty slice).

@@ -3,6 +3,8 @@ package repository
 import (
 	"context"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 // AdminStore extends GormRepository with admin write/query methods.
@@ -95,6 +97,81 @@ func (r *GormRepository) AssignUserPlan(ctx context.Context, up *UserPlan) error
 		return ErrInsertFailed
 	}
 	return nil
+}
+
+// RenewUserPlan extends or explicitly sets the expiry of an existing user_plan.
+// When expiresAt is nil, extendDays must be >0; extension starts from the
+// current expires_at if it is in the future, otherwise from now. A never-expiring
+// plan requires an explicit expiresAt to avoid surprising conversion.
+func (r *GormRepository) RenewUserPlan(ctx context.Context, id int64, extendDays int, expiresAt *time.Time) (UserPlan, error) {
+	var out UserPlan
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var up UserPlan
+		if err := tx.Where("id = ?", id).First(&up).Error; err != nil {
+			return ErrNotFound
+		}
+		newExpiry := expiresAt
+		if newExpiry == nil {
+			if extendDays <= 0 {
+				return ErrConflict
+			}
+			base := time.Now().UTC()
+			if up.ExpiresAt != nil && up.ExpiresAt.After(base) {
+				base = up.ExpiresAt.UTC()
+			}
+			v := base.AddDate(0, 0, extendDays)
+			newExpiry = &v
+		}
+		res := tx.Model(&UserPlan{}).Where("id = ?", id).Updates(map[string]any{
+			"expires_at": *newExpiry,
+			"updated_at": time.Now().UTC(),
+		})
+		if res.Error != nil {
+			return ErrQueryFailed
+		}
+		if res.RowsAffected == 0 {
+			return ErrNotFound
+		}
+		if err := tx.Where("id = ?", id).First(&out).Error; err != nil {
+			return ErrQueryFailed
+		}
+		return nil
+	})
+	if err != nil {
+		return UserPlan{}, err
+	}
+	return out, nil
+}
+
+// UpgradeUserPlan cancels the existing user_plan and creates a replacement with
+// the new plan. It is intentionally explicit rather than mutating plan_id in
+// place so historical reservations remain attributable to the original plan
+// period.
+func (r *GormRepository) UpgradeUserPlan(ctx context.Context, id int64, newPlanID int64, expiresAt *time.Time) (UserPlan, error) {
+	var created UserPlan
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var old UserPlan
+		if err := tx.Where("id = ?", id).First(&old).Error; err != nil {
+			return ErrNotFound
+		}
+		var p Plan
+		if err := tx.Where("id = ? AND status = ?", newPlanID, "active").First(&p).Error; err != nil {
+			return ErrNotFound
+		}
+		now := time.Now().UTC()
+		if err := tx.Model(&UserPlan{}).Where("id = ? AND status = ?", id, "active").Updates(map[string]any{"status": "cancelled", "updated_at": now}).Error; err != nil {
+			return ErrQueryFailed
+		}
+		created = UserPlan{UserID: old.UserID, PlanID: newPlanID, PlanType: p.PlanType, Status: "active", ActivatedAt: now, ExpiresAt: expiresAt}
+		if err := tx.Create(&created).Error; err != nil {
+			return ErrInsertFailed
+		}
+		return nil
+	})
+	if err != nil {
+		return UserPlan{}, err
+	}
+	return created, nil
 }
 
 // CancelUserPlan marks a user_plan as cancelled. Idempotent: cancelling an

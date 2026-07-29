@@ -45,6 +45,8 @@ type AdminStore interface {
 	DeletePlan(ctx context.Context, id int64) error
 	ListAllUserPlans(ctx context.Context, limit, offset int) ([]repository.UserPlan, int, error)
 	AssignUserPlan(ctx context.Context, up *repository.UserPlan) error
+	RenewUserPlan(ctx context.Context, id int64, extendDays int, expiresAt *time.Time) (repository.UserPlan, error)
+	UpgradeUserPlan(ctx context.Context, id int64, newPlanID int64, expiresAt *time.Time) (repository.UserPlan, error)
 	CancelUserPlan(ctx context.Context, id int64) error
 	GetUsageStats(ctx context.Context, days int, groupBy string) ([]repository.UsageStatRow, error)
 	CreateLimitOverride(ctx context.Context, o *repository.UserPlanLimitOverride) error
@@ -88,6 +90,8 @@ func (s *Server) Router() http.Handler {
 	r.Delete("/v1/billing/admin/plans/{id}", s.handleAdminDeletePlan)
 	r.Get("/v1/billing/admin/user-plans", s.handleAdminListUserPlans)
 	r.Post("/v1/billing/admin/user-plans", s.handleAdminAssignUserPlan)
+	r.Post("/v1/billing/admin/user-plans/{id}/renew", s.handleAdminRenewUserPlan)
+	r.Post("/v1/billing/admin/user-plans/{id}/upgrade", s.handleAdminUpgradeUserPlan)
 	r.Post("/v1/billing/admin/user-plans/{id}/cancel", s.handleAdminCancelUserPlan)
 	r.Get("/v1/billing/admin/usage/stats", s.handleAdminUsageStats)
 	r.Post("/v1/billing/admin/user-plans/{id}/limit-overrides", s.handleAdminCreateLimitOverride)
