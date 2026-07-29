@@ -405,15 +405,24 @@ type UserBalance struct {
 
 // UserPlan defines model for UserPlan.
 type UserPlan struct {
-	ActivatedAt    time.Time          `json:"activatedAt"`
-	ExpiresAt      *time.Time         `json:"expiresAt,omitempty"`
-	Id             openapi_types.UUID `json:"id"`
-	PlanId         openapi_types.UUID `json:"planId"`
-	PlanType       string             `json:"planType"`
-	Priority       *int               `json:"priority,omitempty"`
-	RemainingQuota string             `json:"remainingQuota"`
-	Status         UserPlanStatus     `json:"status"`
-	TotalQuota     string             `json:"totalQuota"`
+	ActivatedAt  time.Time          `json:"activatedAt"`
+	Category     *string            `json:"category,omitempty"`
+	ExpiresAt    *time.Time         `json:"expiresAt,omitempty"`
+	HourlyLimit  *int               `json:"hourlyLimit,omitempty"`
+	Id           openapi_types.UUID `json:"id"`
+	MonthlyLimit *int               `json:"monthlyLimit,omitempty"`
+	PlanId       openapi_types.UUID `json:"planId"`
+
+	// PlanName Human-readable plan name.
+	PlanName       *string        `json:"planName,omitempty"`
+	PlanType       string         `json:"planType"`
+	Price          *float32       `json:"price,omitempty"`
+	Priority       *int           `json:"priority,omitempty"`
+	RemainingQuota string         `json:"remainingQuota"`
+	Status         UserPlanStatus `json:"status"`
+	TokenLimit     *string        `json:"tokenLimit,omitempty"`
+	TotalQuota     string         `json:"totalQuota"`
+	WeeklyLimit    *int           `json:"weeklyLimit,omitempty"`
 }
 
 // UserPlanStatus defines model for UserPlan.Status.

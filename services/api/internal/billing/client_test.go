@@ -45,6 +45,26 @@ func TestListPlans_OK(t *testing.T) {
 	}
 }
 
+func TestListUserPlans_OK(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/billing/users/u1/plans" {
+			t.Errorf("path = %q", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(struct {
+			Plans []UserPlan `json:"plans"`
+		}{Plans: []UserPlan{{ID: 5, UserID: "u1", PlanID: 1, PlanName: "Pro", PlanType: "coding", Status: "active"}}})
+	}))
+	defer srv.Close()
+	c := NewClient(srv.URL)
+	out, err := c.ListUserPlans(context.Background(), "u1")
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if len(out) != 1 || out[0].ID != 5 || out[0].PlanName != "Pro" {
+		t.Errorf("out = %+v", out)
+	}
+}
+
 func TestListUserPlans_NotFound(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)

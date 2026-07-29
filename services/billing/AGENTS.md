@@ -24,7 +24,7 @@ Billing Service 是 TokenMP V3 分层架构的**业务平面**计费服务：
 - `internal/server`：HTTP（chi）。
   - `GET /healthz`、`GET /readyz`。
   - `GET /v1/billing/plans`、`GET /v1/billing/plans/{id}`。
-  - `GET /v1/billing/users/{user_id}/plan`。
+  - `GET /v1/billing/users/{user_id}/plan`（兼容：最新 active user_plan）与 `GET /v1/billing/users/{user_id}/plans`（Panel 概览使用：全部未过期 active user_plan，JOIN active plan 元数据，返回 plan_name/category/price/hourly/weekly/monthly/token limit）。
   - `POST /v1/billing/quota/reserve`、`/finalize`、`/release`（2 MiB body 限，幂等冲突映射 200）。
   - `GET /v1/billing/users/{user_id}/ledger`。
   - `GET /v1/billing/users/{user_id}/balance`：返回 `{coding_remaining, token_remaining}` 十进制字符串。Coding=active coding 套餐月配额减本月已 charge 请求数；Token=active token 套餐 token_limit 加 net token_delta（全期），二者均钳到 >=0；无套餐/无账本返回 0，永不 ErrNotFound。

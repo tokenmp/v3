@@ -34,12 +34,17 @@ func (f *fakePlanReader) ListPlans(_ context.Context, status string) ([]reposito
 }
 
 type fakeUserPlanReader struct {
-	plan repository.UserPlan
-	err  error
+	plan    repository.UserPlan
+	details []repository.UserPlanDetail
+	err     error
 }
 
 func (f *fakeUserPlanReader) GetActiveUserPlan(context.Context, string) (repository.UserPlan, error) {
 	return f.plan, f.err
+}
+
+func (f *fakeUserPlanReader) ListActiveUserPlans(context.Context, string) ([]repository.UserPlanDetail, error) {
+	return f.details, f.err
 }
 
 type fakeQuotaManager struct {

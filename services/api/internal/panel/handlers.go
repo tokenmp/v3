@@ -490,6 +490,12 @@ func mapUserPlan(up billing.UserPlan, bal billing.Balance, balErr error) apiv1.U
 			remaining = bal.CodingRemaining
 		}
 	}
+	totalQuota := "0"
+	if up.PlanType == "token" && up.TokenLimit != nil {
+		totalQuota = strconv.FormatInt(*up.TokenLimit, 10)
+	} else if up.MonthlyLimit != nil {
+		totalQuota = strconv.Itoa(*up.MonthlyLimit)
+	}
 	status := apiv1.UserPlanStatus(up.Status)
 	if up.Status == "cancelled" {
 		status = apiv1.UserPlanStatusDisabled
@@ -497,8 +503,15 @@ func mapUserPlan(up billing.UserPlan, bal billing.Balance, balErr error) apiv1.U
 	return apiv1.UserPlan{
 		Id:             int64ToUUID(up.ID),
 		PlanId:         int64ToUUID(up.PlanID),
+		PlanName:       strPtrOrNil(up.PlanName),
 		PlanType:       up.PlanType,
-		TotalQuota:     "0", // Billing user_plan 不含 plan 限额；由 plans 端点展示
+		Category:       strPtrOrNil(up.Category),
+		Price:          floatPtrOrNil(up.Price, up.Price != 0),
+		HourlyLimit:    intPtrOrNilPtr(up.HourlyLimit),
+		WeeklyLimit:    intPtrOrNilPtr(up.WeeklyLimit),
+		MonthlyLimit:   intPtrOrNilPtr(up.MonthlyLimit),
+		TokenLimit:     int64StringPtrOrNil(up.TokenLimit),
+		TotalQuota:     totalQuota,
 		RemainingQuota: remaining,
 		Status:         status,
 		ActivatedAt:    up.ActivatedAt,
@@ -599,6 +612,29 @@ func strPtrOrNil(s string) *string {
 		return nil
 	}
 	return &s
+}
+
+func intPtrOrNilPtr(n *int) *int {
+	if n == nil {
+		return nil
+	}
+	return n
+}
+
+func int64StringPtrOrNil(n *int64) *string {
+	if n == nil {
+		return nil
+	}
+	s := strconv.FormatInt(*n, 10)
+	return &s
+}
+
+func floatPtrOrNil(n float64, ok bool) *float32 {
+	if !ok {
+		return nil
+	}
+	f := float32(n)
+	return &f
 }
 
 // ---- per-user auto model pool ----

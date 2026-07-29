@@ -42,13 +42,21 @@ type Plan struct {
 
 // UserPlan 对应 Billing Service 返回的用户套餐绑定。
 type UserPlan struct {
-	ID          int64      `json:"id"`
-	UserID      string     `json:"user_id"`
-	PlanID      int64      `json:"plan_id"`
-	PlanType    string     `json:"plan_type"`
-	Status      string     `json:"status"`
-	ActivatedAt time.Time  `json:"activated_at"`
-	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
+	ID           int64      `json:"id"`
+	UserID       string     `json:"user_id"`
+	PlanID       int64      `json:"plan_id"`
+	PlanName     string     `json:"plan_name"`
+	PlanType     string     `json:"plan_type"`
+	Category     string     `json:"category"`
+	Price        float64    `json:"price"`
+	HourlyLimit  *int       `json:"hourly_limit,omitempty"`
+	WeeklyLimit  *int       `json:"weekly_limit,omitempty"`
+	MonthlyLimit *int       `json:"monthly_limit,omitempty"`
+	TokenLimit   *int64     `json:"token_limit,omitempty"`
+	PlanStatus   string     `json:"plan_status"`
+	Status       string     `json:"status"`
+	ActivatedAt  time.Time  `json:"activated_at"`
+	ExpiresAt    *time.Time `json:"expires_at,omitempty"`
 }
 
 // Balance 对应 Billing Service 返回的用户余额（十进制字符串）。
@@ -93,18 +101,21 @@ func (c *Client) ListPlans(ctx context.Context) ([]Plan, error) {
 	return out.Plans, nil
 }
 
-// ListUserPlans 调用 GET /v1/billing/users/{user_id}/plan 获取用户当前生效套餐。
-// Billing Service 当前返回单个 active plan（最新的）；本方法返回单元素切片以便
-// 上层直接映射为 OpenAPI 列表响应。
+// ListUserPlans 调用 GET /v1/billing/users/{user_id}/plans 获取用户全部当前生效套餐。
 func (c *Client) ListUserPlans(ctx context.Context, userID string) ([]UserPlan, error) {
 	if userID == "" {
 		return nil, ErrUnavailable
 	}
-	var plan UserPlan
-	if err := c.get(ctx, "/v1/billing/users/"+url.PathEscape(userID)+"/plan", &plan); err != nil {
+	var out struct {
+		Plans []UserPlan `json:"plans"`
+	}
+	if err := c.get(ctx, "/v1/billing/users/"+url.PathEscape(userID)+"/plans", &out); err != nil {
 		return nil, err
 	}
-	return []UserPlan{plan}, nil
+	if out.Plans == nil {
+		out.Plans = []UserPlan{}
+	}
+	return out.Plans, nil
 }
 
 // GetBalance 调用 GET /v1/billing/users/{user_id}/balance 获取用户余额。

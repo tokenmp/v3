@@ -71,6 +71,7 @@ func (s *Server) Router() http.Handler {
 	r.Get("/v1/billing/plans", s.handleListPlans)
 	r.Get("/v1/billing/plans/{id}", s.handleGetPlan)
 	r.Get("/v1/billing/users/{user_id}/plan", s.handleGetUserPlan)
+	r.Get("/v1/billing/users/{user_id}/plans", s.handleListUserPlans)
 	r.Get("/v1/billing/users/{user_id}/balance", s.handleGetBalance)
 	r.Post("/v1/billing/quota/reserve", s.handleReserve)
 	r.Post("/v1/billing/quota/finalize", s.handleFinalize)
@@ -167,6 +168,21 @@ func (s *Server) handleGetUserPlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpresp.OK(w, plan)
+}
+
+func (s *Server) handleListUserPlans(w http.ResponseWriter, r *http.Request) {
+	plans, err := s.userPlans.ListActiveUserPlans(r.Context(), chi.URLParam(r, "user_id"))
+	if err != nil {
+		s.logger.Warn("user plans query failed", "error", err)
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "plans unavailable")
+		return
+	}
+	if plans == nil {
+		plans = []repository.UserPlanDetail{}
+	}
+	httpresp.OK(w, struct {
+		Plans []repository.UserPlanDetail `json:"plans"`
+	}{Plans: plans})
 }
 
 type reserveRequest struct {
