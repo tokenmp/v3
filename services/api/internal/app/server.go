@@ -197,10 +197,19 @@ func quotaMiddleware(mgr quota.Manager, logger *slog.Logger) func(http.Handler) 
 }
 
 // statusWriter wraps http.ResponseWriter to capture the status code.
+// It implements Unwrap so http.ResponseController (used by httputil.ReverseProxy)
+// can reach the underlying writer's Flush/Hijack methods. Without Unwrap,
+// SSE streaming through the reverse proxy is silently buffered.
 type statusWriter struct {
 	http.ResponseWriter
 	status int
 	wrote  bool
+}
+
+// Unwrap exposes the underlying http.ResponseWriter so http.ResponseController
+// can call Flush, Hijack, etc. on the real writer.
+func (w *statusWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
 }
 
 func (w *statusWriter) WriteHeader(code int) {
