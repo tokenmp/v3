@@ -31,6 +31,7 @@ import type {
   AdminUpstreamCredential,
   AdminUpstreamEndpoint,
   AdminGlobalPolicy,
+  RoutingPolicy,
   RetryPolicy,
   RetryAction,
   RetryRule,
@@ -651,6 +652,10 @@ function mapProvider(p: Record<string, unknown>): AdminProvider {
     baseURL: String(p.base_url ?? p.baseURL ?? ''),
     sdkKind: (p.sdk_kind ?? p.sdkKind ?? 'openai') as AdminProvider['sdkKind'],
     protocol: String(p.protocol ?? ''),
+    contextWindow: p.context_window != null ? Number(p.context_window) : (p.contextWindow != null ? Number(p.contextWindow) : null),
+    maxOutputTokens: p.max_output_tokens != null ? Number(p.max_output_tokens) : (p.maxOutputTokens != null ? Number(p.maxOutputTokens) : null),
+    rpm: p.rpm != null ? Number(p.rpm) : null,
+    tpm: p.tpm != null ? Number(p.tpm) : null,
     status: (p.status ?? 'active') as AdminProvider['status'],
     credentialCount: Number(p.credential_count ?? p.credentialCount ?? 0),
     routeCount: Number(p.route_count ?? p.routeCount ?? 0),
@@ -691,6 +696,8 @@ function mapRouteConfig(r: Record<string, unknown>): AdminRouteConfig {
     quarantined: Boolean(r.quarantined ?? false),
     contextWindow: r.context_window != null ? Number(r.context_window) : (r.contextWindow != null ? Number(r.contextWindow) : null),
     maxOutputTokens: r.max_output_tokens != null ? Number(r.max_output_tokens) : (r.maxOutputTokens != null ? Number(r.maxOutputTokens) : null),
+    rpm: r.rpm != null ? Number(r.rpm) : null,
+    tpm: r.tpm != null ? Number(r.tpm) : null,
     retryPolicy: mapRetryPolicy(r.retry_policy ?? r.retryPolicy),
   };
 }
@@ -725,6 +732,39 @@ function mapRetryPolicy(v: unknown): RetryPolicy | null {
   };
 }
 
+function mapRoutingPolicy(v: unknown): RoutingPolicy | null {
+  if (!v || typeof v !== 'object') return null;
+  const r = v as Record<string, unknown>;
+  const weights = (r.weights ?? r.Weights ?? {}) as Record<string, unknown>;
+  return {
+    strategy: (r.strategy ?? r.Strategy ?? 'softmax') === 'priority' ? 'priority' : 'softmax',
+    temperature: Number(r.temperature ?? r.Temperature ?? 0.7),
+    minCandidates: Number(r.min_candidates ?? r.minCandidates ?? r.MinCandidates ?? 3),
+    weights: {
+      success: Number(weights.success ?? weights.Success ?? 0.45),
+      cost: Number(weights.cost ?? weights.Cost ?? 0.25),
+      latency: Number(weights.latency ?? weights.Latency ?? 0.15),
+      quota: Number(weights.quota ?? weights.Quota ?? 0.1),
+      priority: Number(weights.priority ?? weights.Priority ?? 0.05),
+    },
+  };
+}
+
+function routingPolicyToWire(policy: RoutingPolicy): Record<string, unknown> {
+  return {
+    Strategy: policy.strategy,
+    Temperature: policy.temperature,
+    MinCandidates: policy.minCandidates,
+    Weights: {
+      Success: policy.weights.success,
+      Cost: policy.weights.cost,
+      Latency: policy.weights.latency,
+      Quota: policy.weights.quota,
+      Priority: policy.weights.priority,
+    },
+  };
+}
+
 function mapCredential(c: Record<string, unknown>): AdminUpstreamCredential {
   return {
     id: String(c.id ?? ''),
@@ -735,6 +775,8 @@ function mapCredential(c: Record<string, unknown>): AdminUpstreamCredential {
     priority: Number(c.priority ?? 0),
     maxConcurrency: c.max_concurrency != null ? Number(c.max_concurrency) : (c.maxConcurrency != null ? Number(c.maxConcurrency) : null),
     dailyQuota: c.daily_quota != null ? Number(c.daily_quota) : (c.dailyQuota != null ? Number(c.dailyQuota) : null),
+    rpm: c.rpm != null ? Number(c.rpm) : null,
+    tpm: c.tpm != null ? Number(c.tpm) : null,
     status: (c.status ?? 'active') as AdminUpstreamCredential['status'],
     createdAt: String(c.created_at ?? c.createdAt ?? ''),
     updatedAt: String(c.updated_at ?? c.updatedAt ?? ''),
@@ -767,7 +809,7 @@ export const adminConfigApi = {
     const items = Array.isArray(res) ? res : (res.items ?? []);
     return items.map((p) => mapProvider(p as unknown as Record<string, unknown>));
   },
-  createProvider: async (input: Partial<AdminProvider> & { id: string; name: string; baseURL: string; sdkKind: string; protocol: string }): Promise<AdminProvider> => {
+  createProvider: async (input: Partial<AdminProvider> & { id: string; name: string; baseURL: string; sdkKind: string; protocol: string; contextWindow?: number | null; maxOutputTokens?: number | null; rpm?: number | null; tpm?: number | null }): Promise<AdminProvider> => {
     return request<AdminProvider>('/api/v1/admin/providers', {
       method: 'POST',
       body: {
@@ -778,6 +820,10 @@ export const adminConfigApi = {
         base_url: input.baseURL,
         sdk_kind: input.sdkKind,
         protocol: input.protocol,
+        context_window: input.contextWindow ?? null,
+        max_output_tokens: input.maxOutputTokens ?? null,
+        rpm: input.rpm ?? null,
+        tpm: input.tpm ?? null,
         status: input.status ?? 'active',
       },
       baseUrl: ADMIN_BASE,
@@ -790,6 +836,10 @@ export const adminConfigApi = {
     if (input.baseURL !== undefined) fields.base_url = input.baseURL;
     if (input.sdkKind !== undefined) fields.sdk_kind = input.sdkKind;
     if (input.protocol !== undefined) fields.protocol = input.protocol;
+    if (input.contextWindow !== undefined) fields.context_window = input.contextWindow;
+    if (input.maxOutputTokens !== undefined) fields.max_output_tokens = input.maxOutputTokens;
+    if (input.rpm !== undefined) fields.rpm = input.rpm;
+    if (input.tpm !== undefined) fields.tpm = input.tpm;
     if (input.status !== undefined) fields.status = input.status;
     await request<{ id: string }>(`/api/v1/admin/providers/${id}`, {
       method: 'PATCH',
@@ -861,7 +911,7 @@ export const adminConfigApi = {
     const items = Array.isArray(res) ? res : (res.items ?? []);
     return items.map((r) => mapRouteConfig(r as unknown as Record<string, unknown>));
   },
-  createRoute: async (input: { id: string; modelId: string; providerId: string; upstreamModel: string; protocol: string; priority?: number; contextWindow?: number | null; maxOutputTokens?: number | null }): Promise<AdminRouteConfig> => {
+  createRoute: async (input: { id: string; modelId: string; providerId: string; upstreamModel: string; protocol: string; priority?: number; contextWindow?: number | null; maxOutputTokens?: number | null; rpm?: number | null; tpm?: number | null }): Promise<AdminRouteConfig> => {
     return request<AdminRouteConfig>('/api/v1/admin/routes', {
       method: 'POST',
       body: {
@@ -873,6 +923,8 @@ export const adminConfigApi = {
         priority: input.priority ?? 0,
         context_window: input.contextWindow ?? null,
         max_output_tokens: input.maxOutputTokens ?? null,
+        rpm: input.rpm ?? null,
+        tpm: input.tpm ?? null,
         enabled: true,
         is_default: false,
         status: 'active',
@@ -882,11 +934,16 @@ export const adminConfigApi = {
   },
   updateRoute: async (id: string, input: Partial<AdminRouteConfig>): Promise<void> => {
     const fields: Record<string, unknown> = {};
+    if (input.modelId !== undefined) fields.model_id = input.modelId;
+    if (input.providerId !== undefined) fields.provider_id = input.providerId;
     if (input.upstreamModel !== undefined) fields.upstream_model = input.upstreamModel;
+    if (input.protocol !== undefined) fields.protocol = input.protocol;
     if (input.priority !== undefined) fields.priority = input.priority;
     if (input.enabled !== undefined) fields.enabled = input.enabled;
     if (input.contextWindow !== undefined) fields.context_window = input.contextWindow;
     if (input.maxOutputTokens !== undefined) fields.max_output_tokens = input.maxOutputTokens;
+    if (input.rpm !== undefined) fields.rpm = input.rpm;
+    if (input.tpm !== undefined) fields.tpm = input.tpm;
     if (input.retryPolicy !== undefined) fields.retry_policy = input.retryPolicy;
     await request<{ id: string }>(`/api/v1/admin/routes/${id}`, {
       method: 'PATCH',
@@ -924,6 +981,8 @@ export const adminConfigApi = {
     priority?: number;
     maxConcurrency?: number | null;
     dailyQuota?: number | null;
+    rpm?: number | null;
+    tpm?: number | null;
     status?: string;
   }): Promise<AdminUpstreamCredential> => {
     return request<AdminUpstreamCredential>(`/api/v1/admin/providers/${providerId}/credentials`, {
@@ -934,6 +993,8 @@ export const adminConfigApi = {
         priority: input.priority ?? 0,
         max_concurrency: input.maxConcurrency ?? null,
         daily_quota: input.dailyQuota ?? null,
+        rpm: input.rpm ?? null,
+        tpm: input.tpm ?? null,
         status: input.status ?? 'active',
       },
       baseUrl: ADMIN_BASE,
@@ -945,6 +1006,8 @@ export const adminConfigApi = {
     if (input.priority !== undefined) fields.priority = input.priority;
     if (input.maxConcurrency !== undefined) fields.max_concurrency = input.maxConcurrency;
     if (input.dailyQuota !== undefined) fields.daily_quota = input.dailyQuota;
+    if (input.rpm !== undefined) fields.rpm = input.rpm;
+    if (input.tpm !== undefined) fields.tpm = input.tpm;
     if (input.status !== undefined) fields.status = input.status;
     await request<{ id: string }>(`/api/v1/admin/credentials/${id}`, {
       method: 'PATCH',
@@ -1020,6 +1083,7 @@ export const adminConfigApi = {
       default_retry: mapRetryPolicy(res.default_retry),
       default_timeout: (res.default_timeout as AdminGlobalPolicy['default_timeout']) ?? null,
       auto_model_ids: (res.auto_model_ids as string[] | null) ?? null,
+      routing_policy: mapRoutingPolicy(res.routing_policy),
     };
   },
   setGlobalRetry: async (policy: RetryPolicy): Promise<void> => {
@@ -1060,6 +1124,13 @@ export const adminConfigApi = {
     await request<{ key: string }>(`/api/v1/admin/global/auto_model_ids`, {
       method: 'PUT',
       body: ids ?? [],
+      baseUrl: ADMIN_BASE,
+    });
+  },
+  setRoutingPolicy: async (policy: RoutingPolicy): Promise<void> => {
+    await request<{ key: string }>(`/api/v1/admin/global/routing_policy`, {
+      method: 'PUT',
+      body: routingPolicyToWire(policy),
       baseUrl: ADMIN_BASE,
     });
   },

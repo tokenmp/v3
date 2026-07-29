@@ -70,6 +70,8 @@ type RouteDraft = {
   enabled: boolean;
   contextWindow: number | null;
   maxOutputTokens: number | null;
+  rpm: number | null;
+  tpm: number | null;
 };
 
 function emptyDraft(): RouteDraft {
@@ -83,6 +85,8 @@ function emptyDraft(): RouteDraft {
     enabled: true,
     contextWindow: null,
     maxOutputTokens: null,
+    rpm: null,
+    tpm: null,
   };
 }
 
@@ -97,6 +101,8 @@ function fromRoute(r: AdminRouteConfig): RouteDraft {
     enabled: r.enabled,
     contextWindow: r.contextWindow,
     maxOutputTokens: r.maxOutputTokens,
+    rpm: r.rpm,
+    tpm: r.tpm,
   };
 }
 
@@ -123,6 +129,8 @@ export default function AdminRoutesPage() {
         priority: input.priority,
         contextWindow: input.contextWindow,
         maxOutputTokens: input.maxOutputTokens,
+        rpm: input.rpm,
+        tpm: input.tpm,
       }),
     onSuccess: () => {
       toast.success('路由已创建（需点编译并发布生效）');
@@ -145,6 +153,8 @@ export default function AdminRoutesPage() {
         enabled: input.enabled,
         contextWindow: input.contextWindow,
         maxOutputTokens: input.maxOutputTokens,
+        rpm: input.rpm,
+        tpm: input.tpm,
       }),
     onSuccess: () => {
       toast.success('路由已保存（需点编译并发布生效）');
@@ -244,6 +254,7 @@ export default function AdminRoutesPage() {
                 <TableHead>上游模型</TableHead>
                 <TableHead>协议</TableHead>
                 <TableHead>优先级</TableHead>
+                <TableHead className="text-right">TPM</TableHead>
                 <TableHead>状态</TableHead>
                 <TableHead className="text-right">操作</TableHead>
               </TableRow>
@@ -257,6 +268,7 @@ export default function AdminRoutesPage() {
                   <TableCell className="font-mono text-xs">{r.upstreamModel}</TableCell>
                   <TableCell className="font-mono text-xs text-muted-foreground">{r.protocol}</TableCell>
                   <TableCell className="tabular-nums">{r.priority}</TableCell>
+                  <TableCell className="text-right font-mono text-xs">{r.tpm != null ? r.tpm.toLocaleString() : '继承'}</TableCell>
                   <TableCell>
                     <StatusPill enabled={r.enabled} quarantined={r.quarantined} />
                   </TableCell>
@@ -357,6 +369,8 @@ function RouteFormModal({
   const [maxOutputTokensStr, setMaxOutputTokensStr] = useState<string>(
     initial?.maxOutputTokens != null ? String(initial.maxOutputTokens) : '',
   );
+  const [rpmStr, setRPMStr] = useState<string>(initial?.rpm != null ? String(initial.rpm) : '');
+  const [tpmStr, setTPMStr] = useState<string>(initial?.tpm != null ? String(initial.tpm) : '');
 
   const { data: providers = [] } = useQuery({
     queryKey: ['admin', 'providers'],
@@ -397,6 +411,8 @@ function RouteFormModal({
       ...draft,
       contextWindow: parseNullableInt(contextWindowStr),
       maxOutputTokens: parseNullableInt(maxOutputTokensStr),
+      rpm: parseNullableInt(rpmStr),
+      tpm: parseNullableInt(tpmStr),
     };
     onSubmit(finalDraft);
   };
@@ -481,22 +497,28 @@ function RouteFormModal({
           </Field>
         </FormSection>
 
-        <FormSection title="容量覆盖" cols={2} description="留空表示继承模型默认值">
-          <Field label="上下文窗口（token）" hint="留空继承模型默认">
+        <FormSection title="Provider+模型覆盖" cols={2} description="留空表示继承 Provider 默认值；用于某个模型在某个供应商下的上下文、输出和 RPM/TPM 覆盖。">
+          <Field label="上下文窗口（token）" hint="留空继承 Provider 默认">
             <NumberField
               value={contextWindowStr}
               onChange={setContextWindowStr}
-              placeholder="留空继承模型默认"
+              placeholder="留空继承 Provider 默认"
               min={1}
             />
           </Field>
-          <Field label="最大输出 Token" hint="留空继承模型默认">
+          <Field label="最大输出 Token" hint="留空继承 Provider 默认">
             <NumberField
               value={maxOutputTokensStr}
               onChange={setMaxOutputTokensStr}
-              placeholder="留空继承模型默认"
+              placeholder="留空继承 Provider 默认"
               min={1}
             />
+          </Field>
+          <Field label="RPM" hint="留空继承 Provider/账号设置">
+            <NumberField value={rpmStr} onChange={setRPMStr} placeholder="例如 500" min={1} />
+          </Field>
+          <Field label="TPM" hint="留空继承 Provider/账号设置">
+            <NumberField value={tpmStr} onChange={setTPMStr} placeholder="例如 1000000" min={1} />
           </Field>
         </FormSection>
       </div>

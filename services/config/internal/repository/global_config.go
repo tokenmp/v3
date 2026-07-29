@@ -18,6 +18,7 @@ const (
 	GlobalKeyDefaultRetry   GlobalConfigKey = "default_retry"
 	GlobalKeyDefaultTimeout GlobalConfigKey = "default_timeout"
 	GlobalKeyAutoModelIDs   GlobalConfigKey = "auto_model_ids"
+	GlobalKeyRoutingPolicy  GlobalConfigKey = "routing_policy"
 )
 
 // GlobalConfig maps a row in the global_config KV table.
@@ -30,13 +31,14 @@ type GlobalConfig struct {
 
 func (GlobalConfig) TableName() string { return "global_config" }
 
-// GlobalPolicy is the aggregate view of all three global_config rows,
+// GlobalPolicy is the aggregate view of well-known global_config rows,
 // decoded as raw JSON bytes (the caller unmarshals into its own types).
 // A missing row yields nil bytes (the caller applies defaults).
 type GlobalPolicy struct {
 	DefaultRetry   json.RawMessage `json:"default_retry,omitempty"`
 	DefaultTimeout json.RawMessage `json:"default_timeout,omitempty"`
 	AutoModelIDs   json.RawMessage `json:"auto_model_ids,omitempty"`
+	RoutingPolicy  json.RawMessage `json:"routing_policy,omitempty"`
 }
 
 // ErrGlobalConfigNotFound is returned by GetGlobalConfigEntry when no row
@@ -56,12 +58,12 @@ func (r *GormRepository) GetGlobalConfigEntry(ctx context.Context, key string) (
 	return row, nil
 }
 
-// GetGlobalPolicy reads all three well-known global_config rows and returns
+// GetGlobalPolicy reads all well-known global_config rows and returns
 // their raw JSON values. Missing rows yield nil (caller applies defaults).
 func (r *GormRepository) GetGlobalPolicy(ctx context.Context) (GlobalPolicy, error) {
 	var rows []GlobalConfig
 	if err := r.db.WithContext(ctx).Where("key IN ?", []string{
-		string(GlobalKeyDefaultRetry), string(GlobalKeyDefaultTimeout), string(GlobalKeyAutoModelIDs),
+		string(GlobalKeyDefaultRetry), string(GlobalKeyDefaultTimeout), string(GlobalKeyAutoModelIDs), string(GlobalKeyRoutingPolicy),
 	}).Find(&rows).Error; err != nil {
 		return GlobalPolicy{}, classifyReadErr(err)
 	}
@@ -74,6 +76,8 @@ func (r *GormRepository) GetGlobalPolicy(ctx context.Context) (GlobalPolicy, err
 			p.DefaultTimeout = json.RawMessage(row.Value)
 		case GlobalKeyAutoModelIDs:
 			p.AutoModelIDs = json.RawMessage(row.Value)
+		case GlobalKeyRoutingPolicy:
+			p.RoutingPolicy = json.RawMessage(row.Value)
 		}
 	}
 	return p, nil

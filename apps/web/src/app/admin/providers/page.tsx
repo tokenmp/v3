@@ -12,6 +12,7 @@ import {
   Field,
   FormActions,
   FormSection,
+  NumberField,
   SelectField,
   SwitchField,
   TabField,
@@ -66,6 +67,10 @@ type ProviderDraft = {
   displayLabel: string;
   baseURL: string;
   sdkKind: AdminProvider['sdkKind'];
+  contextWindow: string;
+  maxOutputTokens: string;
+  rpm: string;
+  tpm: string;
   status: AdminProvider['status'];
 };
 
@@ -76,8 +81,19 @@ function emptyDraft(): ProviderDraft {
     displayLabel: '',
     baseURL: '',
     sdkKind: 'openai',
+    contextWindow: '',
+    maxOutputTokens: '',
+    rpm: '',
+    tpm: '',
     status: 'active',
   };
+}
+
+function numOrNull(v: string): number | null {
+  const trimmed = v.trim();
+  if (!trimmed) return null;
+  const n = Number(trimmed);
+  return Number.isFinite(n) ? n : null;
 }
 
 export default function AdminProvidersPage() {
@@ -175,6 +191,7 @@ export default function AdminProvidersPage() {
                 <TableHead>显示名</TableHead>
                 <TableHead>Base URL</TableHead>
                 <TableHead>SDK</TableHead>
+                <TableHead className="text-right">TPM</TableHead>
                 <TableHead>状态</TableHead>
                 <TableHead className="text-right">操作</TableHead>
               </TableRow>
@@ -182,13 +199,13 @@ export default function AdminProvidersPage() {
             <TableBody>
               {isLoading ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
+                  <TableCell colSpan={7} className="py-8 text-center text-muted-foreground">
                     加载中…
                   </TableCell>
                 </TableRow>
               ) : filtered.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
+                  <TableCell colSpan={7} className="py-8 text-center text-muted-foreground">
                     暂无 Provider
                   </TableCell>
                 </TableRow>
@@ -204,6 +221,7 @@ export default function AdminProvidersPage() {
                       {p.baseURL}
                     </TableCell>
                     <TableCell className="text-xs">{p.sdkKind}</TableCell>
+                    <TableCell className="text-right font-mono text-xs">{p.tpm != null ? p.tpm.toLocaleString() : '∞'}</TableCell>
                     <TableCell>
                       <StatusBadge status={p.status} />
                     </TableCell>
@@ -337,6 +355,10 @@ function ProviderFormModal({
           displayLabel: item.displayLabel,
           baseURL: item.baseURL,
           sdkKind: item.sdkKind,
+          contextWindow: item.contextWindow != null ? String(item.contextWindow) : '',
+          maxOutputTokens: item.maxOutputTokens != null ? String(item.maxOutputTokens) : '',
+          rpm: item.rpm != null ? String(item.rpm) : '',
+          tpm: item.tpm != null ? String(item.tpm) : '',
           status: item.status,
         }
       : emptyDraft(),
@@ -352,6 +374,10 @@ function ProviderFormModal({
         baseURL: input.baseURL,
         sdkKind: input.sdkKind,
         protocol: protocolForSdk(input.sdkKind),
+        contextWindow: numOrNull(input.contextWindow),
+        maxOutputTokens: numOrNull(input.maxOutputTokens),
+        rpm: numOrNull(input.rpm),
+        tpm: numOrNull(input.tpm),
         displayLabel: input.displayLabel || undefined,
         selector: input.id,
         status: input.status,
@@ -374,6 +400,10 @@ function ProviderFormModal({
         baseURL: input.baseURL,
         sdkKind: input.sdkKind,
         protocol: protocolForSdk(input.sdkKind),
+        contextWindow: numOrNull(input.contextWindow),
+        maxOutputTokens: numOrNull(input.maxOutputTokens),
+        rpm: numOrNull(input.rpm),
+        tpm: numOrNull(input.tpm),
         status: input.status,
       }),
     onSuccess: () => {
@@ -456,6 +486,21 @@ function ProviderFormModal({
               onChange={(v) => patch({ sdkKind: v as AdminProvider['sdkKind'] })}
               options={SDK_TAB_OPTIONS}
             />
+          </Field>
+        </FormSection>
+
+        <FormSection title="Provider 默认容量" cols={2} description="供应商级默认值；具体 provider+model 路由和账号可覆盖。留空表示不设置/不限。">
+          <Field label="上下文窗口（token）" hint="路由未覆盖时继承">
+            <NumberField value={draft.contextWindow} onChange={(v) => patch({ contextWindow: v })} min={1} placeholder="例如 128000" />
+          </Field>
+          <Field label="最大输出 Token" hint="路由未覆盖时继承">
+            <NumberField value={draft.maxOutputTokens} onChange={(v) => patch({ maxOutputTokens: v })} min={1} placeholder="例如 8192" />
+          </Field>
+          <Field label="RPM" hint="requests/min，留空=不限">
+            <NumberField value={draft.rpm} onChange={(v) => patch({ rpm: v })} min={1} placeholder="例如 1000" />
+          </Field>
+          <Field label="TPM" hint="tokens/min，留空=不限">
+            <NumberField value={draft.tpm} onChange={(v) => patch({ tpm: v })} min={1} placeholder="例如 1000000" />
           </Field>
         </FormSection>
 

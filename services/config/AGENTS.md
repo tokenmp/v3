@@ -6,7 +6,7 @@
 
 Config Service 是 TokenMP V3 分层架构的**控制平面**配置服务：
 
-- 管理 Config DB（`infra/db/migrations/config/`）中的 provider/model/route/credential/adapter 配置。Provider 是协议中立的供应商/账号池维度；protocol 由 route/adapter/endpoint 表达，legacy `providers.sdk_kind`/`providers.protocol` 仅用于兼容旧行和默认值。
+- 管理 Config DB（`infra/db/migrations/config/`）中的 provider/model/route/credential/adapter 配置。Provider 是协议中立的供应商/账号池维度；protocol 由 route/adapter/endpoint 表达，legacy `providers.sdk_kind`/`providers.protocol` 仅用于兼容旧行和默认值。`providers` 可配置供应商默认 context/max output/RPM/TPM，`route_mappings` 用于 provider+model 覆盖，`upstream_credentials` 与 `route_credentials` 用于账号级/路由账号绑定级覆盖；当前为配置与后台管理入口，执行侧 softmax/限流 enforcement 分后续批次接入。
 - 发布版本化的配置快照（`config_revisions` draft/published/archived + `config_revision_snapshots.snapshot_json`）。
 - 通过 HTTP `GET /v1/config/snapshots/latest` 把最新 published 的 raw `ConfigSnapshot` JSON 下发给 executor。
 
