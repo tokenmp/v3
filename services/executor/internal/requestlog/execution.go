@@ -78,6 +78,10 @@ type ExecutionEvent struct {
 	// UpstreamMessage is the sanitized upstream error message retained for
 	// admin diagnostics. Never returned to clients.
 	UpstreamMessage string
+	// UpstreamResponseBody is the sanitized raw upstream error response body
+	// retained for admin diagnostics/reproduction. Bounded by 4 KiB, control
+	// characters replaced with spaces. Never returned to clients.
+	UpstreamResponseBody string
 	// RetryStop is the retry State stop reason for Kind=attempt failure
 	// events (e.g. "no_match", "retry_none", "max_total_attempts").
 	RetryStop string

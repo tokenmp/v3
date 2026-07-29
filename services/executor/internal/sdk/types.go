@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 	"unicode"
@@ -286,6 +287,7 @@ type ClassifiedError struct {
 	retryAfter    time.Duration
 	hasRetryAfter bool
 	upstreamMsg   string
+	upstreamBody  string
 }
 
 // NewClassifiedError returns a classified error. Unknown kinds are reduced to
@@ -441,6 +443,36 @@ func (e *ClassifiedError) UpstreamMessage() string {
 	return e.upstreamMsg
 }
 
+// maxUpstreamBodyBytes bounds the length of a retained upstream error
+// response body. It is large enough to capture typical provider error
+// envelopes (including nested error codes, request IDs, and messages) while
+// preventing unbounded flooding. The raw body is stored for admin
+// diagnostics/reproduction only and never reaches a client response.
+const maxUpstreamBodyBytes = 4096
+
+// WithUpstreamBody attaches a bounded, sanitized copy of the raw upstream
+// error response body to the classified error for admin diagnostics. The
+// body is never returned by Error() and never reaches a client response; it
+// is surfaced solely through execution logs. Sanitization: valid UTF-8,
+// control characters replaced with spaces, byte length bounded by
+// [maxUpstreamBodyBytes].
+func (e *ClassifiedError) WithUpstreamBody(body string) *ClassifiedError {
+	if e == nil {
+		return e
+	}
+	e.upstreamBody = sanitizeUpstreamBody(body)
+	return e
+}
+
+// UpstreamBody returns the sanitized raw upstream error response body
+// retained for admin diagnostics, or empty if none was set.
+func (e *ClassifiedError) UpstreamBody() string {
+	if e == nil {
+		return ""
+	}
+	return e.upstreamBody
+}
+
 // sanitizeUpstreamMessage bounds and sanitizes an upstream-supplied error
 // message for admin-only logging. It permits printable ASCII and printable
 // Unicode (including spaces and common punctuation) while rejecting control
@@ -462,6 +494,33 @@ func sanitizeUpstreamMessage(v string) string {
 		}
 	}
 	return v
+}
+
+// sanitizeUpstreamBody bounds and sanitizes a raw upstream error response
+// body for admin-only logging. Unlike sanitizeUpstreamMessage (which rejects
+// control chars entirely), it replaces control characters with spaces so that
+// JSON structure is preserved for reproduction while still preventing control
+// character injection. Valid UTF-8 is required; invalid input is rejected.
+func sanitizeUpstreamBody(v string) string {
+	if len(v) == 0 || !utf8.ValidString(v) {
+		return ""
+	}
+	if len(v) > maxUpstreamBodyBytes {
+		v = v[:maxUpstreamBodyBytes]
+		for len(v) > 0 && !utf8.ValidString(v) {
+			v = v[:len(v)-1]
+		}
+	}
+	var b strings.Builder
+	b.Grow(len(v))
+	for _, r := range v {
+		if unicode.IsControl(r) {
+			b.WriteByte(' ')
+		} else {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 // NewClassifiedErrorWithRetryAfter returns a classified error with an optional

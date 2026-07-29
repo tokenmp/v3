@@ -161,7 +161,7 @@ func extractOpenAIChatUsage(raw json.RawMessage) (sdk.Usage, bool) {
 func classifyError(err error, response *http.Response) *sdk.ClassifiedError {
 	var apiErr *openai.Error
 	status, requestID, code, typ := 0, "", "", ""
-	var upstreamMsg string
+	var upstreamMsg, upstreamBody string
 	if response != nil {
 		status = response.StatusCode
 		requestID = response.Header.Get("x-request-id")
@@ -169,11 +169,11 @@ func classifyError(err error, response *http.Response) *sdk.ClassifiedError {
 	if errors.As(err, &apiErr) {
 		status, code, typ = apiErr.StatusCode, apiErr.Code, apiErr.Type
 		upstreamMsg = apiErr.Message
+		upstreamBody = apiErr.RawJSON()
 		if apiErr.Response != nil {
 			requestID = apiErr.Response.Header.Get("x-request-id")
 		}
 	}
-
 	if status >= 200 && status < 300 {
 		// An HTTP success that the SDK cannot decode is a provider protocol
 		// violation, never a successful completion or a transport failure.
@@ -186,10 +186,14 @@ func classifyError(err error, response *http.Response) *sdk.ClassifiedError {
 	// Parse Retry-After only for retryable statuses (429, 5xx).
 	if isRetryableHTTPStatus(status) && response != nil {
 		if ra, ok := sdk.ParseRetryAfter(response.Header); ok {
-			return sdk.NewClassifiedErrorWithRetryAfter(kind, status, requestID, code, typ, ra, true).WithUpstreamMessage(upstreamMsg)
+			return sdk.NewClassifiedErrorWithRetryAfter(kind, status, requestID, code, typ, ra, true).
+				WithUpstreamMessage(upstreamMsg).
+				WithUpstreamBody(upstreamBody)
 		}
 	}
-	return sdk.NewClassifiedError(kind, status, requestID, code, typ).WithUpstreamMessage(upstreamMsg)
+	return sdk.NewClassifiedError(kind, status, requestID, code, typ).
+		WithUpstreamMessage(upstreamMsg).
+		WithUpstreamBody(upstreamBody)
 }
 
 // isRetryableHTTPStatus reports whether the HTTP status is retryable and

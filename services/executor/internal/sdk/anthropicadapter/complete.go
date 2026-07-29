@@ -170,7 +170,7 @@ func extractAnthropicMessagesUsage(raw json.RawMessage) (sdk.Usage, bool) {
 func classifyError(err error, response *http.Response) *sdk.ClassifiedError {
 	var apiErr *anthropic.Error
 	status, requestID, code, typ := 0, "", "", ""
-	var upstreamMsg string
+	var upstreamMsg, upstreamBody string
 	if response != nil {
 		status = response.StatusCode
 		requestID = response.Header.Get("request-id")
@@ -181,11 +181,11 @@ func classifyError(err error, response *http.Response) *sdk.ClassifiedError {
 			requestID = apiErr.RequestID
 		}
 		// Extract the human-readable message from the Anthropic error envelope
-		// {"error":{"type":"...","message":"..."}}. The raw JSON is never
-		// retained verbatim; only the sanitized message is kept for admin logs.
-		upstreamMsg = extractAnthropicMessage(apiErr.RawJSON())
-		// Anthropic errors carry no "code" field; the error type is the only
-		// sanitized classifier. RawJSON is never retained or echoed.
+		// {"error":{"type":"...","message":"..."}}. The raw JSON is
+		// captured separately as upstreamBody for admin reproduction.
+		rawJSON := apiErr.RawJSON()
+		upstreamMsg = extractAnthropicMessage(rawJSON)
+		upstreamBody = rawJSON
 	}
 
 	if status >= 200 && status < 300 {
@@ -200,10 +200,14 @@ func classifyError(err error, response *http.Response) *sdk.ClassifiedError {
 	// Parse Retry-After only for retryable statuses (429, 5xx, including 529).
 	if isRetryableHTTPStatus(status) && response != nil {
 		if ra, ok := sdk.ParseRetryAfter(response.Header); ok {
-			return sdk.NewClassifiedErrorWithRetryAfter(kind, status, requestID, code, typ, ra, true).WithUpstreamMessage(upstreamMsg)
+			return sdk.NewClassifiedErrorWithRetryAfter(kind, status, requestID, code, typ, ra, true).
+				WithUpstreamMessage(upstreamMsg).
+				WithUpstreamBody(upstreamBody)
 		}
 	}
-	return sdk.NewClassifiedError(kind, status, requestID, code, typ).WithUpstreamMessage(upstreamMsg)
+	return sdk.NewClassifiedError(kind, status, requestID, code, typ).
+		WithUpstreamMessage(upstreamMsg).
+		WithUpstreamBody(upstreamBody)
 }
 
 // isRetryableHTTPStatus reports whether the HTTP status is retryable and

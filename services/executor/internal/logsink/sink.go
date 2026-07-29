@@ -344,17 +344,17 @@ func buildBatch(e requestlog.ExecutionEvent) (batch, bool) {
 	// Attempt row for KindAttempt.
 	if e.Kind == requestlog.KindAttempt {
 		b.Attempts = []attempt{{
-			RequestID:     e.RequestID,
-			AttemptIndex:  e.Attempt,
-			RouteID:       e.Candidate.RouteID,
-			ProviderID:    e.Candidate.ProviderID,
-			CredentialID:  e.Candidate.CredentialID,
-			UpstreamModel: e.Candidate.ModelID,
-			Status:        mapAttemptStatus(e),
-			HTTPStatus:    e.HTTPStatus,
-			LatencyMS:     int(e.Latency / time.Millisecond),
-			ErrorCode:     e.Code,
-			ErrorType:     e.Type,
+			RequestID:          e.RequestID,
+			AttemptIndex:       e.Attempt,
+			RouteID:            e.Candidate.RouteID,
+			ProviderID:         e.Candidate.ProviderID,
+			CredentialID:       e.Candidate.CredentialID,
+			UpstreamModel:      e.Candidate.ModelID,
+			Status:             mapAttemptStatus(e),
+			HTTPStatus:         e.HTTPStatus,
+			LatencyMS:          int(e.Latency / time.Millisecond),
+			ErrorCode:          e.Code,
+			ErrorType:          e.Type,
 			UpstreamHTTPStatus: e.UpstreamStatus,
 			RetryClassified:    mapRetryClassified(e.RetryStop),
 			Metadata:           buildAttemptMetadata(e),
@@ -411,7 +411,7 @@ func buildEventMetadata(e requestlog.ExecutionEvent) json.RawMessage {
 	if e.Kind != requestlog.KindAttempt {
 		return nil
 	}
-	if e.UpstreamRequestID == "" && e.UpstreamMessage == "" {
+	if e.UpstreamRequestID == "" && e.UpstreamMessage == "" && e.UpstreamResponseBody == "" {
 		return nil
 	}
 	m := map[string]string{}
@@ -420,6 +420,9 @@ func buildEventMetadata(e requestlog.ExecutionEvent) json.RawMessage {
 	}
 	if e.UpstreamMessage != "" {
 		m["upstream_message"] = e.UpstreamMessage
+	}
+	if e.UpstreamResponseBody != "" {
+		m["upstream_response_body"] = e.UpstreamResponseBody
 	}
 	b, err := json.Marshal(m)
 	if err != nil {
@@ -457,6 +460,9 @@ func buildAttemptMetadata(e requestlog.ExecutionEvent) json.RawMessage {
 	}
 	if e.UpstreamMessage != "" {
 		m["upstream_message"] = e.UpstreamMessage
+	}
+	if e.UpstreamResponseBody != "" {
+		m["upstream_response_body"] = e.UpstreamResponseBody
 	}
 	if e.RetryStop != "" {
 		m["retry_stop"] = e.RetryStop
