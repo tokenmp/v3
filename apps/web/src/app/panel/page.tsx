@@ -1,6 +1,5 @@
 'use client';
 
-import type { ComponentType } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { userApi } from '@/lib/api/user';
@@ -16,10 +15,8 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import {
-  CircleDollarSign,
   Gauge,
   KeyRound,
-  Zap,
 } from 'lucide-react';
 import type { RequestLog, UserPlan } from '@/types';
 import {
@@ -109,50 +106,6 @@ function ProgressBar({ value }: { value: number }) {
   );
 }
 
-function QuotaSummaryCard({
-  title,
-  icon: Icon,
-  remaining,
-  used,
-  total,
-  unit,
-  hint,
-}: {
-  title: string;
-  icon: ComponentType<{ className?: string }>;
-  remaining: string | number;
-  used: number;
-  total: string | number;
-  unit: string;
-  hint: string;
-}) {
-  const percent = pct(used, total);
-  return (
-    <Card>
-      <CardHeader className="flex flex-row items-center gap-3 pb-2">
-        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
-          <Icon className="h-4 w-4" />
-        </div>
-        <CardTitle className="text-base">{title}</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3 text-sm">
-        <div>
-          <div className="text-2xl font-semibold tabular-nums">{formatInt(remaining)}</div>
-          <div className="text-xs text-muted-foreground">剩余 {unit}</div>
-        </div>
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between text-xs">
-            <span>已用 {formatInt(used)} / {formatInt(total)} {unit}</span>
-            <span className="text-muted-foreground">{percent.toFixed(percent < 1 && percent > 0 ? 2 : 0)}%</span>
-          </div>
-          <ProgressBar value={percent} />
-        </div>
-        <p className="text-xs text-muted-foreground">{hint}</p>
-      </CardContent>
-    </Card>
-  );
-}
-
 function PlanCard({ plan }: { plan: UserPlan }) {
   const used = usedOf(plan.totalQuota, plan.remainingQuota);
   const percent = pct(used, plan.totalQuota);
@@ -229,11 +182,6 @@ function requestSpeed(r: RequestLog) {
 }
 
 export default function OverviewPage() {
-  const { data: balance } = useQuery({
-    queryKey: ['balance'],
-    queryFn: () => userApi.getBalance(),
-  });
-
   const { data: userPlans } = useQuery({
     queryKey: ['userPlans'],
     queryFn: userApi.getUserPlans,
@@ -245,46 +193,16 @@ export default function OverviewPage() {
   });
 
   const activePlans = (userPlans ?? []).filter((p) => p.status === 'active');
-  const codingPlans = activePlans.filter((p) => p.planType === 'coding');
-  const tokenPlans = activePlans.filter((p) => p.planType === 'token');
-  const codingTotal = codingPlans.reduce((sum, p) => sum + toNumber(p.totalQuota), 0);
-  const tokenTotal = tokenPlans.reduce((sum, p) => sum + toNumber(p.totalQuota), 0);
-  const codingRemaining = toNumber(balance?.codingRemaining ?? codingPlans[0]?.remainingQuota ?? 0);
-  const tokenRemaining = toNumber(balance?.tokenRemaining ?? tokenPlans[0]?.remainingQuota ?? 0);
-  const codingUsed = Math.max(0, codingTotal - codingRemaining);
-  const tokenUsed = Math.max(0, tokenTotal - tokenRemaining);
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-lg font-semibold">概览</h1>
-          <p className="text-sm text-muted-foreground">查看当前套餐、额度余额和最近调用情况。</p>
+          <p className="text-sm text-muted-foreground">查看当前套餐和最近调用情况。</p>
         </div>
         <Link href="/panel/settings" className={buttonVariants({ variant: 'outline', size: 'sm' })}>
           <KeyRound className="mr-2 h-4 w-4" />计费设置
         </Link>
-      </div>
-
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <QuotaSummaryCard
-          title="编程请求额度"
-          icon={Zap}
-          remaining={codingRemaining}
-          used={codingUsed}
-          total={codingTotal}
-          unit="次"
-          hint="成功模型请求按 1 次扣除 · 本月周期"
-        />
-
-        <QuotaSummaryCard
-          title="Token 余额"
-          icon={CircleDollarSign}
-          remaining={tokenRemaining}
-          used={tokenUsed}
-          total={tokenTotal}
-          unit="tokens"
-          hint="Token 套餐按余额叠加 · 长期额度"
-        />
       </div>
 
       <div className="space-y-3">
