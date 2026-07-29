@@ -138,10 +138,21 @@ func (s *RemoteSink) RecordExecution(ctx context.Context, event requestlog.Execu
 	if !ok {
 		return nil
 	}
-	if err := s.post(b); err != nil {
-		s.logger.Warn("logsink post failed", "request_id", event.RequestID, "error", err)
+	// First-token logging must never delay SSE delivery. The event has already
+	// been recorded locally in deterministic order; only its remote HTTP post
+	// is detached. All other lifecycle events keep synchronous delivery.
+	if event.Kind == requestlog.KindStarted {
+		go s.postBestEffort(event.RequestID, b)
+		return nil
 	}
+	s.postBestEffort(event.RequestID, b)
 	return nil
+}
+
+func (s *RemoteSink) postBestEffort(requestID string, b batch) {
+	if err := s.post(b); err != nil {
+		s.logger.Warn("logsink post failed", "request_id", requestID, "error", err)
+	}
 }
 
 // QueryEvents delegates to the inner store for local queries.
@@ -283,7 +294,7 @@ func buildBatch(e requestlog.ExecutionEvent) (batch, bool) {
 		CredentialID:  e.Candidate.CredentialID,
 		Protocol:      e.Protocol,
 		ReservationID: e.ReservationID,
-		Stream:       e.Stream,
+		Stream:        e.Stream,
 		CreatedAt:     e.Timestamp,
 	}
 
@@ -298,7 +309,7 @@ func buildBatch(e requestlog.ExecutionEvent) (batch, bool) {
 	// FailureCategory (set by the Runner from SDK classification) maps
 	// directly to these enum values for failure events.
 	switch e.Kind {
-	case requestlog.KindReserved:
+	case requestlog.KindReserved, requestlog.KindStarted:
 		log.FinalStatus = "processing"
 	case requestlog.KindFinalized:
 		log.FinalStatus = "success"
@@ -502,12 +513,15 @@ func mapAttemptStatus(e requestlog.ExecutionEvent) string {
 }
 
 // mapEventStage maps an executor event Kind to the Logging DB
-// request_log_events stage enum. KindAttempt fires after the upstream
-// call/stream completes, so it maps to upstream_finished (not started).
+// request_log_events stage enum. KindStarted fires immediately after the
+// first streaming token is committed; KindAttempt fires when the upstream
+// call/stream completes.
 func mapEventStage(kind string) string {
 	switch kind {
 	case requestlog.KindReserved:
 		return "quota_reserved"
+	case requestlog.KindStarted:
+		return "upstream_started"
 	case requestlog.KindAttempt:
 		return "upstream_finished"
 	case requestlog.KindFinalized:

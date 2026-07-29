@@ -19,7 +19,7 @@ Logging Service 是 TokenMP V3 分层架构的**业务平面**日志服务：
 - `internal/repository`：
   - 结构体 `RequestLog`/`Attempt`/`Event` 对齐 `request_logs`/`request_attempts`/`request_log_events` 表字段，**无明文 body 字段**。
   - 端口 `Writer`（InsertRequestLog/InsertAttempt/InsertEvent）+ `Reader`（GetRequestLog/ListAttempts/ListEvents + ListRequestLogs/GetStats）+ `BatchIngestor`（IngestBatch 单事务批量插入，任一失败回滚）。
-  - `GormRepository` 实现。`IngestBatch` 对同一 `request_id` 使用 transaction advisory lock，UPDATE 已有摘要、无记录时 INSERT；因此 Edge `received`、executor `quota_reserved/upstream_finished/terminal/completed` 可逐阶段 upsert 同一行。`final_status=processing` 表示未终态，最终事件更新为 success/error 类别；`stream` 以 OR 语义只从 false 升为 true。`created_at` 零值时默认 `now()` 以路由到正确日分区；CHECK 约束的可空列（usage_status/retry_classified）用 `NULLIF` 映射。跨分区查询 by `request_id`。
+  - `GormRepository` 实现。`IngestBatch` 对同一 `request_id` 使用 transaction advisory lock，UPDATE 已有摘要、无记录时 INSERT；因此 Edge `received`、executor `quota_reserved/upstream_started(首 token + TTFT)/upstream_finished/terminal/completed` 可逐阶段 upsert 同一行。`final_status=processing` 表示未终态，最终事件更新为 success/error 类别；迟到的异步 processing 事件不得覆盖已有终态，但仍可补 TTFT/stream；`stream` 以 OR 语义只从 false 升为 true。`created_at` 零值时默认 `now()` 以路由到正确日分区；CHECK 约束的可空列（usage_status/retry_classified）用 `NULLIF` 映射。跨分区查询 by `request_id`。
   - sentinel：`ErrNotFound`/`ErrQueryFailed`/`ErrInsertFailed`，不泄漏 DSN/SQL。
 - `internal/server`：HTTP（chi）。
   - `GET /healthz`（liveness）、`GET /readyz`（DB ping）。

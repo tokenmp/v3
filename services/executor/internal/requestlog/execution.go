@@ -9,6 +9,7 @@ import (
 const (
 	KindAttempt   = "attempt"
 	KindReserved  = "reserved"
+	KindStarted   = "started"
 	KindFinalized = "finalized"
 	KindReleased  = "released"
 	KindCommitted = "committed"

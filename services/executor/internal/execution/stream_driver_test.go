@@ -290,18 +290,21 @@ func TestStreamDriverPostCommitConfirmedUsageFinalizesAndLogsFailure(t *testing.
 		t.Fatalf("quota calls = %+v", calls)
 	}
 	events := log.Events(context.Background())
-	// Lifecycle: reserved + attempt(failed,committed) + finalized
-	if len(events) != 3 {
-		t.Fatalf("log events = %d, want 3", len(events))
+	// Lifecycle: reserved + started(first token) + attempt(failed,committed) + finalized.
+	if len(events) != 4 {
+		t.Fatalf("log events = %d, want 4", len(events))
 	}
 	if events[0].Kind != requestlog.KindReserved {
 		t.Fatalf("events[0].Kind = %q, want reserved", events[0].Kind)
 	}
-	if events[1].Kind != requestlog.KindAttempt || events[1].Status != "failed" || events[1].Code != "stream_error" || events[1].Type != "protocol" || !events[1].Committed {
-		t.Fatalf("events[1] = %+v, want failed committed attempt", events[1])
+	if events[1].Kind != requestlog.KindStarted || !events[1].Committed || !events[1].Stream {
+		t.Fatalf("events[1] = %+v, want committed stream start", events[1])
 	}
-	if events[2].Kind != requestlog.KindFinalized {
-		t.Fatalf("events[2].Kind = %q, want finalized", events[2].Kind)
+	if events[2].Kind != requestlog.KindAttempt || events[2].Status != "failed" || events[2].Code != "stream_error" || events[2].Type != "protocol" || !events[2].Committed {
+		t.Fatalf("events[2] = %+v, want failed committed attempt", events[2])
+	}
+	if events[3].Kind != requestlog.KindFinalized {
+		t.Fatalf("events[3].Kind = %q, want finalized", events[3].Kind)
 	}
 }
 
