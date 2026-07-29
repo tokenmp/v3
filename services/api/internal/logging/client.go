@@ -261,7 +261,7 @@ func (c *Client) get(ctx context.Context, path string, dst any) error {
 
 // ingestRequest is the POST /v1/logs/ingest body shape.
 type ingestRequest struct {
-	Log    IngestLog    `json:"log"`
+	Log    IngestLog     `json:"log"`
 	Events []IngestEvent `json:"events,omitempty"`
 }
 
