@@ -430,7 +430,7 @@ func TestBuildBatchStartedCreatesTTFTTimelineUpdate(t *testing.T) {
 	if len(b.Attempts) != 0 {
 		t.Fatalf("attempts = %d, want 0", len(b.Attempts))
 	}
-	if len(b.Events) != 1 || b.Events[0].Stage != "upstream_started" || b.Events[0].CreatedAt != at {
+	if len(b.Events) != 1 || b.Events[0].Stage != "upstream_started" || b.Events[0].DurationMS != 1250 || b.Events[0].CreatedAt != at {
 		t.Fatalf("events = %+v", b.Events)
 	}
 }
