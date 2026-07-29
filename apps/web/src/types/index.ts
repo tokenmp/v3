@@ -118,7 +118,7 @@ export interface UserBalance {
   tokenRemaining: string;
 }
 
-export type RequestLogStatus = 'success' | 'error' | 'processing';
+export type RequestLogStatus = 'success' | 'error' | 'processing' | 'cancelled';
 
 export interface RequestLog {
   requestId: string;

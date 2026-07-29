@@ -24,6 +24,7 @@ import {
 function statusBadge(status: string) {
   if (status === 'success') return { label: '成功', cls: 'bg-green-100 text-green-700' };
   if (status === 'processing') return { label: '处理中', cls: 'bg-blue-100 text-blue-700 animate-pulse' };
+  if (status === 'cancelled') return { label: '已取消', cls: 'bg-amber-100 text-amber-700' };
   return { label: '失败', cls: 'bg-red-100 text-red-700' };
 }
 
@@ -47,52 +48,18 @@ function formatUser(log: AdminRequestLog) {
   return '—';
 }
 
-/** Combined "请求类型" cell: protocol + stream badge */
-function RequestTypeCell({ log }: { log: AdminRequestLog }) {
-  return (
-    <span className="inline-flex items-center gap-1.5">
-      <span>{protocolLabel(log.protocol)}</span>
-      {log.stream != null && (
-        <span className={`rounded px-1 py-px text-[10px] font-medium ${log.stream ? 'bg-blue-100 text-blue-700' : 'bg-muted text-muted-foreground'}`}>
-          {streamLabel(log.stream)}
-        </span>
-      )}
-    </span>
-  );
+function shortRequestId(id: string | null | undefined): string {
+  if (!id) return '—';
+  return id.length > 10 ? `…${id.slice(-10)}` : id;
 }
 
-/** Combined "Token" cell: in / out (cache) */
-function TokenCell({ log }: { log: AdminRequestLog }) {
-  const cache = log.cacheTokens != null && log.cacheTokens > 0
-    ? <span className="text-muted-foreground">({formatTokens(log.cacheTokens)}缓存)</span>
-    : null;
-  return (
-    <span className="inline-flex items-center gap-1 tabular-nums">
-      {formatTokens(log.inputTokens)} / {formatTokens(log.outputTokens)}
-      {cache}
-    </span>
-  );
-}
-
-/** Combined "性能" cell: duration + TTFT + speed */
-function PerfCell({ log }: { log: AdminRequestLog }) {
-  const speed = calcTokensPerSecond({
+function speedFor(log: AdminRequestLog): number | null {
+  return calcTokensPerSecond({
     outputTokens: log.outputTokens,
     durationMs: log.durationMs,
     ttftMs: log.ttftMs,
     stream: log.stream,
   });
-  return (
-    <span className="inline-flex flex-col gap-0.5 text-xs">
-      <span>{formatDuration(log.durationMs)}</span>
-      {log.ttftMs != null && log.ttftMs > 0 && log.stream === true && (
-        <span className="text-muted-foreground">TTFT {formatDuration(log.ttftMs)}</span>
-      )}
-      {speed != null && (
-        <span className="text-muted-foreground">{formatTokensPerSecond(speed)}</span>
-      )}
-    </span>
-  );
 }
 
 export default function AdminRequestLogsPage() {
@@ -144,6 +111,7 @@ export default function AdminRequestLogsPage() {
           <FilterChip label="全部" active={!statusF} onClick={() => setStatusF(undefined)} />
           <FilterChip label="成功" active={statusF === 'success'} onClick={() => setStatusF('success')} />
           <FilterChip label="失败" active={statusF === 'error'} onClick={() => setStatusF('error')} />
+          <FilterChip label="已取消" active={statusF === 'cancelled'} onClick={() => setStatusF('cancelled')} />
           <FilterChip label="处理中" active={statusF === 'processing'} onClick={() => setStatusF('processing')} />
         </div>
       </div>
@@ -154,80 +122,101 @@ export default function AdminRequestLogsPage() {
           <Table>
             <TableHeader>
               <TableRow className="bg-muted/30">
-                <TableHead className="text-xs whitespace-nowrap">时间</TableHead>
+                <TableHead className="text-xs whitespace-nowrap">请求ID</TableHead>
                 <TableHead className="text-xs whitespace-nowrap">用户</TableHead>
                 <TableHead className="text-xs whitespace-nowrap">模型</TableHead>
-                <TableHead className="text-xs whitespace-nowrap">请求类型</TableHead>
-                <TableHead className="text-xs whitespace-nowrap">状态</TableHead>
+                <TableHead className="text-xs whitespace-nowrap">协议</TableHead>
                 <TableHead className="text-xs whitespace-nowrap">Provider</TableHead>
+                <TableHead className="text-xs whitespace-nowrap">状态</TableHead>
+                <TableHead className="text-xs whitespace-nowrap text-right">输入</TableHead>
+                <TableHead className="text-xs whitespace-nowrap text-right">输出</TableHead>
+                <TableHead className="text-xs whitespace-nowrap text-right">缓存</TableHead>
+                <TableHead className="text-xs whitespace-nowrap text-right">TTFT</TableHead>
+                <TableHead className="text-xs whitespace-nowrap text-right">速度</TableHead>
+                <TableHead className="text-xs whitespace-nowrap text-right">耗时</TableHead>
                 <TableHead className="text-xs whitespace-nowrap">Thinking</TableHead>
-                <TableHead className="text-xs whitespace-nowrap">Token (入/出)</TableHead>
-                <TableHead className="text-xs whitespace-nowrap">性能</TableHead>
                 <TableHead className="text-xs whitespace-nowrap">UA</TableHead>
+                <TableHead className="text-xs whitespace-nowrap">时间</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filtered.map((log) => (
-                <TableRow key={log.requestId} className="cursor-pointer">
-                  <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
-                    <Link href={`/admin/request-logs/${log.requestId}`} className="block">
-                      {formatTime(log.createdAt)}
-                    </Link>
-                  </TableCell>
-                  <TableCell className="text-sm">
-                    <Link href={`/admin/request-logs/${log.requestId}`} className="block">
-                      {formatUser(log)}
-                    </Link>
-                  </TableCell>
-                  <TableCell className="text-sm">
-                    <Link href={`/admin/request-logs/${log.requestId}`} className="block">
-                      {log.model}
-                    </Link>
-                  </TableCell>
-                  <TableCell>
-                    <Link href={`/admin/request-logs/${log.requestId}`} className="block">
-                      <RequestTypeCell log={log} />
-                    </Link>
-                  </TableCell>
-                  <TableCell>
-                    <Link href={`/admin/request-logs/${log.requestId}`} className="block">
-                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${statusBadge(log.status).cls}`}>
-                        {statusBadge(log.status).label}
-                      </span>
-                    </Link>
-                  </TableCell>
-                  <TableCell className="text-sm">
-                    <Link href={`/admin/request-logs/${log.requestId}`} className="block">
-                      {log.provider ?? '—'}
-                    </Link>
-                  </TableCell>
-                  <TableCell className="text-sm">
-                    <Link href={`/admin/request-logs/${log.requestId}`} className="block">
-                      {thinkingLabel(log.thinkingEffort, log.thinkingMode)}
-                    </Link>
-                  </TableCell>
-                  <TableCell className="text-sm">
-                    <Link href={`/admin/request-logs/${log.requestId}`} className="block">
-                      <TokenCell log={log} />
-                    </Link>
-                  </TableCell>
-                  <TableCell>
-                    <Link href={`/admin/request-logs/${log.requestId}`} className="block">
-                      <PerfCell log={log} />
-                    </Link>
-                  </TableCell>
-                  <TableCell className="text-sm max-w-[160px]">
-                    <Link href={`/admin/request-logs/${log.requestId}`} className="block">
-                      <span title={log.userAgent ?? undefined} className="block truncate">
-                        {truncateUA(log.userAgent)}
-                      </span>
-                    </Link>
-                  </TableCell>
-                </TableRow>
-              ))}
+              {filtered.map((log) => {
+                const speed = speedFor(log);
+                return (
+                  <TableRow key={log.requestId} className="cursor-pointer">
+                    <TableCell className="text-xs font-mono whitespace-nowrap">
+                      <Link href={`/admin/request-logs/${log.requestId}`} title={log.requestId} className="block">
+                        {shortRequestId(log.requestId)}
+                      </Link>
+                    </TableCell>
+                    <TableCell className="text-sm max-w-[180px]">
+                      <Link href={`/admin/request-logs/${log.requestId}`} className="block truncate">
+                        {formatUser(log)}
+                      </Link>
+                    </TableCell>
+                    <TableCell className="text-sm whitespace-nowrap">
+                      <Link href={`/admin/request-logs/${log.requestId}`} className="block">
+                        {log.model || '—'}
+                      </Link>
+                    </TableCell>
+                    <TableCell className="text-sm whitespace-nowrap">
+                      <Link href={`/admin/request-logs/${log.requestId}`} className="block">
+                        {protocolLabel(log.protocol)}
+                      </Link>
+                    </TableCell>
+                    <TableCell className="text-sm whitespace-nowrap">
+                      <Link href={`/admin/request-logs/${log.requestId}`} className="block">
+                        {log.provider ?? '—'}
+                      </Link>
+                    </TableCell>
+                    <TableCell>
+                      <Link href={`/admin/request-logs/${log.requestId}`} className="block">
+                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${statusBadge(log.status).cls}`}>
+                          {statusBadge(log.status).label}
+                        </span>
+                      </Link>
+                    </TableCell>
+                    <TableCell className="text-sm text-right tabular-nums">
+                      <Link href={`/admin/request-logs/${log.requestId}`} className="block">{formatTokens(log.inputTokens)}</Link>
+                    </TableCell>
+                    <TableCell className="text-sm text-right tabular-nums">
+                      <Link href={`/admin/request-logs/${log.requestId}`} className="block">{formatTokens(log.outputTokens)}</Link>
+                    </TableCell>
+                    <TableCell className="text-sm text-right tabular-nums">
+                      <Link href={`/admin/request-logs/${log.requestId}`} className="block">{formatTokens(log.cacheTokens)}</Link>
+                    </TableCell>
+                    <TableCell className="text-sm text-right tabular-nums">
+                      <Link href={`/admin/request-logs/${log.requestId}`} className="block">{formatDuration(log.ttftMs)}</Link>
+                    </TableCell>
+                    <TableCell className="text-sm text-right tabular-nums">
+                      <Link href={`/admin/request-logs/${log.requestId}`} className="block">{formatTokensPerSecond(speed)}</Link>
+                    </TableCell>
+                    <TableCell className="text-sm text-right tabular-nums">
+                      <Link href={`/admin/request-logs/${log.requestId}`} className="block">{formatDuration(log.durationMs)}</Link>
+                    </TableCell>
+                    <TableCell className="text-sm whitespace-nowrap">
+                      <Link href={`/admin/request-logs/${log.requestId}`} className="block">
+                        {thinkingLabel(log.thinkingEffort, log.thinkingMode)}
+                      </Link>
+                    </TableCell>
+                    <TableCell className="text-sm max-w-[160px]">
+                      <Link href={`/admin/request-logs/${log.requestId}`} className="block">
+                        <span title={log.userAgent ?? undefined} className="block truncate">
+                          {truncateUA(log.userAgent)}
+                        </span>
+                      </Link>
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
+                      <Link href={`/admin/request-logs/${log.requestId}`} className="block">
+                        {formatTime(log.createdAt)}
+                      </Link>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
               {filtered.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={10} className="py-8 text-center text-sm text-muted-foreground">
+                  <TableCell colSpan={15} className="py-8 text-center text-sm text-muted-foreground">
                     暂无请求记录
                   </TableCell>
                 </TableRow>

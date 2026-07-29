@@ -176,9 +176,10 @@ function mapRequestLogEvent(e: Record<string, unknown>): Record<string, unknown>
 
 function mapRequestLog(r: Record<string, unknown>): AdminRequestLog {
   const rawStatus = String(r.final_status ?? r.status ?? '');
-  let status: 'success' | 'error' | 'processing' = 'error';
+  let status: 'success' | 'error' | 'processing' | 'cancelled' = 'error';
   if (rawStatus === 'success') status = 'success';
   else if (rawStatus === 'processing') status = 'processing';
+  else if (rawStatus === 'cancelled' || rawStatus === 'client_cancelled') status = 'cancelled';
 
   const rawAttempts = r.attempts ?? r.events;
   const attempts = Array.isArray(rawAttempts)

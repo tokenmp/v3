@@ -26,55 +26,22 @@ function formatTime(iso: string) {
 function statusBadge(status: string) {
   if (status === 'success') return { label: '成功', cls: 'bg-green-100 text-green-700' };
   if (status === 'processing') return { label: '处理中', cls: 'bg-blue-100 text-blue-700 animate-pulse' };
+  if (status === 'cancelled') return { label: '已取消', cls: 'bg-amber-100 text-amber-700' };
   return { label: '失败', cls: 'bg-red-100 text-red-700' };
 }
 
-/** Combined "请求类型" cell: protocol + stream badge */
-function RequestTypeCell({ r }: { r: RequestLog }) {
-  return (
-    <span className="inline-flex items-center gap-1.5">
-      <span>{protocolLabel(r.protocol)}</span>
-      {r.stream != null && (
-        <span className={`rounded px-1 py-px text-[10px] font-medium ${r.stream ? 'bg-blue-100 text-blue-700' : 'bg-muted text-muted-foreground'}`}>
-          {streamLabel(r.stream)}
-        </span>
-      )}
-    </span>
-  );
+function shortRequestId(id: string | null | undefined): string {
+  if (!id) return '—';
+  return id.length > 10 ? `…${id.slice(-10)}` : id;
 }
 
-/** Combined "Token" cell: in / out (cache) */
-function TokenCell({ r }: { r: RequestLog }) {
-  const cache = r.cacheTokens != null && r.cacheTokens > 0
-    ? <span className="text-muted-foreground">({formatTokens(r.cacheTokens)}缓存)</span>
-    : null;
-  return (
-    <span className="inline-flex items-center gap-1 tabular-nums">
-      {formatTokens(r.inputTokens)} / {formatTokens(r.outputTokens)}
-      {cache}
-    </span>
-  );
-}
-
-/** Combined "性能" cell: duration + TTFT + speed */
-function PerfCell({ r }: { r: RequestLog }) {
-  const speed = calcTokensPerSecond({
+function speedFor(r: RequestLog): number | null {
+  return calcTokensPerSecond({
     outputTokens: r.outputTokens,
     durationMs: r.durationMs,
     ttftMs: r.ttftMs,
     stream: r.stream,
   });
-  return (
-    <span className="inline-flex flex-col gap-0.5 text-xs">
-      <span>{formatDuration(r.durationMs)}</span>
-      {r.ttftMs != null && r.ttftMs > 0 && r.stream === true && (
-        <span className="text-muted-foreground">TTFT {formatDuration(r.ttftMs)}</span>
-      )}
-      {speed != null && (
-        <span className="text-muted-foreground">{formatTokensPerSecond(speed)}</span>
-      )}
-    </span>
-  );
 }
 
 export default function RequestsPage() {
@@ -119,6 +86,7 @@ export default function RequestsPage() {
           <FilterChip label="全部" active={!statusF} onClick={() => setStatusF(undefined)} />
           <FilterChip label="成功" active={statusF === 'success'} onClick={() => setStatusF('success')} />
           <FilterChip label="失败" active={statusF === 'error'} onClick={() => setStatusF('error')} />
+          <FilterChip label="已取消" active={statusF === 'cancelled'} onClick={() => setStatusF('cancelled')} />
           <FilterChip label="处理中" active={statusF === 'processing'} onClick={() => setStatusF('processing')} />
         </div>
       </div>
@@ -129,34 +97,47 @@ export default function RequestsPage() {
           <Table>
             <TableHeader>
               <TableRow className="bg-muted/30">
-                <TableHead className="text-xs whitespace-nowrap">时间</TableHead>
+                <TableHead className="text-xs whitespace-nowrap">请求ID</TableHead>
                 <TableHead className="text-xs whitespace-nowrap">模型</TableHead>
-                <TableHead className="text-xs whitespace-nowrap">请求类型</TableHead>
+                <TableHead className="text-xs whitespace-nowrap">协议</TableHead>
                 <TableHead className="text-xs whitespace-nowrap">状态</TableHead>
-                <TableHead className="text-xs whitespace-nowrap">Token (入/出)</TableHead>
-                <TableHead className="text-xs whitespace-nowrap">性能</TableHead>
+                <TableHead className="text-xs whitespace-nowrap text-right">输入</TableHead>
+                <TableHead className="text-xs whitespace-nowrap text-right">输出</TableHead>
+                <TableHead className="text-xs whitespace-nowrap text-right">缓存</TableHead>
+                <TableHead className="text-xs whitespace-nowrap text-right">TTFT</TableHead>
+                <TableHead className="text-xs whitespace-nowrap text-right">速度</TableHead>
+                <TableHead className="text-xs whitespace-nowrap text-right">耗时</TableHead>
                 <TableHead className="text-xs whitespace-nowrap">Thinking</TableHead>
+                <TableHead className="text-xs whitespace-nowrap">时间</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filtered.map((r: RequestLog) => (
-                <TableRow key={r.requestId}>
-                  <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{formatTime(r.createdAt)}</TableCell>
-                  <TableCell className="text-sm">{r.model}</TableCell>
-                  <TableCell><RequestTypeCell r={r} /></TableCell>
-                  <TableCell>
-                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${statusBadge(r.status).cls}`}>
-                      {statusBadge(r.status).label}
-                    </span>
-                  </TableCell>
-                  <TableCell className="text-sm"><TokenCell r={r} /></TableCell>
-                  <TableCell><PerfCell r={r} /></TableCell>
-                  <TableCell className="text-sm">{thinkingLabel(r.thinkingEffort)}</TableCell>
-                </TableRow>
-              ))}
+              {filtered.map((r: RequestLog) => {
+                const speed = speedFor(r);
+                return (
+                  <TableRow key={r.requestId}>
+                    <TableCell className="text-xs font-mono whitespace-nowrap" title={r.requestId}>{shortRequestId(r.requestId)}</TableCell>
+                    <TableCell className="text-sm whitespace-nowrap">{r.model || '—'}</TableCell>
+                    <TableCell className="text-sm whitespace-nowrap">{protocolLabel(r.protocol)}</TableCell>
+                    <TableCell>
+                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${statusBadge(r.status).cls}`}>
+                        {statusBadge(r.status).label}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-sm text-right tabular-nums">{formatTokens(r.inputTokens)}</TableCell>
+                    <TableCell className="text-sm text-right tabular-nums">{formatTokens(r.outputTokens)}</TableCell>
+                    <TableCell className="text-sm text-right tabular-nums">{formatTokens(r.cacheTokens)}</TableCell>
+                    <TableCell className="text-sm text-right tabular-nums">{formatDuration(r.ttftMs)}</TableCell>
+                    <TableCell className="text-sm text-right tabular-nums">{formatTokensPerSecond(speed)}</TableCell>
+                    <TableCell className="text-sm text-right tabular-nums">{formatDuration(r.durationMs)}</TableCell>
+                    <TableCell className="text-sm whitespace-nowrap">{thinkingLabel(r.thinkingEffort)}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{formatTime(r.createdAt)}</TableCell>
+                  </TableRow>
+                );
+              })}
               {filtered.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={7} className="py-8 text-center text-sm text-muted-foreground">
+                  <TableCell colSpan={12} className="py-8 text-center text-sm text-muted-foreground">
                     暂无请求记录
                   </TableCell>
                 </TableRow>

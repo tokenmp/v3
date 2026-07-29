@@ -282,7 +282,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [success, error, processing, all]
+            enum: [success, error, processing, cancelled, all]
             default: all
         - name: startDate
           in: query
@@ -588,7 +588,7 @@ components:
           type: string
         status:
           type: string
-          enum: [success, error, processing]
+          enum: [success, error, processing, cancelled]
         inputTokens:
           type: integer
           nullable: true
@@ -640,7 +640,7 @@ components:
           type: string
         status:
           type: string
-          enum: [success, error, processing]
+          enum: [success, error, processing, cancelled]
         errorMessage:
           type: string
           nullable: true
