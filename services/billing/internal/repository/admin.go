@@ -205,10 +205,12 @@ func canSwitchPlan(current Plan, target Plan) bool {
 }
 
 func intLimitNotLower(current *int, target *int) bool {
-	if current == nil {
-		return target == nil
+	currentUnlimited := current == nil || *current <= 0
+	targetUnlimited := target == nil || *target <= 0
+	if currentUnlimited {
+		return targetUnlimited
 	}
-	if target == nil {
+	if targetUnlimited {
 		return true
 	}
 	return *target >= *current

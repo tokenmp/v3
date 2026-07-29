@@ -478,6 +478,10 @@ LIMIT 1`
 
 // getActiveCodingPlan loads the user's most recent active coding plan with
 // limits. A zero ActivatedAt means no active coding entitlement.
+func positiveIntLimit(v *int) bool {
+	return v != nil && *v > 0
+}
+
 func getActiveCodingPlan(tx *gorm.DB, userID string, now time.Time) (activeCodingPlanRow, error) {
 	var row activeCodingPlanRow
 	if err := tx.Raw(activeCodingPlanSQL, userID, now).Scan(&row).Error; err != nil {
@@ -524,7 +528,7 @@ func enforceCodingWindows(tx *gorm.DB, userID string, wanted int, now time.Time)
 	if row.ActivatedAt.IsZero() {
 		return &QuotaExceededError{Scope: ScopePeriod, Limit: 0, Consumed: 0, Wanted: wanted}
 	}
-	if row.HourlyLimit != nil {
+	if positiveIntLimit(row.HourlyLimit) {
 		res, err := computeWindow(tx, userID, row.UserPlanID, string(ScopeHour5), now.Add(-5*time.Hour), *row.HourlyLimit, now)
 		if err != nil {
 			return err
@@ -533,7 +537,7 @@ func enforceCodingWindows(tx *gorm.DB, userID string, wanted int, now time.Time)
 			return &QuotaExceededError{Scope: ScopeHour5, Limit: res.AdjustedLimit, Consumed: res.Consumed, Wanted: wanted}
 		}
 	}
-	if row.WeeklyLimit != nil {
+	if positiveIntLimit(row.WeeklyLimit) {
 		res, err := computeWindow(tx, userID, row.UserPlanID, string(ScopeWeekly), startOfWeekUTC(now), *row.WeeklyLimit, now)
 		if err != nil {
 			return err
@@ -542,7 +546,7 @@ func enforceCodingWindows(tx *gorm.DB, userID string, wanted int, now time.Time)
 			return &QuotaExceededError{Scope: ScopeWeekly, Limit: res.AdjustedLimit, Consumed: res.Consumed, Wanted: wanted}
 		}
 	}
-	if row.MonthlyLimit != nil {
+	if positiveIntLimit(row.MonthlyLimit) {
 		res, err := computeWindow(tx, userID, row.UserPlanID, string(ScopePeriod), row.ActivatedAt, *row.MonthlyLimit, now)
 		if err != nil {
 			return err
@@ -773,7 +777,7 @@ WHERE up.user_id = ? AND up.status = 'active' AND p.plan_type = 'token'`
 	if err != nil {
 		return Balance{}, ErrQueryFailed
 	}
-	if !codingPlan.ActivatedAt.IsZero() && codingPlan.MonthlyLimit != nil {
+	if !codingPlan.ActivatedAt.IsZero() && positiveIntLimit(codingPlan.MonthlyLimit) {
 		now := time.Now().UTC()
 		res, err := computeWindow(r.db.WithContext(ctx), userID, codingPlan.UserPlanID, string(ScopePeriod), codingPlan.ActivatedAt, *codingPlan.MonthlyLimit, now)
 		if err != nil {
@@ -816,7 +820,7 @@ func (r *GormRepository) GetUsageWindows(ctx context.Context, userID string) ([]
 		return []UsageWindow{}, nil
 	}
 	windows := make([]UsageWindow, 0, 3)
-	if row.HourlyLimit != nil {
+	if positiveIntLimit(row.HourlyLimit) {
 		res, err := computeWindow(r.db.WithContext(ctx), userID, row.UserPlanID, string(ScopeHour5), now.Add(-5*time.Hour), *row.HourlyLimit, now)
 		if err != nil {
 			return nil, err
@@ -831,7 +835,7 @@ func (r *GormRepository) GetUsageWindows(ctx context.Context, userID string) ([]
 			Remaining: rem, WindowStart: res.EffectiveStart,
 		})
 	}
-	if row.WeeklyLimit != nil {
+	if positiveIntLimit(row.WeeklyLimit) {
 		baseStart := startOfWeekUTC(now)
 		res, err := computeWindow(r.db.WithContext(ctx), userID, row.UserPlanID, string(ScopeWeekly), baseStart, *row.WeeklyLimit, now)
 		if err != nil {
@@ -848,7 +852,7 @@ func (r *GormRepository) GetUsageWindows(ctx context.Context, userID string) ([]
 			Remaining: rem, WindowStart: res.EffectiveStart, WindowEnd: &we,
 		})
 	}
-	if row.MonthlyLimit != nil {
+	if positiveIntLimit(row.MonthlyLimit) {
 		res, err := computeWindow(r.db.WithContext(ctx), userID, row.UserPlanID, string(ScopePeriod), row.ActivatedAt, *row.MonthlyLimit, now)
 		if err != nil {
 			return nil, err
