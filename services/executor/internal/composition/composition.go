@@ -241,7 +241,7 @@ func Build(ctx context.Context, cfg config.Config, lookupEnv func(string) (strin
 	})
 
 	// ── Generated handler with strict non-stream + SSE stream dispatch ──
-	nonStreamAdapter := executorv1api.NewNonStream(executorv1api.Options{Executor: facade, Catalog: catalogFacade})
+	nonStreamAdapter := executorv1api.NewNonStream(executorv1api.Options{Executor: facade, Catalog: catalogFacade, RequestIDs: executorv1api.EdgeRequestIDSource{}})
 	hybrid := executorv1api.NewHybrid(executorv1api.HybridOptions{Strict: nonStreamAdapter, StreamExecutor: streamFacade, RequestIDs: executorv1api.EdgeRequestIDSource{}})
 	generated := executorv1.Handler(hybrid)
 
