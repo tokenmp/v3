@@ -78,10 +78,14 @@ type ThinkingInput struct {
 }
 type ProviderInput struct {
 	ID, Name, BaseURL, Selector string
-	SDKKind                     SDKKind
-	Protocol                    Protocol
-	Retry                       RetryPolicy
-	Timeout                     TimeoutPolicy
+	// SDKKind and Protocol are legacy provider-scoped fields accepted for
+	// backward compatibility with already-published snapshots. New routing
+	// semantics are provider-neutral: SDK/protocol compatibility is determined
+	// by the selected route and adapter, not by the provider row.
+	SDKKind  SDKKind
+	Protocol Protocol
+	Retry    RetryPolicy
+	Timeout  TimeoutPolicy
 }
 type RouteInput struct {
 	ID, ModelID, ProviderID, AdapterID, UpstreamModel string
@@ -118,10 +122,12 @@ type CompiledModel struct {
 }
 type CompiledProvider struct {
 	ID, Name, BaseURL, Selector string
-	SDKKind                     SDKKind
-	Protocol                    Protocol
-	Retry                       CompiledRetry
-	Timeout                     CompiledTimeout
+	// SDKKind and Protocol are retained only as legacy metadata. Execution and
+	// routing must use the adapter's SDKKind and the route's Protocol.
+	SDKKind  SDKKind
+	Protocol Protocol
+	Retry    CompiledRetry
+	Timeout  CompiledTimeout
 }
 type CompiledRoute struct {
 	ID, ModelID, ProviderID, AdapterID, UpstreamModel string
@@ -204,7 +210,7 @@ func Compile(in ConfigInput) (CompiledConfig, error) {
 			return CompiledConfig{}, fmt.Errorf("duplicate provider name %q", p.Name)
 		}
 		providerNames[p.Name] = true
-		if key == "" || p.ID == "" || key != p.ID || strings.TrimSpace(p.Name) == "" || !p.SDKKind.Valid() || !p.Protocol.Valid() {
+		if key == "" || p.ID == "" || key != p.ID || strings.TrimSpace(p.Name) == "" || (p.SDKKind != "" && !p.SDKKind.Valid()) || (p.Protocol != "" && !p.Protocol.Valid()) {
 			return CompiledConfig{}, fmt.Errorf("invalid provider %q", key)
 		}
 		selector := p.Selector
@@ -262,16 +268,15 @@ func Compile(in ConfigInput) (CompiledConfig, error) {
 		if !ok {
 			return CompiledConfig{}, fmt.Errorf("route %q references unknown model %q", route.ID, route.ModelID)
 		}
-		p, ok := out.Providers[route.ProviderID]
-		if !ok {
+		if _, ok := out.Providers[route.ProviderID]; !ok {
 			return CompiledConfig{}, fmt.Errorf("route %q references unknown provider %q", route.ID, route.ProviderID)
 		}
 		a, ok := out.Adapters[route.AdapterID]
 		if !ok {
 			return CompiledConfig{}, fmt.Errorf("route %q references unknown adapter %q", route.ID, route.AdapterID)
 		}
-		if strings.TrimSpace(route.UpstreamModel) == "" || !route.Protocol.Valid() || route.Protocol != p.Protocol || route.Protocol != a.Protocol || p.SDKKind != a.SDKKind {
-			return CompiledConfig{}, fmt.Errorf("route %q has incompatible provider/adapter/protocol", route.ID)
+		if strings.TrimSpace(route.UpstreamModel) == "" || !route.Protocol.Valid() || route.Protocol != a.Protocol {
+			return CompiledConfig{}, fmt.Errorf("route %q has incompatible adapter/protocol", route.ID)
 		}
 		if err := compatible(m, a); err != nil {
 			return CompiledConfig{}, fmt.Errorf("route %q: %w", route.ID, err)

@@ -471,6 +471,48 @@ func TestCompileSnapshot_AnthropicAutoAdapter(t *testing.T) {
 	}
 }
 
+func TestCompileSnapshot_ProviderUsesProtocolScopedImplicitAdapters(t *testing.T) {
+	models := []repository.Model{{ID: "m1", DisplayName: "M1", Capabilities: repository.StringArray{"chat", "messages"}, Status: "active"}}
+	providers := []repository.Provider{{ID: "p1", Name: "P1", Selector: "p1", BaseURL: "https://api.example.com/v1", SDKKind: "openai", Protocol: "openai_chat", Status: "active"}}
+	routes := []repository.RouteMapping{
+		{ID: "chat", ModelID: "m1", ProviderID: "p1", UpstreamModel: "gpt", Priority: 100, Enabled: true, Protocol: "openai_chat", Status: "active"},
+		{ID: "messages", ModelID: "m1", ProviderID: "p1", UpstreamModel: "claude", Priority: 100, Enabled: true, Protocol: "anthropic_messages", Status: "active"},
+	}
+	credsByProvider := map[string][]repository.UpstreamCredential{"p1": {{ID: "c1", ProviderID: "p1", CredentialRef: "vault://p1/credential/c1", Priority: 100, Status: "active"}}}
+
+	data, err := compileSnapshot(models, providers, routes, credsByProvider, map[string][]repository.RouteCredential{}, nil, repository.GlobalPolicy{})
+	if err != nil {
+		t.Fatalf("compileSnapshot: %v", err)
+	}
+	var snap struct {
+		Adapters map[string]struct {
+			SDKKind  string `json:"SDKKind"`
+			Protocol string `json:"Protocol"`
+		} `json:"Adapters"`
+		Routes []struct {
+			ID        string `json:"ID"`
+			AdapterID string `json:"AdapterID"`
+			Protocol  string `json:"Protocol"`
+		} `json:"Routes"`
+	}
+	if err := json.Unmarshal(data, &snap); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if snap.Adapters["adapter-p1-openai_chat"].SDKKind != "openai" || snap.Adapters["adapter-p1-openai_chat"].Protocol != "openai_chat" {
+		t.Fatalf("chat implicit adapter = %#v", snap.Adapters["adapter-p1-openai_chat"])
+	}
+	if snap.Adapters["adapter-p1-anthropic_messages"].SDKKind != "anthropic" || snap.Adapters["adapter-p1-anthropic_messages"].Protocol != "anthropic_messages" {
+		t.Fatalf("messages implicit adapter = %#v", snap.Adapters["adapter-p1-anthropic_messages"])
+	}
+	byRoute := map[string]string{}
+	for _, route := range snap.Routes {
+		byRoute[route.ID] = route.AdapterID
+	}
+	if byRoute["chat"] != "adapter-p1-openai_chat" || byRoute["messages"] != "adapter-p1-anthropic_messages" {
+		t.Fatalf("route adapters = %#v", byRoute)
+	}
+}
+
 func TestCompileSnapshot_RouteWithCredentials(t *testing.T) {
 	reader := &fakeAdminReader{
 		models: []repository.Model{

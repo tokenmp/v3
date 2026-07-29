@@ -102,6 +102,33 @@ func TestCompileOfficialSDKAuthCompatibility(t *testing.T) {
 	}
 }
 
+func TestCompileProviderIsProtocolNeutral(t *testing.T) {
+	in := baseInput()
+	in.Models["m"] = ModelInput{ID: "m", Capabilities: []Capability{CapabilityChat, CapabilityMessages}}
+	p := in.Providers["p"]
+	// Legacy provider-scoped protocol/SDKKind may be absent or stale; the
+	// route+adapter pair is authoritative for execution compatibility.
+	p.SDKKind = ""
+	p.Protocol = ""
+	in.Providers["p"] = p
+	in.Adapters["anthropic"] = AdapterConfig{ID: "anthropic", Name: "anthropic", Version: 1, SDKKind: SDKKindAnthropic, Protocol: ProtocolAnthropic, Auth: AuthRule{Kind: AuthAPIKeyHeader, Header: "x-api-key", CredentialRef: "vault://provider/anthropic"}}
+	in.Routes = append(in.Routes, RouteInput{ID: "anthropic-route", ModelID: "m", ProviderID: "p", AdapterID: "anthropic", UpstreamModel: "claude", Enabled: true, Protocol: ProtocolAnthropic})
+
+	got := mustCompile(t, in)
+	if got.Providers["p"].SDKKind != "" || got.Providers["p"].Protocol != "" {
+		t.Fatalf("provider legacy SDK/protocol = %q/%q, want empty", got.Providers["p"].SDKKind, got.Providers["p"].Protocol)
+	}
+	foundAnthropicRoute := false
+	for _, route := range got.Routes {
+		if route.ID == "anthropic-route" {
+			foundAnthropicRoute = route.Protocol == ProtocolAnthropic
+		}
+	}
+	if !foundAnthropicRoute || got.Adapters["anthropic"].SDKKind != SDKKindAnthropic {
+		t.Fatalf("route/adapter protocol authority not preserved")
+	}
+}
+
 func TestCompileAppliesDefaultsLimitsAndRelationships(t *testing.T) {
 	got := mustCompile(t, baseInput())
 	r := got.Routes[0]
