@@ -24,9 +24,9 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { ConfirmDialog } from '@/components/confirm-dialog';
-import { Plus, Ban, RotateCcw, Gift } from 'lucide-react';
+import { Plus, Ban, RotateCcw, Gift, History } from 'lucide-react';
 import { toast } from 'sonner';
-import type { AdminUserPlan, AdminUserPlanInput, LimitOverrideScope } from '@/types/admin';
+import type { AdminLimitOverride, AdminUserPlan, AdminUserPlanInput, LimitOverrideScope } from '@/types/admin';
 
 function formatTime(iso: string) {
   return new Date(iso).toLocaleString('zh-CN');
@@ -72,6 +72,10 @@ const SCOPE_LABELS: Record<LimitOverrideScope, string> = {
   period: '本周期总额度',
 };
 
+function overrideActive(override: AdminLimitOverride) {
+  return !override.effectiveUntil || new Date(override.effectiveUntil).getTime() > Date.now();
+}
+
 export default function AdminUserPlansPage() {
   const qc = useQueryClient();
 
@@ -114,8 +118,9 @@ export default function AdminUserPlansPage() {
       effectiveUntil: input.effectiveUntil ? new Date(input.effectiveUntil).toISOString() : null,
       reason: input.reason || undefined,
     }),
-    onSuccess: () => {
+    onSuccess: (_, variables) => {
       qc.invalidateQueries({ queryKey: ['admin', 'user-plans'] });
+      qc.invalidateQueries({ queryKey: ['admin', 'user-plan-overrides', variables.userPlan.id] });
       toast.success('额度调整已生效');
     },
   });
@@ -130,6 +135,24 @@ export default function AdminUserPlansPage() {
 
   const [overrideOpen, setOverrideOpen] = useState(false);
   const [overrideForm, setOverrideForm] = useState<OverrideForm | null>(null);
+  const [historyPlan, setHistoryPlan] = useState<AdminUserPlan | null>(null);
+
+  const { data: overrideHistory = [], isFetching: loadingHistory } = useQuery({
+    queryKey: ['admin', 'user-plan-overrides', historyPlan?.id],
+    queryFn: () => adminUserPlanApi.listLimitOverrides(historyPlan?.id ?? ''),
+    enabled: Boolean(historyPlan?.id),
+  });
+
+  const revokeOverrideMutation = useMutation({
+    mutationFn: (id: string) => adminUserPlanApi.revokeLimitOverride(id),
+    onSuccess: () => {
+      if (historyPlan?.id) {
+        qc.invalidateQueries({ queryKey: ['admin', 'user-plan-overrides', historyPlan.id] });
+      }
+      qc.invalidateQueries({ queryKey: ['admin', 'user-plans'] });
+      toast.success('覆盖已撤销');
+    },
+  });
 
   function openAssign() {
     setForm(emptyForm);
@@ -182,6 +205,14 @@ export default function AdminUserPlansPage() {
       return;
     }
     overrideMutation.mutate(overrideForm, { onSuccess: () => setOverrideOpen(false) });
+  }
+
+  function openHistory(userPlan: AdminUserPlan) {
+    setHistoryPlan(userPlan);
+  }
+
+  function handleRevokeOverride(id: string) {
+    revokeOverrideMutation.mutate(id);
   }
 
   const users = usersData?.users ?? [];
@@ -248,6 +279,9 @@ export default function AdminUserPlansPage() {
                                 <Button variant="ghost" size="icon" title="临时加额" onClick={() => openOverride(up, 'bonus')}>
                                   <Gift className="h-4 w-4" />
                                 </Button>
+                                <Button variant="ghost" size="icon" title="覆盖历史" onClick={() => openHistory(up)}>
+                                  <History className="h-4 w-4" />
+                                </Button>
                               </>
                             )}
                             <Button
@@ -304,6 +338,10 @@ export default function AdminUserPlansPage() {
                             <Button variant="outline" size="sm" onClick={() => openOverride(up, 'bonus')}>
                               <Gift className="h-4 w-4" />
                               加额
+                            </Button>
+                            <Button variant="outline" size="sm" onClick={() => openHistory(up)}>
+                              <History className="h-4 w-4" />
+                              历史
                             </Button>
                           </>
                         )}
@@ -451,6 +489,84 @@ export default function AdminUserPlansPage() {
           <Button onClick={handleOverride} disabled={overrideMutation.isPending}>
             {overrideMutation.isPending ? '提交中…' : '确认'}
           </Button>
+        </DialogFooter>
+      </Dialog>
+
+      <Dialog open={Boolean(historyPlan)} onOpenChange={(open) => { if (!open) setHistoryPlan(null); }}>
+        <DialogHeader>
+          <DialogTitle>额度覆盖历史</DialogTitle>
+          <DialogDescription>
+            查看和撤销该用户套餐的重置/加额记录。撤销不会删除记录，只会让它从现在起失效。
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          {historyPlan && (
+            <div className="rounded-md bg-muted p-3 text-sm">
+              <div className="font-medium">{historyPlan.userEmail || historyPlan.userId}</div>
+              <div className="text-muted-foreground">{historyPlan.planName}</div>
+            </div>
+          )}
+          {loadingHistory ? (
+            <div className="py-8 text-center text-sm text-muted-foreground">加载中…</div>
+          ) : overrideHistory.length === 0 ? (
+            <div className="py-8 text-center text-sm text-muted-foreground">暂无覆盖记录</div>
+          ) : (
+            <div className="max-h-[420px] overflow-auto rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>类型</TableHead>
+                    <TableHead>窗口</TableHead>
+                    <TableHead>加额</TableHead>
+                    <TableHead>生效时间</TableHead>
+                    <TableHead>状态</TableHead>
+                    <TableHead>原因</TableHead>
+                    <TableHead className="text-right">操作</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {overrideHistory.map((ov) => {
+                    const active = overrideActive(ov);
+                    return (
+                      <TableRow key={ov.id}>
+                        <TableCell>
+                          <Badge variant={ov.kind === 'bonus' ? 'success' : 'outline'}>
+                            {ov.kind === 'bonus' ? '加额' : '重置'}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>{SCOPE_LABELS[ov.scope]}</TableCell>
+                        <TableCell>{ov.kind === 'bonus' ? Number(ov.bonusRequests ?? 0).toLocaleString() : '—'}</TableCell>
+                        <TableCell className="whitespace-nowrap">{formatTime(ov.effectiveFrom)}</TableCell>
+                        <TableCell>
+                          <Badge variant={active ? 'success' : 'secondary'}>{active ? '生效中' : '已失效'}</Badge>
+                          {ov.effectiveUntil && (
+                            <div className="mt-1 whitespace-nowrap text-xs text-muted-foreground">至 {formatTime(ov.effectiveUntil)}</div>
+                          )}
+                        </TableCell>
+                        <TableCell className="max-w-48 truncate" title={ov.reason || undefined}>{ov.reason || '—'}</TableCell>
+                        <TableCell className="text-right">
+                          {active ? (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="text-destructive"
+                              disabled={revokeOverrideMutation.isPending}
+                              onClick={() => handleRevokeOverride(ov.id)}
+                            >
+                              撤销
+                            </Button>
+                          ) : '—'}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setHistoryPlan(null)}>关闭</Button>
         </DialogFooter>
       </Dialog>
 
