@@ -261,7 +261,8 @@ const upsertRequestLogSQL = `UPDATE request_logs SET
   thinking_effort_degraded = COALESCE(NULLIF($25, ''), thinking_effort_degraded),
   reservation_id = COALESCE(NULLIF($26, ''), reservation_id),
   billing_plan = COALESCE(NULLIF($27, ''), billing_plan),
-  completed_at = COALESCE($28, completed_at)
+  completed_at = COALESCE($28, completed_at),
+  stream = ($29 OR stream)
 WHERE request_id = $1
 RETURNING id`
 
@@ -297,7 +298,7 @@ func (r *GormRepository) upsertRequestLog(ctx TxContext, log RequestLog) (int64,
 		log.HTTPStatus, log.InputTokens, log.OutputTokens, log.TotalTokens, log.CacheTokens,
 		log.LatencyMS, log.TTFTMS, log.ErrorCode, log.ErrorType, log.UpstreamHTTPStatus,
 		log.UsageStatus, log.ThinkingMode, log.ThinkingEffort, log.ThinkingEffortDegraded,
-		log.ReservationID, log.BillingPlan, log.CompletedAt,
+		log.ReservationID, log.BillingPlan, log.CompletedAt, log.Stream,
 	).Scan(&id).Error
 	if err != nil {
 		return 0, ErrInsertFailed
