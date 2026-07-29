@@ -236,6 +236,63 @@ func TestEdgeLogsClientCancelledTerminal(t *testing.T) {
 	}
 }
 
+func TestEdgeDoesNotLogOrReserveModelsCatalog(t *testing.T) {
+	pub, priv := genEdgeKeyPair(t)
+	keyFile := writeEdgePubPEM(t, pub)
+	verifier, err := identity.NewVerifier(keyFile, "tokenmp-auth", "tokenmp-web", nil)
+	if err != nil {
+		t.Fatalf("NewVerifier: %v", err)
+	}
+
+	var execHits atomic.Int32
+	execBackend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		execHits.Add(1)
+		if r.URL.Path != "/v1/models" {
+			t.Errorf("path = %q", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[],"object":"list"}`))
+	}))
+	defer execBackend.Close()
+	prx, err := proxy.New(execBackend.URL, "edge-token", nil)
+	if err != nil {
+		t.Fatalf("proxy.New: %v", err)
+	}
+
+	logBackend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("logging should not be called for /v1/models")
+	}))
+	defer logBackend.Close()
+	billBackend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("billing should not be called for /v1/models")
+	}))
+	defer billBackend.Close()
+
+	deps := app.Deps{
+		Verifier: verifier,
+		Proxy:    prx,
+		Quota:    quota.NewManager(billBackend.URL),
+		Logging:  logging.NewClient(logBackend.URL),
+	}
+	front := httptest.NewServer(app.NewServer(deps, 10*time.Second, 60*time.Second).Handler)
+	defer front.Close()
+
+	tok := makeEdgeJWT(t, priv, "models-test")
+	req, _ := http.NewRequest(http.MethodGet, front.URL+"/v1/models", nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	if execHits.Load() != 1 {
+		t.Fatalf("exec hits = %d", execHits.Load())
+	}
+}
+
 func TestEdgeIngestsBoundedUserAgentOnReceipt(t *testing.T) {
 	pub, priv := genEdgeKeyPair(t)
 	keyFile := writeEdgePubPEM(t, pub)

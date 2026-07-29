@@ -160,6 +160,10 @@ func quotaMiddleware(mgr quota.Manager, logClient *logging.Client, logger *slog.
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !meteredExecutorRequest(r) {
+				next.ServeHTTP(w, r)
+				return
+			}
 			startedAt := time.Now().UTC()
 			claims, ok := identity.FromContext(r.Context())
 			if !ok {
@@ -290,6 +294,21 @@ func logEdgeClientCancelled(logClient *logging.Client, logger *slog.Logger, requ
 			logger.Debug("edge log ingest (client cancelled) failed", "error", err, "request_id", requestID)
 		}
 	}()
+}
+
+func meteredExecutorRequest(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	if r.Method != http.MethodPost {
+		return false
+	}
+	switch r.URL.Path {
+	case "/v1/chat/completions", "/v1/messages", "/v1/responses", "/v1/images/generations":
+		return true
+	default:
+		return false
+	}
 }
 
 // statusWriter wraps http.ResponseWriter to capture the status code.
