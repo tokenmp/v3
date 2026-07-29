@@ -290,7 +290,7 @@ func (s *Server) handleUserPlanAdminErr(w http.ResponseWriter, err error, msg st
 		return
 	}
 	if errors.Is(err, repository.ErrConflict) {
-		httpresp.Error(w, httpresp.CodeBadRequest, "target plan is lower than current plan")
+		httpresp.Error(w, httpresp.CodeBadRequest, "目标套餐类型或额度不能低于当前套餐")
 		return
 	}
 	s.logger.Warn(msg, "error", err)
