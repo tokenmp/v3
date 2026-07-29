@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func TestClient_Unavailable(t *testing.T) {
@@ -91,6 +92,71 @@ func TestGetBalance_OK(t *testing.T) {
 	}
 	if out.CodingRemaining != "42" || out.TokenRemaining != "1000" {
 		t.Errorf("out = %+v", out)
+	}
+}
+
+func TestGetUsageWindows_OK(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/billing/users/u1/usage-windows" {
+			t.Errorf("path = %q", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(struct {
+			Windows []UsageWindow `json:"windows"`
+		}{Windows: []UsageWindow{
+			{Scope: "hour5", Limit: intPtr(5), Consumed: 2, Remaining: 3, WindowStart: timeParse(t, "2026-07-29T12:00:00Z")},
+			{Scope: "weekly", Limit: intPtr(50), Consumed: 2, Remaining: 48, WindowStart: timeParse(t, "2026-07-28T00:00:00Z"), WindowEnd: timePtr(timeParse(t, "2026-08-04T00:00:00Z"))},
+			{Scope: "period", Consumed: 2, Remaining: 498, WindowStart: timeParse(t, "2026-07-01T00:00:00Z")},
+		}})
+	}))
+	defer srv.Close()
+	c := NewClient(srv.URL)
+	out, err := c.GetUsageWindows(context.Background(), "u1")
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if len(out) != 3 {
+		t.Fatalf("len = %d, want 3", len(out))
+	}
+	if out[0].Scope != "hour5" || out[0].Remaining != 3 || out[0].Limit == nil || *out[0].Limit != 5 {
+		t.Errorf("out[0] = %+v", out[0])
+	}
+	if out[2].Scope != "period" || out[2].Limit != nil || out[2].WindowEnd != nil {
+		t.Errorf("out[2] = %+v", out[2])
+	}
+}
+
+func TestGetUsageWindows_Empty(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(struct {
+			Windows []UsageWindow `json:"windows"`
+		}{})
+	}))
+	defer srv.Close()
+	c := NewClient(srv.URL)
+	out, err := c.GetUsageWindows(context.Background(), "u1")
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if out == nil || len(out) != 0 {
+		t.Fatalf("out = %+v, want non-nil empty", out)
+	}
+}
+
+func TestGetUsageWindows_Unavailable(t *testing.T) {
+	c := NewClient("")
+	if _, err := c.GetUsageWindows(context.Background(), "u1"); !errors.Is(err, ErrUnavailable) {
+		t.Errorf("err = %v, want ErrUnavailable", err)
+	}
+}
+
+func TestGetUsageWindows_NotFound(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+	c := NewClient(srv.URL)
+	if _, err := c.GetUsageWindows(context.Background(), "u1"); !errors.Is(err, NotFound) {
+		t.Errorf("err = %v, want NotFound", err)
 	}
 }
 
@@ -186,4 +252,17 @@ func TestListAllUserPlans_NotFound(t *testing.T) {
 	if _, err := c.ListAllUserPlans(context.Background()); !errors.Is(err, NotFound) {
 		t.Errorf("err = %v, want NotFound", err)
 	}
+}
+
+func intPtr(n int) *int { return &n }
+
+func timePtr(t time.Time) *time.Time { return &t }
+
+func timeParse(t *testing.T, s string) time.Time {
+	t.Helper()
+	v, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		t.Fatalf("timeParse %q: %v", s, err)
+	}
+	return v
 }

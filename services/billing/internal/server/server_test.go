@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -93,12 +94,27 @@ func (f *fakeBalanceReader) GetBalance(_ context.Context, userID string) (reposi
 	return f.balance, f.err
 }
 
+type fakeUsageWindowsReader struct {
+	windows []repository.UsageWindow
+	err     error
+	user    string
+}
+
+func (f *fakeUsageWindowsReader) GetUsageWindows(_ context.Context, userID string) ([]repository.UsageWindow, error) {
+	f.user = userID
+	return f.windows, f.err
+}
+
 func newServer(plans *fakePlanReader, userPlans *fakeUserPlanReader, quota *fakeQuotaManager, ledger *fakeLedgerReader, pinger fakePinger) *Server {
-	return New(plans, userPlans, quota, ledger, &fakeBalanceReader{}, nil, pinger, nil)
+	return New(plans, userPlans, quota, ledger, &fakeBalanceReader{}, nil, nil, pinger, nil)
 }
 
 func newServerWithBalance(plans *fakePlanReader, userPlans *fakeUserPlanReader, quota *fakeQuotaManager, ledger *fakeLedgerReader, balance *fakeBalanceReader, pinger fakePinger) *Server {
-	return New(plans, userPlans, quota, ledger, balance, nil, pinger, nil)
+	return New(plans, userPlans, quota, ledger, balance, nil, nil, pinger, nil)
+}
+
+func newServerWithUsageWindows(plans *fakePlanReader, userPlans *fakeUserPlanReader, quota *fakeQuotaManager, ledger *fakeLedgerReader, balance *fakeBalanceReader, uw *fakeUsageWindowsReader, pinger fakePinger) *Server {
+	return New(plans, userPlans, quota, ledger, balance, uw, nil, pinger, nil)
 }
 
 func do(t *testing.T, s *Server, method, target string, body string) *httptest.ResponseRecorder {
@@ -348,5 +364,68 @@ func TestGetBalance_QueryError(t *testing.T) {
 	}
 	if containsLeak(rec.Body.String()) {
 		t.Errorf("body leaked: %s", rec.Body.String())
+	}
+}
+
+func TestReserve_QuotaExceeded(t *testing.T) {
+	quota := &fakeQuotaManager{reserveErr: &repository.QuotaExceededError{Scope: repository.ScopeHour5, Limit: 2, Consumed: 2, Wanted: 1}}
+	s := newServer(&fakePlanReader{}, &fakeUserPlanReader{}, quota, &fakeLedgerReader{}, fakePinger{})
+	rec := do(t, s, http.MethodPost, "/v1/billing/quota/reserve", `{"reservation_id":"res-1","user_id":"u1","request_id":"req-1","billing_plan":"coding","reserved_requests":1,"reserved_tokens":42}`)
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want 429", rec.Code)
+	}
+	if !contains(rec.Body.String(), "quota_exceeded") || !contains(rec.Body.String(), "hour5") {
+		t.Fatalf("body missing scope: %s", rec.Body.String())
+	}
+	if containsLeak(rec.Body.String()) {
+		t.Errorf("body leaked: %s", rec.Body.String())
+	}
+}
+
+func TestReserve_QuotaExceededWrapped(t *testing.T) {
+	// A wrapped QuotaExceededError must still be recognized (errors.As walks
+	// the chain) so callers that wrap repo errors do not regress to 500.
+	quota := &fakeQuotaManager{reserveErr: fmt.Errorf("%w", &repository.QuotaExceededError{Scope: repository.ScopeWeekly})}
+	s := newServer(&fakePlanReader{}, &fakeUserPlanReader{}, quota, &fakeLedgerReader{}, fakePinger{})
+	rec := do(t, s, http.MethodPost, "/v1/billing/quota/reserve", `{"reservation_id":"res-1","user_id":"u1","request_id":"req-1","billing_plan":"coding","reserved_requests":1,"reserved_tokens":42}`)
+	if rec.Code != http.StatusTooManyRequests || !contains(rec.Body.String(), "weekly") {
+		t.Fatalf("status/body = %d/%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestGetUsageWindows_OK(t *testing.T) {
+	lim := 100
+	uw := &fakeUsageWindowsReader{windows: []repository.UsageWindow{{Scope: "hour5", Limit: &lim, Consumed: 3, Remaining: 97}}}
+	s := newServerWithUsageWindows(&fakePlanReader{}, &fakeUserPlanReader{}, &fakeQuotaManager{}, &fakeLedgerReader{}, &fakeBalanceReader{}, uw, fakePinger{})
+	rec := do(t, s, http.MethodGet, "/v1/billing/users/u1/usage-windows", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if uw.user != "u1" {
+		t.Errorf("user = %q", uw.user)
+	}
+	var out struct {
+		Windows []repository.UsageWindow `json:"windows"`
+	}
+	decode(t, rec, &out)
+	if len(out.Windows) != 1 || out.Windows[0].Scope != "hour5" || out.Windows[0].Remaining != 97 {
+		t.Errorf("windows = %+v", out.Windows)
+	}
+}
+
+func TestGetUsageWindows_NilReturnsEmpty(t *testing.T) {
+	s := newServerWithBalance(&fakePlanReader{}, &fakeUserPlanReader{}, &fakeQuotaManager{}, &fakeLedgerReader{}, &fakeBalanceReader{}, fakePinger{})
+	rec := do(t, s, http.MethodGet, "/v1/billing/users/u1/usage-windows", "")
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", rec.Code)
+	}
+}
+
+func TestGetUsageWindows_QueryError(t *testing.T) {
+	uw := &fakeUsageWindowsReader{err: repository.ErrQueryFailed}
+	s := newServerWithUsageWindows(&fakePlanReader{}, &fakeUserPlanReader{}, &fakeQuotaManager{}, &fakeLedgerReader{}, &fakeBalanceReader{}, uw, fakePinger{})
+	rec := do(t, s, http.MethodGet, "/v1/billing/users/u1/usage-windows", "")
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
 	}
 }

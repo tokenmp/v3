@@ -187,14 +187,61 @@ type BalanceReader interface {
 	GetBalance(ctx context.Context, userID string) (Balance, error)
 }
 
+// UsageWindow is one rate-limit window for an active coding plan. Limit is
+// the plan's hourly/weekly/monthly limit (non-nil only when the plan sets
+// it); Consumed is the count of finalized 'charge' coding requests inside
+// [WindowStart, WindowEnd); Remaining = max(0, Limit-Consumed). WindowEnd is
+// nil for the rolling hour5 and open-ended period windows.
+type UsageWindow struct {
+	Scope       string     `json:"scope"`
+	Limit       *int       `json:"limit,omitempty"`
+	Consumed    int        `json:"consumed"`
+	Remaining   int        `json:"remaining"`
+	WindowStart time.Time  `json:"window_start"`
+	WindowEnd   *time.Time `json:"window_end,omitempty"`
+}
+
+// UsageWindowsReader exposes the current coding usage windows for a user's
+// active coding plan(s), so callers (panel/BFF) can show remaining quota.
+type UsageWindowsReader interface {
+	// GetUsageWindows returns the hourly/weekly/monthly usage windows for
+	// the user's most recently activated active coding plan. A user with no
+	// active coding plan returns an empty slice (not an error).
+	GetUsageWindows(ctx context.Context, userID string) ([]UsageWindow, error)
+}
+
 // Stable classified errors. They do not wrap the driver error so DSN/SQL
 // fragments never reach logs through Error().
 var (
-	ErrNotFound     = errors.New("repository: not found")
-	ErrQueryFailed  = errors.New("repository: query failed")
-	ErrInsertFailed = errors.New("repository: insert failed")
-	ErrConflict     = errors.New("repository: conflicting state")
+	ErrNotFound      = errors.New("repository: not found")
+	ErrQueryFailed   = errors.New("repository: query failed")
+	ErrInsertFailed  = errors.New("repository: insert failed")
+	ErrConflict      = errors.New("repository: conflicting state")
+	ErrQuotaExceeded = errors.New("repository: quota exceeded")
 )
+
+// QuotaScope identifies which coding window was exceeded.
+type QuotaScope string
+
+const (
+	ScopeHour5  QuotaScope = "hour5"  // 5-hour rolling requests window (hourly_limit)
+	ScopeWeekly QuotaScope = "weekly" // Monday 00:00 UTC → next Monday 00:00 UTC (weekly_limit)
+	ScopePeriod QuotaScope = "period" // active user_plan activated_at → expires_at (monthly_limit)
+)
+
+// QuotaExceededError carries the scope (and accounting) of the exceeded
+// coding window. Error() returns a stable, secret-free message so it is safe
+// to log; use errors.Is(err, ErrQuotaExceeded) or errors.As to recover the
+// scope. Wanted is the number of requests the Reserve tried to hold.
+type QuotaExceededError struct {
+	Scope    QuotaScope
+	Limit    int
+	Consumed int
+	Wanted   int
+}
+
+func (e *QuotaExceededError) Error() string { return "repository: quota exceeded" }
+func (e *QuotaExceededError) Unwrap() error { return ErrQuotaExceeded }
 
 // GormRepository persists and reads billing records via GORM. It is the
 // single production implementation of PlanReader, UserPlanReader,
@@ -210,11 +257,12 @@ func New(db *gorm.DB) *GormRepository {
 
 // Compile-time assertions that GormRepository satisfies every port.
 var (
-	_ PlanReader     = (*GormRepository)(nil)
-	_ UserPlanReader = (*GormRepository)(nil)
-	_ QuotaManager   = (*GormRepository)(nil)
-	_ LedgerReader   = (*GormRepository)(nil)
-	_ BalanceReader  = (*GormRepository)(nil)
+	_ PlanReader         = (*GormRepository)(nil)
+	_ UserPlanReader     = (*GormRepository)(nil)
+	_ QuotaManager       = (*GormRepository)(nil)
+	_ LedgerReader       = (*GormRepository)(nil)
+	_ BalanceReader      = (*GormRepository)(nil)
+	_ UsageWindowsReader = (*GormRepository)(nil)
 )
 
 // ----------------------------------------------------------------------------
@@ -323,16 +371,23 @@ const insertLedgerSQL = `INSERT INTO usage_ledger (
 ON CONFLICT (idempotency_key) DO NOTHING`
 
 // Reserve creates the reservation and its 'reserve' ledger entry in a single
-// transaction. Idempotent per reservationID: a repeat call collides on the
-// reservation PK and the ledger idempotency_key, both handled by ON CONFLICT
-// DO NOTHING, so no duplicate rows are created.
+// transaction. Idempotent per reservationID: a repeat call returns nil
+// without re-enforcing windows or inserting duplicate rows.
+//
+// For billing_plan == "coding", Reserve enforces the active coding plan's
+// plan limits before holding quota:
+//   - hourly_limit  → 5-hour rolling requests window
+//   - weekly_limit  → Monday 00:00 UTC → next Monday 00:00 UTC
+//   - monthly_limit → active user_plan activated_at → expires_at (plan period)
+//
+// Consumption is counted from finalized 'charge' ledger rows
+// (-SUM(request_delta)). A per-user pg_advisory_xact_lock(hashtext(user_id))
+// is taken inside the transaction so the read-check-insert is atomic per
+// user. Exceeding any applicable window returns a *QuotaExceededError (scope
+// hour5/weekly/period); a user with no active coding plan is rejected
+// fail-closed (period, limit 0).
 func (r *GormRepository) Reserve(ctx context.Context, reservationID, userID, requestID, billingPlan string, reservedReqs int, reservedTokens int64, expiresAt *time.Time) error {
 	now := time.Now().UTC()
-	// Ensure the user exists in the billing users table before inserting
-	// the reservation row (foreign key constraint).
-	if err := r.EnsureUser(ctx, userID); err != nil {
-		return err
-	}
 	tx := r.db.WithContext(ctx).Begin()
 	if tx.Error != nil {
 		return ErrInsertFailed
@@ -343,6 +398,33 @@ func (r *GormRepository) Reserve(ctx context.Context, reservationID, userID, req
 			_ = tx.Rollback().Error
 		}
 	}()
+
+	// Serialize reserve per user so the window read-check-insert is atomic.
+	// Transaction-scoped: released on commit/rollback.
+	if err := tx.Exec(`SELECT pg_advisory_xact_lock(hashtext(?))`, userID).Error; err != nil {
+		return ErrQueryFailed
+	}
+
+	// Idempotency: a repeat reserve for the same reservation ID is a no-op
+	// and must NOT be rejected by a window that was fine on the first call.
+	var exists int
+	if err := tx.Raw(`SELECT 1 FROM quota_reservations WHERE id = ? LIMIT 1`, reservationID).Scan(&exists).Error; err != nil {
+		return ErrQueryFailed
+	}
+	if exists == 1 {
+		return nil
+	}
+
+	// Ensure the user exists before inserting the reservation (FK).
+	if err := tx.Exec(`INSERT INTO users (id, status) VALUES (?, 'active') ON CONFLICT (id) DO NOTHING`, userID).Error; err != nil {
+		return ErrInsertFailed
+	}
+
+	if billingPlan == "coding" {
+		if err := enforceCodingWindows(tx, userID, reservedReqs, now); err != nil {
+			return err
+		}
+	}
 
 	if err := tx.Exec(insertReservationSQL,
 		reservationID, userID, requestID, billingPlan,
@@ -363,6 +445,97 @@ func (r *GormRepository) Reserve(ctx context.Context, reservationID, userID, req
 		return ErrInsertFailed
 	}
 	committed = true
+	return nil
+}
+
+// activeCodingPlanRow is the projection of the user's most recently
+// activated active coding plan with its plan-level limits.
+type activeCodingPlanRow struct {
+	ActivatedAt  time.Time  `gorm:"column:activated_at"`
+	ExpiresAt    *time.Time `gorm:"column:expires_at"`
+	HourlyLimit  *int       `gorm:"column:hourly_limit"`
+	WeeklyLimit  *int       `gorm:"column:weekly_limit"`
+	MonthlyLimit *int       `gorm:"column:monthly_limit"`
+}
+
+const activeCodingPlanSQL = `SELECT up.activated_at, up.expires_at,
+	p.hourly_limit, p.weekly_limit, p.monthly_limit
+FROM user_plans up JOIN plans p ON p.id = up.plan_id
+WHERE up.user_id = ? AND up.status = 'active'
+  AND p.plan_type = 'coding' AND p.status = 'active'
+  AND (up.expires_at IS NULL OR up.expires_at > ?)
+ORDER BY up.activated_at DESC, up.id DESC
+LIMIT 1`
+
+// getActiveCodingPlan loads the user's most recent active coding plan with
+// limits. A zero ActivatedAt means no active coding entitlement.
+func getActiveCodingPlan(tx *gorm.DB, userID string, now time.Time) (activeCodingPlanRow, error) {
+	var row activeCodingPlanRow
+	if err := tx.Raw(activeCodingPlanSQL, userID, now).Scan(&row).Error; err != nil {
+		return activeCodingPlanRow{}, ErrQueryFailed
+	}
+	return row, nil
+}
+
+// consumedCodingSince returns finalized 'charge' coding requests (-SUM of
+// negative request_delta) with created_at >= since for the user.
+func consumedCodingSince(tx *gorm.DB, userID string, since time.Time) (int, error) {
+	const q = `SELECT COALESCE(-SUM(request_delta), 0) FROM usage_ledger
+WHERE user_id = ? AND billing_plan = 'coding' AND ledger_type = 'charge' AND created_at >= ?`
+	var consumed int
+	if err := tx.Raw(q, userID, since).Scan(&consumed).Error; err != nil {
+		return 0, ErrQueryFailed
+	}
+	return consumed, nil
+}
+
+// startOfWeekUTC returns the Monday 00:00 UTC that contains t.
+func startOfWeekUTC(t time.Time) time.Time {
+	t = t.UTC()
+	daysSinceMonday := (int(t.Weekday()) - int(time.Monday) + 7) % 7
+	return time.Date(t.Year(), t.Month(), t.Day()-daysSinceMonday, 0, 0, 0, 0, time.UTC)
+}
+
+// enforceCodingWindows checks the active coding plan's hourly/weekly/monthly
+// limits against finalized 'charge' consumption plus the new reservedReqs
+// (wanted). Returns *QuotaExceededError on breach, nil if within limits.
+// No active coding plan → fail-closed period breach (limit 0).
+func enforceCodingWindows(tx *gorm.DB, userID string, wanted int, now time.Time) error {
+	row, err := getActiveCodingPlan(tx, userID, now)
+	if err != nil {
+		return err
+	}
+	if row.ActivatedAt.IsZero() {
+		return &QuotaExceededError{Scope: ScopePeriod, Limit: 0, Consumed: 0, Wanted: wanted}
+	}
+	if row.HourlyLimit != nil {
+		consumed, err := consumedCodingSince(tx, userID, now.Add(-5*time.Hour))
+		if err != nil {
+			return err
+		}
+		if consumed+wanted > *row.HourlyLimit {
+			return &QuotaExceededError{Scope: ScopeHour5, Limit: *row.HourlyLimit, Consumed: consumed, Wanted: wanted}
+		}
+	}
+	if row.WeeklyLimit != nil {
+		ws := startOfWeekUTC(now)
+		consumed, err := consumedCodingSince(tx, userID, ws)
+		if err != nil {
+			return err
+		}
+		if consumed+wanted > *row.WeeklyLimit {
+			return &QuotaExceededError{Scope: ScopeWeekly, Limit: *row.WeeklyLimit, Consumed: consumed, Wanted: wanted}
+		}
+	}
+	if row.MonthlyLimit != nil {
+		consumed, err := consumedCodingSince(tx, userID, row.ActivatedAt)
+		if err != nil {
+			return err
+		}
+		if consumed+wanted > *row.MonthlyLimit {
+			return &QuotaExceededError{Scope: ScopePeriod, Limit: *row.MonthlyLimit, Consumed: consumed, Wanted: wanted}
+		}
+	}
 	return nil
 }
 
@@ -552,10 +725,9 @@ LIMIT ?`
 // (reserve/charge carry negative deltas, refund carries the positive reversal;
 // net = -total_consumed_tokens). Resulting remaining = token_limit + net_delta.
 //
-// Coding balance: SUM(monthly_limit) over active coding-type user_plans, minus
-// the requests consumed this calendar month (=-SUM(request_delta) over
-// 'charge' ledger entries with created_at >= month start). Periodic, because
-// coding plans are request-rate-based (hourly/weekly/monthly).
+// Coding balance: the current active coding plan's monthly_limit interpreted
+// as plan-period total, minus requests consumed since that user_plan's
+// activated_at. This intentionally is NOT calendar-month based.
 //
 // Both results are clamped to >=0. A user with no plans and no ledger returns
 // zeros; this is never ErrNotFound (the user-plan endpoint owns that case).
@@ -579,23 +751,19 @@ WHERE up.user_id = ? AND up.status = 'active' AND p.plan_type = 'token'`
 		tokenRemaining = 0
 	}
 
-	// Coding: monthly limit - consumed requests this calendar month.
-	const codingLimitQ = `SELECT COALESCE(SUM(p.monthly_limit), 0)
-FROM user_plans up JOIN plans p ON p.id = up.plan_id
-WHERE up.user_id = ? AND up.status = 'active' AND p.plan_type = 'coding'`
-	var codingLimit int64
-	if err := r.db.WithContext(ctx).Raw(codingLimitQ, userID).Scan(&codingLimit).Error; err != nil {
+	// Coding: plan-period total - consumed requests since activation.
+	codingRemaining := int64(0)
+	codingPlan, err := getActiveCodingPlan(r.db.WithContext(ctx), userID, time.Now().UTC())
+	if err != nil {
 		return Balance{}, ErrQueryFailed
 	}
-	const codingConsumedQ = `SELECT COALESCE(-SUM(request_delta), 0)
-FROM usage_ledger
-WHERE user_id = ? AND billing_plan = 'coding' AND ledger_type = 'charge'
-  AND created_at >= date_trunc('month', now())`
-	var codingConsumed int64
-	if err := r.db.WithContext(ctx).Raw(codingConsumedQ, userID).Scan(&codingConsumed).Error; err != nil {
-		return Balance{}, ErrQueryFailed
+	if !codingPlan.ActivatedAt.IsZero() && codingPlan.MonthlyLimit != nil {
+		consumed, err := consumedCodingSince(r.db.WithContext(ctx), userID, codingPlan.ActivatedAt)
+		if err != nil {
+			return Balance{}, ErrQueryFailed
+		}
+		codingRemaining = int64(*codingPlan.MonthlyLimit - consumed)
 	}
-	codingRemaining := codingLimit - codingConsumed
 	if codingRemaining < 0 {
 		codingRemaining = 0
 	}
@@ -604,4 +772,74 @@ WHERE user_id = ? AND billing_plan = 'coding' AND ledger_type = 'charge'
 		CodingRemaining: codingRemaining,
 		TokenRemaining:  tokenRemaining,
 	}, nil
+}
+
+// ----------------------------------------------------------------------------
+// UsageWindowsReader
+// ----------------------------------------------------------------------------
+
+// GetUsageWindows returns the hourly/weekly/monthly usage windows for the
+// user's most recently activated active coding plan. Only windows whose plan
+// limit is set are returned. A user with no active coding plan returns an
+// empty slice (not an error). Consumption is counted from finalized 'charge'
+// ledger rows, mirroring Reserve enforcement.
+func (r *GormRepository) GetUsageWindows(ctx context.Context, userID string) ([]UsageWindow, error) {
+	now := time.Now().UTC()
+	row, err := getActiveCodingPlan(r.db.WithContext(ctx), userID, now)
+	if err != nil {
+		return nil, ErrQueryFailed
+	}
+	if row.ActivatedAt.IsZero() {
+		return []UsageWindow{}, nil
+	}
+	windows := make([]UsageWindow, 0, 3)
+	if row.HourlyLimit != nil {
+		ws := now.Add(-5 * time.Hour)
+		consumed, err := consumedCodingSince(r.db.WithContext(ctx), userID, ws)
+		if err != nil {
+			return nil, err
+		}
+		lim := *row.HourlyLimit
+		rem := lim - consumed
+		if rem < 0 {
+			rem = 0
+		}
+		windows = append(windows, UsageWindow{
+			Scope: string(ScopeHour5), Limit: &lim, Consumed: consumed,
+			Remaining: rem, WindowStart: ws,
+		})
+	}
+	if row.WeeklyLimit != nil {
+		ws := startOfWeekUTC(now)
+		we := ws.Add(7 * 24 * time.Hour)
+		consumed, err := consumedCodingSince(r.db.WithContext(ctx), userID, ws)
+		if err != nil {
+			return nil, err
+		}
+		lim := *row.WeeklyLimit
+		rem := lim - consumed
+		if rem < 0 {
+			rem = 0
+		}
+		windows = append(windows, UsageWindow{
+			Scope: string(ScopeWeekly), Limit: &lim, Consumed: consumed,
+			Remaining: rem, WindowStart: ws, WindowEnd: &we,
+		})
+	}
+	if row.MonthlyLimit != nil {
+		consumed, err := consumedCodingSince(r.db.WithContext(ctx), userID, row.ActivatedAt)
+		if err != nil {
+			return nil, err
+		}
+		lim := *row.MonthlyLimit
+		rem := lim - consumed
+		if rem < 0 {
+			rem = 0
+		}
+		windows = append(windows, UsageWindow{
+			Scope: string(ScopePeriod), Limit: &lim, Consumed: consumed,
+			Remaining: rem, WindowStart: row.ActivatedAt, WindowEnd: row.ExpiresAt,
+		})
+	}
+	return windows, nil
 }

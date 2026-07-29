@@ -73,6 +73,20 @@ func TestBillingManagerReserveFinalizeRelease(t *testing.T) {
 	}
 }
 
+func TestBillingManagerReserveQuotaExceeded(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"code": "quota_exceeded"}})
+	}))
+	defer srv.Close()
+
+	m := NewManager(srv.URL)
+	_, err := m.Reserve(context.Background(), "r1", "u1", "req1", "coding", 1, 0)
+	if err != ErrQuotaExceeded {
+		t.Errorf("error = %v, want ErrQuotaExceeded", err)
+	}
+}
+
 func TestBillingManagerReserveError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)

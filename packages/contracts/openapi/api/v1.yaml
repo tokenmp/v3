@@ -604,6 +604,37 @@ components:
           type: string
           format: date-time
           nullable: true
+        usageWindows:
+          type: array
+          description: Optional current usage windows for an active coding plan
+            (hour5/weekly/period). Omitted when the plan has no windows or when
+            the upstream window query is unavailable.
+          items:
+            $ref: "#/components/schemas/UsageWindow"
+
+    UsageWindow:
+      type: object
+      required: [scope, consumed, remaining, windowStart]
+      properties:
+        scope:
+          type: string
+          enum: [hour5, weekly, period]
+          description: The rate-limit window this entry describes.
+        limit:
+          type: integer
+          nullable: true
+          description: The plan limit for this window, when set.
+        consumed:
+          type: integer
+        remaining:
+          type: integer
+        windowStart:
+          type: string
+          format: date-time
+        windowEnd:
+          type: string
+          format: date-time
+          nullable: true
 
     RequestLog:
       type: object

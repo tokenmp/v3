@@ -65,6 +65,17 @@ type Balance struct {
 	TokenRemaining  string `json:"token_remaining"`
 }
 
+// UsageWindow 对应 Billing Service 返回的活跃 coding 套餐用量窗口（hour5/weekly/period）。
+// Limit 仅在套餐设置了对应周期限额时非 nil；WindowEnd 在滚动 hour5 与无界 period 窗口为 nil。
+type UsageWindow struct {
+	Scope       string     `json:"scope"`
+	Limit       *int       `json:"limit,omitempty"`
+	Consumed    int        `json:"consumed"`
+	Remaining   int        `json:"remaining"`
+	WindowStart time.Time  `json:"window_start"`
+	WindowEnd   *time.Time `json:"window_end,omitempty"`
+}
+
 // Client 调用 Billing Service 只读端点。baseURL 为空时返回降级客户端。
 type Client struct {
 	httpClient *http.Client
@@ -128,6 +139,24 @@ func (c *Client) GetBalance(ctx context.Context, userID string) (Balance, error)
 		return out, err
 	}
 	return out, nil
+}
+
+// GetUsageWindows 调用 GET /v1/billing/users/{user_id}/usage-windows 获取用户活跃 coding
+// 套餐的当前用量窗口（hour5/weekly/period）。无活跃 coding 套餐时 Billing 返回空数组。
+func (c *Client) GetUsageWindows(ctx context.Context, userID string) ([]UsageWindow, error) {
+	if userID == "" {
+		return nil, ErrUnavailable
+	}
+	var out struct {
+		Windows []UsageWindow `json:"windows"`
+	}
+	if err := c.get(ctx, "/v1/billing/users/"+url.PathEscape(userID)+"/usage-windows", &out); err != nil {
+		return nil, err
+	}
+	if out.Windows == nil {
+		out.Windows = []UsageWindow{}
+	}
+	return out.Windows, nil
 }
 
 // ListAllUserPlans calls GET /v1/billing/admin/user-plans (cross-user admin list).

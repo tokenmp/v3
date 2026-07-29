@@ -104,6 +104,16 @@ VALUES (?, ?, ?, ?, ?)`, userID, planID, planType, status, time.Now().UTC()).Err
 	}
 }
 
+// setupCodingEntitlement inserts a coding plan with generous limits and an
+// active user_plan binding so Reserve('coding', ...) enforcement does not
+// fail-closed in tests that are not about quota enforcement.
+func setupCodingEntitlement(t *testing.T, db *gorm.DB, userID string) {
+	t.Helper()
+	h, w, m := 1000000, 1000000, 1000000
+	planID := insertCodingPlan(t, db, "ent-"+userID, &h, &w, &m)
+	insertUserPlanActivated(t, db, userID, planID, "active", time.Now().UTC())
+}
+
 func reservationStatus(t *testing.T, db *gorm.DB, id string) string {
 	t.Helper()
 	var s string
@@ -111,6 +121,34 @@ func reservationStatus(t *testing.T, db *gorm.DB, id string) string {
 		t.Fatalf("query reservation status: %v", err)
 	}
 	return s
+}
+
+// insertCodingPlan inserts a coding plan with explicit nullable limits.
+func insertCodingPlan(t *testing.T, db *gorm.DB, name string, hourly, weekly, monthly *int) int64 {
+	t.Helper()
+	var id int64
+	if err := db.Raw(`INSERT INTO plans (name, plan_type, price, category, hourly_limit, weekly_limit, monthly_limit, allowed_models, status)
+VALUES (?, 'coding', 0, 'monthly', ?, ?, ?, '[]'::jsonb, 'active') RETURNING id`,
+		name, hourly, weekly, monthly).Scan(&id).Error; err != nil {
+		t.Fatalf("insert coding plan: %v", err)
+	}
+	return id
+}
+
+func insertUserPlanActivated(t *testing.T, db *gorm.DB, userID string, planID int64, status string, activatedAt time.Time) {
+	t.Helper()
+	if err := db.Exec(`INSERT INTO user_plans (user_id, plan_id, plan_type, status, activated_at)
+VALUES (?, ?, 'coding', ?, ?)`, userID, planID, status, activatedAt).Error; err != nil {
+		t.Fatalf("insert user_plan: %v", err)
+	}
+}
+
+func quotaExceededScope(err error) string {
+	var qe *QuotaExceededError
+	if errors.As(err, &qe) {
+		return string(qe.Scope)
+	}
+	return ""
 }
 
 func ledgerCount(t *testing.T, db *gorm.DB, userID string) int {
@@ -138,6 +176,7 @@ func TestReserve_Finalize_Release(t *testing.T) {
 	applyMigrations(t, d)
 	db := openDB(t, d)
 	insertUser(t, db, "u1")
+	setupCodingEntitlement(t, db, "u1")
 	r := New(db)
 	ctx := context.Background()
 
@@ -237,6 +276,7 @@ func TestFinalize_Idempotent(t *testing.T) {
 	applyMigrations(t, d)
 	db := openDB(t, d)
 	insertUser(t, db, "u3")
+	setupCodingEntitlement(t, db, "u3")
 	r := New(db)
 	ctx := context.Background()
 
@@ -270,6 +310,7 @@ func TestRelease_Idempotent(t *testing.T) {
 	applyMigrations(t, d)
 	db := openDB(t, d)
 	insertUser(t, db, "u4")
+	setupCodingEntitlement(t, db, "u4")
 	r := New(db)
 	ctx := context.Background()
 
@@ -307,6 +348,7 @@ func TestListLedger(t *testing.T) {
 	applyMigrations(t, d)
 	db := openDB(t, d)
 	insertUser(t, db, "u5")
+	setupCodingEntitlement(t, db, "u5")
 	r := New(db)
 	ctx := context.Background()
 
@@ -425,5 +467,210 @@ VALUES ('b-disabled', 'token', 0, 'monthly', '[]'::jsonb, 'disabled')`).Error; e
 	}
 	if len(all) != 2 {
 		t.Fatalf("all plans count = %d, want 2", len(all))
+	}
+}
+
+// --- coding window enforcement tests -------------------------------------
+
+// consume charges one coding request: reserve then finalize (charge ledger).
+func consume(t *testing.T, r *GormRepository, ctx context.Context, userID, tag string) {
+	t.Helper()
+	resID := "res-" + tag
+	if err := r.Reserve(ctx, resID, userID, "req-"+tag, "coding", 1, 1, nil); err != nil {
+		t.Fatalf("Reserve %s: %v", tag, err)
+	}
+	if err := r.Finalize(ctx, resID, 1, 1); err != nil {
+		t.Fatalf("Finalize %s: %v", tag, err)
+	}
+}
+
+func TestReserve_CodingNoPlan_FailClosed(t *testing.T) {
+	d := dsn(t)
+	applyMigrations(t, d)
+	db := openDB(t, d)
+	insertUser(t, db, "np")
+	r := New(db)
+	ctx := context.Background()
+
+	err := r.Reserve(ctx, "res-np", "np", "req-np", "coding", 1, 1, nil)
+	if !errors.Is(err, ErrQuotaExceeded) {
+		t.Fatalf("expected ErrQuotaExceeded (no active coding plan), got %v", err)
+	}
+	if s := quotaExceededScope(err); s != "period" {
+		t.Fatalf("scope = %q, want period", s)
+	}
+	// No reservation or ledger row should have been written on rejection.
+	var n int
+	db.Raw(`SELECT count(*) FROM quota_reservations WHERE id = 'res-np'`).Scan(&n)
+	if n != 0 {
+		t.Fatalf("reservation row leaked on rejection: %d", n)
+	}
+}
+
+func TestReserve_CodingEnforcesHour5(t *testing.T) {
+	d := dsn(t)
+	applyMigrations(t, d)
+	db := openDB(t, d)
+	insertUser(t, db, "h5")
+	lim := 2
+	planID := insertCodingPlan(t, db, "h5plan", &lim, nil, nil)
+	insertUserPlanActivated(t, db, "h5", planID, "active", time.Now().UTC())
+	r := New(db)
+	ctx := context.Background()
+
+	// Consume 2 finalized requests (hour5 limit=2).
+	consume(t, r, ctx, "h5", "a")
+	consume(t, r, ctx, "h5", "b")
+	// A third reserve must be rejected with scope hour5.
+	err := r.Reserve(ctx, "res-h5c", "h5", "req-h5c", "coding", 1, 1, nil)
+	if !errors.Is(err, ErrQuotaExceeded) {
+		t.Fatalf("expected ErrQuotaExceeded, got %v", err)
+	}
+	if s := quotaExceededScope(err); s != "hour5" {
+		t.Fatalf("scope = %q, want hour5", s)
+	}
+}
+
+func TestReserve_CodingEnforcesWeekly(t *testing.T) {
+	d := dsn(t)
+	applyMigrations(t, d)
+	db := openDB(t, d)
+	insertUser(t, db, "wk")
+	lim := 1
+	planID := insertCodingPlan(t, db, "wkplan", nil, &lim, nil)
+	insertUserPlanActivated(t, db, "wk", planID, "active", time.Now().UTC())
+	r := New(db)
+	ctx := context.Background()
+
+	consume(t, r, ctx, "wk", "a")
+	err := r.Reserve(ctx, "res-wkb", "wk", "req-wkb", "coding", 1, 1, nil)
+	if !errors.Is(err, ErrQuotaExceeded) {
+		t.Fatalf("expected ErrQuotaExceeded, got %v", err)
+	}
+	if s := quotaExceededScope(err); s != "weekly" {
+		t.Fatalf("scope = %q, want weekly", s)
+	}
+}
+
+func TestReserve_CodingEnforcesPeriod(t *testing.T) {
+	d := dsn(t)
+	applyMigrations(t, d)
+	db := openDB(t, d)
+	insertUser(t, db, "pd")
+	lim := 2
+	planID := insertCodingPlan(t, db, "pdplan", nil, nil, &lim)
+	insertUserPlanActivated(t, db, "pd", planID, "active", time.Now().UTC())
+	r := New(db)
+	ctx := context.Background()
+
+	consume(t, r, ctx, "pd", "a")
+	consume(t, r, ctx, "pd", "b")
+	err := r.Reserve(ctx, "res-pdc", "pd", "req-pdc", "coding", 1, 1, nil)
+	if !errors.Is(err, ErrQuotaExceeded) {
+		t.Fatalf("expected ErrQuotaExceeded, got %v", err)
+	}
+	if s := quotaExceededScope(err); s != "period" {
+		t.Fatalf("scope = %q, want period", s)
+	}
+}
+
+func TestReserve_CodingIdempotentSkipsEnforcement(t *testing.T) {
+	d := dsn(t)
+	applyMigrations(t, d)
+	db := openDB(t, d)
+	insertUser(t, db, "idem")
+	lim := 1
+	planID := insertCodingPlan(t, db, "idemplan", &lim, nil, nil)
+	insertUserPlanActivated(t, db, "idem", planID, "active", time.Now().UTC())
+	r := New(db)
+	ctx := context.Background()
+
+	if err := r.Reserve(ctx, "res-idem", "idem", "req-idem", "coding", 1, 1, nil); err != nil {
+		t.Fatalf("Reserve first: %v", err)
+	}
+	// Fill the window so a fresh reserve would be rejected.
+	consume(t, r, ctx, "idem", "a")
+	// Repeat reserve of the SAME id must stay idempotent (nil), not be
+	// rejected by the now-full window.
+	if err := r.Reserve(ctx, "res-idem", "idem", "req-idem", "coding", 1, 1, nil); err != nil {
+		t.Fatalf("Reserve repeat (idempotent): %v", err)
+	}
+}
+
+func TestReserve_CodingWithinLimitSucceeds(t *testing.T) {
+	d := dsn(t)
+	applyMigrations(t, d)
+	db := openDB(t, d)
+	insertUser(t, db, "ok")
+	lim := 5
+	planID := insertCodingPlan(t, db, "okplan", &lim, &lim, &lim)
+	insertUserPlanActivated(t, db, "ok", planID, "active", time.Now().UTC())
+	r := New(db)
+	ctx := context.Background()
+
+	consume(t, r, ctx, "ok", "a")
+	consume(t, r, ctx, "ok", "b")
+	// Third reserve is within all limits (3 <= 5).
+	if err := r.Reserve(ctx, "res-ok3", "ok", "req-ok3", "coding", 1, 1, nil); err != nil {
+		t.Fatalf("Reserve within limit: %v", err)
+	}
+}
+
+func TestGetUsageWindows(t *testing.T) {
+	d := dsn(t)
+	applyMigrations(t, d)
+	db := openDB(t, d)
+	insertUser(t, db, "uw")
+	h, w, m := 5, 50, 500
+	planID := insertCodingPlan(t, db, "uwplan", &h, &w, &m)
+	insertUserPlanActivated(t, db, "uw", planID, "active", time.Now().UTC())
+	r := New(db)
+	ctx := context.Background()
+
+	consume(t, r, ctx, "uw", "a")
+	consume(t, r, ctx, "uw", "b")
+
+	windows, err := r.GetUsageWindows(ctx, "uw")
+	if err != nil {
+		t.Fatalf("GetUsageWindows: %v", err)
+	}
+	if len(windows) != 3 {
+		t.Fatalf("windows count = %d, want 3", len(windows))
+	}
+	byScope := map[string]UsageWindow{}
+	for _, win := range windows {
+		byScope[win.Scope] = win
+	}
+	for _, scope := range []string{"hour5", "weekly", "period"} {
+		win, ok := byScope[scope]
+		if !ok {
+			t.Errorf("missing scope %q", scope)
+			continue
+		}
+		if win.Consumed != 2 {
+			t.Errorf("scope %q consumed = %d, want 2", scope, win.Consumed)
+		}
+		if win.Limit == nil {
+			t.Errorf("scope %q limit nil", scope)
+		}
+	}
+	// Sanity: remaining == limit - consumed for each.
+	if byScope["hour5"].Remaining != 3 || byScope["weekly"].Remaining != 48 || byScope["period"].Remaining != 498 {
+		t.Errorf("remaining = hour5:%d weekly:%d period:%d", byScope["hour5"].Remaining, byScope["weekly"].Remaining, byScope["period"].Remaining)
+	}
+}
+
+func TestGetUsageWindows_NoCodingPlan(t *testing.T) {
+	d := dsn(t)
+	applyMigrations(t, d)
+	db := openDB(t, d)
+	insertUser(t, db, "uw-none")
+	r := New(db)
+	windows, err := r.GetUsageWindows(context.Background(), "uw-none")
+	if err != nil {
+		t.Fatalf("GetUsageWindows: %v", err)
+	}
+	if len(windows) != 0 {
+		t.Fatalf("windows count = %d, want 0 (no coding plan)", len(windows))
 	}
 }

@@ -224,9 +224,15 @@ func quotaMiddleware(mgr quota.Manager, logClient *logging.Client, settingsStore
 					logEdgeClientCancelled(logClient, logger, requestID, claims.Subject, startedAt, completedAt)
 					return
 				}
-				logger.Error("quota reserve failed", "error", err, "request_id", requestID)
 				w.Header().Set("Content-Type", "application/json; charset=utf-8")
 				w.Header().Set("Cache-Control", "no-store")
+				if errors.Is(err, quota.ErrQuotaExceeded) {
+					logger.Info("quota exceeded", "request_id", requestID)
+					w.WriteHeader(http.StatusTooManyRequests)
+					_, _ = w.Write([]byte(`{"error":{"code":"quota_exceeded","message":"Quota exceeded"}}`))
+					return
+				}
+				logger.Error("quota reserve failed", "error", err, "request_id", requestID)
 				w.WriteHeader(http.StatusServiceUnavailable)
 				_, _ = w.Write([]byte(`{"error":{"code":"quota_unavailable","message":"Quota service unavailable"}}`))
 				return
