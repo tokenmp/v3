@@ -205,6 +205,14 @@ func (c *Client) RenewUserPlan(ctx context.Context, userPlanID string, body map[
 	return out, nil
 }
 
+func (c *Client) SwitchUserPlan(ctx context.Context, userPlanID string, body map[string]any) (UserPlan, error) {
+	var out UserPlan
+	if err := c.post(ctx, "/v1/billing/admin/user-plans/"+url.PathEscape(userPlanID)+"/switch", body, &out); err != nil {
+		return out, err
+	}
+	return out, nil
+}
+
 func (c *Client) UpgradeUserPlan(ctx context.Context, userPlanID string, body map[string]any) (UserPlan, error) {
 	var out UserPlan
 	if err := c.post(ctx, "/v1/billing/admin/user-plans/"+url.PathEscape(userPlanID)+"/upgrade", body, &out); err != nil {

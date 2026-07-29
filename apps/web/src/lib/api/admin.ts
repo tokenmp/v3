@@ -22,7 +22,7 @@ import type {
   AdminUserPlan,
   AdminUserPlanInput,
   AdminUserPlanRenewInput,
-  AdminUserPlanUpgradeInput,
+  AdminUserPlanSwitchInput,
   AdminLimitOverride,
   AdminLimitOverrideInput,
   AdminProvider,
@@ -534,8 +534,8 @@ export const adminApi = {
         baseUrl: ADMIN_BASE,
       });
     },
-    upgrade: async (id: string, input: AdminUserPlanUpgradeInput): Promise<AdminUserPlan> => {
-      return request<AdminUserPlan>(`/api/v1/admin/user-plans/${id}/upgrade`, {
+    switchPlan: async (id: string, input: AdminUserPlanSwitchInput): Promise<AdminUserPlan> => {
+      return request<AdminUserPlan>(`/api/v1/admin/user-plans/${id}/switch`, {
         method: 'POST',
         body: {
           plan_id: Number(input.planId),
@@ -609,7 +609,7 @@ export const adminUserPlanApi = {
   assign: adminApi.userPlans.assign,
   cancel: adminApi.userPlans.cancel,
   renew: adminApi.userPlans.renew,
-  upgrade: adminApi.userPlans.upgrade,
+  switchPlan: adminApi.userPlans.switchPlan,
   createLimitOverride: adminApi.userPlans.createLimitOverride,
   listLimitOverrides: adminApi.userPlans.listLimitOverrides,
   revokeLimitOverride: adminApi.userPlans.revokeLimitOverride,

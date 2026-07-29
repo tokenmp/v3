@@ -63,6 +63,7 @@ func (h *Handlers) Routes(r chi.Router) {
 	r.Delete("/api/v1/admin/plans/{planId}", h.AdminDeletePlan)
 	r.Post("/api/v1/admin/user-plans", h.AdminAssignUserPlan)
 	r.Post("/api/v1/admin/user-plans/{userPlanId}/renew", h.AdminRenewUserPlan)
+	r.Post("/api/v1/admin/user-plans/{userPlanId}/switch", h.AdminSwitchUserPlan)
 	r.Post("/api/v1/admin/user-plans/{userPlanId}/upgrade", h.AdminUpgradeUserPlan)
 	r.Post("/api/v1/admin/user-plans/{userPlanId}/cancel", h.AdminCancelUserPlan)
 	r.Get("/api/v1/admin/user-plans/{userPlanId}/limit-overrides", h.AdminListLimitOverrides)
@@ -474,7 +475,15 @@ func (h *Handlers) AdminRenewUserPlan(w http.ResponseWriter, r *http.Request) {
 	httpresp.OK(w, up)
 }
 
+func (h *Handlers) AdminSwitchUserPlan(w http.ResponseWriter, r *http.Request) {
+	h.adminSwitchLikeUserPlan(w, r, true)
+}
+
 func (h *Handlers) AdminUpgradeUserPlan(w http.ResponseWriter, r *http.Request) {
+	h.adminSwitchLikeUserPlan(w, r, false)
+}
+
+func (h *Handlers) adminSwitchLikeUserPlan(w http.ResponseWriter, r *http.Request, useSwitch bool) {
 	if h.Billing == nil || !h.Billing.Available() {
 		httpresp.Error(w, httpresp.CodeServiceUnavailable, "billing unavailable")
 		return
@@ -484,9 +493,15 @@ func (h *Handlers) AdminUpgradeUserPlan(w http.ResponseWriter, r *http.Request) 
 		httpresp.Error(w, httpresp.CodeInvalidJSON, "invalid body")
 		return
 	}
-	up, err := h.Billing.UpgradeUserPlan(r.Context(), chi.URLParam(r, "userPlanId"), body)
+	var up billing.UserPlan
+	var err error
+	if useSwitch {
+		up, err = h.Billing.SwitchUserPlan(r.Context(), chi.URLParam(r, "userPlanId"), body)
+	} else {
+		up, err = h.Billing.UpgradeUserPlan(r.Context(), chi.URLParam(r, "userPlanId"), body)
+	}
 	if err != nil {
-		h.logger().Warn("admin upgrade user plan failed", "error", err)
+		h.logger().Warn("admin switch user plan failed", "error", err)
 		httpresp.Error(w, httpresp.CodeServiceUnavailable, "billing unavailable")
 		return
 	}

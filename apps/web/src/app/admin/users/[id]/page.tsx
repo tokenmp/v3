@@ -26,7 +26,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { ConfirmDialog } from '@/components/confirm-dialog';
-import { ArrowLeft, Ban, Gift, History, Plus, RotateCcw, TrendingUp } from 'lucide-react';
+import { ArrowLeft, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import type { ApiKey, UserPlan, RequestLog } from '@/types';
 import type { AdminLimitOverride, AdminUserPlanInput, LimitOverrideScope } from '@/types/admin';
@@ -81,9 +81,9 @@ interface OverrideForm {
   reason: string;
 }
 
-interface RenewUpgradeForm {
+interface RenewSwitchForm {
   userPlan: UserPlan;
-  mode: 'renew' | 'upgrade';
+  mode: 'renew' | 'switch';
   extendDays: string;
   newPlanId: string;
   expiresAt: string;
@@ -118,8 +118,8 @@ export default function AdminUserDetailPage() {
   const [assignOpen, setAssignOpen] = useState(false);
   const [assignForm, setAssignForm] = useState<AssignForm>({ planId: '', expiresAt: '' });
   const [cancelPlanId, setCancelPlanId] = useState<string | null>(null);
-  const [renewUpgradeOpen, setRenewUpgradeOpen] = useState(false);
-  const [renewUpgradeForm, setRenewUpgradeForm] = useState<RenewUpgradeForm | null>(null);
+  const [renewSwitchOpen, setRenewSwitchOpen] = useState(false);
+  const [renewSwitchForm, setRenewSwitchForm] = useState<RenewSwitchForm | null>(null);
   const [overrideOpen, setOverrideOpen] = useState(false);
   const [overrideForm, setOverrideForm] = useState<OverrideForm | null>(null);
   const [historyPlan, setHistoryPlan] = useState<UserPlan | null>(null);
@@ -146,10 +146,10 @@ export default function AdminUserDetailPage() {
     },
   });
 
-  const renewUpgradeMutation = useMutation({
-    mutationFn: (input: RenewUpgradeForm) => {
-      if (input.mode === 'upgrade') {
-        return adminUserPlanApi.upgrade(input.userPlan.id, {
+  const renewSwitchMutation = useMutation({
+    mutationFn: (input: RenewSwitchForm) => {
+      if (input.mode === 'switch') {
+        return adminUserPlanApi.switchPlan(input.userPlan.id, {
           planId: input.newPlanId,
           expiresAt: input.expiresAt ? new Date(input.expiresAt).toISOString() : null,
         });
@@ -202,28 +202,28 @@ export default function AdminUserDetailPage() {
     }, { onSuccess: () => setAssignOpen(false) });
   }
 
-  function openRenewUpgrade(userPlan: UserPlan, mode: 'renew' | 'upgrade') {
-    setRenewUpgradeForm({
+  function openRenewSwitch(userPlan: UserPlan, mode: 'renew' | 'switch') {
+    setRenewSwitchForm({
       userPlan,
       mode,
       extendDays: mode === 'renew' ? '30' : '',
-      newPlanId: mode === 'upgrade' ? userPlan.planId : '',
+      newPlanId: mode === 'switch' ? userPlan.planId : '',
       expiresAt: '',
     });
-    setRenewUpgradeOpen(true);
+    setRenewSwitchOpen(true);
   }
 
-  function handleRenewUpgrade() {
-    if (!renewUpgradeForm) return;
-    if (renewUpgradeForm.mode === 'renew' && !renewUpgradeForm.extendDays && !renewUpgradeForm.expiresAt) {
+  function handleRenewSwitch() {
+    if (!renewSwitchForm) return;
+    if (renewSwitchForm.mode === 'renew' && !renewSwitchForm.extendDays && !renewSwitchForm.expiresAt) {
       toast.error('请输入延长天数或新的到期时间');
       return;
     }
-    if (renewUpgradeForm.mode === 'upgrade' && !renewUpgradeForm.newPlanId) {
-      toast.error('请选择升级后的套餐');
+    if (renewSwitchForm.mode === 'switch' && !renewSwitchForm.newPlanId) {
+      toast.error('请选择切换后的套餐');
       return;
     }
-    renewUpgradeMutation.mutate(renewUpgradeForm, { onSuccess: () => setRenewUpgradeOpen(false) });
+    renewSwitchMutation.mutate(renewSwitchForm, { onSuccess: () => setRenewSwitchOpen(false) });
   }
 
   function openOverride(userPlan: UserPlan, kind: 'reset' | 'bonus') {
@@ -355,29 +355,17 @@ export default function AdminUserDetailPage() {
                     </TableCell>
                     <TableCell className="text-right">
                       {plan.status === 'active' && (
-                        <div className="flex justify-end gap-1">
-                          <Button variant="ghost" size="icon" title="续费" onClick={() => openRenewUpgrade(plan, 'renew')}>
-                            <RotateCcw className="h-4 w-4" />
-                          </Button>
-                          <Button variant="ghost" size="icon" title="升级/更换套餐" onClick={() => openRenewUpgrade(plan, 'upgrade')}>
-                            <TrendingUp className="h-4 w-4" />
-                          </Button>
+                        <div className="flex flex-wrap justify-end gap-2">
+                          <Button variant="outline" size="sm" onClick={() => openRenewSwitch(plan, 'renew')}>续费</Button>
+                          <Button variant="outline" size="sm" onClick={() => openRenewSwitch(plan, 'switch')}>切换</Button>
                           {plan.planType === 'coding' && (
                             <>
-                              <Button variant="ghost" size="icon" title="重置窗口" onClick={() => openOverride(plan, 'reset')}>
-                                <RotateCcw className="h-4 w-4" />
-                              </Button>
-                              <Button variant="ghost" size="icon" title="临时加额" onClick={() => openOverride(plan, 'bonus')}>
-                                <Gift className="h-4 w-4" />
-                              </Button>
-                              <Button variant="ghost" size="icon" title="覆盖历史" onClick={() => setHistoryPlan(plan)}>
-                                <History className="h-4 w-4" />
-                              </Button>
+                              <Button variant="outline" size="sm" onClick={() => openOverride(plan, 'reset')}>重置</Button>
+                              <Button variant="outline" size="sm" onClick={() => openOverride(plan, 'bonus')}>加额</Button>
+                              <Button variant="ghost" size="sm" onClick={() => setHistoryPlan(plan)}>历史</Button>
                             </>
                           )}
-                          <Button variant="ghost" size="icon" className="text-destructive" title="撤销套餐" onClick={() => setCancelPlanId(plan.id)}>
-                            <Ban className="h-4 w-4" />
-                          </Button>
+                          <Button variant="ghost" size="sm" className="text-destructive" onClick={() => setCancelPlanId(plan.id)}>撤销</Button>
                         </div>
                       )}
                     </TableCell>
@@ -512,41 +500,41 @@ export default function AdminUserDetailPage() {
         </DialogFooter>
       </Dialog>
 
-      <Dialog open={renewUpgradeOpen} onOpenChange={setRenewUpgradeOpen}>
+      <Dialog open={renewSwitchOpen} onOpenChange={setRenewSwitchOpen}>
         <DialogHeader>
-          <DialogTitle>{renewUpgradeForm?.mode === 'upgrade' ? '升级/更换套餐' : '续费套餐'}</DialogTitle>
+          <DialogTitle>{renewSwitchForm?.mode === 'switch' ? '切换套餐' : '续费套餐'}</DialogTitle>
           <DialogDescription>
-            {renewUpgradeForm?.mode === 'upgrade'
-              ? '取消当前套餐并创建新的套餐绑定。历史请求和账本不修改。'
+            {renewSwitchForm?.mode === 'switch'
+              ? '切换会取消当前套餐并创建新的套餐绑定；目标套餐不能比当前套餐等级或用量更低。历史请求和账本不修改。'
               : '延长当前套餐到期时间，或直接设置新的到期时间。'}
           </DialogDescription>
         </DialogHeader>
-        {renewUpgradeForm && (
+        {renewSwitchForm && (
           <div className="space-y-4">
             <div className="rounded-md bg-muted p-3 text-sm">
-              <div className="font-medium">{renewUpgradeForm.userPlan.planName || `#${renewUpgradeForm.userPlan.planId}`}</div>
-              <div className="text-muted-foreground">当前到期：{formatTime(renewUpgradeForm.userPlan.expiresAt)}</div>
+              <div className="font-medium">{renewSwitchForm.userPlan.planName || `#${renewSwitchForm.userPlan.planId}`}</div>
+              <div className="text-muted-foreground">当前到期：{formatTime(renewSwitchForm.userPlan.expiresAt)}</div>
             </div>
-            {renewUpgradeForm.mode === 'renew' ? (
+            {renewSwitchForm.mode === 'renew' ? (
               <div className="space-y-2">
                 <Label htmlFor="renew-days">延长天数</Label>
                 <Input
                   id="renew-days"
                   type="number"
                   min={1}
-                  value={renewUpgradeForm.extendDays}
-                  onChange={(e) => setRenewUpgradeForm((f) => f ? { ...f, extendDays: e.target.value } : f)}
+                  value={renewSwitchForm.extendDays}
+                  onChange={(e) => setRenewSwitchForm((f) => f ? { ...f, extendDays: e.target.value } : f)}
                 />
                 <p className="text-xs text-muted-foreground">从当前到期时间（若已过期则从现在）开始延长；也可以清空天数，改用下面的新到期时间。</p>
               </div>
             ) : (
               <div className="space-y-2">
-                <Label htmlFor="upgrade-plan">升级后的套餐</Label>
+                <Label htmlFor="switch-plan">切换后的套餐</Label>
                 <select
-                  id="upgrade-plan"
+                  id="switch-plan"
                   className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                  value={renewUpgradeForm.newPlanId}
-                  onChange={(e) => setRenewUpgradeForm((f) => f ? { ...f, newPlanId: e.target.value } : f)}
+                  value={renewSwitchForm.newPlanId}
+                  onChange={(e) => setRenewSwitchForm((f) => f ? { ...f, newPlanId: e.target.value } : f)}
                 >
                   <option value="">选择套餐</option>
                   {plans.map((p) => (
@@ -560,16 +548,16 @@ export default function AdminUserDetailPage() {
               <Input
                 id="renew-expires"
                 type="datetime-local"
-                value={renewUpgradeForm.expiresAt}
-                onChange={(e) => setRenewUpgradeForm((f) => f ? { ...f, expiresAt: e.target.value } : f)}
+                value={renewSwitchForm.expiresAt}
+                onChange={(e) => setRenewSwitchForm((f) => f ? { ...f, expiresAt: e.target.value } : f)}
               />
-              <p className="text-xs text-muted-foreground">填写后会优先使用此到期时间；升级时留空表示永久有效。</p>
+              <p className="text-xs text-muted-foreground">填写后会优先使用此到期时间；切换时留空表示永久有效。</p>
             </div>
           </div>
         )}
         <DialogFooter>
-          <Button variant="outline" onClick={() => setRenewUpgradeOpen(false)} disabled={renewUpgradeMutation.isPending}>取消</Button>
-          <Button onClick={handleRenewUpgrade} disabled={renewUpgradeMutation.isPending}>{renewUpgradeMutation.isPending ? '提交中…' : '确认'}</Button>
+          <Button variant="outline" onClick={() => setRenewSwitchOpen(false)} disabled={renewSwitchMutation.isPending}>取消</Button>
+          <Button onClick={handleRenewSwitch} disabled={renewSwitchMutation.isPending}>{renewSwitchMutation.isPending ? '提交中…' : '确认'}</Button>
         </DialogFooter>
       </Dialog>
 

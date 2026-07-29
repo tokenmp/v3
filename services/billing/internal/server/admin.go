@@ -227,7 +227,15 @@ func (s *Server) handleAdminRenewUserPlan(w http.ResponseWriter, r *http.Request
 	httpresp.OK(w, up)
 }
 
+func (s *Server) handleAdminSwitchUserPlan(w http.ResponseWriter, r *http.Request) {
+	s.handleAdminSwitchLikeUserPlan(w, r, true)
+}
+
 func (s *Server) handleAdminUpgradeUserPlan(w http.ResponseWriter, r *http.Request) {
+	s.handleAdminSwitchLikeUserPlan(w, r, false)
+}
+
+func (s *Server) handleAdminSwitchLikeUserPlan(w http.ResponseWriter, r *http.Request, useSwitch bool) {
 	if s.admin == nil {
 		httpresp.Error(w, httpresp.CodeServiceUnavailable, "admin not configured")
 		return
@@ -250,9 +258,14 @@ func (s *Server) handleAdminUpgradeUserPlan(w http.ResponseWriter, r *http.Reque
 	if !ok {
 		return
 	}
-	up, err := s.admin.UpgradeUserPlan(r.Context(), id, body.PlanID, expiresAt)
+	var up repository.UserPlan
+	if useSwitch {
+		up, err = s.admin.SwitchUserPlan(r.Context(), id, body.PlanID, expiresAt)
+	} else {
+		up, err = s.admin.UpgradeUserPlan(r.Context(), id, body.PlanID, expiresAt)
+	}
 	if err != nil {
-		s.handleUserPlanAdminErr(w, err, "admin upgrade user plan failed")
+		s.handleUserPlanAdminErr(w, err, "admin switch user plan failed")
 		return
 	}
 	httpresp.Created(w, up)
@@ -277,7 +290,7 @@ func (s *Server) handleUserPlanAdminErr(w http.ResponseWriter, err error, msg st
 		return
 	}
 	if errors.Is(err, repository.ErrConflict) {
-		httpresp.Error(w, httpresp.CodeBadRequest, "invalid renewal")
+		httpresp.Error(w, httpresp.CodeBadRequest, "target plan is lower than current plan")
 		return
 	}
 	s.logger.Warn(msg, "error", err)
