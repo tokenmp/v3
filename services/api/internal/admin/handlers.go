@@ -17,6 +17,7 @@ package admin
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -468,6 +469,10 @@ func (h *Handlers) AdminRenewUserPlan(w http.ResponseWriter, r *http.Request) {
 	}
 	up, err := h.Billing.RenewUserPlan(r.Context(), chi.URLParam(r, "userPlanId"), body)
 	if err != nil {
+		if errors.Is(err, billing.BadRequest) {
+			httpresp.Error(w, httpresp.CodeBadRequest, "invalid renewal")
+			return
+		}
 		h.logger().Warn("admin renew user plan failed", "error", err)
 		httpresp.Error(w, httpresp.CodeServiceUnavailable, "billing unavailable")
 		return
@@ -501,6 +506,10 @@ func (h *Handlers) adminSwitchLikeUserPlan(w http.ResponseWriter, r *http.Reques
 		up, err = h.Billing.UpgradeUserPlan(r.Context(), chi.URLParam(r, "userPlanId"), body)
 	}
 	if err != nil {
+		if errors.Is(err, billing.BadRequest) {
+			httpresp.Error(w, httpresp.CodeBadRequest, "目标套餐不能低于当前套餐")
+			return
+		}
 		h.logger().Warn("admin switch user plan failed", "error", err)
 		httpresp.Error(w, httpresp.CodeServiceUnavailable, "billing unavailable")
 		return

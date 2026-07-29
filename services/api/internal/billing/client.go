@@ -237,6 +237,9 @@ func (c *Client) ListAllUserPlans(ctx context.Context) ([]UserPlan, error) {
 	return out.UserPlans, nil
 }
 
+// BadRequest 表示下游返回 400，便于 Admin BFF 保留业务校验错误。
+var BadRequest = errors.New("billing: bad request")
+
 // NotFound 表示下游返回 404，便于上层区分「不存在」与「不可用」。
 var NotFound = errors.New("billing: not found")
 
@@ -276,6 +279,9 @@ func (c *Client) do(req *http.Request, dst any) error {
 	}
 	defer func() { _ = resp.Body.Close() }()
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode == http.StatusBadRequest {
+		return BadRequest
+	}
 	if resp.StatusCode == http.StatusNotFound {
 		return NotFound
 	}
