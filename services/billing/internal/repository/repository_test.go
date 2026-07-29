@@ -43,6 +43,7 @@ func openDB(t *testing.T, dsn string) *gorm.DB {
 
 // applyMigrations runs down first (idempotent via IF EXISTS) so the test
 // starts from a clean state, then applies up. Down is re-run on cleanup.
+// Migrations are applied in order: 000001 then 000002; down in reverse.
 func applyMigrations(t *testing.T, dsn string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -53,27 +54,37 @@ func applyMigrations(t *testing.T, dsn string) {
 	}
 	t.Cleanup(func() { _ = conn.Close(context.Background()) })
 	migrationsDir := filepath.Join("..", "..", "migrations")
-	downPath := filepath.Join(migrationsDir, "000001_init.down.sql")
-	downBytes, err := os.ReadFile(downPath)
-	if err != nil {
-		t.Fatalf("read down migration: %v", err)
+	up1 := readMigration(t, migrationsDir, "000001_init.up.sql")
+	down1 := readMigration(t, migrationsDir, "000001_init.down.sql")
+	up2 := readMigration(t, migrationsDir, "000002_limit_overrides.up.sql")
+	down2 := readMigration(t, migrationsDir, "000002_limit_overrides.down.sql")
+	// down in reverse order.
+	for _, d := range []string{down2, down1} {
+		if _, err := conn.Exec(ctx, d); err != nil {
+			t.Fatalf("apply down migration: %v", err)
+		}
 	}
-	if _, err := conn.Exec(ctx, string(downBytes)); err != nil {
-		t.Fatalf("apply down migration: %v", err)
-	}
-	upPath := filepath.Join(migrationsDir, "000001_init.up.sql")
-	upBytes, err := os.ReadFile(upPath)
-	if err != nil {
-		t.Fatalf("read up migration: %v", err)
-	}
-	if _, err := conn.Exec(ctx, string(upBytes)); err != nil {
-		t.Fatalf("apply up migration: %v", err)
+	for _, u := range []string{up1, up2} {
+		if _, err := conn.Exec(ctx, u); err != nil {
+			t.Fatalf("apply up migration: %v", err)
+		}
 	}
 	t.Cleanup(func() {
 		cctx, ccancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer ccancel()
-		_, _ = conn.Exec(cctx, string(downBytes))
+		for _, d := range []string{down2, down1} {
+			_, _ = conn.Exec(cctx, d)
+		}
 	})
+}
+
+func readMigration(t *testing.T, dir, name string) string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(dir, name))
+	if err != nil {
+		t.Fatalf("read migration %s: %v", name, err)
+	}
+	return string(b)
 }
 
 // --- test fixtures -------------------------------------------------------

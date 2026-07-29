@@ -47,6 +47,9 @@ type AdminStore interface {
 	AssignUserPlan(ctx context.Context, up *repository.UserPlan) error
 	CancelUserPlan(ctx context.Context, id int64) error
 	GetUsageStats(ctx context.Context, days int, groupBy string) ([]repository.UsageStatRow, error)
+	CreateLimitOverride(ctx context.Context, o *repository.UserPlanLimitOverride) error
+	ListLimitOverrides(ctx context.Context, userPlanID int64) ([]repository.UserPlanLimitOverride, error)
+	RevokeLimitOverride(ctx context.Context, id int64) error
 }
 
 // New returns a billing Server. A nil logger falls back to slog.Default.
@@ -87,6 +90,9 @@ func (s *Server) Router() http.Handler {
 	r.Post("/v1/billing/admin/user-plans", s.handleAdminAssignUserPlan)
 	r.Post("/v1/billing/admin/user-plans/{id}/cancel", s.handleAdminCancelUserPlan)
 	r.Get("/v1/billing/admin/usage/stats", s.handleAdminUsageStats)
+	r.Post("/v1/billing/admin/user-plans/{id}/limit-overrides", s.handleAdminCreateLimitOverride)
+	r.Get("/v1/billing/admin/user-plans/{id}/limit-overrides", s.handleAdminListLimitOverrides)
+	r.Post("/v1/billing/admin/limit-overrides/{id}/revoke", s.handleAdminRevokeLimitOverride)
 	return r
 }
 

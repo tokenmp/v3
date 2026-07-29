@@ -265,6 +265,14 @@ var (
 	_ UsageWindowsReader = (*GormRepository)(nil)
 )
 
+// Compile-time assertion that GormRepository implements the admin override
+// methods (the server.AdminStore interface is asserted in the server pkg).
+var _ interface {
+	CreateLimitOverride(context.Context, *UserPlanLimitOverride) error
+	ListLimitOverrides(context.Context, int64) ([]UserPlanLimitOverride, error)
+	RevokeLimitOverride(context.Context, int64) error
+} = (*GormRepository)(nil)
+
 // ----------------------------------------------------------------------------
 // PlanReader
 // ----------------------------------------------------------------------------
@@ -451,6 +459,7 @@ func (r *GormRepository) Reserve(ctx context.Context, reservationID, userID, req
 // activeCodingPlanRow is the projection of the user's most recently
 // activated active coding plan with its plan-level limits.
 type activeCodingPlanRow struct {
+	UserPlanID   int64      `gorm:"column:user_plan_id"`
 	ActivatedAt  time.Time  `gorm:"column:activated_at"`
 	ExpiresAt    *time.Time `gorm:"column:expires_at"`
 	HourlyLimit  *int       `gorm:"column:hourly_limit"`
@@ -458,7 +467,7 @@ type activeCodingPlanRow struct {
 	MonthlyLimit *int       `gorm:"column:monthly_limit"`
 }
 
-const activeCodingPlanSQL = `SELECT up.activated_at, up.expires_at,
+const activeCodingPlanSQL = `SELECT up.id AS user_plan_id, up.activated_at, up.expires_at,
 	p.hourly_limit, p.weekly_limit, p.monthly_limit
 FROM user_plans up JOIN plans p ON p.id = up.plan_id
 WHERE up.user_id = ? AND up.status = 'active'
@@ -500,6 +509,13 @@ func startOfWeekUTC(t time.Time) time.Time {
 // limits against finalized 'charge' consumption plus the new reservedReqs
 // (wanted). Returns *QuotaExceededError on breach, nil if within limits.
 // No active coding plan → fail-closed period breach (limit 0).
+//
+// User-plan limit overrides (reset/bonus) are applied per scope: a 'reset'
+// override moves the window's effective start forward to
+// max(baseStart, latest active reset effective_from), forgiving earlier
+// consumption; a 'bonus' override adds active bonus_requests to the base
+// limit. Request timestamps are never modified — only the consumption read
+// window and effective limit change.
 func enforceCodingWindows(tx *gorm.DB, userID string, wanted int, now time.Time) error {
 	row, err := getActiveCodingPlan(tx, userID, now)
 	if err != nil {
@@ -509,31 +525,30 @@ func enforceCodingWindows(tx *gorm.DB, userID string, wanted int, now time.Time)
 		return &QuotaExceededError{Scope: ScopePeriod, Limit: 0, Consumed: 0, Wanted: wanted}
 	}
 	if row.HourlyLimit != nil {
-		consumed, err := consumedCodingSince(tx, userID, now.Add(-5*time.Hour))
+		res, err := computeWindow(tx, userID, row.UserPlanID, string(ScopeHour5), now.Add(-5*time.Hour), *row.HourlyLimit, now)
 		if err != nil {
 			return err
 		}
-		if consumed+wanted > *row.HourlyLimit {
-			return &QuotaExceededError{Scope: ScopeHour5, Limit: *row.HourlyLimit, Consumed: consumed, Wanted: wanted}
+		if res.Consumed+wanted > res.AdjustedLimit {
+			return &QuotaExceededError{Scope: ScopeHour5, Limit: res.AdjustedLimit, Consumed: res.Consumed, Wanted: wanted}
 		}
 	}
 	if row.WeeklyLimit != nil {
-		ws := startOfWeekUTC(now)
-		consumed, err := consumedCodingSince(tx, userID, ws)
+		res, err := computeWindow(tx, userID, row.UserPlanID, string(ScopeWeekly), startOfWeekUTC(now), *row.WeeklyLimit, now)
 		if err != nil {
 			return err
 		}
-		if consumed+wanted > *row.WeeklyLimit {
-			return &QuotaExceededError{Scope: ScopeWeekly, Limit: *row.WeeklyLimit, Consumed: consumed, Wanted: wanted}
+		if res.Consumed+wanted > res.AdjustedLimit {
+			return &QuotaExceededError{Scope: ScopeWeekly, Limit: res.AdjustedLimit, Consumed: res.Consumed, Wanted: wanted}
 		}
 	}
 	if row.MonthlyLimit != nil {
-		consumed, err := consumedCodingSince(tx, userID, row.ActivatedAt)
+		res, err := computeWindow(tx, userID, row.UserPlanID, string(ScopePeriod), row.ActivatedAt, *row.MonthlyLimit, now)
 		if err != nil {
 			return err
 		}
-		if consumed+wanted > *row.MonthlyLimit {
-			return &QuotaExceededError{Scope: ScopePeriod, Limit: *row.MonthlyLimit, Consumed: consumed, Wanted: wanted}
+		if res.Consumed+wanted > res.AdjustedLimit {
+			return &QuotaExceededError{Scope: ScopePeriod, Limit: res.AdjustedLimit, Consumed: res.Consumed, Wanted: wanted}
 		}
 	}
 	return nil
@@ -751,18 +766,20 @@ WHERE up.user_id = ? AND up.status = 'active' AND p.plan_type = 'token'`
 		tokenRemaining = 0
 	}
 
-	// Coding: plan-period total - consumed requests since activation.
+	// Coding: plan-period total - consumed requests since the effective
+	// (override-adjusted) activation start. Mirrors the period usage window.
 	codingRemaining := int64(0)
 	codingPlan, err := getActiveCodingPlan(r.db.WithContext(ctx), userID, time.Now().UTC())
 	if err != nil {
 		return Balance{}, ErrQueryFailed
 	}
 	if !codingPlan.ActivatedAt.IsZero() && codingPlan.MonthlyLimit != nil {
-		consumed, err := consumedCodingSince(r.db.WithContext(ctx), userID, codingPlan.ActivatedAt)
+		now := time.Now().UTC()
+		res, err := computeWindow(r.db.WithContext(ctx), userID, codingPlan.UserPlanID, string(ScopePeriod), codingPlan.ActivatedAt, *codingPlan.MonthlyLimit, now)
 		if err != nil {
 			return Balance{}, ErrQueryFailed
 		}
-		codingRemaining = int64(*codingPlan.MonthlyLimit - consumed)
+		codingRemaining = int64(res.AdjustedLimit - res.Consumed)
 	}
 	if codingRemaining < 0 {
 		codingRemaining = 0
@@ -783,6 +800,12 @@ WHERE up.user_id = ? AND up.status = 'active' AND p.plan_type = 'token'`
 // limit is set are returned. A user with no active coding plan returns an
 // empty slice (not an error). Consumption is counted from finalized 'charge'
 // ledger rows, mirroring Reserve enforcement.
+//
+// User-plan limit overrides are reflected: the reported Limit is the adjusted
+// limit (base + active bonus), WindowStart is the effective start (max of
+// base start and latest active reset effective_from), Consumed is finalized
+// 'charge' requests since that effective start, and Remaining = max(0,
+// adjusted limit - consumed).
 func (r *GormRepository) GetUsageWindows(ctx context.Context, userID string) ([]UsageWindow, error) {
 	now := time.Now().UTC()
 	row, err := getActiveCodingPlan(r.db.WithContext(ctx), userID, now)
@@ -794,51 +817,50 @@ func (r *GormRepository) GetUsageWindows(ctx context.Context, userID string) ([]
 	}
 	windows := make([]UsageWindow, 0, 3)
 	if row.HourlyLimit != nil {
-		ws := now.Add(-5 * time.Hour)
-		consumed, err := consumedCodingSince(r.db.WithContext(ctx), userID, ws)
+		res, err := computeWindow(r.db.WithContext(ctx), userID, row.UserPlanID, string(ScopeHour5), now.Add(-5*time.Hour), *row.HourlyLimit, now)
 		if err != nil {
 			return nil, err
 		}
-		lim := *row.HourlyLimit
-		rem := lim - consumed
+		lim := res.AdjustedLimit
+		rem := lim - res.Consumed
 		if rem < 0 {
 			rem = 0
 		}
 		windows = append(windows, UsageWindow{
-			Scope: string(ScopeHour5), Limit: &lim, Consumed: consumed,
-			Remaining: rem, WindowStart: ws,
+			Scope: string(ScopeHour5), Limit: &lim, Consumed: res.Consumed,
+			Remaining: rem, WindowStart: res.EffectiveStart,
 		})
 	}
 	if row.WeeklyLimit != nil {
-		ws := startOfWeekUTC(now)
-		we := ws.Add(7 * 24 * time.Hour)
-		consumed, err := consumedCodingSince(r.db.WithContext(ctx), userID, ws)
+		baseStart := startOfWeekUTC(now)
+		res, err := computeWindow(r.db.WithContext(ctx), userID, row.UserPlanID, string(ScopeWeekly), baseStart, *row.WeeklyLimit, now)
 		if err != nil {
 			return nil, err
 		}
-		lim := *row.WeeklyLimit
-		rem := lim - consumed
+		lim := res.AdjustedLimit
+		rem := lim - res.Consumed
 		if rem < 0 {
 			rem = 0
 		}
+		we := baseStart.Add(7 * 24 * time.Hour)
 		windows = append(windows, UsageWindow{
-			Scope: string(ScopeWeekly), Limit: &lim, Consumed: consumed,
-			Remaining: rem, WindowStart: ws, WindowEnd: &we,
+			Scope: string(ScopeWeekly), Limit: &lim, Consumed: res.Consumed,
+			Remaining: rem, WindowStart: res.EffectiveStart, WindowEnd: &we,
 		})
 	}
 	if row.MonthlyLimit != nil {
-		consumed, err := consumedCodingSince(r.db.WithContext(ctx), userID, row.ActivatedAt)
+		res, err := computeWindow(r.db.WithContext(ctx), userID, row.UserPlanID, string(ScopePeriod), row.ActivatedAt, *row.MonthlyLimit, now)
 		if err != nil {
 			return nil, err
 		}
-		lim := *row.MonthlyLimit
-		rem := lim - consumed
+		lim := res.AdjustedLimit
+		rem := lim - res.Consumed
 		if rem < 0 {
 			rem = 0
 		}
 		windows = append(windows, UsageWindow{
-			Scope: string(ScopePeriod), Limit: &lim, Consumed: consumed,
-			Remaining: rem, WindowStart: row.ActivatedAt, WindowEnd: row.ExpiresAt,
+			Scope: string(ScopePeriod), Limit: &lim, Consumed: res.Consumed,
+			Remaining: rem, WindowStart: res.EffectiveStart, WindowEnd: row.ExpiresAt,
 		})
 	}
 	return windows, nil

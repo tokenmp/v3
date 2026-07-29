@@ -21,6 +21,8 @@ import type {
   AdminPlanInput,
   AdminUserPlan,
   AdminUserPlanInput,
+  AdminLimitOverride,
+  AdminLimitOverrideInput,
   AdminProvider,
   AdminModelConfig,
   AdminRouteConfig,
@@ -261,6 +263,21 @@ function mapPlan(p: Record<string, unknown>): AdminPlan {
     status: (p.status ?? 'active') as AdminPlan['status'],
     createdAt: String(p.created_at ?? p.createdAt ?? ''),
     updatedAt: String(p.updated_at ?? p.updatedAt ?? ''),
+  };
+}
+
+function mapLimitOverride(o: Record<string, unknown>): AdminLimitOverride {
+  return {
+    id: String(o.id ?? ''),
+    userPlanId: String(o.user_plan_id ?? o.userPlanId ?? ''),
+    kind: (o.kind ?? 'reset') as AdminLimitOverride['kind'],
+    scope: (o.scope ?? 'hour5') as AdminLimitOverride['scope'],
+    effectiveFrom: String(o.effective_from ?? o.effectiveFrom ?? ''),
+    effectiveUntil: o.effective_until != null ? String(o.effective_until) : (o.effectiveUntil != null ? String(o.effectiveUntil) : null),
+    bonusRequests: o.bonus_requests != null ? Number(o.bonus_requests) : (o.bonusRequests != null ? Number(o.bonusRequests) : null),
+    reason: String(o.reason ?? ''),
+    createdBy: String(o.created_by ?? o.createdBy ?? ''),
+    createdAt: String(o.created_at ?? o.createdAt ?? ''),
   };
 }
 
@@ -505,6 +522,33 @@ export const adminApi = {
         baseUrl: ADMIN_BASE,
       });
     },
+    createLimitOverride: async (userPlanId: string, input: AdminLimitOverrideInput): Promise<AdminLimitOverride> => {
+      const res = await request<Record<string, unknown>>(`/api/v1/admin/user-plans/${userPlanId}/limit-overrides`, {
+        method: 'POST',
+        body: {
+          kind: input.kind,
+          scope: input.scope,
+          bonus_requests: input.bonusRequests ?? undefined,
+          effective_until: input.effectiveUntil ?? undefined,
+          reason: input.reason ?? undefined,
+        },
+        baseUrl: ADMIN_BASE,
+      });
+      return mapLimitOverride(res);
+    },
+    listLimitOverrides: async (userPlanId: string): Promise<AdminLimitOverride[]> => {
+      const res = await request<{ overrides: Record<string, unknown>[] } | Record<string, unknown>[]>(`/api/v1/admin/user-plans/${userPlanId}/limit-overrides`, {
+        baseUrl: ADMIN_BASE,
+      });
+      const raw = Array.isArray(res) ? res : (res.overrides ?? []);
+      return raw.map(mapLimitOverride);
+    },
+    revokeLimitOverride: async (id: string): Promise<void> => {
+      await request<void>(`/api/v1/admin/limit-overrides/${id}/revoke`, {
+        method: 'POST',
+        baseUrl: ADMIN_BASE,
+      });
+    },
     cancel: async (id: string): Promise<void> => {
       await request<void>(`/api/v1/admin/user-plans/${id}/cancel`, {
         method: 'POST',
@@ -542,6 +586,9 @@ export const adminUserPlanApi = {
   list: adminApi.userPlans.list,
   assign: adminApi.userPlans.assign,
   cancel: adminApi.userPlans.cancel,
+  createLimitOverride: adminApi.userPlans.createLimitOverride,
+  listLimitOverrides: adminApi.userPlans.listLimitOverrides,
+  revokeLimitOverride: adminApi.userPlans.revokeLimitOverride,
 };
 
 export const adminAnnouncementApi = {

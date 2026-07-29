@@ -216,6 +216,30 @@ export interface AdminUserPlan {
   remainingQuota: string;
 }
 
+export type LimitOverrideScope = 'hour5' | 'weekly' | 'period';
+export type LimitOverrideKind = 'reset' | 'bonus';
+
+export interface AdminLimitOverride {
+  id: string;
+  userPlanId: string;
+  kind: LimitOverrideKind;
+  scope: LimitOverrideScope;
+  effectiveFrom: string;
+  effectiveUntil: string | null;
+  bonusRequests: number | null;
+  reason: string;
+  createdBy: string;
+  createdAt: string;
+}
+
+export interface AdminLimitOverrideInput {
+  kind: LimitOverrideKind;
+  scope: LimitOverrideScope;
+  bonusRequests?: number | null;
+  effectiveUntil?: string | null;
+  reason?: string;
+}
+
 export interface AdminUserPlanInput {
   userId: string;
   planId: string;

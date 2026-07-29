@@ -63,6 +63,9 @@ func (h *Handlers) Routes(r chi.Router) {
 	r.Delete("/api/v1/admin/plans/{planId}", h.AdminDeletePlan)
 	r.Post("/api/v1/admin/user-plans", h.AdminAssignUserPlan)
 	r.Post("/api/v1/admin/user-plans/{userPlanId}/cancel", h.AdminCancelUserPlan)
+	r.Get("/api/v1/admin/user-plans/{userPlanId}/limit-overrides", h.AdminListLimitOverrides)
+	r.Post("/api/v1/admin/user-plans/{userPlanId}/limit-overrides", h.AdminCreateLimitOverride)
+	r.Post("/api/v1/admin/limit-overrides/{overrideId}/revoke", h.AdminRevokeLimitOverride)
 	r.Get("/api/v1/admin/usage/stats", h.AdminUsageStats)
 	r.Get("/api/v1/admin/stats", h.AdminDashboardStats)
 }
@@ -448,6 +451,57 @@ func (h *Handlers) AdminDeletePlan(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handlers) AdminAssignUserPlan(w http.ResponseWriter, r *http.Request) {
 	h.proxyBillingAdmin(w, r, http.MethodPost, "/v1/billing/admin/user-plans")
+}
+
+func (h *Handlers) AdminCreateLimitOverride(w http.ResponseWriter, r *http.Request) {
+	if h.Billing == nil || !h.Billing.Available() {
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "billing unavailable")
+		return
+	}
+	id := chi.URLParam(r, "userPlanId")
+	if id == "" {
+		httpresp.Error(w, httpresp.CodeBadRequest, "invalid user plan id")
+		return
+	}
+	var body map[string]any
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&body); err != nil {
+		httpresp.Error(w, httpresp.CodeInvalidJSON, "invalid body")
+		return
+	}
+	ov, err := h.Billing.CreateLimitOverride(r.Context(), id, body)
+	if err != nil {
+		h.logger().Warn("admin create limit override failed", "error", err)
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "billing unavailable")
+		return
+	}
+	httpresp.Created(w, ov)
+}
+
+func (h *Handlers) AdminListLimitOverrides(w http.ResponseWriter, r *http.Request) {
+	if h.Billing == nil || !h.Billing.Available() {
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "billing unavailable")
+		return
+	}
+	rows, err := h.Billing.ListLimitOverrides(r.Context(), chi.URLParam(r, "userPlanId"))
+	if err != nil {
+		h.logger().Warn("admin list limit overrides failed", "error", err)
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "billing unavailable")
+		return
+	}
+	httpresp.OK(w, map[string]any{"overrides": rows})
+}
+
+func (h *Handlers) AdminRevokeLimitOverride(w http.ResponseWriter, r *http.Request) {
+	if h.Billing == nil || !h.Billing.Available() {
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "billing unavailable")
+		return
+	}
+	if err := h.Billing.RevokeLimitOverride(r.Context(), chi.URLParam(r, "overrideId")); err != nil {
+		h.logger().Warn("admin revoke limit override failed", "error", err)
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "billing unavailable")
+		return
+	}
+	httpresp.OK(w, map[string]any{"status": "revoked"})
 }
 
 func (h *Handlers) AdminCancelUserPlan(w http.ResponseWriter, r *http.Request) {

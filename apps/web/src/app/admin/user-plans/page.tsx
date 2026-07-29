@@ -24,9 +24,9 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { ConfirmDialog } from '@/components/confirm-dialog';
-import { Plus, Ban } from 'lucide-react';
+import { Plus, Ban, RotateCcw, Gift } from 'lucide-react';
 import { toast } from 'sonner';
-import type { AdminUserPlanInput } from '@/types/admin';
+import type { AdminUserPlan, AdminUserPlanInput, LimitOverrideScope } from '@/types/admin';
 
 function formatTime(iso: string) {
   return new Date(iso).toLocaleString('zh-CN');
@@ -51,10 +51,25 @@ interface AssignForm {
   expiresAt: string;
 }
 
+interface OverrideForm {
+  userPlan: AdminUserPlan;
+  kind: 'reset' | 'bonus';
+  scope: LimitOverrideScope;
+  bonusRequests: string;
+  effectiveUntil: string;
+  reason: string;
+}
+
 const emptyForm: AssignForm = {
   userId: '',
   planId: '',
   expiresAt: '',
+};
+
+const SCOPE_LABELS: Record<LimitOverrideScope, string> = {
+  hour5: '5小时滚动',
+  weekly: '本周额度',
+  period: '本周期总额度',
 };
 
 export default function AdminUserPlansPage() {
@@ -91,6 +106,20 @@ export default function AdminUserPlansPage() {
     },
   });
 
+  const overrideMutation = useMutation({
+    mutationFn: (input: OverrideForm) => adminUserPlanApi.createLimitOverride(input.userPlan.id, {
+      kind: input.kind,
+      scope: input.scope,
+      bonusRequests: input.kind === 'bonus' ? Number(input.bonusRequests) : null,
+      effectiveUntil: input.effectiveUntil ? new Date(input.effectiveUntil).toISOString() : null,
+      reason: input.reason || undefined,
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin', 'user-plans'] });
+      toast.success('额度调整已生效');
+    },
+  });
+
   // Assign dialog
   const [assignOpen, setAssignOpen] = useState(false);
   const [form, setForm] = useState<AssignForm>(emptyForm);
@@ -98,6 +127,9 @@ export default function AdminUserPlansPage() {
   // Cancel confirm
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancellingId, setCancellingId] = useState<string | null>(null);
+
+  const [overrideOpen, setOverrideOpen] = useState(false);
+  const [overrideForm, setOverrideForm] = useState<OverrideForm | null>(null);
 
   function openAssign() {
     setForm(emptyForm);
@@ -129,6 +161,27 @@ export default function AdminUserPlansPage() {
   function handleCancel() {
     if (!cancellingId) return;
     cancelMutation.mutate(cancellingId, { onSuccess: () => setCancelOpen(false) });
+  }
+
+  function openOverride(userPlan: AdminUserPlan, kind: 'reset' | 'bonus') {
+    setOverrideForm({
+      userPlan,
+      kind,
+      scope: 'hour5',
+      bonusRequests: kind === 'bonus' ? '100' : '',
+      effectiveUntil: '',
+      reason: '',
+    });
+    setOverrideOpen(true);
+  }
+
+  function handleOverride() {
+    if (!overrideForm) return;
+    if (overrideForm.kind === 'bonus' && (!overrideForm.bonusRequests || Number(overrideForm.bonusRequests) <= 0)) {
+      toast.error('请输入大于 0 的加额次数');
+      return;
+    }
+    overrideMutation.mutate(overrideForm, { onSuccess: () => setOverrideOpen(false) });
   }
 
   const users = usersData?.users ?? [];
@@ -186,14 +239,26 @@ export default function AdminUserPlansPage() {
                       <TableCell>{Number(up.remainingQuota).toLocaleString()}</TableCell>
                       <TableCell className="text-right">
                         {up.status === 'active' && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="text-destructive"
-                            onClick={() => openCancel(up.id)}
-                          >
-                            <Ban className="h-4 w-4" />
-                          </Button>
+                          <div className="flex justify-end gap-1">
+                            {up.planType === 'coding' && (
+                              <>
+                                <Button variant="ghost" size="icon" title="重置窗口" onClick={() => openOverride(up, 'reset')}>
+                                  <RotateCcw className="h-4 w-4" />
+                                </Button>
+                                <Button variant="ghost" size="icon" title="临时加额" onClick={() => openOverride(up, 'bonus')}>
+                                  <Gift className="h-4 w-4" />
+                                </Button>
+                              </>
+                            )}
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="text-destructive"
+                              onClick={() => openCancel(up.id)}
+                            >
+                              <Ban className="h-4 w-4" />
+                            </Button>
+                          </div>
                         )}
                       </TableCell>
                     </TableRow>
@@ -229,7 +294,19 @@ export default function AdminUserPlansPage() {
                       <div>{Number(up.remainingQuota).toLocaleString()}</div>
                     </div>
                     {up.status === 'active' && (
-                      <div className="flex justify-end">
+                      <div className="flex flex-wrap justify-end gap-2">
+                        {up.planType === 'coding' && (
+                          <>
+                            <Button variant="outline" size="sm" onClick={() => openOverride(up, 'reset')}>
+                              <RotateCcw className="h-4 w-4" />
+                              重置
+                            </Button>
+                            <Button variant="outline" size="sm" onClick={() => openOverride(up, 'bonus')}>
+                              <Gift className="h-4 w-4" />
+                              加额
+                            </Button>
+                          </>
+                        )}
                         <Button
                           variant="ghost"
                           size="sm"
@@ -304,6 +381,75 @@ export default function AdminUserPlansPage() {
           </Button>
           <Button onClick={handleAssign} disabled={assignMutation.isPending}>
             {assignMutation.isPending ? '分配中…' : '分配'}
+          </Button>
+        </DialogFooter>
+      </Dialog>
+
+      <Dialog open={overrideOpen} onOpenChange={setOverrideOpen}>
+        <DialogHeader>
+          <DialogTitle>{overrideForm?.kind === 'bonus' ? '临时加额' : '重置用量窗口'}</DialogTitle>
+          <DialogDescription>
+            {overrideForm?.kind === 'bonus'
+              ? '为该用户套餐在指定窗口临时增加可用请求次数，不修改历史请求记录。'
+              : '从现在开始重置指定窗口的计数起点，不修改历史请求记录。'}
+          </DialogDescription>
+        </DialogHeader>
+        {overrideForm && (
+          <div className="space-y-4">
+            <div className="rounded-md bg-muted p-3 text-sm">
+              <div className="font-medium">{overrideForm.userPlan.userEmail || overrideForm.userPlan.userId}</div>
+              <div className="text-muted-foreground">{overrideForm.userPlan.planName}</div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="override-scope">窗口</Label>
+              <select
+                id="override-scope"
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                value={overrideForm.scope}
+                onChange={(e) => setOverrideForm((f) => f ? { ...f, scope: e.target.value as LimitOverrideScope } : f)}
+              >
+                {Object.entries(SCOPE_LABELS).map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+            </div>
+            {overrideForm.kind === 'bonus' && (
+              <div className="space-y-2">
+                <Label htmlFor="override-bonus">加额次数</Label>
+                <Input
+                  id="override-bonus"
+                  type="number"
+                  min={1}
+                  value={overrideForm.bonusRequests}
+                  onChange={(e) => setOverrideForm((f) => f ? { ...f, bonusRequests: e.target.value } : f)}
+                />
+              </div>
+            )}
+            <div className="space-y-2">
+              <Label htmlFor="override-until">有效期至（选填）</Label>
+              <Input
+                id="override-until"
+                type="datetime-local"
+                value={overrideForm.effectiveUntil}
+                onChange={(e) => setOverrideForm((f) => f ? { ...f, effectiveUntil: e.target.value } : f)}
+              />
+              <p className="text-xs text-muted-foreground">留空表示长期有效；重置窗口通常可留空。</p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="override-reason">原因（选填）</Label>
+              <Input
+                id="override-reason"
+                value={overrideForm.reason}
+                onChange={(e) => setOverrideForm((f) => f ? { ...f, reason: e.target.value } : f)}
+                placeholder="例如：客服补偿 / 活动加赠"
+              />
+            </div>
+          </div>
+        )}
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setOverrideOpen(false)} disabled={overrideMutation.isPending}>取消</Button>
+          <Button onClick={handleOverride} disabled={overrideMutation.isPending}>
+            {overrideMutation.isPending ? '提交中…' : '确认'}
           </Button>
         </DialogFooter>
       </Dialog>

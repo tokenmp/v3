@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/tokenmp/v3/packages/go/httpresp"
@@ -221,7 +222,128 @@ func (s *Server) handleAdminUsageStats(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// ---- Limit Overrides ----
+
+type createLimitOverrideBody struct {
+	Kind           string  `json:"kind"`
+	Scope          string  `json:"scope"`
+	EffectiveFrom  *string `json:"effective_from,omitempty"`
+	EffectiveUntil *string `json:"effective_until,omitempty"`
+	BonusRequests  *int    `json:"bonus_requests,omitempty"`
+	Reason         string  `json:"reason,omitempty"`
+	CreatedBy      string  `json:"created_by,omitempty"`
+}
+
+func (s *Server) handleAdminCreateLimitOverride(w http.ResponseWriter, r *http.Request) {
+	if s.admin == nil {
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "admin not configured")
+		return
+	}
+	userPlanID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil || userPlanID <= 0 {
+		httpresp.Error(w, httpresp.CodeBadRequest, "invalid user plan id")
+		return
+	}
+	var body createLimitOverrideBody
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxQuotaBodyBytes)).Decode(&body); err != nil {
+		httpresp.Error(w, httpresp.CodeInvalidJSON, "invalid body")
+		return
+	}
+	if body.Kind != "reset" && body.Kind != "bonus" {
+		httpresp.Error(w, httpresp.CodeMissingField, "kind must be reset or bonus")
+		return
+	}
+	if body.Scope != "hour5" && body.Scope != "weekly" && body.Scope != "period" {
+		httpresp.Error(w, httpresp.CodeMissingField, "scope must be hour5, weekly or period")
+		return
+	}
+	if body.Kind == "bonus" && (body.BonusRequests == nil || *body.BonusRequests < 0) {
+		httpresp.Error(w, httpresp.CodeMissingField, "bonus_requests must be a non-negative int for bonus kind")
+		return
+	}
+	o := &repository.UserPlanLimitOverride{
+		UserPlanID:    userPlanID,
+		Kind:          body.Kind,
+		Scope:         body.Scope,
+		BonusRequests: body.BonusRequests,
+		Reason:        body.Reason,
+		CreatedBy:     body.CreatedBy,
+	}
+	now := time.Now().UTC()
+	if body.EffectiveFrom != nil && *body.EffectiveFrom != "" {
+		t, err := time.Parse(time.RFC3339Nano, *body.EffectiveFrom)
+		if err != nil {
+			httpresp.Error(w, httpresp.CodeBadRequest, "invalid effective_from")
+			return
+		}
+		o.EffectiveFrom = t.UTC()
+	} else {
+		o.EffectiveFrom = now
+	}
+	if body.EffectiveUntil != nil && *body.EffectiveUntil != "" {
+		t, err := time.Parse(time.RFC3339Nano, *body.EffectiveUntil)
+		if err != nil {
+			httpresp.Error(w, httpresp.CodeBadRequest, "invalid effective_until")
+			return
+		}
+		o.EffectiveUntil = ptrTime(t.UTC())
+	}
+	if err := s.admin.CreateLimitOverride(r.Context(), o); err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			httpresp.Error(w, httpresp.CodeNotFound, "user plan not found")
+			return
+		}
+		s.logger.Warn("admin create limit override failed", "error", err)
+		httpresp.Error(w, httpresp.CodeInternalError, "internal error")
+		return
+	}
+	httpresp.Created(w, o)
+}
+
+func (s *Server) handleAdminListLimitOverrides(w http.ResponseWriter, r *http.Request) {
+	if s.admin == nil {
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "admin not configured")
+		return
+	}
+	userPlanID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil || userPlanID <= 0 {
+		httpresp.Error(w, httpresp.CodeBadRequest, "invalid user plan id")
+		return
+	}
+	rows, err := s.admin.ListLimitOverrides(r.Context(), userPlanID)
+	if err != nil {
+		s.logger.Warn("admin list limit overrides failed", "error", err)
+		httpresp.Error(w, httpresp.CodeInternalError, "internal error")
+		return
+	}
+	httpresp.OK(w, map[string]any{"overrides": rows})
+}
+
+func (s *Server) handleAdminRevokeLimitOverride(w http.ResponseWriter, r *http.Request) {
+	if s.admin == nil {
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "admin not configured")
+		return
+	}
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil || id <= 0 {
+		httpresp.Error(w, httpresp.CodeBadRequest, "invalid override id")
+		return
+	}
+	if err := s.admin.RevokeLimitOverride(r.Context(), id); err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			httpresp.Error(w, httpresp.CodeNotFound, "override not found")
+			return
+		}
+		s.logger.Warn("admin revoke limit override failed", "error", err)
+		httpresp.Error(w, httpresp.CodeInternalError, "internal error")
+		return
+	}
+	httpresp.OK(w, map[string]any{"id": id, "status": "revoked"})
+}
+
 // ---- helpers ----
+
+func ptrTime(t time.Time) *time.Time { return &t }
 
 func parsePositiveInt(s string, def int) int {
 	n, err := strconv.Atoi(s)
