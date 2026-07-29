@@ -393,6 +393,44 @@ func TestInsertEvent_AndList(t *testing.T) {
 	}
 }
 
+func TestIngestBatch_ClientCancelledOverridesNonSuccessTerminal(t *testing.T) {
+	d := dsn(t)
+	applyMigrations(t, d)
+	db := openDB(t, d)
+	repo := New(db)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	reqID := "req-cancel-precedence"
+
+	if err := repo.IngestBatch(ctx, Batch{Log: RequestLog{
+		RequestID:   reqID,
+		FinalStatus: "upstream_error",
+		LatencyMS:   100,
+		CreatedAt:   now,
+	}}); err != nil {
+		t.Fatalf("ingest upstream error: %v", err)
+	}
+	cancelledAt := now.Add(200 * time.Millisecond)
+	if err := repo.IngestBatch(ctx, Batch{Log: RequestLog{
+		RequestID:   reqID,
+		FinalStatus: "client_cancelled",
+		HTTPStatus:  499,
+		LatencyMS:   200,
+		ErrorType:   "client_cancelled",
+		CreatedAt:   now,
+		CompletedAt: &cancelledAt,
+	}}); err != nil {
+		t.Fatalf("ingest client cancelled: %v", err)
+	}
+	got, err := repo.GetRequestLog(ctx, reqID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.FinalStatus != "client_cancelled" || got.HTTPStatus != 499 || got.ErrorType != "client_cancelled" || got.LatencyMS != 200 {
+		t.Fatalf("got final=%q http=%d err=%q latency=%d", got.FinalStatus, got.HTTPStatus, got.ErrorType, got.LatencyMS)
+	}
+}
+
 func TestGetRequestLog_NotFound(t *testing.T) {
 	d := dsn(t)
 	applyMigrations(t, d)
