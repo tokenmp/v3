@@ -252,6 +252,9 @@ func quotaMiddleware(mgr quota.Manager, logClient *logging.Client, settingsStore
 				}
 				logEdgeClientCancelled(logClient, logger, requestID, claims.Subject, startedAt, completedAt)
 			} else if ww.status >= 200 && ww.status < 400 {
+				if billingPlan == "token" {
+					finalTokens = tokenUsageForRequest(finCtx, logClient, logger, requestID)
+				}
 				if err := mgr.Finalize(finCtx, reservationID, finalReqs, finalTokens); err != nil {
 					logger.Warn("quota finalize failed", "error", err, "request_id", requestID)
 				}
@@ -266,15 +269,42 @@ func quotaMiddleware(mgr quota.Manager, logClient *logging.Client, settingsStore
 
 func billingUsageForUser(settingsStore *settings.Store, userID string) (billingPlan string, reservedReqs int, reservedTokens int64, finalReqs int, finalTokens int64) {
 	if settingsStore != nil && settingsStore.Get(userID).PreferredBilling == "token" {
-		// The current public request path has no authoritative token estimate yet.
 		// Reserve zero to avoid double-counting token balance (Billing token balance
-		// sums all token ledger deltas, including reserves), then charge the minimal
-		// one-token unit at finalize so selecting Token billing hits token ledger
-		// instead of the default coding request ledger. A later phase should wire
-		// provider confirmed usage into finalTokens.
-		return "token", 0, 0, 0, 1
+		// sums all token ledger deltas, including reserves). On success, finalize is
+		// filled from Logging total_tokens by tokenUsageForRequest.
+		return "token", 0, 0, 0, 0
 	}
 	return "coding", 1, 0, 1, 0
+}
+
+func tokenUsageForRequest(ctx context.Context, logClient *logging.Client, logger *slog.Logger, requestID string) int64 {
+	const fallback = int64(1)
+	if logClient == nil || !logClient.Available() {
+		return fallback
+	}
+	for attempt := 0; attempt < 5; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return fallback
+			case <-time.After(100 * time.Millisecond):
+			}
+		}
+		detail, err := logClient.GetLog(ctx, requestID)
+		if err != nil {
+			if logger != nil {
+				logger.Debug("token usage log lookup failed", "error", err, "request_id", requestID)
+			}
+			continue
+		}
+		if detail.Log.TotalTokens > 0 {
+			return int64(detail.Log.TotalTokens)
+		}
+		if sum := detail.Log.InputTokens + detail.Log.OutputTokens; sum > 0 {
+			return int64(sum)
+		}
+	}
+	return fallback
 }
 
 func logEdgeClientCancelled(logClient *logging.Client, logger *slog.Logger, requestID, userID string, startedAt, completedAt time.Time) {
