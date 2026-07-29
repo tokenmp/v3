@@ -143,20 +143,33 @@ func (r *GormRepository) RenewUserPlan(ctx context.Context, id int64, extendDays
 	return out, nil
 }
 
-// UpgradeUserPlan cancels the existing user_plan and creates a replacement with
+// UpgradeUserPlan is kept as a compatibility alias for SwitchUserPlan.
+func (r *GormRepository) UpgradeUserPlan(ctx context.Context, id int64, newPlanID int64, expiresAt *time.Time) (UserPlan, error) {
+	return r.SwitchUserPlan(ctx, id, newPlanID, expiresAt)
+}
+
+// SwitchUserPlan cancels the existing user_plan and creates a replacement with
 // the new plan. It is intentionally explicit rather than mutating plan_id in
 // place so historical reservations remain attributable to the original plan
-// period.
-func (r *GormRepository) UpgradeUserPlan(ctx context.Context, id int64, newPlanID int64, expiresAt *time.Time) (UserPlan, error) {
+// period. The target plan must be comparable and not lower than the current
+// plan: same plan_type, price not lower, and relevant quota limits not lower.
+func (r *GormRepository) SwitchUserPlan(ctx context.Context, id int64, newPlanID int64, expiresAt *time.Time) (UserPlan, error) {
 	var created UserPlan
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var old UserPlan
 		if err := tx.Where("id = ?", id).First(&old).Error; err != nil {
 			return ErrNotFound
 		}
+		var currentPlan Plan
+		if err := tx.Where("id = ?", old.PlanID).First(&currentPlan).Error; err != nil {
+			return ErrNotFound
+		}
 		var p Plan
 		if err := tx.Where("id = ? AND status = ?", newPlanID, "active").First(&p).Error; err != nil {
 			return ErrNotFound
+		}
+		if !canSwitchPlan(currentPlan, p) {
+			return ErrConflict
 		}
 		now := time.Now().UTC()
 		if err := tx.Model(&UserPlan{}).Where("id = ? AND status = ?", id, "active").Updates(map[string]any{"status": "cancelled", "updated_at": now}).Error; err != nil {
@@ -172,6 +185,45 @@ func (r *GormRepository) UpgradeUserPlan(ctx context.Context, id int64, newPlanI
 		return UserPlan{}, err
 	}
 	return created, nil
+}
+
+func canSwitchPlan(current Plan, target Plan) bool {
+	if current.PlanType != target.PlanType {
+		return false
+	}
+	if target.Price < current.Price {
+		return false
+	}
+	switch current.PlanType {
+	case "coding":
+		return intLimitNotLower(current.HourlyLimit, target.HourlyLimit) &&
+			intLimitNotLower(current.WeeklyLimit, target.WeeklyLimit) &&
+			intLimitNotLower(current.MonthlyLimit, target.MonthlyLimit)
+	case "token":
+		return int64LimitNotLower(current.TokenLimit, target.TokenLimit)
+	default:
+		return true
+	}
+}
+
+func intLimitNotLower(current *int, target *int) bool {
+	if current == nil {
+		return target == nil
+	}
+	if target == nil {
+		return true
+	}
+	return *target >= *current
+}
+
+func int64LimitNotLower(current *int64, target *int64) bool {
+	if current == nil {
+		return target == nil
+	}
+	if target == nil {
+		return true
+	}
+	return *target >= *current
 }
 
 // CancelUserPlan marks a user_plan as cancelled. Idempotent: cancelling an

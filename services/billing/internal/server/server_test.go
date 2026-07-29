@@ -71,6 +71,9 @@ func (f *fakeAdminStore) UpgradeUserPlan(_ context.Context, id int64, newPlanID 
 	f.upgradeExpiresAt = expiresAt
 	return f.upgradedUserPlan, f.upgradeErr
 }
+func (f *fakeAdminStore) SwitchUserPlan(ctx context.Context, id int64, newPlanID int64, expiresAt *time.Time) (repository.UserPlan, error) {
+	return f.UpgradeUserPlan(ctx, id, newPlanID, expiresAt)
+}
 func (f *fakeAdminStore) CancelUserPlan(context.Context, int64) error { return f.cancelErr }
 func (f *fakeAdminStore) GetUsageStats(context.Context, int, string) ([]repository.UsageStatRow, error) {
 	return f.usageStatsRows, f.usageStatsErr

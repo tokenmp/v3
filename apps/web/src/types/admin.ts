@@ -251,7 +251,7 @@ export interface AdminUserPlanRenewInput {
   expiresAt?: string | null;
 }
 
-export interface AdminUserPlanUpgradeInput {
+export interface AdminUserPlanSwitchInput {
   planId: string;
   expiresAt?: string | null;
 }

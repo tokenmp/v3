@@ -168,7 +168,7 @@ keys/codes/errors/models/plans/providers，recharts 用量图表。
 **套餐操作**：
 - 分配套餐（Modal：选套餐 + 到期时间；user 由详情页固定）
 - 续费套餐（按延长天数从当前未来到期日/now 延长，或显式设置新到期时间）
-- 升级/更换套餐（取消旧 user_plan，并创建新 plan 绑定；历史请求/账本不修改）
+- 切换套餐（取消旧 user_plan，并创建新 plan 绑定；目标套餐不能比当前套餐等级或用量更低；历史请求/账本不修改）
 - 撤销套餐（status→cancelled）
 - active coding user_plan 支持 reset/bonus limit override：重置 5小时/周/周期窗口或临时加额，并可查看历史与软撤销 override。
 
@@ -176,7 +176,7 @@ keys/codes/errors/models/plans/providers，recharts 用量图表。
 - `GET /api/v1/admin/users/{id}` 聚合用户信息 + userPlans + 5 条 API Key + 5 条最近请求
 - `POST /api/v1/admin/user-plans`
 - `POST /api/v1/admin/user-plans/{id}/renew`
-- `POST /api/v1/admin/user-plans/{id}/upgrade`
+- `POST /api/v1/admin/user-plans/{id}/switch`
 - `POST /api/v1/admin/user-plans/{id}/cancel`
 - `POST/GET /api/v1/admin/user-plans/{id}/limit-overrides`
 - `POST /api/v1/admin/limit-overrides/{id}/revoke`
@@ -321,7 +321,7 @@ keys/codes/errors/models/plans/providers，recharts 用量图表。
 
 ### Phase 3（套餐计费）✅ 前端已完成
 - 套餐 CRUD
-- 用户详情内套餐分配/续费/升级/撤销
+- 用户详情内套餐分配/续费/切换/撤销
 - active coding 套餐 reset/bonus override 与历史撤销
 - 用量统计（BarChart + AreaChart）
 
