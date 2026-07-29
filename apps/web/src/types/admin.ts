@@ -181,7 +181,7 @@ export interface AdminPlan {
   name: string;
   planType: 'coding' | 'token' | 'image' | 'free';
   price: number;
-  category: 'monthly' | 'quarterly' | 'yearly';
+  category: 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'yearly';
   monthlyLimit: number | null;
   tokenLimit: number | null;
   allowedModels: string[];
@@ -194,7 +194,7 @@ export interface AdminPlanInput {
   name: string;
   planType: 'coding' | 'token' | 'image' | 'free';
   price: number;
-  category: 'monthly' | 'quarterly' | 'yearly';
+  category: 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'yearly';
   monthlyLimit: number | null;
   tokenLimit: number | null;
   allowedModels: string[];

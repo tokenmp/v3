@@ -37,6 +37,8 @@ const PLAN_TYPE_OPTIONS: { value: AdminPlanInput['planType']; label: string }[] 
 ];
 
 const CATEGORY_OPTIONS: { value: AdminPlanInput['category']; label: string }[] = [
+  { value: 'daily', label: '天' },
+  { value: 'weekly', label: '周' },
   { value: 'monthly', label: '月' },
   { value: 'quarterly', label: '季' },
   { value: 'yearly', label: '年' },

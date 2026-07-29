@@ -34,8 +34,9 @@ Billing Service 是 TokenMP V3 分层架构的**业务平面**计费服务：
   - Admin user_plan lifecycle endpoints：`POST /v1/billing/admin/user-plans/{id}/renew`（续费：按 `extend_days` 从当前未来到期日/now 延长，或显式设置 `expires_at`；不修改历史账本）、`POST /v1/billing/admin/user-plans/{id}/switch`（切换套餐：取消旧 user_plan，并为同 user 创建新 plan 绑定；目标必须同 plan_type 且最大总额度不低；coding 仅比较 `monthly_limit`/周期总额（hourly/weekly 是节流限制，不代表套餐等级），token 比较 `token_limit`；不以 price 判定等级（运营/反馈赠送套餐可 price=0 但额度更高）；历史请求继续归属于旧套餐周期，不改 usage_ledger；`/upgrade` 仅保留兼容）、`POST /v1/billing/admin/user-plans/{id}/cancel`（撤销 active 用户套餐，幂等）。
   - Phase 2 admin endpoints：`POST /v1/billing/admin/user-plans/{id}/limit-overrides`（create，校验 kind/scope/bonus_requests，effective_from 默认 now，支持 RFC3339 effective_from/effective_until）、`GET /v1/billing/admin/user-plans/{id}/limit-overrides`（list，newest-first）、`POST /v1/billing/admin/limit-overrides/{id}/revoke`（soft-revoke，幂等，not-found 404）。
   - 协议原生 JSON 错误，不泄漏 DSN/SQL/凭据；所有响应 `Cache-Control: no-store`。
-- `migrations/000001_init.{up,down}.sql`：Billing DB schema（从 `infra/db/migrations/billing/0001_init.sql` 转换为 golang-migrate 格式）。
+- `migrations/000001_init.{up,down}.sql`：Billing DB schema（从 `infra/db/migrations/billing/0001_init.sql` 转换为 golang-migrate 格式；plan category 支持 `daily`/`weekly`/`monthly`/`quarterly`/`yearly`）。
 - `migrations/000002_limit_overrides.{up,down}.sql`：Phase 2 `user_plan_limit_overrides` 表（kind reset/bonus、scope hour5/weekly/period、user_plan_id FK、effective_from、effective_until nullable、bonus_requests nullable、reason、created_by、created_at）。镜像 `infra/db/migrations/billing/0002_limit_overrides.sql`。
+- `migrations/000003_plan_daily_weekly_categories.{up,down}.sql`：扩展 plan category CHECK 以支持天卡/周卡。镜像 `infra/db/migrations/billing/0003_plan_daily_weekly_categories.sql`。
 
 ## 验证
 
