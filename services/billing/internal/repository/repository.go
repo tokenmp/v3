@@ -69,6 +69,21 @@ type UserPlan struct {
 	UpdatedAt   time.Time  `json:"updated_at" gorm:"column:updated_at"`
 }
 
+// UserPlanDetail is a user_plan joined with its immutable-ish plan definition.
+// It is used by read APIs that render quota cards and should not be used for
+// billing lifecycle writes.
+type UserPlanDetail struct {
+	UserPlan
+	PlanName     string  `json:"plan_name" gorm:"column:plan_name"`
+	Category     string  `json:"category" gorm:"column:category"`
+	Price        float64 `json:"price" gorm:"column:price"`
+	HourlyLimit  *int    `json:"hourly_limit,omitempty" gorm:"column:hourly_limit"`
+	WeeklyLimit  *int    `json:"weekly_limit,omitempty" gorm:"column:weekly_limit"`
+	MonthlyLimit *int    `json:"monthly_limit,omitempty" gorm:"column:monthly_limit"`
+	TokenLimit   *int64  `json:"token_limit,omitempty" gorm:"column:token_limit"`
+	PlanStatus   string  `json:"plan_status" gorm:"column:plan_status"`
+}
+
 // QuotaReservation corresponds to the quota_reservations table (配额预留).
 // Its text PK is the reservation ID carried on the V3 request. Nullable
 // final_* / finalized_at / expires_at use pointers.
@@ -119,6 +134,9 @@ type UserPlanReader interface {
 	// GetActiveUserPlan returns the user's most recently activated
 	// active user_plan. Returns ErrNotFound when the user has none.
 	GetActiveUserPlan(ctx context.Context, userID string) (UserPlan, error)
+	// ListActiveUserPlans returns all active user_plans joined with plan metadata,
+	// newest-first. Missing users/plans return an empty slice, not ErrNotFound.
+	ListActiveUserPlans(ctx context.Context, userID string) ([]UserPlanDetail, error)
 }
 
 // QuotaManager implements the "reserve then finalize" quota lifecycle:
@@ -257,6 +275,31 @@ LIMIT 1`
 		return UserPlan{}, ErrNotFound
 	}
 	return row, nil
+}
+
+// ListActiveUserPlans returns all active user plans with the plan metadata the
+// user panel needs to display quotas and expiry. Expired rows that have not yet
+// been marked expired are excluded by expires_at so the UI never shows stale
+// entitlements as current.
+func (r *GormRepository) ListActiveUserPlans(ctx context.Context, userID string) ([]UserPlanDetail, error) {
+	const q = `SELECT
+	up.id, up.user_id, up.plan_id, up.plan_type, up.status, up.activated_at, up.expires_at, up.created_at, up.updated_at,
+	p.name AS plan_name, p.category, p.price, p.hourly_limit, p.weekly_limit, p.monthly_limit, p.token_limit, p.status AS plan_status
+FROM user_plans up
+JOIN plans p ON p.id = up.plan_id
+WHERE up.user_id = ?
+  AND up.status = 'active'
+  AND p.status = 'active'
+  AND (up.expires_at IS NULL OR up.expires_at > now())
+ORDER BY up.plan_type ASC, up.activated_at DESC, up.id DESC`
+	var rows []UserPlanDetail
+	if err := r.db.WithContext(ctx).Raw(q, userID).Scan(&rows).Error; err != nil {
+		return nil, ErrQueryFailed
+	}
+	if rows == nil {
+		rows = []UserPlanDetail{}
+	}
+	return rows, nil
 }
 
 // ----------------------------------------------------------------------------

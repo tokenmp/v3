@@ -564,8 +564,29 @@ components:
         planId:
           type: string
           format: uuid
+        planName:
+          type: string
+          description: Human-readable plan name.
         planType:
           type: string
+        category:
+          type: string
+          nullable: true
+        price:
+          type: number
+          nullable: true
+        hourlyLimit:
+          type: integer
+          nullable: true
+        weeklyLimit:
+          type: integer
+          nullable: true
+        monthlyLimit:
+          type: integer
+          nullable: true
+        tokenLimit:
+          type: string
+          nullable: true
         totalQuota:
           type: string
         remainingQuota:

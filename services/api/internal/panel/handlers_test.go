@@ -203,7 +203,7 @@ func TestListUserPlans_OK(t *testing.T) {
 		status int
 		body   string
 	}{
-		"/v1/billing/users/user-1/plan":    {200, `{"id":5,"user_id":"user-1","plan_id":1,"plan_type":"coding","status":"active","activated_at":"2026-01-01T00:00:00Z"}`},
+		"/v1/billing/users/user-1/plans":   {200, `{"plans":[{"id":5,"user_id":"user-1","plan_id":1,"plan_name":"Pro","plan_type":"coding","category":"monthly","monthly_limit":10,"status":"active","activated_at":"2026-01-01T00:00:00Z"}]}`},
 		"/v1/billing/users/user-1/balance": {200, `{"coding_remaining":"7","token_remaining":"0"}`},
 	})
 	defer b.close()
@@ -216,7 +216,7 @@ func TestListUserPlans_OK(t *testing.T) {
 		Plans []apiv1.UserPlan `json:"plans"`
 	}
 	decodeData(t, rec, &out)
-	if len(out.Plans) != 1 || out.Plans[0].RemainingQuota != "7" {
+	if len(out.Plans) != 1 || out.Plans[0].RemainingQuota != "7" || out.Plans[0].TotalQuota != "10" || out.Plans[0].PlanName == nil || *out.Plans[0].PlanName != "Pro" {
 		t.Errorf("plans = %+v", out)
 	}
 }

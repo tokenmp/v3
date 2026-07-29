@@ -103,7 +103,14 @@ export type UserPlanStatus = 'active' | 'expired' | 'disabled';
 export interface UserPlan {
   id: string;
   planId: string;
+  planName?: string | null;
   planType: PlanType;
+  category?: string | null;
+  price?: number | null;
+  hourlyLimit?: number | null;
+  weeklyLimit?: number | null;
+  monthlyLimit?: number | null;
+  tokenLimit?: string | null;
   totalQuota: string;
   remainingQuota: string;
   priority: number | null;
