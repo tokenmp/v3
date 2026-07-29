@@ -31,6 +31,7 @@ Billing Service 是 TokenMP V3 分层架构的**业务平面**计费服务：
   - `GET /v1/billing/users/{user_id}/ledger`。
   - `GET /v1/billing/users/{user_id}/balance`：返回 `{coding_remaining, token_remaining}` 十进制字符串。Coding=active coding 套餐月配额减本月已 charge 请求数；Token=active token 套餐 token_limit 加 net token_delta（全期），二者均钳到 >=0；无套餐/无账本返回 0，永不 ErrNotFound。
   - `GET /v1/billing/users/{user_id}/usage-windows`：返回活跃 coding 套餐的 hour5/weekly/period 窗口（limit/consumed/remaining/window_start/window_end），与 Reserve enforcement 同源计数；limit 为 override-adjusted（base+active bonus），window_start 为 effective start（max base start, latest active reset effective_from），无活跃 coding 套餐返回空数组。
+  - Admin user_plan lifecycle endpoints：`POST /v1/billing/admin/user-plans/{id}/renew`（续费：按 `extend_days` 从当前未来到期日/now 延长，或显式设置 `expires_at`；不修改历史账本）、`POST /v1/billing/admin/user-plans/{id}/upgrade`（升级/更换：取消旧 user_plan，并为同 user 创建新 plan 绑定；历史请求继续归属于旧套餐周期，不改 usage_ledger）、`POST /v1/billing/admin/user-plans/{id}/cancel`（撤销 active 用户套餐，幂等）。
   - Phase 2 admin endpoints：`POST /v1/billing/admin/user-plans/{id}/limit-overrides`（create，校验 kind/scope/bonus_requests，effective_from 默认 now，支持 RFC3339 effective_from/effective_until）、`GET /v1/billing/admin/user-plans/{id}/limit-overrides`（list，newest-first）、`POST /v1/billing/admin/limit-overrides/{id}/revoke`（soft-revoke，幂等，not-found 404）。
   - 协议原生 JSON 错误，不泄漏 DSN/SQL/凭据；所有响应 `Cache-Control: no-store`。
 - `migrations/000001_init.{up,down}.sql`：Billing DB schema（从 `infra/db/migrations/billing/0001_init.sql` 转换为 golang-migrate 格式）。

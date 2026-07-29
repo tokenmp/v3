@@ -24,6 +24,16 @@ type fakeAdminStore struct {
 	userPlansTotal    int
 	assignErr         error
 	assignedUserPlan  *repository.UserPlan
+	renewErr          error
+	renewedUserPlan   repository.UserPlan
+	renewID           int64
+	renewExtendDays   int
+	renewExpiresAt    *time.Time
+	upgradeErr        error
+	upgradedUserPlan  repository.UserPlan
+	upgradeID         int64
+	upgradePlanID     int64
+	upgradeExpiresAt  *time.Time
 	cancelErr         error
 	usageStatsErr     error
 	usageStatsRows    []repository.UsageStatRow
@@ -48,6 +58,18 @@ func (f *fakeAdminStore) ListAllUserPlans(context.Context, int, int) ([]reposito
 func (f *fakeAdminStore) AssignUserPlan(_ context.Context, up *repository.UserPlan) error {
 	f.assignedUserPlan = up
 	return f.assignErr
+}
+func (f *fakeAdminStore) RenewUserPlan(_ context.Context, id int64, extendDays int, expiresAt *time.Time) (repository.UserPlan, error) {
+	f.renewID = id
+	f.renewExtendDays = extendDays
+	f.renewExpiresAt = expiresAt
+	return f.renewedUserPlan, f.renewErr
+}
+func (f *fakeAdminStore) UpgradeUserPlan(_ context.Context, id int64, newPlanID int64, expiresAt *time.Time) (repository.UserPlan, error) {
+	f.upgradeID = id
+	f.upgradePlanID = newPlanID
+	f.upgradeExpiresAt = expiresAt
+	return f.upgradedUserPlan, f.upgradeErr
 }
 func (f *fakeAdminStore) CancelUserPlan(context.Context, int64) error { return f.cancelErr }
 func (f *fakeAdminStore) GetUsageStats(context.Context, int, string) ([]repository.UsageStatRow, error) {

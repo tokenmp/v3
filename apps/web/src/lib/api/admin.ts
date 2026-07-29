@@ -21,6 +21,8 @@ import type {
   AdminPlanInput,
   AdminUserPlan,
   AdminUserPlanInput,
+  AdminUserPlanRenewInput,
+  AdminUserPlanUpgradeInput,
   AdminLimitOverride,
   AdminLimitOverrideInput,
   AdminProvider,
@@ -522,6 +524,26 @@ export const adminApi = {
         baseUrl: ADMIN_BASE,
       });
     },
+    renew: async (id: string, input: AdminUserPlanRenewInput): Promise<AdminUserPlan> => {
+      return request<AdminUserPlan>(`/api/v1/admin/user-plans/${id}/renew`, {
+        method: 'POST',
+        body: {
+          extend_days: input.extendDays ?? undefined,
+          expires_at: input.expiresAt ?? undefined,
+        },
+        baseUrl: ADMIN_BASE,
+      });
+    },
+    upgrade: async (id: string, input: AdminUserPlanUpgradeInput): Promise<AdminUserPlan> => {
+      return request<AdminUserPlan>(`/api/v1/admin/user-plans/${id}/upgrade`, {
+        method: 'POST',
+        body: {
+          plan_id: Number(input.planId),
+          expires_at: input.expiresAt ?? undefined,
+        },
+        baseUrl: ADMIN_BASE,
+      });
+    },
     createLimitOverride: async (userPlanId: string, input: AdminLimitOverrideInput): Promise<AdminLimitOverride> => {
       const res = await request<Record<string, unknown>>(`/api/v1/admin/user-plans/${userPlanId}/limit-overrides`, {
         method: 'POST',
@@ -586,6 +608,8 @@ export const adminUserPlanApi = {
   list: adminApi.userPlans.list,
   assign: adminApi.userPlans.assign,
   cancel: adminApi.userPlans.cancel,
+  renew: adminApi.userPlans.renew,
+  upgrade: adminApi.userPlans.upgrade,
   createLimitOverride: adminApi.userPlans.createLimitOverride,
   listLimitOverrides: adminApi.userPlans.listLimitOverrides,
   revokeLimitOverride: adminApi.userPlans.revokeLimitOverride,

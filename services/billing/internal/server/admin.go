@@ -160,10 +160,15 @@ func (s *Server) handleAdminAssignUserPlan(w http.ResponseWriter, r *http.Reques
 		httpresp.Error(w, httpresp.CodeMissingField, "user id and plan id required")
 		return
 	}
+	expiresAt, ok := parseOptionalRFC3339(w, body.ExpiresAt)
+	if !ok {
+		return
+	}
 	up := &repository.UserPlan{
-		UserID: body.UserID,
-		PlanID: body.PlanID,
-		Status: "active",
+		UserID:    body.UserID,
+		PlanID:    body.PlanID,
+		Status:    "active",
+		ExpiresAt: expiresAt,
 	}
 	if err := s.admin.AssignUserPlan(r.Context(), up); err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
@@ -175,6 +180,108 @@ func (s *Server) handleAdminAssignUserPlan(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	httpresp.Created(w, up)
+}
+
+type renewUserPlanBody struct {
+	ExtendDays *int    `json:"extend_days,omitempty"`
+	ExpiresAt  *string `json:"expires_at,omitempty"`
+}
+
+type upgradeUserPlanBody struct {
+	PlanID    int64   `json:"plan_id"`
+	ExpiresAt *string `json:"expires_at,omitempty"`
+}
+
+func (s *Server) handleAdminRenewUserPlan(w http.ResponseWriter, r *http.Request) {
+	if s.admin == nil {
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "admin not configured")
+		return
+	}
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil || id <= 0 {
+		httpresp.Error(w, httpresp.CodeBadRequest, "invalid user plan id")
+		return
+	}
+	var body renewUserPlanBody
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxQuotaBodyBytes)).Decode(&body); err != nil {
+		httpresp.Error(w, httpresp.CodeInvalidJSON, "invalid body")
+		return
+	}
+	expiresAt, ok := parseOptionalRFC3339(w, body.ExpiresAt)
+	if !ok {
+		return
+	}
+	extendDays := 0
+	if body.ExtendDays != nil {
+		extendDays = *body.ExtendDays
+	}
+	if expiresAt == nil && extendDays <= 0 {
+		httpresp.Error(w, httpresp.CodeBadRequest, "extend_days or expires_at required")
+		return
+	}
+	up, err := s.admin.RenewUserPlan(r.Context(), id, extendDays, expiresAt)
+	if err != nil {
+		s.handleUserPlanAdminErr(w, err, "admin renew user plan failed")
+		return
+	}
+	httpresp.OK(w, up)
+}
+
+func (s *Server) handleAdminUpgradeUserPlan(w http.ResponseWriter, r *http.Request) {
+	if s.admin == nil {
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "admin not configured")
+		return
+	}
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil || id <= 0 {
+		httpresp.Error(w, httpresp.CodeBadRequest, "invalid user plan id")
+		return
+	}
+	var body upgradeUserPlanBody
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxQuotaBodyBytes)).Decode(&body); err != nil {
+		httpresp.Error(w, httpresp.CodeInvalidJSON, "invalid body")
+		return
+	}
+	if body.PlanID <= 0 {
+		httpresp.Error(w, httpresp.CodeMissingField, "plan id required")
+		return
+	}
+	expiresAt, ok := parseOptionalRFC3339(w, body.ExpiresAt)
+	if !ok {
+		return
+	}
+	up, err := s.admin.UpgradeUserPlan(r.Context(), id, body.PlanID, expiresAt)
+	if err != nil {
+		s.handleUserPlanAdminErr(w, err, "admin upgrade user plan failed")
+		return
+	}
+	httpresp.Created(w, up)
+}
+
+func parseOptionalRFC3339(w http.ResponseWriter, raw *string) (*time.Time, bool) {
+	if raw == nil || *raw == "" {
+		return nil, true
+	}
+	t, err := time.Parse(time.RFC3339, *raw)
+	if err != nil {
+		httpresp.Error(w, httpresp.CodeBadRequest, "invalid expires_at")
+		return nil, false
+	}
+	t = t.UTC()
+	return &t, true
+}
+
+func (s *Server) handleUserPlanAdminErr(w http.ResponseWriter, err error, msg string) {
+	if errors.Is(err, repository.ErrNotFound) {
+		httpresp.Error(w, httpresp.CodeNotFound, "user plan or plan not found")
+		return
+	}
+	if errors.Is(err, repository.ErrConflict) {
+		httpresp.Error(w, httpresp.CodeBadRequest, "invalid renewal")
+		return
+	}
+	s.logger.Warn(msg, "error", err)
+	httpresp.Error(w, httpresp.CodeInternalError, "internal error")
 }
 
 func (s *Server) handleAdminCancelUserPlan(w http.ResponseWriter, r *http.Request) {
