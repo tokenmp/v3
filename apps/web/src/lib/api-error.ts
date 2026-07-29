@@ -43,7 +43,10 @@ export function parseApiError(res: Response, body: unknown): ApiError {
   if (env && typeof env === 'object' && 'code' in env && typeof env.code === 'number') {
     // Map numeric code to string ErrorCode for CODE_MESSAGES lookup.
     const codeStr = numericToCodeString(env.code);
-    return new ApiError(codeStr, CODE_MESSAGES[codeStr] ?? env.message ?? '请求失败', res.status);
+    const message = env.message && env.message !== 'bad request'
+      ? env.message
+      : (CODE_MESSAGES[codeStr] ?? '请求失败');
+    return new ApiError(codeStr, message, res.status);
   }
   const rawErr = (body as ApiErrorBody | null)?.error;
   // Simplified wire shape: {error: "code_string"} (panel handlers).

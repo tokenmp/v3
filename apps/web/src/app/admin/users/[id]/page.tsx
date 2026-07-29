@@ -136,6 +136,9 @@ export default function AdminUserDetailPage() {
       qc.invalidateQueries({ queryKey: ['admin', 'user', id] });
       toast.success('套餐已分配');
     },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : '套餐分配失败');
+    },
   });
 
   const cancelMutation = useMutation({
@@ -143,6 +146,9 @@ export default function AdminUserDetailPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['admin', 'user', id] });
       toast.success('套餐已撤销');
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : '套餐撤销失败');
     },
   });
 
@@ -163,6 +169,9 @@ export default function AdminUserDetailPage() {
       qc.invalidateQueries({ queryKey: ['admin', 'user', id] });
       toast.success('套餐已更新');
     },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : '套餐更新失败');
+    },
   });
 
   const overrideMutation = useMutation({
@@ -178,6 +187,9 @@ export default function AdminUserDetailPage() {
       qc.invalidateQueries({ queryKey: ['admin', 'user-plan-overrides', variables.userPlan.id] });
       toast.success('额度调整已生效');
     },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : '额度调整失败');
+    },
   });
 
   const revokeOverrideMutation = useMutation({
@@ -186,6 +198,9 @@ export default function AdminUserDetailPage() {
       qc.invalidateQueries({ queryKey: ['admin', 'user', id] });
       if (historyPlan?.id) qc.invalidateQueries({ queryKey: ['admin', 'user-plan-overrides', historyPlan.id] });
       toast.success('覆盖已撤销');
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : '撤销覆盖失败');
     },
   });
 
@@ -246,6 +261,12 @@ export default function AdminUserDetailPage() {
     }
     overrideMutation.mutate(overrideForm, { onSuccess: () => setOverrideOpen(false) });
   }
+
+  const switchCandidates = renewSwitchForm?.mode === 'switch'
+    ? plans.filter((p) => p.status === 'active'
+      && p.planType === renewSwitchForm.userPlan.planType
+      && Number(p.price ?? 0) >= Number(renewSwitchForm.userPlan.price ?? 0))
+    : [];
 
   if (isLoading) {
     return (
@@ -537,10 +558,11 @@ export default function AdminUserDetailPage() {
                   onChange={(e) => setRenewSwitchForm((f) => f ? { ...f, newPlanId: e.target.value } : f)}
                 >
                   <option value="">选择套餐</option>
-                  {plans.map((p) => (
+                  {switchCandidates.map((p) => (
                     <option key={p.id} value={p.id}>{p.name}</option>
                   ))}
                 </select>
+                <p className="text-xs text-muted-foreground">只显示同类型、价格不低于当前套餐的候选；后端还会校验具体用量不能降低。</p>
               </div>
             )}
             <div className="space-y-2">
