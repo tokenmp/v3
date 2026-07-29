@@ -522,6 +522,27 @@ func TestIngestBatch_UpsertDedupes(t *testing.T) {
 	if got.CompletedAt == nil {
 		t.Errorf("completed_at not set")
 	}
+
+	// A late asynchronous Edge/first-token processing event must not regress a
+	// terminal summary back to processing, but it may still add TTFT/stream.
+	lateProcessing := Batch{Log: RequestLog{
+		RequestID:   reqID,
+		FinalStatus: "processing",
+		Stream:      true,
+		TTFTMS:      321,
+		CreatedAt:   now.Add(2 * time.Second),
+	}}
+	if err := repo.IngestBatch(ctx, lateProcessing); err != nil {
+		t.Fatalf("ingest late processing batch: %v", err)
+	}
+	got, err = repo.GetRequestLog(ctx, reqID)
+	if err != nil {
+		t.Fatalf("get after late processing: %v", err)
+	}
+	if got.FinalStatus != "success" || !got.Stream || got.TTFTMS != 321 {
+		t.Fatalf("late processing regression: final=%q stream=%v ttft=%d", got.FinalStatus, got.Stream, got.TTFTMS)
+	}
+
 	// One attempt row.
 	attempts, err := repo.ListAttempts(ctx, reqID)
 	if err != nil {

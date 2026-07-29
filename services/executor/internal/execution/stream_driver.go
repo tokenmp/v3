@@ -205,10 +205,18 @@ func (d *StreamDriver) Run(ctx context.Context, in StreamInput) (StreamResult, e
 			}
 			return StreamResult{}, d.releaseFailureWithLog(ctx, terminalizer, primary, in, prepared, attemptNo)
 		}
-		bridge := streaming.Bridge{Source: source, Sink: sink, Timeouts: streamTimeouts(prepared)}
-		// Record the bridge start time so the real TTFT (time from
-		// attempt start to first token, including upstream network
-		// latency) can be reconstructed from the bridge's relative TTFT.
+		// Observe the first successful downstream Commit without delaying SSE:
+		// enqueue the best-effort log post in a goroutine after Commit+Flush.
+		observedSink := &commitObserverSink{
+			inner: sink,
+			onCommit: func() {
+				committedAt := d.now()
+				d.logStarted(ctx, in, prepared, attemptNo, committedAt.Sub(attemptStart), committedAt)
+			},
+		}
+		bridge := streaming.Bridge{Source: source, Sink: observedSink, Timeouts: streamTimeouts(prepared)}
+		// Record the bridge start time so the terminal summary can reconstruct
+		// real TTFT (stream open latency + Bridge-relative first commit).
 		bridgeStart := d.now()
 		// Wire the optional cross-protocol EndOfStreamFinalizer so a committed
 		// clean EOF (e.g. OpenAI [DONE] that never carried finish_reason) is
@@ -495,6 +503,22 @@ func (d *StreamDriver) logReserved(ctx context.Context, in StreamInput, prepared
 		KeyID:     in.QuotaIdentity.KeyID,
 		Timestamp: d.now(),
 	}
+	logCtx, cancel := d.logContext(ctx)
+	defer cancel()
+	_ = d.Logger.RecordExecution(logCtx, event)
+}
+
+func (d *StreamDriver) logStarted(ctx context.Context, in StreamInput, prepared routing.PreparedAttempt, attemptNo int, ttft time.Duration, committedAt time.Time) {
+	if d == nil || isNilInterface(d.Logger) {
+		return
+	}
+	event := d.baseEvent(in, prepared, attemptNo)
+	event.Kind = requestlog.KindStarted
+	event.Status = "info"
+	event.Timestamp = committedAt
+	event.TTFT = ttft
+	event.Committed = true
+	event.Stream = true
 	logCtx, cancel := d.logContext(ctx)
 	defer cancel()
 	_ = d.Logger.RecordExecution(logCtx, event)

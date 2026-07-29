@@ -408,6 +408,33 @@ func TestQueryEventsForwardsFilterToLocal(t *testing.T) {
 	}
 }
 
+func TestBuildBatchStartedCreatesTTFTTimelineUpdate(t *testing.T) {
+	t.Parallel()
+
+	at := time.Date(2026, 7, 29, 3, 0, 0, 0, time.UTC)
+	b, ok := buildBatch(requestlog.ExecutionEvent{
+		RequestID: "rsv_started",
+		Kind:      requestlog.KindStarted,
+		Status:    "info",
+		Attempt:   1,
+		Timestamp: at,
+		TTFT:      1250 * time.Millisecond,
+		Stream:    true,
+	})
+	if !ok {
+		t.Fatal("buildBatch(started) ok = false")
+	}
+	if b.Log.FinalStatus != "processing" || !b.Log.Stream || b.Log.TTFTMS != 1250 {
+		t.Fatalf("log = %+v", b.Log)
+	}
+	if len(b.Attempts) != 0 {
+		t.Fatalf("attempts = %d, want 0", len(b.Attempts))
+	}
+	if len(b.Events) != 1 || b.Events[0].Stage != "upstream_started" || b.Events[0].CreatedAt != at {
+		t.Fatalf("events = %+v", b.Events)
+	}
+}
+
 func TestRemoteSinkContract(t *testing.T) {
 	t.Parallel()
 

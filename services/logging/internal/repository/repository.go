@@ -244,7 +244,10 @@ const upsertRequestLogSQL = `UPDATE request_logs SET
   provider_id = COALESCE(NULLIF($8, ''), provider_id),
   credential_id = COALESCE(NULLIF($9, ''), credential_id),
   protocol = COALESCE(NULLIF($10, ''), protocol),
-  final_status = COALESCE(NULLIF($11, ''), final_status),
+  final_status = CASE
+    WHEN $11 = 'processing' AND final_status <> 'processing' THEN final_status
+    ELSE COALESCE(NULLIF($11, ''), final_status)
+  END,
   http_status = COALESCE(NULLIF($12, 0), http_status),
   input_tokens = COALESCE(NULLIF($13, 0), input_tokens),
   output_tokens = COALESCE(NULLIF($14, 0), output_tokens),
