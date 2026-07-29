@@ -67,6 +67,8 @@ function statusLabel(s: string | null | undefined): { label: string; tone: 'succ
   switch (s) {
     case 'success':
       return { label: '成功', tone: 'success' };
+    case 'processing':
+      return { label: '处理中', tone: 'secondary' };
     case 'upstream_error':
       return { label: '上游错误', tone: 'destructive' };
     case 'timeout':
@@ -393,10 +395,11 @@ export default function RequestLogDetailPage() {
   }
 
   const isSuccess = log.status === 'success';
+  const isProcessing = log.status === 'processing';
   const attempts = log.attempts ?? [];
   const events = log.events ?? [];
-  const hasError = !!log.errorMessage || !!log.errorCode;
-  const st = statusLabel(isSuccess ? 'success' : (log.errorType ?? 'error'));
+  const hasError = !isProcessing && (!!log.errorMessage || !!log.errorCode);
+  const st = statusLabel(isProcessing ? 'processing' : (isSuccess ? 'success' : (log.errorType ?? 'error')));
 
   return (
     <div className="space-y-6">
@@ -409,7 +412,7 @@ export default function RequestLogDetailPage() {
       </Link>
 
       {/* Header banner */}
-      <Card className={isSuccess ? '' : 'border-destructive/40'}>
+      <Card className={isSuccess || isProcessing ? '' : 'border-destructive/40'}>
         <CardContent className="flex flex-col gap-4 p-4 sm:p-6">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="space-y-1.5 min-w-0">
@@ -430,8 +433,8 @@ export default function RequestLogDetailPage() {
         </CardContent>
       </Card>
 
-      {/* KPI stats — only for successful requests (failed requests show error banner instead) */}
-      {isSuccess && (
+      {/* KPI stats — show for successful and processing requests (failed requests show error banner instead) */}
+      {(isSuccess || isProcessing) && (
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           <StatTile icon={Clock} label="总耗时" value={formatMs(log.durationMs)} tone="blue" />
           {log.ttftMs != null && log.ttftMs > 0 && (

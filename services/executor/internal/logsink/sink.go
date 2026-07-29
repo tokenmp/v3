@@ -268,15 +268,11 @@ type batch struct {
 }
 
 // buildBatch assembles a single-event ingest batch from an ExecutionEvent.
-// Returns ok=false for KindReserved events: a reservation is an intermediate
-// lifecycle signal that carries no terminal outcome and cannot populate the
-// Logging DB final_status NOT NULL/CHECK constraint. The caller skips the
-// post, and the terminal event (KindFinalized or KindReleased) that follows
-// carries the complete request_log row.
+// KindReserved events are now posted (not skipped) with final_status="processing"
+// so the request log row appears immediately when the executor starts
+// processing — before the upstream call. Subsequent events (KindAttempt,
+// KindFinalized, KindReleased) update the row via upsertRequestLog.
 func buildBatch(e requestlog.ExecutionEvent) (batch, bool) {
-	if e.Kind == requestlog.KindReserved {
-		return batch{}, false
-	}
 	log := requestLog{
 		RequestID:     e.RequestID,
 		UserID:        e.Subject,
@@ -290,12 +286,19 @@ func buildBatch(e requestlog.ExecutionEvent) (batch, bool) {
 		CreatedAt:     e.Timestamp,
 	}
 
+	// TTFT for streaming events (non-zero only for stream attempts).
+	if e.TTFT > 0 {
+		log.TTFTMS = int(e.TTFT / time.Millisecond)
+	}
+
 	// Final status from event status or kind. The Logging DB final_status
-	// CHECK constraint only accepts: success, client_error,
+	// CHECK constraint accepts: processing, success, client_error,
 	// upstream_error, timeout, transport_error. The executor's coarse
 	// FailureCategory (set by the Runner from SDK classification) maps
 	// directly to these enum values for failure events.
 	switch e.Kind {
+	case requestlog.KindReserved:
+		log.FinalStatus = "processing"
 	case requestlog.KindFinalized:
 		log.FinalStatus = "success"
 	case requestlog.KindReleased:
@@ -498,13 +501,14 @@ func mapAttemptStatus(e requestlog.ExecutionEvent) string {
 }
 
 // mapEventStage maps an executor event Kind to the Logging DB
-// request_log_events stage enum.
+// request_log_events stage enum. KindAttempt fires after the upstream
+// call/stream completes, so it maps to upstream_finished (not started).
 func mapEventStage(kind string) string {
 	switch kind {
 	case requestlog.KindReserved:
 		return "quota_reserved"
 	case requestlog.KindAttempt:
-		return "upstream_started"
+		return "upstream_finished"
 	case requestlog.KindFinalized:
 		return "completed"
 	case requestlog.KindReleased:

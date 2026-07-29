@@ -504,6 +504,7 @@ func (d *StreamDriver) logSuccess(ctx context.Context, in StreamInput, prepared 
 	event.Status = "success"
 	event.Latency = latency
 	event.Committed = true
+	event.TTFT = outcome.TTFT
 	if outcome.UsageKnown {
 		event.Usage = requestlog.ExecutionUsage{
 			InputTokens:  uint64(outcome.Usage.PromptTokens),

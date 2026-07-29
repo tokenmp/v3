@@ -106,7 +106,7 @@ func NewServer(deps Deps, readHeaderTimeout, idleTimeout time.Duration) *http.Se
 	// Authenticated executor proxy routes (identity → quota → proxy).
 	r.Group(func(r chi.Router) {
 		r.Use(identity.Middleware(deps.Verifier, deps.Logger))
-		r.Use(quotaMiddleware(deps.Quota, deps.Logger))
+		r.Use(quotaMiddleware(deps.Quota, deps.Logging, deps.Logger))
 		// Catch-all forward to executor.
 		r.HandleFunc("/v1/*", deps.Proxy.ServeHTTP)
 	})
@@ -147,7 +147,14 @@ func Run(ctx context.Context, ln net.Listener, srv *http.Server, shutdownTimeout
 // quotaMiddleware reserves quota before the request and finalizes or releases
 // after. Reserve failures return 503. Finalize/release failures are logged
 // but do not affect the already-sent response.
-func quotaMiddleware(mgr quota.Manager, logger *slog.Logger) func(http.Handler) http.Handler {
+//
+// When logClient is non-nil, the middleware posts an early "received" event
+// to the Logging Service so the request log row appears immediately with
+// final_status="processing". The executor's subsequent events update the
+// same row (keyed by request_id). A final status update is posted after
+// the response completes. Both posts are fire-and-forget (background
+// context, errors swallowed) and never block the request path.
+func quotaMiddleware(mgr quota.Manager, logClient *logging.Client, logger *slog.Logger) func(http.Handler) http.Handler {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -167,6 +174,38 @@ func quotaMiddleware(mgr quota.Manager, logger *slog.Logger) func(http.Handler) 
 				requestID = reservationID
 			}
 
+			// Set the request ID on the forwarded request so the executor
+			// logs under the same ID, enabling the progressive log row to be
+			// updated by executor events.
+			r.Header.Set("X-Request-ID", requestID)
+
+			// Post an early "received" event so the request appears in the
+			// log immediately with "processing" status. Fire-and-forget.
+			if logClient != nil && logClient.Available() {
+				now := time.Now().UTC()
+				log := logging.IngestLog{
+					RequestID:   requestID,
+					UserID:      claims.Subject,
+					FinalStatus: "processing",
+					CreatedAt:   now,
+				}
+				events := []logging.IngestEvent{{
+					RequestID: requestID,
+					Source:    "edge",
+					Stage:     "received",
+					Status:    "info",
+					Message:   "request received",
+					CreatedAt: now,
+				}}
+				go func() {
+					bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+					defer cancel()
+					if err := logClient.Ingest(bgCtx, log, events); err != nil {
+						logger.Debug("edge log ingest (received) failed", "error", err, "request_id", requestID)
+					}
+				}()
+			}
+
 			// Reserve (best-effort; noop manager skips).
 			_, err := mgr.Reserve(r.Context(), reservationID, claims.Subject, requestID, "coding", 1, 0)
 			if err != nil {
@@ -182,13 +221,17 @@ func quotaMiddleware(mgr quota.Manager, logger *slog.Logger) func(http.Handler) 
 			ww := &statusWriter{ResponseWriter: w, status: http.StatusOK}
 			next.ServeHTTP(ww, r)
 
-			// Finalize or release based on status.
+			// Finalize or release based on status. Use a background context
+			// with a timeout because the request context may be cancelled after
+			// the response is sent (e.g. reverse proxy streaming).
+			finCtx, finCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer finCancel()
 			if ww.status >= 200 && ww.status < 400 {
-				if err := mgr.Finalize(r.Context(), reservationID, 1, 0); err != nil {
+				if err := mgr.Finalize(finCtx, reservationID, 1, 0); err != nil {
 					logger.Warn("quota finalize failed", "error", err, "request_id", requestID)
 				}
 			} else {
-				if err := mgr.Release(r.Context(), reservationID); err != nil {
+				if err := mgr.Release(finCtx, reservationID); err != nil {
 					logger.Warn("quota release failed", "error", err, "request_id", requestID)
 				}
 			}
