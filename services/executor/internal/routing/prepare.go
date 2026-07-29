@@ -52,9 +52,13 @@ func (r *Resolver) Prepare(candidate Candidate) (PreparedAttempt, error) {
 		return PreparedAttempt{}, ErrInvalidCandidate
 	}
 
+	baseURL := provider.BaseURL
+	if route.BaseURL != "" {
+		baseURL = route.BaseURL
+	}
 	return PreparedAttempt{
 		Target: sdk.Target{
-			BaseURL:       provider.BaseURL,
+			BaseURL:       baseURL,
 			UpstreamModel: route.UpstreamModel,
 			Protocol:      route.Protocol,
 		},

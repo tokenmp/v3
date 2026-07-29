@@ -89,6 +89,7 @@ type ProviderInput struct {
 }
 type RouteInput struct {
 	ID, ModelID, ProviderID, AdapterID, UpstreamModel string
+	BaseURL                                           string
 	Priority                                          int
 	Enabled                                           bool
 	Protocol                                          Protocol
@@ -131,6 +132,7 @@ type CompiledProvider struct {
 }
 type CompiledRoute struct {
 	ID, ModelID, ProviderID, AdapterID, UpstreamModel string
+	BaseURL                                           string
 	Priority                                          int
 	Enabled                                           bool
 	Protocol                                          Protocol
@@ -278,6 +280,12 @@ func Compile(in ConfigInput) (CompiledConfig, error) {
 		if strings.TrimSpace(route.UpstreamModel) == "" || !route.Protocol.Valid() || route.Protocol != a.Protocol {
 			return CompiledConfig{}, fmt.Errorf("route %q has incompatible adapter/protocol", route.ID)
 		}
+		if route.BaseURL != "" {
+			baseURL, err := url.Parse(route.BaseURL)
+			if err != nil || (baseURL.Scheme != "https" && baseURL.Scheme != "http") || baseURL.Host == "" || baseURL.User != nil || baseURL.RawQuery != "" || baseURL.ForceQuery || baseURL.Fragment != "" {
+				return CompiledConfig{}, fmt.Errorf("route %q has invalid base URL", route.ID)
+			}
+		}
 		if err := compatible(m, a); err != nil {
 			return CompiledConfig{}, fmt.Errorf("route %q: %w", route.ID, err)
 		}
@@ -317,7 +325,7 @@ func Compile(in ConfigInput) (CompiledConfig, error) {
 		if err != nil {
 			return CompiledConfig{}, fmt.Errorf("route %q: %w", route.ID, err)
 		}
-		out.Routes = append(out.Routes, CompiledRoute{ID: route.ID, ModelID: route.ModelID, ProviderID: route.ProviderID, AdapterID: route.AdapterID, UpstreamModel: route.UpstreamModel, Priority: route.Priority, Enabled: route.Enabled, Protocol: route.Protocol, Retry: r, Timeout: t, FallbackRouteIDs: append([]string(nil), route.FallbackRouteIDs...), RouteGroup: route.RouteGroup, Credentials: credentials})
+		out.Routes = append(out.Routes, CompiledRoute{ID: route.ID, ModelID: route.ModelID, ProviderID: route.ProviderID, AdapterID: route.AdapterID, UpstreamModel: route.UpstreamModel, BaseURL: route.BaseURL, Priority: route.Priority, Enabled: route.Enabled, Protocol: route.Protocol, Retry: r, Timeout: t, FallbackRouteIDs: append([]string(nil), route.FallbackRouteIDs...), RouteGroup: route.RouteGroup, Credentials: credentials})
 	}
 	if err := validateRouteCredentials(out.Routes); err != nil {
 		return CompiledConfig{}, err
