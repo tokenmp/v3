@@ -3,7 +3,9 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/tokenmp/v3/services/config/internal/repository"
@@ -88,6 +90,7 @@ type wireRoute struct {
 	ProviderID       string            `json:"ProviderID"`
 	AdapterID        string            `json:"AdapterID"`
 	UpstreamModel    string            `json:"UpstreamModel"`
+	BaseURL          string            `json:"BaseURL,omitempty"`
 	Priority         int               `json:"Priority"`
 	Enabled          bool              `json:"Enabled"`
 	Protocol         string            `json:"Protocol"`
@@ -388,6 +391,19 @@ func compileSnapshot(
 	adapters []repository.Adapter,
 	global repository.GlobalPolicy,
 ) ([]byte, error) {
+	return compileSnapshotWithEndpoints(models, providers, routes, credentialsByProvider, routeCredentialsByRoute, nil, adapters, global)
+}
+
+func compileSnapshotWithEndpoints(
+	models []repository.Model,
+	providers []repository.Provider,
+	routes []repository.RouteMapping,
+	credentialsByProvider map[string][]repository.UpstreamCredential,
+	routeCredentialsByRoute map[string][]repository.RouteCredential,
+	endpointsByProvider map[string][]repository.UpstreamEndpoint,
+	adapters []repository.Adapter,
+	global repository.GlobalPolicy,
+) ([]byte, error) {
 	now := time.Now().UTC()
 	revision := fmt.Sprintf("compile-%d", now.Unix())
 
@@ -518,6 +534,11 @@ func compileSnapshot(
 		}
 	}
 
+	providerByID := make(map[string]repository.Provider, len(providers))
+	for _, p := range providers {
+		providerByID[p.ID] = p
+	}
+
 	// ---- Routes ----
 	wireRoutes := make([]wireRoute, 0, len(routes))
 	for _, rm := range routes {
@@ -594,12 +615,18 @@ func compileSnapshot(
 			routeGroup = *rm.RouteGroup
 		}
 
+		baseURL := ""
+		if provider, ok := providerByID[rm.ProviderID]; ok {
+			baseURL = routeBaseURL(provider.BaseURL, endpointForProtocol(endpointsByProvider[rm.ProviderID], rm.Protocol))
+		}
+
 		wireRoutes = append(wireRoutes, wireRoute{
 			ID:            rm.ID,
 			ModelID:       rm.ModelID,
 			ProviderID:    rm.ProviderID,
 			AdapterID:     adapterID,
 			UpstreamModel: rm.UpstreamModel,
+			BaseURL:       baseURL,
 			Priority:      rm.Priority,
 			Enabled:       rm.Enabled,
 			Protocol:      rm.Protocol,
@@ -706,6 +733,56 @@ func dbAdapterToWire(a repository.Adapter, credentialsByProvider map[string][]re
 		Retry:      retry,
 		Timeout:    timeout,
 	}, nil
+}
+
+func endpointForProtocol(endpoints []repository.UpstreamEndpoint, protocol string) *repository.UpstreamEndpoint {
+	for i := range endpoints {
+		if endpoints[i].Status != "deleted" && endpoints[i].Protocol == protocol {
+			return &endpoints[i]
+		}
+	}
+	return nil
+}
+
+func routeBaseURL(providerBaseURL string, endpoint *repository.UpstreamEndpoint) string {
+	if endpoint == nil || strings.TrimSpace(endpoint.Path) == "" {
+		return ""
+	}
+	base, err := url.Parse(providerBaseURL)
+	if err != nil || base.Scheme == "" || base.Host == "" {
+		return ""
+	}
+	prefix := sdkBasePathForEndpoint(endpoint.Protocol, endpoint.Path)
+	if prefix == "" {
+		return ""
+	}
+	basePath := strings.TrimRight(base.Path, "/")
+	if basePath == prefix || strings.HasSuffix(basePath, prefix) {
+		base.Path = basePath
+	} else {
+		base.Path = basePath + prefix
+	}
+	base.RawQuery = ""
+	base.Fragment = ""
+	return base.String()
+}
+
+func sdkBasePathForEndpoint(protocol, endpointPath string) string {
+	path := "/" + strings.TrimLeft(endpointPath, "/")
+	operationSuffix := map[string]string{
+		"openai_chat":        "/chat/completions",
+		"openai_responses":   "/responses",
+		"openai_images":      "/images/generations",
+		"anthropic_messages": "/messages",
+	}[protocol]
+	if operationSuffix == "" || !strings.HasSuffix(path, operationSuffix) {
+		return ""
+	}
+	prefix := strings.TrimSuffix(path, operationSuffix)
+	if prefix == "" {
+		return ""
+	}
+	return prefix
 }
 
 func routeProtocolsByProvider(routes []repository.RouteMapping) map[string][]string {

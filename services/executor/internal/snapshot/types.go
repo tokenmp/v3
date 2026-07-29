@@ -67,6 +67,7 @@ type RouteConfig struct {
 	ProviderID       string
 	AdapterID        string
 	UpstreamModel    string
+	BaseURL          string
 	Priority         int
 	Enabled          bool
 	Protocol         adapter.Protocol

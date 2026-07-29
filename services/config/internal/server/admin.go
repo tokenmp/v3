@@ -513,6 +513,17 @@ func (s *Server) handleAdminCompile(w http.ResponseWriter, r *http.Request) {
 		credentialsByProvider[p.ID] = creds
 	}
 
+	// Build endpoints by provider map.
+	endpointsByProvider := make(map[string][]repository.UpstreamEndpoint)
+	for _, p := range providers {
+		endpoints, err := s.adminReader.ListEndpoints(ctx, p.ID)
+		if err != nil {
+			s.logger.Warn("compile: list endpoints failed", "provider_id", p.ID, "error", err)
+			continue
+		}
+		endpointsByProvider[p.ID] = endpoints
+	}
+
 	// Build route credentials by route map.
 	routeCredentialsByRoute := make(map[string][]repository.RouteCredential)
 	for _, rm := range routes {
@@ -525,7 +536,7 @@ func (s *Server) handleAdminCompile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Compile snapshot JSON.
-	snapshotJSON, err := compileSnapshot(models, providers, routes, credentialsByProvider, routeCredentialsByRoute, adapters, global)
+	snapshotJSON, err := compileSnapshotWithEndpoints(models, providers, routes, credentialsByProvider, routeCredentialsByRoute, endpointsByProvider, adapters, global)
 	if err != nil {
 		s.logger.Warn("compile: snapshot compilation failed", "error", err)
 		httpresp.Error(w, httpresp.CodeInternalError, "compilation failed")
