@@ -100,6 +100,21 @@ export interface Plan {
 
 export type UserPlanStatus = 'active' | 'expired' | 'disabled';
 
+/** Rate-limit window scope for an active coding plan. */
+export type UsageWindowScope = 'hour5' | 'weekly' | 'period';
+
+/** Current usage for a single rate-limit window of an active coding plan.
+ * Aligned to packages/contracts/openapi/api/v1.yaml UsageWindow. */
+export interface UsageWindow {
+  scope: UsageWindowScope;
+  /** Plan limit for this window, when set. null means unlimited. */
+  limit: number | null;
+  consumed: number;
+  remaining: number;
+  windowStart: string;
+  windowEnd: string | null;
+}
+
 export interface UserPlan {
   id: string;
   planId: string;
@@ -117,6 +132,10 @@ export interface UserPlan {
   status: UserPlanStatus;
   activatedAt: string;
   expiresAt: string | null;
+  /** Optional current usage windows for an active coding plan
+   * (hour5/weekly/period). Omitted when the plan has no windows or when the
+   * upstream window query is unavailable. */
+  usageWindows?: UsageWindow[] | null;
 }
 
 /** Decimal amounts as strings to preserve precision. */

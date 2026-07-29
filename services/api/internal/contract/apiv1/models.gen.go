@@ -126,6 +126,27 @@ func (e RequestLogDetailStatus) Valid() bool {
 	}
 }
 
+// Defines values for UsageWindowScope.
+const (
+	Hour5  UsageWindowScope = "hour5"
+	Period UsageWindowScope = "period"
+	Weekly UsageWindowScope = "weekly"
+)
+
+// Valid indicates whether the value is a known member of the UsageWindowScope enum.
+func (e UsageWindowScope) Valid() bool {
+	switch e {
+	case Hour5:
+		return true
+	case Period:
+		return true
+	case Weekly:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for UserPlanStatus.
 const (
 	UserPlanStatusActive   UserPlanStatus = "active"
@@ -394,6 +415,23 @@ type UsageStats struct {
 	TotalRequests     int    `json:"totalRequests"`
 }
 
+// UsageWindow defines model for UsageWindow.
+type UsageWindow struct {
+	Consumed int `json:"consumed"`
+
+	// Limit The plan limit for this window, when set.
+	Limit     *int `json:"limit,omitempty"`
+	Remaining int  `json:"remaining"`
+
+	// Scope The rate-limit window this entry describes.
+	Scope       UsageWindowScope `json:"scope"`
+	WindowEnd   *time.Time       `json:"windowEnd,omitempty"`
+	WindowStart time.Time        `json:"windowStart"`
+}
+
+// UsageWindowScope The rate-limit window this entry describes.
+type UsageWindowScope string
+
 // UserBalance defines model for UserBalance.
 type UserBalance struct {
 	// CodingRemaining Coding quota remaining (bigint string)
@@ -422,7 +460,10 @@ type UserPlan struct {
 	Status         UserPlanStatus `json:"status"`
 	TokenLimit     *string        `json:"tokenLimit,omitempty"`
 	TotalQuota     string         `json:"totalQuota"`
-	WeeklyLimit    *int           `json:"weeklyLimit,omitempty"`
+
+	// UsageWindows Optional current usage windows for an active coding plan (hour5/weekly/period). Omitted when the plan has no windows or when the upstream window query is unavailable.
+	UsageWindows *[]UsageWindow `json:"usageWindows,omitempty"`
+	WeeklyLimit  *int           `json:"weeklyLimit,omitempty"`
 }
 
 // UserPlanStatus defines model for UserPlan.Status.

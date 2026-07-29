@@ -26,6 +26,11 @@ type Reservation struct {
 // returned an error. It never embeds the URL, request body, or response body.
 var ErrQuotaUnavailable = errors.New("quota: billing service unavailable")
 
+// ErrQuotaExceeded indicates Billing rejected the request with a quota limit
+// breach (HTTP 429). It is distinct from ErrQuotaUnavailable so Edge can
+// return a client-visible 429 instead of a service 503.
+var ErrQuotaExceeded = errors.New("quota: exceeded")
+
 // Manager coordinates the reserve-finalize-release lifecycle.
 type Manager interface {
 	// Reserve creates a quota reservation for the given user/request.
@@ -121,6 +126,9 @@ func (m *billingManager) post(ctx context.Context, path string, body any) ([]byt
 	}
 	defer func() { _ = resp.Body.Close() }()
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return nil, ErrQuotaExceeded
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, ErrQuotaUnavailable
 	}

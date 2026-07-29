@@ -18,7 +18,7 @@ import {
   Gauge,
   KeyRound,
 } from 'lucide-react';
-import type { RequestLog, UserPlan } from '@/types';
+import type { RequestLog, UsageWindow, UserPlan } from '@/types';
 import {
   calcTokensPerSecond,
   formatDuration,
@@ -98,10 +98,64 @@ function quotaUnit(type: string) {
   return type === 'token' ? 'tokens' : '次';
 }
 
+function windowLabel(scope: UsageWindow['scope']) {
+  switch (scope) {
+    case 'hour5':
+      return '5 小时滚动';
+    case 'weekly':
+      return '本周额度';
+    case 'period':
+      return '本周期总额度';
+    default:
+      return scope;
+  }
+}
+
+/** Human-readable window reset hint. `windowEnd` (when present) is authoritative;
+ * for weekly we annotate the documented Monday 08:00 Beijing reset (UTC Monday
+ * 00:00) to help users anticipate the boundary. */
+function windowResetHint(w: UsageWindow) {
+  if (w.windowEnd) {
+    return `重置 ${formatTime(w.windowEnd)}`;
+  }
+  if (w.scope === 'weekly') return '每周一 08:00 重置（北京时间）';
+  if (w.scope === 'hour5') return '5 小时滚动窗口';
+  return '';
+}
+
 function ProgressBar({ value }: { value: number }) {
   return (
     <div className="h-2 overflow-hidden rounded-full bg-muted">
       <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${value}%` }} />
+    </div>
+  );
+}
+
+function UsageWindowBar({ w, unit }: { w: UsageWindow; unit: string }) {
+  const unlimited = w.limit == null;
+  const used = Math.max(0, w.consumed);
+  const percent = unlimited ? 0 : pct(used, w.limit ?? 0);
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between text-xs">
+        <span className="text-muted-foreground">{windowLabel(w.scope)}</span>
+        <span className="text-muted-foreground tabular-nums">
+          {unlimited
+            ? `已用 ${formatInt(used)} / 不限 ${unit}`
+            : `已用 ${formatInt(used)} / ${formatInt(w.limit)} ${unit}`}
+        </span>
+      </div>
+      {unlimited ? (
+        <div className="flex h-2 items-center rounded-full bg-muted">
+          <div className="h-1 w-full rounded-full bg-primary/40" />
+        </div>
+      ) : (
+        <ProgressBar value={percent} />
+      )}
+      <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+        <span>剩余 {unlimited ? '不限' : `${formatInt(w.remaining)} ${unit}`}</span>
+        <span>{windowResetHint(w)}</span>
+      </div>
     </div>
   );
 }
@@ -129,20 +183,31 @@ function PlanCard({ plan }: { plan: UserPlan }) {
           </div>
         </div>
 
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between text-sm">
-            <span className="tabular-nums">已用 {formatInt(used)} / {formatInt(plan.totalQuota)} {unit}</span>
-            <span className="text-muted-foreground">{percent.toFixed(percent < 1 && percent > 0 ? 2 : 0)}%</span>
+        {plan.planType === 'coding' && plan.usageWindows && plan.usageWindows.length > 0 ? (
+          <div className="space-y-2.5 rounded-md border p-3">
+            {(['hour5', 'weekly', 'period'] as const)
+              .map((scope) => plan.usageWindows!.find((w) => w.scope === scope))
+              .filter((w): w is UsageWindow => Boolean(w))
+              .map((w) => (
+                <UsageWindowBar key={w.scope} w={w} unit={unit} />
+              ))}
           </div>
-          <ProgressBar value={percent} />
-          <div className="text-xs text-muted-foreground">剩余 {formatInt(plan.remainingQuota)} {unit}</div>
-        </div>
+        ) : (
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between text-sm">
+              <span className="tabular-nums">已用 {formatInt(used)} / {formatInt(plan.totalQuota)} {unit}</span>
+              <span className="text-muted-foreground">{percent.toFixed(percent < 1 && percent > 0 ? 2 : 0)}%</span>
+            </div>
+            <ProgressBar value={percent} />
+            <div className="text-xs text-muted-foreground">剩余 {formatInt(plan.remainingQuota)} {unit}</div>
+          </div>
+        )}
 
         {plan.planType === 'coding' ? (
           <div className="grid grid-cols-3 gap-2 text-xs">
-            <Limit label="小时" value={plan.hourlyLimit} unit="次" />
+            <Limit label="5小时" value={plan.hourlyLimit} unit="次" />
             <Limit label="周" value={plan.weeklyLimit} unit="次" />
-            <Limit label="月" value={plan.monthlyLimit} unit="次" />
+            <Limit label="周期" value={plan.monthlyLimit} unit="次" />
           </div>
         ) : (
           <div className="rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">

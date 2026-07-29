@@ -94,9 +94,15 @@ func (h *Handlers) ListUserPlans(w http.ResponseWriter, r *http.Request) {
 	}
 	// 取余额用于填充 remainingQuota；余额失败时不阻塞套餐列表，remainingQuota 降级为 "0"。
 	bal, balErr := h.Billing.GetBalance(r.Context(), claims.Subject)
+	// 取活跃 coding 套餐的用量窗口（hour5/weekly/period）；失败时不阻塞套餐列表，
+	// usageWindows 降级为省略。仅当有窗口数据时填充。
+	windows, winErr := h.Billing.GetUsageWindows(r.Context(), claims.Subject)
+	if winErr != nil && !errors.Is(winErr, billing.NotFound) {
+		h.logger().Warn("get usage windows failed", "error", winErr)
+	}
 	plans := make([]apiv1.UserPlan, 0, len(userPlans))
 	for _, up := range userPlans {
-		plans = append(plans, mapUserPlan(up, bal, balErr))
+		plans = append(plans, mapUserPlan(up, bal, balErr, windows, winErr))
 	}
 	httpresp.OK(w, userPlansResponse{Plans: plans})
 }
@@ -480,8 +486,9 @@ func mapPlan(p billing.Plan) apiv1.Plan {
 }
 
 // mapUserPlan 把 Billing 用户套餐映射为契约 UserPlan。remainingQuota 取对应类型
-// 的余额字段；balErr 非 nil 时降级为 "0"。
-func mapUserPlan(up billing.UserPlan, bal billing.Balance, balErr error) apiv1.UserPlan {
+// 的余额字段；balErr 非 nil 时降级为 "0"。usageWindows 仅对 coding 套餐填充，
+// winErr 非 nil（且非 NotFound）时省略，fail-soft 不阻塞套餐列表。
+func mapUserPlan(up billing.UserPlan, bal billing.Balance, balErr error, windows []billing.UsageWindow, winErr error) apiv1.UserPlan {
 	remaining := "0"
 	if balErr == nil {
 		if up.PlanType == "token" {
@@ -516,7 +523,28 @@ func mapUserPlan(up billing.UserPlan, bal billing.Balance, balErr error) apiv1.U
 		Status:         status,
 		ActivatedAt:    up.ActivatedAt,
 		ExpiresAt:      up.ExpiresAt,
+		UsageWindows:   mapUsageWindows(up.PlanType, windows, winErr),
 	}
+}
+
+// mapUsageWindows 把 Billing UsageWindow 列表映射为契约 UsageWindow 数组。
+// winErr 非 nil（且非 NotFound）或空列表时返回 nil（省略字段），fail-soft。
+func mapUsageWindows(planType string, windows []billing.UsageWindow, winErr error) *[]apiv1.UsageWindow {
+	if planType != "coding" || winErr != nil || len(windows) == 0 {
+		return nil
+	}
+	out := make([]apiv1.UsageWindow, 0, len(windows))
+	for _, w := range windows {
+		out = append(out, apiv1.UsageWindow{
+			Scope:       apiv1.UsageWindowScope(w.Scope),
+			Limit:       w.Limit,
+			Consumed:    w.Consumed,
+			Remaining:   w.Remaining,
+			WindowStart: w.WindowStart,
+			WindowEnd:   w.WindowEnd,
+		})
+	}
+	return &out
 }
 
 // mapRequestLog 把 Logging 日志摘要映射为契约 RequestLog。

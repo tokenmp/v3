@@ -203,8 +203,9 @@ func TestListUserPlans_OK(t *testing.T) {
 		status int
 		body   string
 	}{
-		"/v1/billing/users/user-1/plans":   {200, `{"plans":[{"id":5,"user_id":"user-1","plan_id":1,"plan_name":"Pro","plan_type":"coding","category":"monthly","monthly_limit":10,"status":"active","activated_at":"2026-01-01T00:00:00Z"}]}`},
-		"/v1/billing/users/user-1/balance": {200, `{"coding_remaining":"7","token_remaining":"0"}`},
+		"/v1/billing/users/user-1/plans":         {200, `{"plans":[{"id":5,"user_id":"user-1","plan_id":1,"plan_name":"Pro","plan_type":"coding","category":"monthly","monthly_limit":10,"status":"active","activated_at":"2026-01-01T00:00:00Z"}]}`},
+		"/v1/billing/users/user-1/balance":       {200, `{"coding_remaining":"7","token_remaining":"0"}`},
+		"/v1/billing/users/user-1/usage-windows": {200, `{"windows":[{"scope":"hour5","limit":5,"consumed":2,"remaining":3,"window_start":"2026-07-29T12:00:00Z"},{"scope":"weekly","limit":50,"consumed":2,"remaining":48,"window_start":"2026-07-28T00:00:00Z","window_end":"2026-08-04T00:00:00Z"},{"scope":"period","consumed":2,"remaining":498,"window_start":"2026-07-01T00:00:00Z"}]}`},
 	})
 	defer b.close()
 	h, _ := newTestRouter(t, "", b.srv.URL, nil)
@@ -218,6 +219,47 @@ func TestListUserPlans_OK(t *testing.T) {
 	decodeData(t, rec, &out)
 	if len(out.Plans) != 1 || out.Plans[0].RemainingQuota != "7" || out.Plans[0].TotalQuota != "10" || out.Plans[0].PlanName == nil || *out.Plans[0].PlanName != "Pro" {
 		t.Errorf("plans = %+v", out)
+	}
+	// usage windows 应填充到 coding 套餐上
+	uw := out.Plans[0].UsageWindows
+	if uw == nil || len(*uw) != 3 {
+		t.Fatalf("usageWindows = %v, want 3 windows", uw)
+	}
+	w := (*uw)[0]
+	if w.Scope != apiv1.Hour5 || w.Remaining != 3 || w.Limit == nil || *w.Limit != 5 || w.WindowEnd != nil {
+		t.Errorf("window[0] = %+v", w)
+	}
+	if (*uw)[2].Scope != apiv1.Period || (*uw)[2].Limit != nil {
+		t.Errorf("window[2] = %+v", (*uw)[2])
+	}
+}
+
+// TestListUserPlans_UsageWindowsFailSoft 验证 usage-windows 下游失败时不阻塞套餐列表，
+// usageWindows 字段被省略（nil）。
+func TestListUserPlans_UsageWindowsFailSoft(t *testing.T) {
+	b := newStubBackend(map[string]struct {
+		status int
+		body   string
+	}{
+		"/v1/billing/users/user-1/plans":         {200, `{"plans":[{"id":5,"user_id":"user-1","plan_id":1,"plan_name":"Pro","plan_type":"coding","category":"monthly","monthly_limit":10,"status":"active","activated_at":"2026-01-01T00:00:00Z"}]}`},
+		"/v1/billing/users/user-1/balance":       {200, `{"coding_remaining":"7","token_remaining":"0"}`},
+		"/v1/billing/users/user-1/usage-windows": {500, `{"error":"boom"}`},
+	})
+	defer b.close()
+	h, _ := newTestRouter(t, "", b.srv.URL, nil)
+	rec := doAuth(t, h, http.MethodGet, "/api/v1/user/plans", "user-1", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		Plans []apiv1.UserPlan `json:"plans"`
+	}
+	decodeData(t, rec, &out)
+	if len(out.Plans) != 1 || out.Plans[0].RemainingQuota != "7" {
+		t.Errorf("plans = %+v", out)
+	}
+	if out.Plans[0].UsageWindows != nil {
+		t.Errorf("usageWindows = %v, want nil on failure", out.Plans[0].UsageWindows)
 	}
 }
 

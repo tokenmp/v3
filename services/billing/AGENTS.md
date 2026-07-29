@@ -18,16 +18,18 @@ Billing Service 是 TokenMP V3 分层架构的**业务平面**计费服务：
 - `internal/database`：GORM 连接，AutoMigrate 禁止，schema 由 `migrations/` 版本化 SQL 管理（golang-migrate）。classified sentinel 不泄漏 DSN。
 - `internal/repository`：
   - 结构体 `Plan`/`User`/`UserPlan`/`QuotaReservation`/`UsageLedgerEntry` 对齐表字段。
-  - 端口 `PlanReader`（GetPlan/ListPlans）、`UserPlanReader`（GetActiveUserPlan）、`QuotaManager`（Reserve/Finalize/Release，单事务 + ON CONFLICT DO NOTHING 幂等）、`LedgerReader`（ListLedger）、`BalanceReader`（GetBalance）。
+  - 端口 `PlanReader`（GetPlan/ListPlans）、`UserPlanReader`（GetActiveUserPlan）、`QuotaManager`（Reserve/Finalize/Release，单事务 + ON CONFLICT DO NOTHING 幂等）、`LedgerReader`（ListLedger）、`BalanceReader`（GetBalance）、`UsageWindowsReader`（GetUsageWindows）。
   - `GormRepository` 实现。reserve/charge/refund 用 ledger delta 有符号方向（reserve/charge 负、refund 正）。idempotency_key UNIQUE 保证账本幂等。
-  - sentinel：`ErrNotFound`/`ErrQueryFailed`/`ErrInsertFailed`/`ErrConflict`，不泄漏 DSN/SQL。
+  - sentinel：`ErrNotFound`/`ErrQueryFailed`/`ErrInsertFailed`/`ErrConflict`/`ErrQuotaExceeded`，不泄漏 DSN/SQL；`*QuotaExceededError` 携带 scope（hour5/weekly/period）与计费数，`Error()` 为安全常量，`Unwrap()` 返回 `ErrQuotaExceeded`。
+  - coding 窗口配额 enforcement（Reserve 内）：`billing_plan='coding'` 时以 `pg_advisory_xact_lock(hashtext(user_id))` 按用户串行化，幂等重复 Reserve 先短路（不重检），随后查活跃 coding user_plan+plan limits 并以 finalized `charge` ledger 行（`-SUM(request_delta)`）计数消耗：`hourly_limit`→5 小时滚动、`weekly_limit`→周一 00:00 UTC→下周一 00:00 UTC（Go 侧计算 boundary，避免 DB 时区依赖）、`monthly_limit`→`activated_at`→`expires_at` 计划期。任一超限返回 `*QuotaExceededError`（对应 scope）；无活跃 coding 套餐 fail-closed（period, limit 0）。超限不写 reservation/ledger。
 - `internal/server`：HTTP（chi）。
   - `GET /healthz`、`GET /readyz`。
   - `GET /v1/billing/plans`、`GET /v1/billing/plans/{id}`。
   - `GET /v1/billing/users/{user_id}/plan`（兼容：最新 active user_plan）与 `GET /v1/billing/users/{user_id}/plans`（Panel 概览使用：全部未过期 active user_plan，JOIN active plan 元数据，返回 plan_name/category/price/hourly/weekly/monthly/token limit）。
-  - `POST /v1/billing/quota/reserve`、`/finalize`、`/release`（2 MiB body 限，幂等冲突映射 200）。
+  - `POST /v1/billing/quota/reserve`、`/finalize`、`/release`（2 MiB body 限，幂等冲突映射 200）。Reserve 对 `*QuotaExceededError` 返回 429 + `quota_exceeded: <scope>`（scope=hour5/weekly/period），仅暴露 scope 不泄露 SQL/DSN。
   - `GET /v1/billing/users/{user_id}/ledger`。
   - `GET /v1/billing/users/{user_id}/balance`：返回 `{coding_remaining, token_remaining}` 十进制字符串。Coding=active coding 套餐月配额减本月已 charge 请求数；Token=active token 套餐 token_limit 加 net token_delta（全期），二者均钳到 >=0；无套餐/无账本返回 0，永不 ErrNotFound。
+  - `GET /v1/billing/users/{user_id}/usage-windows`：返回活跃 coding 套餐的 hour5/weekly/period 窗口（limit/consumed/remaining/window_start/window_end），与 Reserve enforcement 同源计数；无活跃 coding 套餐返回空数组。
   - 协议原生 JSON 错误，不泄漏 DSN/SQL/凭据；所有响应 `Cache-Control: no-store`。
 - `migrations/000001_init.{up,down}.sql`：Billing DB schema（从 `infra/db/migrations/billing/0001_init.sql` 转换为 golang-migrate 格式）。
 

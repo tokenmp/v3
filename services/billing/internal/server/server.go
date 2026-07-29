@@ -27,14 +27,15 @@ const maxQuotaBodyBytes = 2 << 20 // 2 MiB
 
 // Server holds the shared dependencies for billing HTTP handlers.
 type Server struct {
-	plans     repository.PlanReader
-	userPlans repository.UserPlanReader
-	quota     repository.QuotaManager
-	ledger    repository.LedgerReader
-	balance   repository.BalanceReader
-	admin     AdminStore
-	pinger    database.Pinger
-	logger    *slog.Logger
+	plans        repository.PlanReader
+	userPlans    repository.UserPlanReader
+	quota        repository.QuotaManager
+	ledger       repository.LedgerReader
+	balance      repository.BalanceReader
+	usageWindows repository.UsageWindowsReader
+	admin        AdminStore
+	pinger       database.Pinger
+	logger       *slog.Logger
 }
 
 // AdminStore provides admin write/query methods on the billing repository.
@@ -49,14 +50,14 @@ type AdminStore interface {
 }
 
 // New returns a billing Server. A nil logger falls back to slog.Default.
-// balance may be nil only in tests that do not exercise the balance route;
-// production wiring always supplies the GormRepository (which implements
-// BalanceReader). When nil, the balance endpoint returns 503.
-func New(plans repository.PlanReader, userPlans repository.UserPlanReader, quota repository.QuotaManager, ledger repository.LedgerReader, balance repository.BalanceReader, admin AdminStore, pinger database.Pinger, logger *slog.Logger) *Server {
+// balance/usageWindows may be nil only in tests that do not exercise those
+// routes; production wiring always supplies the GormRepository. When nil,
+// the corresponding endpoint returns 503.
+func New(plans repository.PlanReader, userPlans repository.UserPlanReader, quota repository.QuotaManager, ledger repository.LedgerReader, balance repository.BalanceReader, usageWindows repository.UsageWindowsReader, admin AdminStore, pinger database.Pinger, logger *slog.Logger) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Server{plans: plans, userPlans: userPlans, quota: quota, ledger: ledger, balance: balance, admin: admin, pinger: pinger, logger: logger}
+	return &Server{plans: plans, userPlans: userPlans, quota: quota, ledger: ledger, balance: balance, usageWindows: usageWindows, admin: admin, pinger: pinger, logger: logger}
 }
 
 // Router returns the configured chi router.
@@ -73,6 +74,7 @@ func (s *Server) Router() http.Handler {
 	r.Get("/v1/billing/users/{user_id}/plan", s.handleGetUserPlan)
 	r.Get("/v1/billing/users/{user_id}/plans", s.handleListUserPlans)
 	r.Get("/v1/billing/users/{user_id}/balance", s.handleGetBalance)
+	r.Get("/v1/billing/users/{user_id}/usage-windows", s.handleGetUsageWindows)
 	r.Post("/v1/billing/quota/reserve", s.handleReserve)
 	r.Post("/v1/billing/quota/finalize", s.handleFinalize)
 	r.Post("/v1/billing/quota/release", s.handleRelease)
@@ -204,7 +206,20 @@ func (s *Server) handleReserve(w http.ResponseWriter, r *http.Request) {
 		httpresp.Error(w, httpresp.CodeMissingField, "missing field")
 		return
 	}
-	if err := s.quota.Reserve(r.Context(), req.ReservationID, req.UserID, req.RequestID, req.BillingPlan, *req.ReservedRequests, *req.ReservedTokens, req.ExpiresAt); err != nil && !errors.Is(err, repository.ErrConflict) {
+	err := s.quota.Reserve(r.Context(), req.ReservationID, req.UserID, req.RequestID, req.BillingPlan, *req.ReservedRequests, *req.ReservedTokens, req.ExpiresAt)
+	if err != nil && !errors.Is(err, repository.ErrConflict) {
+		// Quota exceeded: distinct 429 with a secret-free scope tag. The
+		// scope (hour5/weekly/period) is the only extra detail exposed.
+		var qe *repository.QuotaExceededError
+		if errors.As(err, &qe) {
+			s.logger.Info("quota reserve rejected", "scope", qe.Scope, "limit", qe.Limit, "consumed", qe.Consumed, "wanted", qe.Wanted)
+			httpresp.ErrorWithStatus(w, http.StatusTooManyRequests, httpresp.CodeConflict, "quota_exceeded: "+string(qe.Scope))
+			return
+		}
+		if errors.Is(err, repository.ErrNotFound) {
+			httpresp.Error(w, httpresp.CodeNotFound, "not found")
+			return
+		}
 		s.logger.Warn("quota reserve failed", "error", err)
 		httpresp.Error(w, httpresp.CodeInternalError, "reserve failed")
 		return
@@ -314,6 +329,25 @@ func (s *Server) handleGetBalance(w http.ResponseWriter, r *http.Request) {
 		CodingRemaining: strconv.FormatInt(bal.CodingRemaining, 10),
 		TokenRemaining:  strconv.FormatInt(bal.TokenRemaining, 10),
 	})
+}
+
+func (s *Server) handleGetUsageWindows(w http.ResponseWriter, r *http.Request) {
+	if s.usageWindows == nil {
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "usage windows unavailable")
+		return
+	}
+	windows, err := s.usageWindows.GetUsageWindows(r.Context(), chi.URLParam(r, "user_id"))
+	if err != nil {
+		s.logger.Warn("usage windows query failed", "error", err)
+		httpresp.Error(w, httpresp.CodeInternalError, "usage windows unavailable")
+		return
+	}
+	if windows == nil {
+		windows = []repository.UsageWindow{}
+	}
+	httpresp.OK(w, struct {
+		Windows []repository.UsageWindow `json:"windows"`
+	}{Windows: windows})
 }
 
 func decodeBoundedJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
