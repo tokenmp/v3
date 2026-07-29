@@ -385,13 +385,20 @@ func buildBatch(e requestlog.ExecutionEvent) (batch, bool) {
 		Stage:        mapEventStage(e.Kind),
 		Status:       mapEventStatus(e.Status, e.Kind),
 		AttemptIndex: ptrIfPositive(idx),
-		DurationMS:   int(e.Latency / time.Millisecond),
+		DurationMS:   eventDurationMS(e),
 		Message:      buildEventMessage(e),
 		Metadata:     buildEventMetadata(e),
 		CreatedAt:    e.Timestamp,
 	}}
 
 	return b, true
+}
+
+func eventDurationMS(e requestlog.ExecutionEvent) int {
+	if e.Kind == requestlog.KindStarted {
+		return int(e.TTFT / time.Millisecond)
+	}
+	return int(e.Latency / time.Millisecond)
 }
 
 // buildEventMessage constructs a human-readable, sanitized summary for the
