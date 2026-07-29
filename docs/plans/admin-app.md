@@ -166,9 +166,9 @@ keys/codes/errors/models/plans/providers，recharts 用量图表。
 - 用户信息 → 套餐 → API 密钥（最近 5 条）→ 最近请求（5 条）
 
 **套餐操作**：
-- 分配套餐（Modal：选套餐 + 到期时间；user 由详情页固定）
-- 续费套餐（按延长天数从当前未来到期日/now 延长，或显式设置新到期时间）
-- 切换套餐（取消旧 user_plan，并创建新 plan 绑定；目标套餐必须同类型且最大总额度不能低于当前套餐；coding 只比较周期总额度，5小时/周额度是节流限制不代表套餐等级；token 比较 token_limit；不按价格硬拦，因为运营赠送套餐可 price=0 但额度更高；历史请求/账本不修改）
+- 分配套餐（Modal：选套餐 + 到期时间；user 由详情页固定；默认按套餐 category 填充到期：daily=1、weekly=7、monthly=30、quarterly=90、yearly=365 天）
+- 续费套餐（默认延长一个套餐周期，或显式设置新到期时间）
+- 切换套餐（取消旧 user_plan，并创建新 plan 绑定；默认保留旧 user_plan 的 expires_at，只有管理员显式填新到期时间才覆盖；目标套餐必须同类型且最大总额度不能低于当前套餐；coding 只比较周期总额度，5小时/周额度是节流限制不代表套餐等级；token 比较 token_limit；不按价格硬拦，因为运营赠送套餐可 price=0 但额度更高；历史请求/账本不修改）
 - 撤销套餐（status→cancelled）
 - active coding user_plan 支持 reset/bonus limit override：重置 5小时/周/周期窗口或临时加额，并可查看历史与软撤销 override。
 

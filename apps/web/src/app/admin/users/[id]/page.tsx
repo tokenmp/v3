@@ -99,6 +99,29 @@ function overrideActive(override: AdminLimitOverride) {
   return !override.effectiveUntil || new Date(override.effectiveUntil).getTime() > Date.now();
 }
 
+function toDateTimeLocalValue(date: Date) {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function addDaysLocal(days: number) {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  return toDateTimeLocalValue(d);
+}
+
+function defaultPeriodDays(category?: string | null) {
+  switch (category) {
+    case 'daily': return 1;
+    case 'weekly': return 7;
+    case 'quarterly': return 90;
+    case 'yearly': return 365;
+    case 'monthly':
+    default:
+      return 30;
+  }
+}
+
 export default function AdminUserDetailPage() {
   const params = useParams<{ id: string }>();
   const id = params.id;
@@ -204,6 +227,15 @@ export default function AdminUserDetailPage() {
     },
   });
 
+  function handleAssignPlanChange(planId: string) {
+    const plan = plans.find((p) => p.id === planId);
+    setAssignForm((f) => ({
+      ...f,
+      planId,
+      expiresAt: plan ? addDaysLocal(defaultPeriodDays(plan.category)) : f.expiresAt,
+    }));
+  }
+
   function handleAssign() {
     if (!id) return;
     if (!assignForm.planId) {
@@ -221,7 +253,7 @@ export default function AdminUserDetailPage() {
     setRenewSwitchForm({
       userPlan,
       mode,
-      extendDays: mode === 'renew' ? '30' : '',
+      extendDays: mode === 'renew' ? String(defaultPeriodDays(userPlan.category)) : '',
       newPlanId: mode === 'switch' ? userPlan.planId : '',
       expiresAt: '',
     });
@@ -495,7 +527,7 @@ export default function AdminUserDetailPage() {
               id="detail-plan"
               className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
               value={assignForm.planId}
-              onChange={(e) => setAssignForm((f) => ({ ...f, planId: e.target.value }))}
+              onChange={(e) => handleAssignPlanChange(e.target.value)}
             >
               <option value="">选择套餐</option>
               {plans.map((p) => (
@@ -524,8 +556,8 @@ export default function AdminUserDetailPage() {
           <DialogTitle>{renewSwitchForm?.mode === 'switch' ? '切换套餐' : '续费套餐'}</DialogTitle>
           <DialogDescription>
             {renewSwitchForm?.mode === 'switch'
-              ? '切换会取消当前套餐并创建新的套餐绑定；目标套餐不能比当前套餐等级或用量更低。历史请求和账本不修改。'
-              : '延长当前套餐到期时间，或直接设置新的到期时间。'}
+              ? '切换会取消当前套餐并创建新的套餐绑定；默认保留原到期时间，只有填写新到期时间才会覆盖。历史请求和账本不修改。'
+              : '按套餐周期延长当前到期时间，或直接设置新的到期时间。'}
           </DialogDescription>
         </DialogHeader>
         {renewSwitchForm && (
@@ -544,7 +576,7 @@ export default function AdminUserDetailPage() {
                   value={renewSwitchForm.extendDays}
                   onChange={(e) => setRenewSwitchForm((f) => f ? { ...f, extendDays: e.target.value } : f)}
                 />
-                <p className="text-xs text-muted-foreground">从当前到期时间（若已过期则从现在）开始延长；也可以清空天数，改用下面的新到期时间。</p>
+                <p className="text-xs text-muted-foreground">默认按套餐周期填充：天卡 1 天、周卡 7 天、月卡 30 天、季卡 90 天、年卡 365 天；也可以清空天数，改用下面的新到期时间。</p>
               </div>
             ) : (
               <div className="space-y-2">
@@ -571,7 +603,7 @@ export default function AdminUserDetailPage() {
                 value={renewSwitchForm.expiresAt}
                 onChange={(e) => setRenewSwitchForm((f) => f ? { ...f, expiresAt: e.target.value } : f)}
               />
-              <p className="text-xs text-muted-foreground">填写后会优先使用此到期时间；切换时留空表示永久有效。</p>
+              <p className="text-xs text-muted-foreground">填写后会优先使用此到期时间；切换时留空会保留原到期时间。</p>
             </div>
           </div>
         )}

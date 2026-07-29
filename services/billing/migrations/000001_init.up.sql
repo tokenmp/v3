@@ -35,7 +35,7 @@ CREATE TABLE plans (
     updated_at    timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT plans_status_chk CHECK (status IN ('active', 'disabled', 'deleted')),
     CONSTRAINT plans_plan_type_chk CHECK (plan_type IN ('coding', 'token', 'image', 'free')),
-    CONSTRAINT plans_category_chk CHECK (category IN ('monthly', 'quarterly', 'yearly')),
+    CONSTRAINT plans_category_chk CHECK (category IN ('daily', 'weekly', 'monthly', 'quarterly', 'yearly')),
     CONSTRAINT plans_price_chk CHECK (price >= 0),
     CONSTRAINT plans_token_limit_chk CHECK (token_limit IS NULL OR token_limit >= 0)
 );

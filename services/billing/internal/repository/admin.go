@@ -178,7 +178,11 @@ func (r *GormRepository) SwitchUserPlan(ctx context.Context, id int64, newPlanID
 		if err := tx.Model(&UserPlan{}).Where("id = ? AND status = ?", id, "active").Updates(map[string]any{"status": "cancelled", "updated_at": now}).Error; err != nil {
 			return ErrQueryFailed
 		}
-		created = UserPlan{UserID: old.UserID, PlanID: newPlanID, PlanType: p.PlanType, Status: "active", ActivatedAt: now, ExpiresAt: expiresAt}
+		newExpiresAt := expiresAt
+		if newExpiresAt == nil {
+			newExpiresAt = old.ExpiresAt
+		}
+		created = UserPlan{UserID: old.UserID, PlanID: newPlanID, PlanType: p.PlanType, Status: "active", ActivatedAt: now, ExpiresAt: newExpiresAt}
 		if err := tx.Create(&created).Error; err != nil {
 			return ErrInsertFailed
 		}
