@@ -268,22 +268,28 @@ type ingestRequest struct {
 
 // IngestLog is the minimal request_log fields Edge sends on receipt.
 type IngestLog struct {
-	RequestID   string    `json:"request_id"`
-	UserID      string    `json:"user_id,omitempty"`
-	ClientKeyID string    `json:"client_key_id,omitempty"`
-	UserAgent   string    `json:"user_agent,omitempty"`
-	FinalStatus string    `json:"final_status"`
-	CreatedAt   time.Time `json:"created_at"`
+	RequestID   string     `json:"request_id"`
+	UserID      string     `json:"user_id,omitempty"`
+	ClientKeyID string     `json:"client_key_id,omitempty"`
+	UserAgent   string     `json:"user_agent,omitempty"`
+	FinalStatus string     `json:"final_status"`
+	HTTPStatus  int        `json:"http_status,omitempty"`
+	LatencyMS   int        `json:"latency_ms,omitempty"`
+	ErrorCode   string     `json:"error_code,omitempty"`
+	ErrorType   string     `json:"error_type,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
+	CompletedAt *time.Time `json:"completed_at,omitempty"`
 }
 
 // IngestEvent is a minimal timeline event.
 type IngestEvent struct {
-	RequestID string    `json:"request_id"`
-	Source    string    `json:"source"`
-	Stage     string    `json:"stage"`
-	Status    string    `json:"status"`
-	Message   string    `json:"message,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
+	RequestID  string    `json:"request_id"`
+	Source     string    `json:"source"`
+	Stage      string    `json:"stage"`
+	Status     string    `json:"status"`
+	DurationMS int       `json:"duration_ms,omitempty"`
+	Message    string    `json:"message,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
 }
 
 // Ingest sends a minimal log batch to the Logging Service. It is fire-and-

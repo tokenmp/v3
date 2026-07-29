@@ -555,6 +555,26 @@ func TestIngestBatch_UpsertDedupes(t *testing.T) {
 		t.Fatalf("late processing regression: final=%q stream=%v ttft=%d", got.FinalStatus, got.Stream, got.TTFTMS)
 	}
 
+	lateCancelAt := now.Add(3 * time.Second)
+	lateCancelled := Batch{Log: RequestLog{
+		RequestID:   reqID,
+		FinalStatus: "client_cancelled",
+		HTTPStatus:  499,
+		ErrorType:   "client_cancelled",
+		CreatedAt:   now.Add(3 * time.Second),
+		CompletedAt: &lateCancelAt,
+	}}
+	if err := repo.IngestBatch(ctx, lateCancelled); err != nil {
+		t.Fatalf("ingest late cancelled batch: %v", err)
+	}
+	got, err = repo.GetRequestLog(ctx, reqID)
+	if err != nil {
+		t.Fatalf("get after late cancelled: %v", err)
+	}
+	if got.FinalStatus != "success" || got.HTTPStatus == 499 || got.ErrorType == "client_cancelled" {
+		t.Fatalf("late terminal merge = final:%q http:%d error:%q", got.FinalStatus, got.HTTPStatus, got.ErrorType)
+	}
+
 	// One attempt row.
 	attempts, err := repo.ListAttempts(ctx, reqID)
 	if err != nil {

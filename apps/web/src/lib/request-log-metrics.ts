@@ -42,26 +42,43 @@ export function formatDuration(ms: number | null | undefined): string {
   return `${(ms / 1000).toFixed(2)}s`;
 }
 
-/** Format token count with locale grouping; null/undefined → "—" */
-export function formatTokens(n: number | null | undefined): string {
-  if (n == null) return '—';
-  return n.toLocaleString();
+function formatCompactNumber(n: number, unit = ''): string {
+  const abs = Math.abs(n);
+  const suffixes: Array<[number, string]> = [
+    [1_000_000_000, 'B'],
+    [1_000_000, 'M'],
+    [1_000, 'K'],
+  ];
+  for (const [value, suffix] of suffixes) {
+    if (abs >= value) {
+      return `${(n / value).toFixed(2)}${suffix}${unit}`;
+    }
+  }
+  return `${n.toLocaleString()}${unit}`;
 }
 
-/** Format tokens/s: null → "—", <10 → 1 decimal, ≥10 → rounded */
+/** Format token count with K/M/B compact suffix; null/undefined → "—" */
+export function formatTokens(n: number | null | undefined): string {
+  if (n == null) return '—';
+  return formatCompactNumber(n);
+}
+
+/** Format tokens/s with K/M/B compact suffix; null → "—" */
 export function formatTokensPerSecond(toks: number | null | undefined): string {
   if (toks == null) return '—';
-  if (toks < 10) return `${toks.toFixed(1)} tok/s`;
-  return `${Math.round(toks)} tok/s`;
+  return `${formatCompactNumber(toks)}/s`;
 }
 
 /** Short protocol label for table cells */
 export function protocolLabel(p: string | null | undefined): string {
   switch (p) {
-    case 'openai_chat': return 'Chat';
-    case 'anthropic_messages': return 'Messages';
-    case 'openai_responses': return 'Responses';
-    case 'openai_images': return 'Images';
+    case 'openai_chat':
+    case 'openai_images':
+      return 'OpenAI';
+    case 'openai_responses':
+      return 'Responses';
+    case 'anthropic_messages':
+      return 'Anthropic';
     default: return p ?? '—';
   }
 }

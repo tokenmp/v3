@@ -395,7 +395,7 @@ func parseIntDefault(raw string, def int) int {
 	return n
 }
 
-// mapStatusFilter 将契约的 success/error/processing/all 映射为 Logging 的
+// mapStatusFilter 将契约的 success/error/processing/cancelled/all 映射为 Logging 的
 // final_status 集合。all/空 → nil（不限）；error → 全部终态错误类别。
 func mapStatusFilter(status string) []string {
 	switch status {
@@ -405,6 +405,8 @@ func mapStatusFilter(status string) []string {
 		return []string{"client_error", "upstream_error", "timeout", "transport_error"}
 	case "processing":
 		return []string{"processing"}
+	case "cancelled", "canceled":
+		return []string{"client_cancelled"}
 	default:
 		return nil
 	}
@@ -549,13 +551,15 @@ func mapRequestLogDetail(d logging.LogDetail) requestLogDetailResponse {
 }
 
 // mapLogStatus 把 Logging final_status 映射为契约的
-// success/error/processing。
+// success/error/processing/cancelled。
 func mapLogStatus(final string) string {
 	switch final {
 	case "success":
 		return "success"
 	case "processing":
 		return "processing"
+	case "client_cancelled":
+		return "cancelled"
 	default:
 		return "error"
 	}

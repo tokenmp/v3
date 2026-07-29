@@ -151,6 +151,91 @@ func TestEdgeFullFlow_AuthQuotaProxyFinalize(t *testing.T) {
 	}
 }
 
+func TestEdgeLogsClientCancelledTerminal(t *testing.T) {
+	pub, priv := genEdgeKeyPair(t)
+	keyFile := writeEdgePubPEM(t, pub)
+	verifier, err := identity.NewVerifier(keyFile, "tokenmp-auth", "tokenmp-web", nil)
+	if err != nil {
+		t.Fatalf("NewVerifier: %v", err)
+	}
+
+	execBackend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	}))
+	defer execBackend.Close()
+	prx, err := proxy.New(execBackend.URL, "edge-token", nil)
+	if err != nil {
+		t.Fatalf("proxy.New: %v", err)
+	}
+
+	type ingestWire struct {
+		Log struct {
+			FinalStatus string `json:"final_status"`
+			HTTPStatus  int    `json:"http_status"`
+			ErrorType   string `json:"error_type"`
+		} `json:"log"`
+		Events []struct {
+			Stage   string `json:"stage"`
+			Status  string `json:"status"`
+			Message string `json:"message"`
+		} `json:"events"`
+	}
+	ingested := make(chan ingestWire, 4)
+	logBackend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body ingestWire
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode ingest: %v", err)
+		}
+		ingested <- body
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer logBackend.Close()
+
+	deps := app.Deps{Verifier: verifier, Proxy: prx, Quota: quota.NewManager(""), Logging: logging.NewClient(logBackend.URL)}
+	front := httptest.NewServer(app.NewServer(deps, 10*time.Second, 60*time.Second).Handler)
+	defer front.Close()
+
+	tok := makeEdgeJWT(t, priv, "cancel-test")
+	ctx, cancel := context.WithCancel(context.Background())
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, front.URL+"/v1/chat/completions", nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	done := make(chan struct{})
+	go func() {
+		resp, err := http.DefaultClient.Do(req)
+		if err == nil && resp != nil {
+			_ = resp.Body.Close()
+		}
+		close(done)
+	}()
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("client request did not return after cancellation")
+	}
+
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case got := <-ingested:
+			if got.Log.FinalStatus != "client_cancelled" {
+				continue
+			}
+			if got.Log.HTTPStatus != 499 || got.Log.ErrorType != "client_cancelled" {
+				t.Fatalf("cancel log = %+v", got.Log)
+			}
+			if len(got.Events) != 1 || got.Events[0].Stage != "terminal" || got.Events[0].Message != "client cancelled" {
+				t.Fatalf("cancel events = %+v", got.Events)
+			}
+			return
+		case <-deadline:
+			t.Fatal("timed out waiting for client_cancelled ingest")
+		}
+	}
+}
+
 func TestEdgeIngestsBoundedUserAgentOnReceipt(t *testing.T) {
 	pub, priv := genEdgeKeyPair(t)
 	keyFile := writeEdgePubPEM(t, pub)

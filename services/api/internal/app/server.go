@@ -160,6 +160,7 @@ func quotaMiddleware(mgr quota.Manager, logClient *logging.Client, logger *slog.
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			startedAt := time.Now().UTC()
 			claims, ok := identity.FromContext(r.Context())
 			if !ok {
 				// No identity (should not happen after auth middleware); proceed
@@ -182,13 +183,12 @@ func quotaMiddleware(mgr quota.Manager, logClient *logging.Client, logger *slog.
 			// Post an early "received" event so the request appears in the
 			// log immediately with "processing" status. Fire-and-forget.
 			if logClient != nil && logClient.Available() {
-				now := time.Now().UTC()
 				log := logging.IngestLog{
 					RequestID:   requestID,
 					UserID:      claims.Subject,
 					UserAgent:   sanitizeUserAgent(r.UserAgent()),
 					FinalStatus: "processing",
-					CreatedAt:   now,
+					CreatedAt:   startedAt,
 				}
 				events := []logging.IngestEvent{{
 					RequestID: requestID,
@@ -196,7 +196,7 @@ func quotaMiddleware(mgr quota.Manager, logClient *logging.Client, logger *slog.
 					Stage:     "received",
 					Status:    "info",
 					Message:   "request received",
-					CreatedAt: now,
+					CreatedAt: startedAt,
 				}}
 				go func() {
 					bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -210,6 +210,11 @@ func quotaMiddleware(mgr quota.Manager, logClient *logging.Client, logger *slog.
 			// Reserve (best-effort; noop manager skips).
 			_, err := mgr.Reserve(r.Context(), reservationID, claims.Subject, requestID, "coding", 1, 0)
 			if err != nil {
+				if r.Context().Err() != nil {
+					completedAt := time.Now().UTC()
+					logEdgeClientCancelled(logClient, logger, requestID, claims.Subject, startedAt, completedAt)
+					return
+				}
 				logger.Error("quota reserve failed", "error", err, "request_id", requestID)
 				w.Header().Set("Content-Type", "application/json; charset=utf-8")
 				w.Header().Set("Cache-Control", "no-store")
@@ -222,12 +227,22 @@ func quotaMiddleware(mgr quota.Manager, logClient *logging.Client, logger *slog.
 			ww := &statusWriter{ResponseWriter: w, status: http.StatusOK}
 			next.ServeHTTP(ww, r)
 
+			completedAt := time.Now().UTC()
+			clientCancelled := r.Context().Err() != nil
+
 			// Finalize or release based on status. Use a background context
 			// with a timeout because the request context may be cancelled after
-			// the response is sent (e.g. reverse proxy streaming).
+			// the response is sent (e.g. reverse proxy streaming). If the client
+			// disconnected before the proxy completed, release the reservation and
+			// durably close the early processing log row as client_cancelled.
 			finCtx, finCancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer finCancel()
-			if ww.status >= 200 && ww.status < 400 {
+			if clientCancelled {
+				if err := mgr.Release(finCtx, reservationID); err != nil {
+					logger.Warn("quota release after client cancel failed", "error", err, "request_id", requestID)
+				}
+				logEdgeClientCancelled(logClient, logger, requestID, claims.Subject, startedAt, completedAt)
+			} else if ww.status >= 200 && ww.status < 400 {
 				if err := mgr.Finalize(finCtx, reservationID, 1, 0); err != nil {
 					logger.Warn("quota finalize failed", "error", err, "request_id", requestID)
 				}
@@ -238,6 +253,43 @@ func quotaMiddleware(mgr quota.Manager, logClient *logging.Client, logger *slog.
 			}
 		})
 	}
+}
+
+func logEdgeClientCancelled(logClient *logging.Client, logger *slog.Logger, requestID, userID string, startedAt, completedAt time.Time) {
+	if logClient == nil || !logClient.Available() {
+		return
+	}
+	latencyMS := int(completedAt.Sub(startedAt).Milliseconds())
+	if latencyMS < 0 {
+		latencyMS = 0
+	}
+	log := logging.IngestLog{
+		RequestID:   requestID,
+		UserID:      userID,
+		FinalStatus: "client_cancelled",
+		HTTPStatus:  499,
+		LatencyMS:   latencyMS,
+		ErrorCode:   "client_cancelled",
+		ErrorType:   "client_cancelled",
+		CreatedAt:   startedAt,
+		CompletedAt: &completedAt,
+	}
+	events := []logging.IngestEvent{{
+		RequestID:  requestID,
+		Source:     "edge",
+		Stage:      "terminal",
+		Status:     "failed",
+		DurationMS: latencyMS,
+		Message:    "client cancelled",
+		CreatedAt:  completedAt,
+	}}
+	go func() {
+		bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := logClient.Ingest(bgCtx, log, events); err != nil {
+			logger.Debug("edge log ingest (client cancelled) failed", "error", err, "request_id", requestID)
+		}
+	}()
 }
 
 // statusWriter wraps http.ResponseWriter to capture the status code.

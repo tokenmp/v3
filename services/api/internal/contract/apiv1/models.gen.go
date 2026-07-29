@@ -80,6 +80,7 @@ func (e PlanStatus) Valid() bool {
 
 // Defines values for RequestLogStatus.
 const (
+	RequestLogStatusCancelled  RequestLogStatus = "cancelled"
 	RequestLogStatusError      RequestLogStatus = "error"
 	RequestLogStatusProcessing RequestLogStatus = "processing"
 	RequestLogStatusSuccess    RequestLogStatus = "success"
@@ -88,6 +89,8 @@ const (
 // Valid indicates whether the value is a known member of the RequestLogStatus enum.
 func (e RequestLogStatus) Valid() bool {
 	switch e {
+	case RequestLogStatusCancelled:
+		return true
 	case RequestLogStatusError:
 		return true
 	case RequestLogStatusProcessing:
@@ -101,6 +104,7 @@ func (e RequestLogStatus) Valid() bool {
 
 // Defines values for RequestLogDetailStatus.
 const (
+	RequestLogDetailStatusCancelled  RequestLogDetailStatus = "cancelled"
 	RequestLogDetailStatusError      RequestLogDetailStatus = "error"
 	RequestLogDetailStatusProcessing RequestLogDetailStatus = "processing"
 	RequestLogDetailStatusSuccess    RequestLogDetailStatus = "success"
@@ -109,6 +113,8 @@ const (
 // Valid indicates whether the value is a known member of the RequestLogDetailStatus enum.
 func (e RequestLogDetailStatus) Valid() bool {
 	switch e {
+	case RequestLogDetailStatusCancelled:
+		return true
 	case RequestLogDetailStatusError:
 		return true
 	case RequestLogDetailStatusProcessing:
@@ -198,6 +204,7 @@ func (e UpdateApiKeyJSONBodyStatus) Valid() bool {
 // Defines values for ListRequestLogsParamsStatus.
 const (
 	ListRequestLogsParamsStatusAll        ListRequestLogsParamsStatus = "all"
+	ListRequestLogsParamsStatusCancelled  ListRequestLogsParamsStatus = "cancelled"
 	ListRequestLogsParamsStatusError      ListRequestLogsParamsStatus = "error"
 	ListRequestLogsParamsStatusProcessing ListRequestLogsParamsStatus = "processing"
 	ListRequestLogsParamsStatusSuccess    ListRequestLogsParamsStatus = "success"
@@ -207,6 +214,8 @@ const (
 func (e ListRequestLogsParamsStatus) Valid() bool {
 	switch e {
 	case ListRequestLogsParamsStatusAll:
+		return true
+	case ListRequestLogsParamsStatusCancelled:
 		return true
 	case ListRequestLogsParamsStatusError:
 		return true

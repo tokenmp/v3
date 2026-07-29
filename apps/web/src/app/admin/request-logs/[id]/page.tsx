@@ -67,6 +67,9 @@ function statusLabel(s: string | null | undefined): { label: string; tone: 'succ
       return { label: '传输错误', tone: 'destructive' };
     case 'client_error':
       return { label: '客户端错误', tone: 'destructive' };
+    case 'client_cancelled':
+    case 'cancelled':
+      return { label: '客户端取消', tone: 'destructive' };
     default:
       return { label: s ?? '未知', tone: 'secondary' };
   }

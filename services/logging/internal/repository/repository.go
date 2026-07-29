@@ -234,7 +234,9 @@ RETURNING id`
 // ON CONFLICT; instead we UPDATE and fall back to INSERT when no row matched.
 // COALESCE(NULLIF(excluded, 0/”), existing) keeps the earlier non-zero value
 // when the incoming event leaves a field at its zero value (e.g. the
-// Finalized event carries no latency).
+// Finalized event carries no latency). Once a row is terminal, later terminal
+// updates do not change final_status; this makes terminal status first-writer-
+// wins and prevents Edge/Executor races from regressing completed requests.
 const upsertRequestLogSQL = `UPDATE request_logs SET
   trace_id = COALESCE(NULLIF($2, ''), trace_id),
   user_id = COALESCE(NULLIF($3, ''), user_id),
@@ -247,17 +249,30 @@ const upsertRequestLogSQL = `UPDATE request_logs SET
   protocol = COALESCE(NULLIF($10, ''), protocol),
   final_status = CASE
     WHEN $11 = 'processing' AND final_status <> 'processing' THEN final_status
+    WHEN final_status <> 'processing' AND NULLIF($11, '') IS NOT NULL THEN final_status
     ELSE COALESCE(NULLIF($11, ''), final_status)
   END,
-  http_status = COALESCE(NULLIF($12, 0), http_status),
+  http_status = CASE
+    WHEN final_status <> 'processing' AND NULLIF($11, '') IS NOT NULL AND $11 <> 'processing' AND $11 <> final_status THEN http_status
+    ELSE COALESCE(NULLIF($12, 0), http_status)
+  END,
   input_tokens = COALESCE(NULLIF($13, 0), input_tokens),
   output_tokens = COALESCE(NULLIF($14, 0), output_tokens),
   total_tokens = COALESCE(NULLIF($15, 0), total_tokens),
   cache_tokens = COALESCE(NULLIF($16, 0), cache_tokens),
-  latency_ms = COALESCE(NULLIF($17, 0), latency_ms),
+  latency_ms = CASE
+    WHEN final_status <> 'processing' AND NULLIF($11, '') IS NOT NULL AND $11 <> 'processing' AND $11 <> final_status THEN latency_ms
+    ELSE COALESCE(NULLIF($17, 0), latency_ms)
+  END,
   ttft_ms = COALESCE(NULLIF($18, 0), ttft_ms),
-  error_code = COALESCE(NULLIF($19, ''), error_code),
-  error_type = COALESCE(NULLIF($20, ''), error_type),
+  error_code = CASE
+    WHEN final_status <> 'processing' AND NULLIF($11, '') IS NOT NULL AND $11 <> 'processing' AND $11 <> final_status THEN error_code
+    ELSE COALESCE(NULLIF($19, ''), error_code)
+  END,
+  error_type = CASE
+    WHEN final_status <> 'processing' AND NULLIF($11, '') IS NOT NULL AND $11 <> 'processing' AND $11 <> final_status THEN error_type
+    ELSE COALESCE(NULLIF($20, ''), error_type)
+  END,
   upstream_http_status = COALESCE(NULLIF($21, 0), upstream_http_status),
   usage_status = COALESCE(NULLIF($22, ''), usage_status),
   thinking_mode = COALESCE(NULLIF($23, ''), thinking_mode),
@@ -265,7 +280,10 @@ const upsertRequestLogSQL = `UPDATE request_logs SET
   thinking_effort_degraded = COALESCE(NULLIF($25, ''), thinking_effort_degraded),
   reservation_id = COALESCE(NULLIF($26, ''), reservation_id),
   billing_plan = COALESCE(NULLIF($27, ''), billing_plan),
-  completed_at = COALESCE($28, completed_at),
+  completed_at = CASE
+    WHEN final_status <> 'processing' AND NULLIF($11, '') IS NOT NULL AND $11 <> 'processing' AND $11 <> final_status THEN completed_at
+    ELSE COALESCE($28, completed_at)
+  END,
   stream = ($29 OR stream),
   user_agent = COALESCE(NULLIF($30, ''), user_agent)
 WHERE request_id = $1
