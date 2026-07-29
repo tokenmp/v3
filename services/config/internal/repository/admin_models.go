@@ -7,18 +7,22 @@ import (
 
 // Provider maps to the config.providers table.
 type Provider struct {
-	ID             string    `gorm:"column:id;primaryKey" json:"id"`
-	Name           string    `gorm:"column:name" json:"name"`
-	DisplayLabel   string    `gorm:"column:display_label" json:"display_label"`
-	Selector       string    `gorm:"column:selector" json:"selector"`
-	BaseURL        string    `gorm:"column:base_url" json:"base_url"`
-	SDKKind        string    `gorm:"column:sdk_kind" json:"sdk_kind"`
-	Protocol       string    `gorm:"column:protocol" json:"protocol"`
-	DefaultRetry   []byte    `gorm:"column:default_retry;type:jsonb" json:"default_retry,omitempty"`
-	DefaultTimeout []byte    `gorm:"column:default_timeout;type:jsonb" json:"default_timeout,omitempty"`
-	Status         string    `gorm:"column:status" json:"status"`
-	CreatedAt      time.Time `gorm:"column:created_at" json:"created_at"`
-	UpdatedAt      time.Time `gorm:"column:updated_at" json:"updated_at"`
+	ID              string    `gorm:"column:id;primaryKey" json:"id"`
+	Name            string    `gorm:"column:name" json:"name"`
+	DisplayLabel    string    `gorm:"column:display_label" json:"display_label"`
+	Selector        string    `gorm:"column:selector" json:"selector"`
+	BaseURL         string    `gorm:"column:base_url" json:"base_url"`
+	SDKKind         string    `gorm:"column:sdk_kind" json:"sdk_kind"`
+	Protocol        string    `gorm:"column:protocol" json:"protocol"`
+	DefaultRetry    []byte    `gorm:"column:default_retry;type:jsonb" json:"default_retry,omitempty"`
+	DefaultTimeout  []byte    `gorm:"column:default_timeout;type:jsonb" json:"default_timeout,omitempty"`
+	ContextWindow   *int      `gorm:"column:context_window" json:"context_window,omitempty"`
+	MaxOutputTokens *int      `gorm:"column:max_output_tokens" json:"max_output_tokens,omitempty"`
+	RPM             *int      `gorm:"column:rpm" json:"rpm,omitempty"`
+	TPM             *int      `gorm:"column:tpm" json:"tpm,omitempty"`
+	Status          string    `gorm:"column:status" json:"status"`
+	CreatedAt       time.Time `gorm:"column:created_at" json:"created_at"`
+	UpdatedAt       time.Time `gorm:"column:updated_at" json:"updated_at"`
 }
 
 func (Provider) TableName() string { return "providers" }
@@ -95,6 +99,8 @@ type UpstreamCredential struct {
 	Priority       int       `gorm:"column:priority" json:"priority"`
 	MaxConcurrency *int      `gorm:"column:max_concurrency" json:"max_concurrency,omitempty"`
 	DailyQuota     *int      `gorm:"column:daily_quota" json:"daily_quota,omitempty"`
+	RPM            *int      `gorm:"column:rpm" json:"rpm,omitempty"`
+	TPM            *int      `gorm:"column:tpm" json:"tpm,omitempty"`
 	Status         string    `gorm:"column:status" json:"status"`
 	CreatedAt      time.Time `gorm:"column:created_at" json:"created_at"`
 	UpdatedAt      time.Time `gorm:"column:updated_at" json:"updated_at"`
@@ -115,6 +121,8 @@ type RouteMapping struct {
 	IsDefault       bool      `gorm:"column:is_default" json:"is_default"`
 	ContextWindow   *int      `gorm:"column:context_window" json:"context_window,omitempty"`
 	MaxOutputTokens *int      `gorm:"column:max_output_tokens" json:"max_output_tokens,omitempty"`
+	RPM             *int      `gorm:"column:rpm" json:"rpm,omitempty"`
+	TPM             *int      `gorm:"column:tpm" json:"tpm,omitempty"`
 	RouteGroup      *string   `gorm:"column:route_group" json:"route_group,omitempty"`
 	RetryPolicy     []byte    `gorm:"column:retry_policy;type:jsonb" json:"retry_policy,omitempty"`
 	TimeoutPolicy   []byte    `gorm:"column:timeout_policy;type:jsonb" json:"timeout_policy,omitempty"`
@@ -131,6 +139,8 @@ type RouteCredential struct {
 	CredentialID string    `gorm:"column:credential_id;primaryKey" json:"credential_id"`
 	Priority     int       `gorm:"column:priority" json:"priority"`
 	Enabled      bool      `gorm:"column:enabled" json:"enabled"`
+	RPM          *int      `gorm:"column:rpm" json:"rpm,omitempty"`
+	TPM          *int      `gorm:"column:tpm" json:"tpm,omitempty"`
 	CreatedAt    time.Time `gorm:"column:created_at" json:"created_at"`
 }
 

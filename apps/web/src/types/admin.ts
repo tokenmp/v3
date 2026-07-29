@@ -266,6 +266,10 @@ export interface AdminProvider {
   baseURL: string;
   sdkKind: 'openai' | 'anthropic';
   protocol: string;
+  contextWindow: number | null;
+  maxOutputTokens: number | null;
+  rpm: number | null;
+  tpm: number | null;
   status: 'active' | 'disabled' | 'deleted';
   credentialCount: number;
   routeCount: number;
@@ -296,6 +300,8 @@ export interface AdminRouteConfig {
   quarantined: boolean;
   contextWindow: number | null;
   maxOutputTokens: number | null;
+  rpm: number | null;
+  tpm: number | null;
   retryPolicy?: RetryPolicy | null;
 }
 
@@ -311,6 +317,8 @@ export interface AdminUpstreamCredential {
   priority: number;
   maxConcurrency: number | null;
   dailyQuota: number | null;
+  rpm: number | null;
+  tpm: number | null;
   status: 'active' | 'disabled' | 'deleted';
   createdAt: string;
   updatedAt: string;
@@ -369,8 +377,22 @@ export interface TimeoutPolicy {
 }
 
 /** 全局策略：GET /v1/config/admin/global 返回 */
+export interface RoutingPolicy {
+  strategy: 'priority' | 'softmax';
+  temperature: number;
+  minCandidates: number;
+  weights: {
+    success: number;
+    cost: number;
+    latency: number;
+    quota: number;
+    priority: number;
+  };
+}
+
 export interface AdminGlobalPolicy {
   default_retry?: RetryPolicy | null;
   default_timeout?: TimeoutPolicy | null;
   auto_model_ids?: string[] | null;
+  routing_policy?: RoutingPolicy | null;
 }

@@ -10,7 +10,7 @@
 
 | 库 | 目录 | 职责 |
 |----|------|------|
-| Config DB | `migrations/config/` | provider/model/route/credential/adapter 配置，带版本（draft/published/archived），编译成 `ConfigSnapshot` 下发 executor |
+| Config DB | `migrations/config/` | provider/model/route/credential/adapter 配置，带版本（draft/published/archived），编译成 `ConfigSnapshot` 下发 executor；`0003_limits_and_routing_policy.sql` 增加 provider/route/credential/route-credential nullable context/max output/RPM/TPM 配置列 |
 | Log DB | `migrations/log/` | 请求生命周期事件，不存明文，按天分区 + 自动清理 |
 | Billing DB | `migrations/billing/` | 套餐/配额/记账，executor 不直连，由 Edge/BFF + Billing Service 操作 |
 

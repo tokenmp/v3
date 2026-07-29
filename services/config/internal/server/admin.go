@@ -593,6 +593,12 @@ func (s *Server) handleAdminGetGlobal(w http.ResponseWriter, r *http.Request) {
 			resp["auto_model_ids"] = v
 		}
 	}
+	if len(policy.RoutingPolicy) > 0 {
+		var v any
+		if json.Unmarshal(policy.RoutingPolicy, &v) == nil {
+			resp["routing_policy"] = v
+		}
+	}
 	httpresp.OK(w, resp)
 }
 
@@ -602,6 +608,7 @@ var validGlobalKeys = map[string]bool{
 	string(repository.GlobalKeyDefaultRetry):   true,
 	string(repository.GlobalKeyDefaultTimeout): true,
 	string(repository.GlobalKeyAutoModelIDs):   true,
+	string(repository.GlobalKeyRoutingPolicy):  true,
 }
 
 // handleAdminSetGlobal upserts a single global_config row. The key must be

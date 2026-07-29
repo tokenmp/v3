@@ -37,6 +37,8 @@ type CredentialDraft = {
   priority: string;
   maxConcurrency: string;
   dailyQuota: string;
+  rpm: string;
+  tpm: string;
   status: AdminUpstreamCredential['status'];
 };
 
@@ -48,6 +50,8 @@ function emptyDraft(): CredentialDraft {
     priority: '0',
     maxConcurrency: '',
     dailyQuota: '',
+    rpm: '',
+    tpm: '',
     status: 'active',
   };
 }
@@ -60,6 +64,8 @@ function toDraft(c: AdminUpstreamCredential): CredentialDraft {
     priority: String(c.priority ?? 0),
     maxConcurrency: c.maxConcurrency != null ? String(c.maxConcurrency) : '',
     dailyQuota: c.dailyQuota != null ? String(c.dailyQuota) : '',
+    rpm: c.rpm != null ? String(c.rpm) : '',
+    tpm: c.tpm != null ? String(c.tpm) : '',
     status: c.status === 'active' ? 'active' : 'disabled',
   };
 }
@@ -172,6 +178,7 @@ export default function AdminCredentialsPage() {
                 <TableHead className="text-xs">密钥前缀/后缀</TableHead>
                 <TableHead className="text-right text-xs">优先级</TableHead>
                 <TableHead className="text-right text-xs">并发</TableHead>
+                <TableHead className="text-right text-xs">TPM</TableHead>
                 <TableHead className="text-xs">状态</TableHead>
                 <TableHead className="text-right text-xs">操作</TableHead>
               </TableRow>
@@ -179,13 +186,13 @@ export default function AdminCredentialsPage() {
             <TableBody>
               {isLoading ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="py-8 text-center text-muted-foreground">
+                  <TableCell colSpan={8} className="py-8 text-center text-muted-foreground">
                     加载中…
                   </TableCell>
                 </TableRow>
               ) : filtered.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="py-8 text-center text-muted-foreground">
+                  <TableCell colSpan={8} className="py-8 text-center text-muted-foreground">
                     暂无上游账号
                   </TableCell>
                 </TableRow>
@@ -204,6 +211,9 @@ export default function AdminCredentialsPage() {
                       <TableCell className="text-right font-mono text-xs">{c.priority}</TableCell>
                       <TableCell className="text-right font-mono text-xs">
                         {c.maxConcurrency != null ? c.maxConcurrency : '∞'}
+                      </TableCell>
+                      <TableCell className="text-right font-mono text-xs">
+                        {c.tpm != null ? c.tpm.toLocaleString() : '继承'}
                       </TableCell>
                       <TableCell>
                         <StatusBadge status={c.status} />
@@ -336,6 +346,8 @@ function CredentialFormModal({
         priority: Number(input.priority) || 0,
         maxConcurrency: numOrNull(input.maxConcurrency),
         dailyQuota: numOrNull(input.dailyQuota),
+        rpm: numOrNull(input.rpm),
+        tpm: numOrNull(input.tpm),
         status: input.status,
       }),
     onSuccess: () => {
@@ -355,6 +367,8 @@ function CredentialFormModal({
         priority: Number(input.priority) || 0,
         maxConcurrency: numOrNull(input.maxConcurrency),
         dailyQuota: numOrNull(input.dailyQuota),
+        rpm: numOrNull(input.rpm),
+        tpm: numOrNull(input.tpm),
         status: input.status,
       }),
     onSuccess: () => {
@@ -433,7 +447,7 @@ function CredentialFormModal({
         </FormSection>
 
         {/* 高级设置 */}
-        <FormSection title="高级设置" description="可选，按需配置调度参数" cols={3}>
+        <FormSection title="高级设置" description="可选，账号级覆盖 Provider/路由默认值；留空表示继承。" cols={3}>
           <Field label="优先级" hint="越小越优先">
             <NumberField value={draft.priority} onChange={(v) => patch({ priority: v })} />
           </Field>
@@ -454,6 +468,12 @@ function CredentialFormModal({
               step={1}
               placeholder="不限"
             />
+          </Field>
+          <Field label="RPM" hint="账号 requests/min，留空=继承">
+            <NumberField value={draft.rpm} onChange={(v) => patch({ rpm: v })} min={1} step={1} placeholder="继承" />
+          </Field>
+          <Field label="TPM" hint="账号 tokens/min，留空=继承">
+            <NumberField value={draft.tpm} onChange={(v) => patch({ tpm: v })} min={1} step={1} placeholder="继承" />
           </Field>
         </FormSection>
 

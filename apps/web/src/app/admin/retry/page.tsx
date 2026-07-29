@@ -14,6 +14,7 @@ import {
 import { adminConfigApi } from '@/lib/api/admin';
 import type {
   AdminRouteConfig,
+  RoutingPolicy,
   RetryAction,
   RetryPolicy,
   RetryRule,
@@ -333,6 +334,94 @@ function GlobalRetryCard() {
 /* Route-level retry table                                                      */
 /* -------------------------------------------------------------------------- */
 
+function defaultRoutingPolicy(): RoutingPolicy {
+  return {
+    strategy: 'softmax',
+    temperature: 0.7,
+    minCandidates: 3,
+    weights: { success: 0.45, cost: 0.25, latency: 0.15, quota: 0.1, priority: 0.05 },
+  };
+}
+
+function RoutingPolicyCard() {
+  const qc = useQueryClient();
+  const { data: global, isLoading } = useQuery({
+    queryKey: ['admin', 'global-policy'],
+    queryFn: () => adminConfigApi.getGlobalPolicy(),
+  });
+  const [draft, setDraft] = useState<RoutingPolicy | null>(null);
+
+  useEffect(() => {
+    if (global && draft === null) setDraft(global.routing_policy ?? defaultRoutingPolicy());
+  }, [global, draft]);
+
+  const save = useMutation({
+    mutationFn: (p: RoutingPolicy) => adminConfigApi.setRoutingPolicy(p),
+    onSuccess: () => {
+      toast.success('选号策略已保存');
+      void qc.invalidateQueries({ queryKey: ['admin', 'global-policy'] });
+    },
+    onError: () => toast.error('保存失败'),
+  });
+
+  if (isLoading || !draft) {
+    return <Card><CardContent className="p-8 text-center text-sm text-muted-foreground">加载中…</CardContent></Card>;
+  }
+
+  const setWeight = (key: keyof RoutingPolicy['weights'], value: number) => {
+    setDraft({ ...draft, weights: { ...draft.weights, [key]: value } });
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Zap className="h-4 w-4" />
+          全局选号策略
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <p className="text-xs text-muted-foreground">
+          这是账号/路由候选的调度策略配置入口。当前先保存配置，执行侧 softmax 采样和 RPM/TPM 硬过滤会在后续批次接入；候选过少时按 min candidates 走保守策略。
+        </p>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <Field label="策略">
+            <select className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm" value={draft.strategy} onChange={(e) => setDraft({ ...draft, strategy: e.target.value as RoutingPolicy['strategy'] })}>
+              <option value="softmax">Softmax 加权采样</option>
+              <option value="priority">固定优先级</option>
+            </select>
+          </Field>
+          <Field label="Temperature" hint="0=近似最高分，越大越分散">
+            <Input type="number" min={0} max={2} step={0.05} value={draft.temperature} onChange={(e) => setDraft({ ...draft, temperature: Number(e.target.value) })} />
+          </Field>
+          <Field label="最小候选数" hint="候选少于此值时不过滤">
+            <Input type="number" min={1} step={1} value={draft.minCandidates} onChange={(e) => setDraft({ ...draft, minCandidates: Number(e.target.value) })} />
+          </Field>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-5">
+          {([
+            ['success', '成功率'],
+            ['cost', '成本'],
+            ['latency', '延迟'],
+            ['quota', '额度'],
+            ['priority', '优先级'],
+          ] as const).map(([key, label]) => (
+            <Field key={key} label={label}>
+              <Input type="number" min={0} step={0.01} value={draft.weights[key]} onChange={(e) => setWeight(key, Number(e.target.value))} />
+            </Field>
+          ))}
+        </div>
+        <div className="flex justify-end">
+          <Button onClick={() => save.mutate(draft)} disabled={save.isPending}>
+            <Save className="h-4 w-4 mr-1" />
+            {save.isPending ? '保存中…' : '保存选号策略'}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 function RouteRetryCard() {
   const qc = useQueryClient();
   const { data: routes, isLoading } = useQuery({
@@ -509,6 +598,7 @@ export default function RetryPolicyPage() {
         <PublishStatusHint className="w-full justify-center sm:w-auto" />
       </div>
 
+      <RoutingPolicyCard />
       <GlobalRetryCard />
       <RouteRetryCard />
 
