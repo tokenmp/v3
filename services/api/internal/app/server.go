@@ -58,6 +58,9 @@ func NewServer(deps Deps, readHeaderTimeout, idleTimeout time.Duration) *http.Se
 	if deps.Logger == nil {
 		deps.Logger = slog.Default()
 	}
+	if deps.Settings == nil {
+		deps.Settings = settings.NewStore()
+	}
 	panelHandlers := panel.New(deps.Logging, deps.Billing, deps.Settings, deps.Logger)
 	adminHandlers := admin.New(deps.Logging, deps.Billing, deps.AdminAuth, deps.Logger)
 	configHandlers := admin.NewConfigHandlers(deps.ConfigCfg)
@@ -106,7 +109,7 @@ func NewServer(deps Deps, readHeaderTimeout, idleTimeout time.Duration) *http.Se
 	// Authenticated executor proxy routes (identity → quota → proxy).
 	r.Group(func(r chi.Router) {
 		r.Use(identity.Middleware(deps.Verifier, deps.Logger))
-		r.Use(quotaMiddleware(deps.Quota, deps.Logging, deps.Logger))
+		r.Use(quotaMiddleware(deps.Quota, deps.Logging, deps.Settings, deps.Logger))
 		// Catch-all forward to executor.
 		r.HandleFunc("/v1/*", deps.Proxy.ServeHTTP)
 	})
@@ -154,7 +157,7 @@ func Run(ctx context.Context, ln net.Listener, srv *http.Server, shutdownTimeout
 // same row (keyed by request_id) and supply the terminal status/completion
 // time. The Edge receipt post is fire-and-forget (background context, errors
 // swallowed) and never blocks the request path.
-func quotaMiddleware(mgr quota.Manager, logClient *logging.Client, logger *slog.Logger) func(http.Handler) http.Handler {
+func quotaMiddleware(mgr quota.Manager, logClient *logging.Client, settingsStore *settings.Store, logger *slog.Logger) func(http.Handler) http.Handler {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -211,8 +214,10 @@ func quotaMiddleware(mgr quota.Manager, logClient *logging.Client, logger *slog.
 				}()
 			}
 
+			billingPlan, reservedReqs, reservedTokens, finalReqs, finalTokens := billingUsageForUser(settingsStore, claims.Subject)
+
 			// Reserve (best-effort; noop manager skips).
-			_, err := mgr.Reserve(r.Context(), reservationID, claims.Subject, requestID, "coding", 1, 0)
+			_, err := mgr.Reserve(r.Context(), reservationID, claims.Subject, requestID, billingPlan, reservedReqs, reservedTokens)
 			if err != nil {
 				if r.Context().Err() != nil {
 					completedAt := time.Now().UTC()
@@ -247,7 +252,7 @@ func quotaMiddleware(mgr quota.Manager, logClient *logging.Client, logger *slog.
 				}
 				logEdgeClientCancelled(logClient, logger, requestID, claims.Subject, startedAt, completedAt)
 			} else if ww.status >= 200 && ww.status < 400 {
-				if err := mgr.Finalize(finCtx, reservationID, 1, 0); err != nil {
+				if err := mgr.Finalize(finCtx, reservationID, finalReqs, finalTokens); err != nil {
 					logger.Warn("quota finalize failed", "error", err, "request_id", requestID)
 				}
 			} else {
@@ -257,6 +262,19 @@ func quotaMiddleware(mgr quota.Manager, logClient *logging.Client, logger *slog.
 			}
 		})
 	}
+}
+
+func billingUsageForUser(settingsStore *settings.Store, userID string) (billingPlan string, reservedReqs int, reservedTokens int64, finalReqs int, finalTokens int64) {
+	if settingsStore != nil && settingsStore.Get(userID).PreferredBilling == "token" {
+		// The current public request path has no authoritative token estimate yet.
+		// Reserve zero to avoid double-counting token balance (Billing token balance
+		// sums all token ledger deltas, including reserves), then charge the minimal
+		// one-token unit at finalize so selecting Token billing hits token ledger
+		// instead of the default coding request ledger. A later phase should wire
+		// provider confirmed usage into finalTokens.
+		return "token", 0, 0, 0, 1
+	}
+	return "coding", 1, 0, 1, 0
 }
 
 func logEdgeClientCancelled(logClient *logging.Client, logger *slog.Logger, requestID, userID string, startedAt, completedAt time.Time) {
