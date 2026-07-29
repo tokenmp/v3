@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 
@@ -169,9 +170,20 @@ func classifyError(err error, response *http.Response) *sdk.ClassifiedError {
 	if errors.As(err, &apiErr) {
 		status, code, typ = apiErr.StatusCode, apiErr.Code, apiErr.Type
 		upstreamMsg = apiErr.Message
-		upstreamBody = apiErr.RawJSON()
 		if apiErr.Response != nil {
 			requestID = apiErr.Response.Header.Get("x-request-id")
+		}
+	}
+	// Capture the full upstream response body for admin reproduction. The
+	// OpenAI SDK restores response.Body after consuming it, so we can read it
+	// here. We prefer the full body over apiErr.RawJSON() (which only contains
+	// the "error" field extracted via gjson) because the full envelope may
+	// carry additional diagnostic fields. When errors.As failed (e.g. the
+	// upstream returned a non-standard error format or HTML), this is the
+	// only way to retain the body.
+	if response != nil && response.Body != nil {
+		if body, readErr := io.ReadAll(io.LimitReader(response.Body, 1<<16)); readErr == nil {
+			upstreamBody = string(body)
 		}
 	}
 	if status >= 200 && status < 300 {

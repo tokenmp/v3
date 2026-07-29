@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 
@@ -181,11 +182,18 @@ func classifyError(err error, response *http.Response) *sdk.ClassifiedError {
 			requestID = apiErr.RequestID
 		}
 		// Extract the human-readable message from the Anthropic error envelope
-		// {"error":{"type":"...","message":"..."}}. The raw JSON is
-		// captured separately as upstreamBody for admin reproduction.
+		// {"error":{"type":"...","message":"..."}}.
 		rawJSON := apiErr.RawJSON()
 		upstreamMsg = extractAnthropicMessage(rawJSON)
-		upstreamBody = rawJSON
+	}
+	// Capture the full upstream response body for admin reproduction. The
+	// Anthropic SDK restores response.Body after consuming it, so we can read
+	// it here. When errors.As failed (non-standard error format), this is the
+	// only way to retain the body.
+	if response != nil && response.Body != nil {
+		if body, readErr := io.ReadAll(io.LimitReader(response.Body, 1<<16)); readErr == nil {
+			upstreamBody = string(body)
+		}
 	}
 
 	if status >= 200 && status < 300 {
