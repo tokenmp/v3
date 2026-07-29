@@ -40,6 +40,7 @@ export interface AdminRequestLog extends RequestLog {
   userId: string | null;
   userEmail: string | null;
   clientKeyId?: string | null;
+  userAgent?: string | null;
   routeId?: string | null;
   credentialId?: string | null;
   provider?: string | null;

@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/x509"
+	"encoding/json"
 	"encoding/pem"
 	"io"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/tokenmp/v3/services/api/internal/app"
 	"github.com/tokenmp/v3/services/api/internal/identity"
+	"github.com/tokenmp/v3/services/api/internal/logging"
 	"github.com/tokenmp/v3/services/api/internal/proxy"
 	"github.com/tokenmp/v3/services/api/internal/quota"
 )
@@ -146,6 +148,68 @@ func TestEdgeFullFlow_AuthQuotaProxyFinalize(t *testing.T) {
 	}
 	if releaseHits.Load() != 0 {
 		t.Errorf("release hits = %d, want 0 (success path)", releaseHits.Load())
+	}
+}
+
+func TestEdgeIngestsBoundedUserAgentOnReceipt(t *testing.T) {
+	pub, priv := genEdgeKeyPair(t)
+	keyFile := writeEdgePubPEM(t, pub)
+	verifier, err := identity.NewVerifier(keyFile, "tokenmp-auth", "tokenmp-web", nil)
+	if err != nil {
+		t.Fatalf("NewVerifier: %v", err)
+	}
+
+	execBackend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer execBackend.Close()
+	prx, err := proxy.New(execBackend.URL, "edge-token", nil)
+	if err != nil {
+		t.Fatalf("proxy.New: %v", err)
+	}
+
+	type ingestWire struct {
+		Log struct {
+			UserAgent string `json:"user_agent"`
+		} `json:"log"`
+	}
+	ingested := make(chan ingestWire, 1)
+	logBackend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body ingestWire
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode ingest: %v", err)
+		}
+		ingested <- body
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer logBackend.Close()
+
+	deps := app.Deps{
+		Verifier: verifier,
+		Proxy:    prx,
+		Quota:    quota.NewManager(""),
+		Logging:  logging.NewClient(logBackend.URL),
+	}
+	front := httptest.NewServer(app.NewServer(deps, 10*time.Second, 60*time.Second).Handler)
+	defer front.Close()
+
+	tok := makeEdgeJWT(t, priv, "user-agent-test")
+	req, _ := http.NewRequest(http.MethodPost, front.URL+"/v1/chat/completions", nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	req.Header.Set("User-Agent", "TokenMP-Test/1.0")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	_ = resp.Body.Close()
+
+	select {
+	case got := <-ingested:
+		if got.Log.UserAgent != "TokenMP-Test/1.0" {
+			t.Fatalf("user_agent = %q", got.Log.UserAgent)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for logging ingest")
 	}
 }
 

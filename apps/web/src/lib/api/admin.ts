@@ -195,6 +195,7 @@ function mapRequestLog(r: Record<string, unknown>): AdminRequestLog {
     userId: r.user_id != null && String(r.user_id) !== '' ? String(r.user_id) : null,
     userEmail: r.user_email != null && String(r.user_email) !== '' ? String(r.user_email) : null,
     clientKeyId: r.client_key_id != null && String(r.client_key_id) !== '' ? String(r.client_key_id) : null,
+    userAgent: r.user_agent != null && String(r.user_agent) !== '' ? String(r.user_agent) : null,
     model: String(r.resolved_model ?? r.model ?? ''),
     status,
     inputTokens: r.input_tokens != null ? Number(r.input_tokens) : null,

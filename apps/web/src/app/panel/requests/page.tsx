@@ -9,9 +9,72 @@ import {
 import { FilterChip } from '@/components/filter-chip';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import type { RequestLog } from '@/types';
+import {
+  formatDuration,
+  formatTokens,
+  formatTokensPerSecond,
+  calcTokensPerSecond,
+  protocolLabel,
+  streamLabel,
+  thinkingLabel,
+} from '@/lib/request-log-metrics';
 
 function formatTime(iso: string) {
   return new Date(iso).toLocaleString('zh-CN');
+}
+
+function statusBadge(status: string) {
+  if (status === 'success') return { label: '成功', cls: 'bg-green-100 text-green-700' };
+  if (status === 'processing') return { label: '处理中', cls: 'bg-blue-100 text-blue-700 animate-pulse' };
+  return { label: '失败', cls: 'bg-red-100 text-red-700' };
+}
+
+/** Combined "请求类型" cell: protocol + stream badge */
+function RequestTypeCell({ r }: { r: RequestLog }) {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span>{protocolLabel(r.protocol)}</span>
+      {r.stream != null && (
+        <span className={`rounded px-1 py-px text-[10px] font-medium ${r.stream ? 'bg-blue-100 text-blue-700' : 'bg-muted text-muted-foreground'}`}>
+          {streamLabel(r.stream)}
+        </span>
+      )}
+    </span>
+  );
+}
+
+/** Combined "Token" cell: in / out (cache) */
+function TokenCell({ r }: { r: RequestLog }) {
+  const cache = r.cacheTokens != null && r.cacheTokens > 0
+    ? <span className="text-muted-foreground">({formatTokens(r.cacheTokens)}缓存)</span>
+    : null;
+  return (
+    <span className="inline-flex items-center gap-1 tabular-nums">
+      {formatTokens(r.inputTokens)} / {formatTokens(r.outputTokens)}
+      {cache}
+    </span>
+  );
+}
+
+/** Combined "性能" cell: duration + TTFT + speed */
+function PerfCell({ r }: { r: RequestLog }) {
+  const speed = calcTokensPerSecond({
+    outputTokens: r.outputTokens,
+    durationMs: r.durationMs,
+    ttftMs: r.ttftMs,
+    stream: r.stream,
+  });
+  return (
+    <span className="inline-flex flex-col gap-0.5 text-xs">
+      <span>{formatDuration(r.durationMs)}</span>
+      {r.ttftMs != null && r.ttftMs > 0 && r.stream === true && (
+        <span className="text-muted-foreground">TTFT {formatDuration(r.ttftMs)}</span>
+      )}
+      {speed != null && (
+        <span className="text-muted-foreground">{formatTokensPerSecond(speed)}</span>
+      )}
+    </span>
+  );
 }
 
 export default function RequestsPage() {
@@ -60,38 +123,40 @@ export default function RequestsPage() {
         </div>
       </div>
 
-      {/* 表格 */}
+      {/* Desktop table */}
       <div className="hidden md:block rounded-md border border-border bg-card">
         <div className="overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow className="bg-muted/30">
-                <TableHead className="text-xs">时间</TableHead>
-                <TableHead className="text-xs">模型</TableHead>
-                <TableHead className="text-xs">状态</TableHead>
-                <TableHead className="text-xs">耗时</TableHead>
-                <TableHead className="text-xs">输入 Token</TableHead>
-                <TableHead className="text-xs">输出 Token</TableHead>
+                <TableHead className="text-xs whitespace-nowrap">时间</TableHead>
+                <TableHead className="text-xs whitespace-nowrap">模型</TableHead>
+                <TableHead className="text-xs whitespace-nowrap">请求类型</TableHead>
+                <TableHead className="text-xs whitespace-nowrap">状态</TableHead>
+                <TableHead className="text-xs whitespace-nowrap">Token (入/出)</TableHead>
+                <TableHead className="text-xs whitespace-nowrap">性能</TableHead>
+                <TableHead className="text-xs whitespace-nowrap">Thinking</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {filtered.map((r: RequestLog) => (
                 <TableRow key={r.requestId}>
-                  <TableCell className="text-xs text-muted-foreground">{formatTime(r.createdAt)}</TableCell>
+                  <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{formatTime(r.createdAt)}</TableCell>
                   <TableCell className="text-sm">{r.model}</TableCell>
+                  <TableCell><RequestTypeCell r={r} /></TableCell>
                   <TableCell>
-                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${r.status === 'success' ? 'bg-green-100 text-green-700' : r.status === 'processing' ? 'bg-blue-100 text-blue-700 animate-pulse' : 'bg-red-100 text-red-700'}`}>
-                      {r.status === 'success' ? '成功' : r.status === 'processing' ? '处理中' : '失败'}
+                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${statusBadge(r.status).cls}`}>
+                      {statusBadge(r.status).label}
                     </span>
                   </TableCell>
-                  <TableCell className="text-sm">{r.durationMs ?? '—'}ms</TableCell>
-                  <TableCell className="text-sm">{(r.inputTokens ?? 0).toLocaleString()}</TableCell>
-                  <TableCell className="text-sm">{(r.outputTokens ?? 0).toLocaleString()}</TableCell>
+                  <TableCell className="text-sm"><TokenCell r={r} /></TableCell>
+                  <TableCell><PerfCell r={r} /></TableCell>
+                  <TableCell className="text-sm">{thinkingLabel(r.thinkingEffort)}</TableCell>
                 </TableRow>
               ))}
               {filtered.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={6} className="py-8 text-center text-sm text-muted-foreground">
+                  <TableCell colSpan={7} className="py-8 text-center text-sm text-muted-foreground">
                     暂无请求记录
                   </TableCell>
                 </TableRow>
@@ -103,21 +168,52 @@ export default function RequestsPage() {
 
       {/* Mobile card list */}
       <div className="md:hidden space-y-3">
-        {filtered.map((r: RequestLog) => (
-          <div key={r.requestId} className="rounded-lg border bg-card p-3 space-y-2">
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-sm font-medium truncate">{r.model || '—'}</span>
-              <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${r.status === 'success' ? 'bg-green-100 text-green-700' : r.status === 'processing' ? 'bg-blue-100 text-blue-700 animate-pulse' : 'bg-red-100 text-red-700'}`}>
-                {r.status === 'success' ? '成功' : r.status === 'processing' ? '处理中' : '失败'}
-              </span>
+        {filtered.map((r: RequestLog) => {
+          const speed = calcTokensPerSecond({
+            outputTokens: r.outputTokens,
+            durationMs: r.durationMs,
+            ttftMs: r.ttftMs,
+            stream: r.stream,
+          });
+          return (
+            <div key={r.requestId} className="rounded-lg border bg-card p-3 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm font-medium truncate">{r.model || '—'}</span>
+                <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${statusBadge(r.status).cls}`}>
+                  {statusBadge(r.status).label}
+                </span>
+              </div>
+              {/* Request type row */}
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <span>{protocolLabel(r.protocol)}</span>
+                {r.stream != null && (
+                  <span className={`rounded px-1 py-px text-[10px] font-medium ${r.stream ? 'bg-blue-100 text-blue-700' : 'bg-muted text-muted-foreground'}`}>
+                    {streamLabel(r.stream)}
+                  </span>
+                )}
+              </div>
+              {/* Token row */}
+              <div className="flex items-center justify-between text-xs">
+                <span className="tabular-nums">
+                  {formatTokens(r.inputTokens)} / {formatTokens(r.outputTokens)}
+                  {r.cacheTokens != null && r.cacheTokens > 0 && (
+                    <span className="text-muted-foreground"> ({formatTokens(r.cacheTokens)}缓存)</span>
+                  )}
+                </span>
+                <span>{formatDuration(r.durationMs)}</span>
+              </div>
+              {/* Performance row */}
+              <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                {r.ttftMs != null && r.ttftMs > 0 && r.stream === true && (
+                  <span>TTFT {formatDuration(r.ttftMs)}</span>
+                )}
+                {speed != null && <span>{formatTokensPerSecond(speed)}</span>}
+                {r.thinkingEffort && <span>思考: {thinkingLabel(r.thinkingEffort)}</span>}
+              </div>
+              <p className="text-[10px] text-muted-foreground">{formatTime(r.createdAt)}</p>
             </div>
-            <div className="flex items-center justify-between text-xs text-muted-foreground">
-              <span>{r.durationMs ?? '—'}ms</span>
-              <span className="tabular-nums">{(r.inputTokens ?? 0).toLocaleString()} / {(r.outputTokens ?? 0).toLocaleString()}</span>
-            </div>
-            <p className="text-[10px] text-muted-foreground">{formatTime(r.createdAt)}</p>
-          </div>
-        ))}
+          );
+        })}
         {filtered.length === 0 && (
           <p className="py-8 text-center text-sm text-muted-foreground">暂无请求记录</p>
         )}

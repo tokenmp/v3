@@ -32,6 +32,7 @@ type RequestLog struct {
 	TraceID                string     `json:"trace_id,omitempty" gorm:"column:trace_id"`
 	UserID                 string     `json:"user_id,omitempty" gorm:"column:user_id"`
 	ClientKeyID            string     `json:"client_key_id,omitempty" gorm:"column:client_key_id"`
+	UserAgent              string     `json:"user_agent,omitempty" gorm:"column:user_agent"`
 	ModelName              string     `json:"model_name,omitempty" gorm:"column:model_name"`
 	ResolvedModel          string     `json:"resolved_model,omitempty" gorm:"column:resolved_model"`
 	RouteID                string     `json:"route_id,omitempty" gorm:"column:route_id"`
@@ -213,14 +214,14 @@ const insertRequestLogSQL = `INSERT INTO request_logs (
   http_status, input_tokens, output_tokens, total_tokens, cache_tokens,
   latency_ms, ttft_ms, error_code, error_type, upstream_http_status,
   usage_status, thinking_mode, thinking_effort, thinking_effort_degraded,
-  reservation_id, billing_plan, created_at, completed_at
+  reservation_id, billing_plan, created_at, completed_at, user_agent
 ) VALUES (
   ?, ?, ?, ?, ?, ?,
   ?, ?, ?, ?, ?, ?,
   ?, ?, ?, ?, ?,
   ?, ?, ?, ?, ?,
   NULLIF(?, '')::text, ?, ?, ?,
-  ?, ?, ?, ?
+  ?, ?, ?, ?, ?
 )
 RETURNING id`
 
@@ -265,7 +266,8 @@ const upsertRequestLogSQL = `UPDATE request_logs SET
   reservation_id = COALESCE(NULLIF($26, ''), reservation_id),
   billing_plan = COALESCE(NULLIF($27, ''), billing_plan),
   completed_at = COALESCE($28, completed_at),
-  stream = ($29 OR stream)
+  stream = ($29 OR stream),
+  user_agent = COALESCE(NULLIF($30, ''), user_agent)
 WHERE request_id = $1
 RETURNING id`
 
@@ -284,6 +286,7 @@ func (r *GormRepository) upsertRequestLog(ctx TxContext, log RequestLog) (int64,
 	if log.CreatedAt.IsZero() {
 		log.CreatedAt = time.Now().UTC()
 	}
+	log.UserAgent = sanitizeUserAgent(log.UserAgent)
 	// Hold a transaction-scoped advisory lock keyed by request_id so concurrent
 	// ingests of the same request serialize. hashtext is int4; cast to int8 for
 	// the single-key advisory lock variant. Hash collisions only cause two
@@ -301,7 +304,7 @@ func (r *GormRepository) upsertRequestLog(ctx TxContext, log RequestLog) (int64,
 		log.HTTPStatus, log.InputTokens, log.OutputTokens, log.TotalTokens, log.CacheTokens,
 		log.LatencyMS, log.TTFTMS, log.ErrorCode, log.ErrorType, log.UpstreamHTTPStatus,
 		log.UsageStatus, log.ThinkingMode, log.ThinkingEffort, log.ThinkingEffortDegraded,
-		log.ReservationID, log.BillingPlan, log.CompletedAt, log.Stream,
+		log.ReservationID, log.BillingPlan, log.CompletedAt, log.Stream, log.UserAgent,
 	).Scan(&id).Error
 	if err != nil {
 		return 0, ErrInsertFailed
@@ -316,7 +319,7 @@ func (r *GormRepository) upsertRequestLog(ctx TxContext, log RequestLog) (int64,
 		log.HTTPStatus, log.InputTokens, log.OutputTokens, log.TotalTokens, log.CacheTokens,
 		log.LatencyMS, log.TTFTMS, log.ErrorCode, log.ErrorType, log.UpstreamHTTPStatus,
 		log.UsageStatus, log.ThinkingMode, log.ThinkingEffort, log.ThinkingEffortDegraded,
-		log.ReservationID, log.BillingPlan, log.CreatedAt, log.CompletedAt,
+		log.ReservationID, log.BillingPlan, log.CreatedAt, log.CompletedAt, log.UserAgent,
 	).Scan(&id).Error; err != nil {
 		return 0, ErrInsertFailed
 	}
@@ -336,6 +339,7 @@ func (r *GormRepository) InsertRequestLog(ctx context.Context, log RequestLog) (
 	if log.CreatedAt.IsZero() {
 		log.CreatedAt = time.Now().UTC()
 	}
+	log.UserAgent = sanitizeUserAgent(log.UserAgent)
 	var id int64
 	if err := r.db.WithContext(ctx).Raw(insertRequestLogSQL,
 		log.RequestID, log.TraceID, log.UserID, log.ClientKeyID, log.ModelName, log.ResolvedModel,
@@ -343,7 +347,7 @@ func (r *GormRepository) InsertRequestLog(ctx context.Context, log RequestLog) (
 		log.HTTPStatus, log.InputTokens, log.OutputTokens, log.TotalTokens, log.CacheTokens,
 		log.LatencyMS, log.TTFTMS, log.ErrorCode, log.ErrorType, log.UpstreamHTTPStatus,
 		log.UsageStatus, log.ThinkingMode, log.ThinkingEffort, log.ThinkingEffortDegraded,
-		log.ReservationID, log.BillingPlan, log.CreatedAt, log.CompletedAt,
+		log.ReservationID, log.BillingPlan, log.CreatedAt, log.CompletedAt, log.UserAgent,
 	).Scan(&id).Error; err != nil {
 		return 0, ErrInsertFailed
 	}
@@ -516,7 +520,7 @@ func rawJSONText(b json.RawMessage) string {
 // gorm.ErrRecordNotFound).
 func (r *GormRepository) GetRequestLog(ctx context.Context, requestID string) (RequestLog, error) {
 	const q = `
-SELECT id, request_id, trace_id, user_id, client_key_id, model_name, resolved_model,
+SELECT id, request_id, trace_id, user_id, client_key_id, user_agent, model_name, resolved_model,
        route_id, provider_id, credential_id, protocol, stream, final_status,
        http_status, input_tokens, output_tokens, total_tokens, cache_tokens,
        latency_ms, ttft_ms, error_code, error_type, upstream_http_status,
@@ -571,7 +575,7 @@ ORDER BY created_at ASC, id ASC`
 
 // logListColumns is the projection ListRequestLogs returns. It mirrors the
 // GetRequestLog SELECT so both read paths expose identical column shape.
-const logListColumns = `id, request_id, trace_id, user_id, client_key_id, model_name, resolved_model,
+const logListColumns = `id, request_id, trace_id, user_id, client_key_id, user_agent, model_name, resolved_model,
        route_id, provider_id, credential_id, protocol, stream, final_status,
        http_status, input_tokens, output_tokens, total_tokens, cache_tokens,
        latency_ms, ttft_ms, error_code, error_type, upstream_http_status,

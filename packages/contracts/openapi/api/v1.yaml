@@ -595,6 +595,12 @@ components:
         outputTokens:
           type: integer
           nullable: true
+        totalTokens:
+          type: integer
+          nullable: true
+        cacheTokens:
+          type: integer
+          nullable: true
         cost:
           type: string
           description: Cost as string (bigint, in smallest unit)
@@ -602,9 +608,25 @@ components:
         durationMs:
           type: integer
           nullable: true
+        ttftMs:
+          type: integer
+          nullable: true
+        protocol:
+          type: string
+          nullable: true
+        stream:
+          type: boolean
+          nullable: true
+        thinkingEffort:
+          type: string
+          nullable: true
         createdAt:
           type: string
           format: date-time
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
 
     RequestLogDetail:
       type: object
@@ -628,11 +650,33 @@ components:
         outputTokens:
           type: integer
           nullable: true
+        totalTokens:
+          type: integer
+          nullable: true
+        cacheTokens:
+          type: integer
+          nullable: true
         cost:
           type: string
           nullable: true
         durationMs:
           type: integer
+          nullable: true
+        ttftMs:
+          type: integer
+          nullable: true
+        protocol:
+          type: string
+          nullable: true
+        stream:
+          type: boolean
+          nullable: true
+        thinkingEffort:
+          type: string
+          nullable: true
+        completedAt:
+          type: string
+          format: date-time
           nullable: true
         attempts:
           type: array

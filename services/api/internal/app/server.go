@@ -186,6 +186,7 @@ func quotaMiddleware(mgr quota.Manager, logClient *logging.Client, logger *slog.
 				log := logging.IngestLog{
 					RequestID:   requestID,
 					UserID:      claims.Subject,
+					UserAgent:   sanitizeUserAgent(r.UserAgent()),
 					FinalStatus: "processing",
 					CreatedAt:   now,
 				}

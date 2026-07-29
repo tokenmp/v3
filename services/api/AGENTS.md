@@ -19,7 +19,7 @@ Edge/BFF **不做**：模型路由、协议转换、上游转发（这些在 Exe
 - `internal/identity`：JWT 验证中间件（EdDSA/Ed25519，本地验，提取 subject/role 到 context；`API_JWT_PUBLIC_KEY_FILE` 空时 noop verifier dev-only；`NewVerifier` + `Middleware` + `FromContext`）。
 - `internal/quota`：Billing Service 客户端（`Manager` 接口，`Reserve`/`Finalize`/`Release`；`billingURL` 空时 noop；禁 redirect，10s timeout，`ErrQuotaUnavailable` 不泄漏 URL）。
 - `internal/proxy`：反向代理转发到 executor（注入 `Bearer <edge-token>`，`ErrorHandter` 返回 502 JSON）。
-- `internal/logging`：Logging Service HTTP 客户端（读取：`ListLogs`/`GetLog`/`GetStats`；写入：`Ingest` 用于 Edge 收到执行请求时创建 `processing` 日志与 `received` 事件；`loggingURL` 空时 `ErrUnavailable`，404 区分为 `NotFound`，禁 redirect，不泄漏 URL）。
+- `internal/logging`：Logging Service HTTP 客户端（读取：`ListLogs`/`GetLog`/`GetStats`；写入：`Ingest` 用于 Edge 收到执行请求时创建 `processing` 日志与 `received` 事件，并仅附带 512-byte、UTF-8/control-char 清洗后的 `User-Agent`，不采集其他客户端头；`loggingURL` 空时 `ErrUnavailable`，404 区分为 `NotFound`，禁 redirect，不泄漏 URL）。
 - `internal/billing`：Billing Service 只读查询 HTTP 客户端（`ListPlans`/`ListUserPlans`/`GetBalance`；与 `internal/quota` 分离，后者负责 reserve/finalize/release 写入路径）。下游 `Balance`/`Plan`/`UserPlan` 为 snake_case DTO，Edge facade 映射为契约 camelCase。
 - `internal/settings`：用户设置进程内内存存储（`Get`/`Snapshot`，默认 preferredBilling="coding"/fallbackEnabled=false；`Snapshot` 用可选指针表达局部更新，支持把 bool 显式设为 false）。无持久化，生产化后可替换。
 - `internal/panel`：Panel 业务查询 handler（`ListPlans`/`ListUserPlans`/`GetUserBalance`/`ListRequestLogs`/`GetRequestLog`/`GetRequestLogStats`/`GetUserSettings`/`UpdateUserSettings`）。聚合 logging+billing+settings，以 OpenAPI 契约形状返回；金额/配额用十进制字符串。防越权：`GetRequestLog` 按身份 subject 校验日志归属（admin 可放宽）。Plan 的 int64 id 经 `int64ToUUID` 确定性映射为契约 UUID，不暴露自增序号。
@@ -31,7 +31,7 @@ Edge/BFF **不做**：模型路由、协议转换、上游转发（这些在 Exe
 ```
 # 模型执行请求
 client → identity.Middleware (JWT verify)
-  → quotaMiddleware (分配并透传 X-Request-ID；异步写 processing + received；reserve)
+  → quotaMiddleware (分配并透传 X-Request-ID；清洗并限制 User-Agent；异步写 processing + received；reserve)
   → proxy (forward to executor, inject Bearer token)
   → executor 复用同一 request_id 并逐阶段 upsert 日志
   → response → quotaMiddleware (finalize if 2xx/3xx, release if error)

@@ -10,6 +10,16 @@ import {
 import { FilterChip } from '@/components/filter-chip';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import type { AdminRequestLog } from '@/types/admin';
+import {
+  formatDuration,
+  formatTokens,
+  formatTokensPerSecond,
+  calcTokensPerSecond,
+  protocolLabel,
+  streamLabel,
+  truncateUA,
+  thinkingLabel,
+} from '@/lib/request-log-metrics';
 
 function statusBadge(status: string) {
   if (status === 'success') return { label: '成功', cls: 'bg-green-100 text-green-700' };
@@ -35,6 +45,54 @@ function formatUser(log: AdminRequestLog) {
   if (log.userEmail) return log.userEmail;
   if (log.userId) return log.userId.length > 12 ? log.userId.slice(0, 12) + '…' : log.userId;
   return '—';
+}
+
+/** Combined "请求类型" cell: protocol + stream badge */
+function RequestTypeCell({ log }: { log: AdminRequestLog }) {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span>{protocolLabel(log.protocol)}</span>
+      {log.stream != null && (
+        <span className={`rounded px-1 py-px text-[10px] font-medium ${log.stream ? 'bg-blue-100 text-blue-700' : 'bg-muted text-muted-foreground'}`}>
+          {streamLabel(log.stream)}
+        </span>
+      )}
+    </span>
+  );
+}
+
+/** Combined "Token" cell: in / out (cache) */
+function TokenCell({ log }: { log: AdminRequestLog }) {
+  const cache = log.cacheTokens != null && log.cacheTokens > 0
+    ? <span className="text-muted-foreground">({formatTokens(log.cacheTokens)}缓存)</span>
+    : null;
+  return (
+    <span className="inline-flex items-center gap-1 tabular-nums">
+      {formatTokens(log.inputTokens)} / {formatTokens(log.outputTokens)}
+      {cache}
+    </span>
+  );
+}
+
+/** Combined "性能" cell: duration + TTFT + speed */
+function PerfCell({ log }: { log: AdminRequestLog }) {
+  const speed = calcTokensPerSecond({
+    outputTokens: log.outputTokens,
+    durationMs: log.durationMs,
+    ttftMs: log.ttftMs,
+    stream: log.stream,
+  });
+  return (
+    <span className="inline-flex flex-col gap-0.5 text-xs">
+      <span>{formatDuration(log.durationMs)}</span>
+      {log.ttftMs != null && log.ttftMs > 0 && log.stream === true && (
+        <span className="text-muted-foreground">TTFT {formatDuration(log.ttftMs)}</span>
+      )}
+      {speed != null && (
+        <span className="text-muted-foreground">{formatTokensPerSecond(speed)}</span>
+      )}
+    </span>
+  );
 }
 
 export default function AdminRequestLogsPage() {
@@ -90,25 +148,28 @@ export default function AdminRequestLogsPage() {
         </div>
       </div>
 
-      {/* 表格 */}
+      {/* Desktop table */}
       <div className="hidden md:block rounded-md border border-border bg-card">
         <div className="overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow className="bg-muted/30">
-                <TableHead className="text-xs">时间</TableHead>
-                <TableHead className="text-xs">用户</TableHead>
-                <TableHead className="text-xs">模型</TableHead>
-                <TableHead className="text-xs">状态</TableHead>
-                <TableHead className="text-xs">耗时</TableHead>
-                <TableHead className="text-xs">输入 Token</TableHead>
-                <TableHead className="text-xs">输出 Token</TableHead>
+                <TableHead className="text-xs whitespace-nowrap">时间</TableHead>
+                <TableHead className="text-xs whitespace-nowrap">用户</TableHead>
+                <TableHead className="text-xs whitespace-nowrap">模型</TableHead>
+                <TableHead className="text-xs whitespace-nowrap">请求类型</TableHead>
+                <TableHead className="text-xs whitespace-nowrap">状态</TableHead>
+                <TableHead className="text-xs whitespace-nowrap">Provider</TableHead>
+                <TableHead className="text-xs whitespace-nowrap">Thinking</TableHead>
+                <TableHead className="text-xs whitespace-nowrap">Token (入/出)</TableHead>
+                <TableHead className="text-xs whitespace-nowrap">性能</TableHead>
+                <TableHead className="text-xs whitespace-nowrap">UA</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {filtered.map((log) => (
                 <TableRow key={log.requestId} className="cursor-pointer">
-                  <TableCell className="text-xs text-muted-foreground">
+                  <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
                     <Link href={`/admin/request-logs/${log.requestId}`} className="block">
                       {formatTime(log.createdAt)}
                     </Link>
@@ -125,6 +186,11 @@ export default function AdminRequestLogsPage() {
                   </TableCell>
                   <TableCell>
                     <Link href={`/admin/request-logs/${log.requestId}`} className="block">
+                      <RequestTypeCell log={log} />
+                    </Link>
+                  </TableCell>
+                  <TableCell>
+                    <Link href={`/admin/request-logs/${log.requestId}`} className="block">
                       <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${statusBadge(log.status).cls}`}>
                         {statusBadge(log.status).label}
                       </span>
@@ -132,24 +198,36 @@ export default function AdminRequestLogsPage() {
                   </TableCell>
                   <TableCell className="text-sm">
                     <Link href={`/admin/request-logs/${log.requestId}`} className="block">
-                      {log.durationMs ?? '—'}ms
+                      {log.provider ?? '—'}
                     </Link>
                   </TableCell>
                   <TableCell className="text-sm">
                     <Link href={`/admin/request-logs/${log.requestId}`} className="block">
-                      {(log.inputTokens ?? 0).toLocaleString()}
+                      {thinkingLabel(log.thinkingEffort, log.thinkingMode)}
                     </Link>
                   </TableCell>
                   <TableCell className="text-sm">
                     <Link href={`/admin/request-logs/${log.requestId}`} className="block">
-                      {(log.outputTokens ?? 0).toLocaleString()}
+                      <TokenCell log={log} />
+                    </Link>
+                  </TableCell>
+                  <TableCell>
+                    <Link href={`/admin/request-logs/${log.requestId}`} className="block">
+                      <PerfCell log={log} />
+                    </Link>
+                  </TableCell>
+                  <TableCell className="text-sm max-w-[160px]">
+                    <Link href={`/admin/request-logs/${log.requestId}`} className="block">
+                      <span title={log.userAgent ?? undefined} className="block truncate">
+                        {truncateUA(log.userAgent)}
+                      </span>
                     </Link>
                   </TableCell>
                 </TableRow>
               ))}
               {filtered.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={7} className="py-8 text-center text-sm text-muted-foreground">
+                  <TableCell colSpan={10} className="py-8 text-center text-sm text-muted-foreground">
                     暂无请求记录
                   </TableCell>
                 </TableRow>
@@ -161,26 +239,64 @@ export default function AdminRequestLogsPage() {
 
       {/* Mobile card list */}
       <div className="md:hidden space-y-3">
-        {filtered.map((log) => (
-          <Link
-            key={log.requestId}
-            href={`/admin/request-logs/${log.requestId}`}
-            className="block rounded-lg border bg-card p-3 hover:bg-accent/50 transition-colors"
-          >
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-sm font-medium truncate">{log.model || '—'}</span>
-              <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${statusBadge(log.status).cls}`}>
-                {statusBadge(log.status).label}
-              </span>
-            </div>
-            <p className="mt-1 text-xs text-muted-foreground truncate">{formatUser(log)}</p>
-            <div className="mt-2 flex items-center justify-between text-xs text-muted-foreground">
-              <span>{log.durationMs ?? '—'}ms</span>
-              <span className="tabular-nums">{(log.inputTokens ?? 0).toLocaleString()} / {(log.outputTokens ?? 0).toLocaleString()}</span>
-            </div>
-            <p className="mt-1 text-[10px] text-muted-foreground">{formatTime(log.createdAt)}</p>
-          </Link>
-        ))}
+        {filtered.map((log) => {
+          const speed = calcTokensPerSecond({
+            outputTokens: log.outputTokens,
+            durationMs: log.durationMs,
+            ttftMs: log.ttftMs,
+            stream: log.stream,
+          });
+          return (
+            <Link
+              key={log.requestId}
+              href={`/admin/request-logs/${log.requestId}`}
+              className="block rounded-lg border bg-card p-3 hover:bg-accent/50 transition-colors"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm font-medium truncate">{log.model || '—'}</span>
+                <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${statusBadge(log.status).cls}`}>
+                  {statusBadge(log.status).label}
+                </span>
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground truncate">{formatUser(log)}</p>
+              {/* Request type row */}
+              <div className="mt-1.5 flex items-center gap-2 text-xs text-muted-foreground">
+                <span>{protocolLabel(log.protocol)}</span>
+                {log.stream != null && (
+                  <span className={`rounded px-1 py-px text-[10px] font-medium ${log.stream ? 'bg-blue-100 text-blue-700' : 'bg-muted text-muted-foreground'}`}>
+                    {streamLabel(log.stream)}
+                  </span>
+                )}
+                {log.provider && <span>· {log.provider}</span>}
+              </div>
+              {/* Token row */}
+              <div className="mt-1.5 flex items-center justify-between text-xs">
+                <span className="tabular-nums">
+                  {formatTokens(log.inputTokens)} / {formatTokens(log.outputTokens)}
+                  {log.cacheTokens != null && log.cacheTokens > 0 && (
+                    <span className="text-muted-foreground"> ({formatTokens(log.cacheTokens)}缓存)</span>
+                  )}
+                </span>
+                <span>{formatDuration(log.durationMs)}</span>
+              </div>
+              {/* Performance row */}
+              <div className="mt-1 flex items-center gap-3 text-xs text-muted-foreground">
+                {log.ttftMs != null && log.ttftMs > 0 && log.stream === true && (
+                  <span>TTFT {formatDuration(log.ttftMs)}</span>
+                )}
+                {speed != null && <span>{formatTokensPerSecond(speed)}</span>}
+                {log.thinkingEffort && <span>思考: {thinkingLabel(log.thinkingEffort, log.thinkingMode)}</span>}
+              </div>
+              {/* UA + time */}
+              <div className="mt-1.5 flex items-center justify-between text-[10px] text-muted-foreground">
+                <span>{formatTime(log.createdAt)}</span>
+                {log.userAgent && (
+                  <span className="truncate max-w-[50%]" title={log.userAgent}>{truncateUA(log.userAgent, 20)}</span>
+                )}
+              </div>
+            </Link>
+          );
+        })}
         {filtered.length === 0 && (
           <p className="py-8 text-center text-sm text-muted-foreground">暂无请求记录</p>
         )}

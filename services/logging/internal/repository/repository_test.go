@@ -446,6 +446,7 @@ func TestIngestBatch_UpsertDedupes(t *testing.T) {
 		Log: RequestLog{
 			RequestID:   reqID,
 			UserID:      "u-dedup",
+			UserAgent:   "LegacyClient/1.0",
 			Protocol:    "openai_chat",
 			Stream:      false,
 			FinalStatus: "success",
@@ -515,6 +516,9 @@ func TestIngestBatch_UpsertDedupes(t *testing.T) {
 	}
 	if got.LatencyMS != 1645 {
 		t.Errorf("latency_ms = %d, want 1645 (preserved from attempt event)", got.LatencyMS)
+	}
+	if got.UserAgent != "LegacyClient/1.0" {
+		t.Errorf("user_agent = %q", got.UserAgent)
 	}
 	if got.TotalTokens != 57 {
 		t.Errorf("total_tokens = %d, want 57 (applied from finalized event)", got.TotalTokens)
