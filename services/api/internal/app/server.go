@@ -151,9 +151,9 @@ func Run(ctx context.Context, ln net.Listener, srv *http.Server, shutdownTimeout
 // When logClient is non-nil, the middleware posts an early "received" event
 // to the Logging Service so the request log row appears immediately with
 // final_status="processing". The executor's subsequent events update the
-// same row (keyed by request_id). A final status update is posted after
-// the response completes. Both posts are fire-and-forget (background
-// context, errors swallowed) and never block the request path.
+// same row (keyed by request_id) and supply the terminal status/completion
+// time. The Edge receipt post is fire-and-forget (background context, errors
+// swallowed) and never blocks the request path.
 func quotaMiddleware(mgr quota.Manager, logClient *logging.Client, logger *slog.Logger) func(http.Handler) http.Handler {
 	if logger == nil {
 		logger = slog.Default()

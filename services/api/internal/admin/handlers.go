@@ -287,6 +287,8 @@ func mapStatusFilter(status string) []string {
 		return []string{"success"}
 	case "error":
 		return []string{"client_error", "upstream_error", "timeout", "transport_error"}
+	case "processing":
+		return []string{"processing"}
 	default:
 		return nil
 	}

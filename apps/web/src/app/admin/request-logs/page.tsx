@@ -45,6 +45,8 @@ export default function AdminRequestLogsPage() {
   const { data } = useQuery({
     queryKey: ['admin', 'request-logs', page],
     queryFn: () => adminApi.listRequestLogs(page, 20),
+    // Keep in-flight rows live so users see processing → terminal transitions.
+    refetchInterval: 2_000,
   });
 
   const logs = data?.logs ?? [];
@@ -83,7 +85,7 @@ export default function AdminRequestLogsPage() {
         <div className="flex flex-wrap gap-1.5 text-xs">
           <FilterChip label="全部" active={!statusF} onClick={() => setStatusF(undefined)} />
           <FilterChip label="成功" active={statusF === 'success'} onClick={() => setStatusF('success')} />
-          <FilterChip label="失败" active={statusF === 'failed'} onClick={() => setStatusF('failed')} />
+          <FilterChip label="失败" active={statusF === 'error'} onClick={() => setStatusF('error')} />
           <FilterChip label="处理中" active={statusF === 'processing'} onClick={() => setStatusF('processing')} />
         </div>
       </div>

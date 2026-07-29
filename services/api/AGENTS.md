@@ -19,7 +19,7 @@ Edge/BFF **不做**：模型路由、协议转换、上游转发（这些在 Exe
 - `internal/identity`：JWT 验证中间件（EdDSA/Ed25519，本地验，提取 subject/role 到 context；`API_JWT_PUBLIC_KEY_FILE` 空时 noop verifier dev-only；`NewVerifier` + `Middleware` + `FromContext`）。
 - `internal/quota`：Billing Service 客户端（`Manager` 接口，`Reserve`/`Finalize`/`Release`；`billingURL` 空时 noop；禁 redirect，10s timeout，`ErrQuotaUnavailable` 不泄漏 URL）。
 - `internal/proxy`：反向代理转发到 executor（注入 `Bearer <edge-token>`，`ErrorHandter` 返回 502 JSON）。
-- `internal/logging`：Logging Service 只读 HTTP 客户端（`ListLogs`/`GetLog`/`GetStats`；`loggingURL` 空时 `ErrUnavailable`，404 区分为 `NotFound`，禁 redirect、1 MiB 响应体限、不泄漏 URL）。
+- `internal/logging`：Logging Service HTTP 客户端（读取：`ListLogs`/`GetLog`/`GetStats`；写入：`Ingest` 用于 Edge 收到执行请求时创建 `processing` 日志与 `received` 事件；`loggingURL` 空时 `ErrUnavailable`，404 区分为 `NotFound`，禁 redirect，不泄漏 URL）。
 - `internal/billing`：Billing Service 只读查询 HTTP 客户端（`ListPlans`/`ListUserPlans`/`GetBalance`；与 `internal/quota` 分离，后者负责 reserve/finalize/release 写入路径）。下游 `Balance`/`Plan`/`UserPlan` 为 snake_case DTO，Edge facade 映射为契约 camelCase。
 - `internal/settings`：用户设置进程内内存存储（`Get`/`Snapshot`，默认 preferredBilling="coding"/fallbackEnabled=false；`Snapshot` 用可选指针表达局部更新，支持把 bool 显式设为 false）。无持久化，生产化后可替换。
 - `internal/panel`：Panel 业务查询 handler（`ListPlans`/`ListUserPlans`/`GetUserBalance`/`ListRequestLogs`/`GetRequestLog`/`GetRequestLogStats`/`GetUserSettings`/`UpdateUserSettings`）。聚合 logging+billing+settings，以 OpenAPI 契约形状返回；金额/配额用十进制字符串。防越权：`GetRequestLog` 按身份 subject 校验日志归属（admin 可放宽）。Plan 的 int64 id 经 `int64ToUUID` 确定性映射为契约 UUID，不暴露自增序号。
@@ -30,8 +30,10 @@ Edge/BFF **不做**：模型路由、协议转换、上游转发（这些在 Exe
 
 ```
 # 模型执行请求
-client → identity.Middleware (JWT verify) → quotaMiddleware (reserve)
+client → identity.Middleware (JWT verify)
+  → quotaMiddleware (分配并透传 X-Request-ID；异步写 processing + received；reserve)
   → proxy (forward to executor, inject Bearer token)
+  → executor 复用同一 request_id 并逐阶段 upsert 日志
   → response → quotaMiddleware (finalize if 2xx/3xx, release if error)
 
 # Panel 业务查询请求（不经配额）
@@ -56,7 +58,6 @@ go test -race ./...
 
 ## 待实现
 
-- Logging 推送（Edge 侧日志 sink，当前 executor logsink 已覆盖执行事件）
 - 客户端速率限制
 - 流式响应的 quota finalize（当前在 response 完成时 finalize，流式可能需要 stream-aware）
 - API Key 验证：V3 与 legacy prod key 均为 `sk-` 前缀，走 Auth Service `/api/v1/auth/verify-key`（`internal/identity/apikey_verifier.go`，`NewCompositeVerifier` 按前缀分发）。Legacy key 兼容需要 Auth 侧注入 `AUTH_LEGACY_API_KEY_PEPPER`（见 `services/auth/AGENTS.md`）。

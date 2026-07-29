@@ -370,6 +370,9 @@ export default function RequestLogDetailPage() {
     queryKey: ['admin', 'request-log', id],
     queryFn: () => adminApi.getRequestLog(id),
     enabled: !!id,
+    // Poll while processing so the event timeline, TTFT and completion time
+    // appear without a manual refresh; stop once a terminal status arrives.
+    refetchInterval: (query) => query.state.data?.status === 'processing' ? 1_000 : false,
   });
 
   if (isLoading) {
