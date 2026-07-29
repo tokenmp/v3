@@ -31,7 +31,8 @@ Edge/BFF **不做**：模型路由、协议转换、上游转发（这些在 Exe
 ```
 # 模型执行请求
 client → identity.Middleware (JWT verify)
-  → quotaMiddleware (分配并透传 X-Request-ID；清洗并限制 User-Agent；异步写 processing + received；reserve)
+  → quotaMiddleware（仅 metered 执行 POST：chat/messages/responses/images；/v1/models 等目录查询只鉴权转发，不预留、不写 processing 日志）
+  → 对 metered 请求：分配并透传 X-Request-ID；清洗并限制 User-Agent；异步写 processing + received；reserve
   → proxy (forward to executor, inject Bearer token)
   → executor 复用同一 request_id 并逐阶段 upsert 日志
   → response → quotaMiddleware (finalize if 2xx/3xx, release if error；客户端断开时 release 并异步写 client_cancelled 终态/terminal 事件)
