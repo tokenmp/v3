@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -21,6 +22,7 @@ import (
 	"github.com/tokenmp/v3/services/api/internal/logging"
 	"github.com/tokenmp/v3/services/api/internal/proxy"
 	"github.com/tokenmp/v3/services/api/internal/quota"
+	"github.com/tokenmp/v3/services/api/internal/settings"
 )
 
 func genEdgeKeyPair(t *testing.T) (ed25519.PublicKey, ed25519.PrivateKey) {
@@ -233,6 +235,65 @@ func TestEdgeLogsClientCancelledTerminal(t *testing.T) {
 		case <-deadline:
 			t.Fatal("timed out waiting for client_cancelled ingest")
 		}
+	}
+}
+
+func TestEdgeUsesPreferredTokenBillingForQuota(t *testing.T) {
+	pub, priv := genEdgeKeyPair(t)
+	keyFile := writeEdgePubPEM(t, pub)
+	verifier, err := identity.NewVerifier(keyFile, "tokenmp-auth", "tokenmp-web", nil)
+	if err != nil {
+		t.Fatalf("NewVerifier: %v", err)
+	}
+	execBackend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":"chatcmpl-1","choices":[]}`))
+	}))
+	defer execBackend.Close()
+	prx, err := proxy.New(execBackend.URL, "edge-svc-token", nil)
+	if err != nil {
+		t.Fatalf("proxy.New: %v", err)
+	}
+
+	var reserveBody map[string]any
+	billBackend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/billing/quota/reserve":
+			_ = json.NewDecoder(r.Body).Decode(&reserveBody)
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"reservation_id":"rsv_1","status":"reserved"}`))
+		case "/v1/billing/quota/finalize", "/v1/billing/quota/release":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"status":"ok"}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer billBackend.Close()
+
+	st := settings.NewStore()
+	pref := "token"
+	st.Snapshot("user-token", &pref, nil, nil)
+	deps := app.Deps{Verifier: verifier, Proxy: prx, Quota: quota.NewManager(billBackend.URL), Settings: st}
+	srv := app.NewServer(deps, 10*time.Second, 60*time.Second)
+	front := httptest.NewServer(srv.Handler)
+	defer front.Close()
+
+	body := `{"model":"gpt-test","messages":[{"role":"user","content":"hi"}]}`
+	req, _ := http.NewRequest(http.MethodPost, front.URL+"/v1/chat/completions", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+makeEdgeJWT(t, priv, "user-token"))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	defer resp.Body.Close()
+	_, _ = io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+	if reserveBody["billing_plan"] != "token" || reserveBody["reserved_requests"] != float64(0) || reserveBody["reserved_tokens"] != float64(0) {
+		t.Fatalf("reserveBody=%v", reserveBody)
 	}
 }
 
