@@ -42,10 +42,10 @@ func openDB(t *testing.T, dsn string) *gorm.DB {
 	return db
 }
 
-// applyMigrations runs the down migration first (idempotent via IF EXISTS)
-// so the test starts from a clean state regardless of prior migration
-// state, then applies the up migration. The down is re-run on cleanup so
-// repeated test runs against the same temp DB stay clean.
+// applyMigrations runs the base down migration first (it drops all Logging
+// tables), then applies every versioned *.up.sql in lexical order. Loading all
+// versions prevents repository tests from silently exercising an obsolete
+// schema when a new migration is added. The base down is re-run on cleanup.
 func applyMigrations(t *testing.T, dsn string) {
 	t.Helper()
 	ctx := context.Background()
@@ -63,13 +63,21 @@ func applyMigrations(t *testing.T, dsn string) {
 	if _, err := conn.Exec(ctx, string(downBytes)); err != nil {
 		t.Fatalf("apply down migration: %v", err)
 	}
-	upPath := filepath.Join(migrationsDir, "000001_init.up.sql")
-	upBytes, err := os.ReadFile(upPath)
+	upPaths, err := filepath.Glob(filepath.Join(migrationsDir, "*.up.sql"))
 	if err != nil {
-		t.Fatalf("read up migration: %v", err)
+		t.Fatalf("glob up migrations: %v", err)
 	}
-	if _, err := conn.Exec(ctx, string(upBytes)); err != nil {
-		t.Fatalf("apply up migration: %v", err)
+	if len(upPaths) == 0 {
+		t.Fatal("no up migrations found")
+	}
+	for _, upPath := range upPaths {
+		upBytes, readErr := os.ReadFile(upPath)
+		if readErr != nil {
+			t.Fatalf("read up migration %s: %v", filepath.Base(upPath), readErr)
+		}
+		if _, execErr := conn.Exec(ctx, string(upBytes)); execErr != nil {
+			t.Fatalf("apply up migration %s: %v", filepath.Base(upPath), execErr)
+		}
 	}
 	t.Cleanup(func() {
 		_, _ = conn.Exec(ctx, string(downBytes))
