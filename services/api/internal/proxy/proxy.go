@@ -95,6 +95,10 @@ func NewWithSettings(executorURL, serviceToken string, st *settings.Store, logge
 			w.WriteHeader(http.StatusBadGateway)
 			_, _ = w.Write([]byte(`{"error":{"code":"upstream_unavailable","message":"Executor service is unavailable"}}`))
 		},
+		// Flush immediately after each write so SSE streaming chunks reach the
+		// client incrementally. Without this, Go's ReverseProxy buffers the
+		// entire response before flushing, turning a stream into a single burst.
+		FlushInterval: -1,
 	}
 	return &Proxy{rp: rp, serviceToken: serviceToken, settings: st}, nil
 }
