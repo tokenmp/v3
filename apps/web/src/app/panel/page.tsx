@@ -16,11 +16,9 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import {
-  CalendarClock,
   CircleDollarSign,
   Gauge,
   KeyRound,
-  ShieldCheck,
   Zap,
 } from 'lucide-react';
 import type { RequestLog, UserPlan } from '@/types';
@@ -255,8 +253,6 @@ export default function OverviewPage() {
   const tokenRemaining = toNumber(balance?.tokenRemaining ?? tokenPlans[0]?.remainingQuota ?? 0);
   const codingUsed = Math.max(0, codingTotal - codingRemaining);
   const tokenUsed = Math.max(0, tokenTotal - tokenRemaining);
-  const preferred = '编程额度';
-
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -291,56 +287,20 @@ export default function OverviewPage() {
         />
       </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_280px]">
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <h2 className="text-base font-semibold">当前套餐</h2>
-            <span className="text-xs text-muted-foreground">{activePlans.length} 个生效套餐</span>
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-base font-semibold">当前套餐</h2>
+          <span className="text-xs text-muted-foreground">{activePlans.length} 个生效套餐</span>
+        </div>
+        {activePlans.length > 0 ? (
+          <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
+            {activePlans.map((plan) => <PlanCard key={plan.id} plan={plan} />)}
           </div>
-          {activePlans.length > 0 ? (
-            <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
-              {activePlans.map((plan) => <PlanCard key={plan.id} plan={plan} />)}
-            </div>
-          ) : (
-            <Card>
-              <CardContent className="py-8 text-center text-sm text-muted-foreground">暂无生效套餐</CardContent>
-            </Card>
-          )}
-        </div>
-
-        <div className="space-y-3">
-          <h2 className="text-base font-semibold">计费状态</h2>
+        ) : (
           <Card>
-            <CardContent className="space-y-4 p-4 text-sm">
-              <div className="flex items-center gap-3">
-                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-green-100 text-green-700">
-                  <ShieldCheck className="h-4 w-4" />
-                </div>
-                <div>
-                  <div className="font-medium">账户正常</div>
-                  <div className="text-xs text-muted-foreground">可继续调用模型</div>
-                </div>
-              </div>
-              <div className="grid gap-2 border-t pt-3 text-xs">
-                <div className="flex justify-between"><span className="text-muted-foreground">当前优先</span><span>{preferred}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Coding 套餐</span><span>{codingPlans.length} 个</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Token 套餐</span><span>{tokenPlans.length} 个</span></div>
-              </div>
-            </CardContent>
+            <CardContent className="py-8 text-center text-sm text-muted-foreground">暂无生效套餐</CardContent>
           </Card>
-          <Card>
-            <CardContent className="space-y-3 p-4 text-sm">
-              <div className="flex items-center gap-2 font-medium"><CalendarClock className="h-4 w-4" />最近到期</div>
-              {activePlans.filter((p) => p.expiresAt).sort((a, b) => new Date(a.expiresAt ?? '').getTime() - new Date(b.expiresAt ?? '').getTime()).slice(0, 2).map((p) => (
-                <div key={p.id} className="rounded-md bg-muted/50 p-3 text-xs">
-                  <div className="font-medium">{planName(p)}</div>
-                  <div className="mt-1 text-muted-foreground">{formatTime(p.expiresAt)} · {daysLeft(p.expiresAt)}</div>
-                </div>
-              ))}
-              {activePlans.every((p) => !p.expiresAt) && <div className="text-xs text-muted-foreground">暂无即将到期套餐</div>}
-            </CardContent>
-          </Card>
-        </div>
+        )}
       </div>
 
       <Card>
