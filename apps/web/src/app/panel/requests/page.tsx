@@ -54,6 +54,7 @@ export default function RequestsPage() {
           <FilterChip label="全部" active={!statusF} onClick={() => setStatusF(undefined)} />
           <FilterChip label="成功" active={statusF === 'success'} onClick={() => setStatusF('success')} />
           <FilterChip label="失败" active={statusF === 'failed'} onClick={() => setStatusF('failed')} />
+          <FilterChip label="处理中" active={statusF === 'processing'} onClick={() => setStatusF('processing')} />
         </div>
       </div>
 
@@ -77,8 +78,8 @@ export default function RequestsPage() {
                   <TableCell className="text-xs text-muted-foreground">{formatTime(r.createdAt)}</TableCell>
                   <TableCell className="text-sm">{r.model}</TableCell>
                   <TableCell>
-                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${r.status === 'success' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                      {r.status === 'success' ? '成功' : '失败'}
+                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${r.status === 'success' ? 'bg-green-100 text-green-700' : r.status === 'processing' ? 'bg-blue-100 text-blue-700 animate-pulse' : 'bg-red-100 text-red-700'}`}>
+                      {r.status === 'success' ? '成功' : r.status === 'processing' ? '处理中' : '失败'}
                     </span>
                   </TableCell>
                   <TableCell className="text-sm">{r.durationMs ?? '—'}ms</TableCell>
@@ -104,8 +105,8 @@ export default function RequestsPage() {
           <div key={r.requestId} className="rounded-lg border bg-card p-3 space-y-2">
             <div className="flex items-center justify-between gap-2">
               <span className="text-sm font-medium truncate">{r.model || '—'}</span>
-              <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${r.status === 'success' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                {r.status === 'success' ? '成功' : '失败'}
+              <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${r.status === 'success' ? 'bg-green-100 text-green-700' : r.status === 'processing' ? 'bg-blue-100 text-blue-700 animate-pulse' : 'bg-red-100 text-red-700'}`}>
+                {r.status === 'success' ? '成功' : r.status === 'processing' ? '处理中' : '失败'}
               </span>
             </div>
             <div className="flex items-center justify-between text-xs text-muted-foreground">

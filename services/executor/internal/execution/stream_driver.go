@@ -206,6 +206,10 @@ func (d *StreamDriver) Run(ctx context.Context, in StreamInput) (StreamResult, e
 			return StreamResult{}, d.releaseFailureWithLog(ctx, terminalizer, primary, in, prepared, attemptNo)
 		}
 		bridge := streaming.Bridge{Source: source, Sink: sink, Timeouts: streamTimeouts(prepared)}
+		// Record the bridge start time so the real TTFT (time from
+		// attempt start to first token, including upstream network
+		// latency) can be reconstructed from the bridge's relative TTFT.
+		bridgeStart := d.now()
 		// Wire the optional cross-protocol EndOfStreamFinalizer so a committed
 		// clean EOF (e.g. OpenAI [DONE] that never carried finish_reason) is
 		// completed via synthesized protocol-native terminal output instead of
@@ -244,7 +248,7 @@ func (d *StreamDriver) Run(ctx context.Context, in StreamInput) (StreamResult, e
 				return StreamResult{}, terminalizationError("terminal")
 			}
 			if outcome.State == streaming.StateCompleted {
-				d.logSuccess(ctx, in, prepared, attemptNo, latency, outcome)
+				d.logSuccess(ctx, in, prepared, attemptNo, latency, outcome, attemptStart, bridgeStart)
 				d.logCommitted(ctx, in, prepared, attemptNo, outcome)
 				d.logFinalized(ctx, in, prepared, attemptNo, outcome)
 			} else {
@@ -496,7 +500,7 @@ func (d *StreamDriver) logReserved(ctx context.Context, in StreamInput, prepared
 	_ = d.Logger.RecordExecution(logCtx, event)
 }
 
-func (d *StreamDriver) logSuccess(ctx context.Context, in StreamInput, prepared routing.PreparedAttempt, attemptNo int, latency time.Duration, outcome streaming.Outcome) {
+func (d *StreamDriver) logSuccess(ctx context.Context, in StreamInput, prepared routing.PreparedAttempt, attemptNo int, latency time.Duration, outcome streaming.Outcome, attemptStart, bridgeStart time.Time) {
 	if d == nil || isNilInterface(d.Logger) {
 		return
 	}
@@ -504,6 +508,10 @@ func (d *StreamDriver) logSuccess(ctx context.Context, in StreamInput, prepared 
 	event.Status = "success"
 	event.Latency = latency
 	event.Committed = true
+	// Real TTFT = time from attempt start to first token, including
+	// upstream network latency (stream open) + bridge processing.
+	event.TTFT = bridgeStart.Sub(attemptStart) + outcome.TTFT
+	event.Stream = true
 	if outcome.UsageKnown {
 		event.Usage = requestlog.ExecutionUsage{
 			InputTokens:  uint64(outcome.Usage.PromptTokens),
@@ -525,6 +533,7 @@ func (d *StreamDriver) logFailure(ctx context.Context, in StreamInput, prepared 
 	event.Status = "failed"
 	event.Latency = latency
 	event.Committed = committed
+	event.Stream = true
 	if classified != nil {
 		event.Code = classified.Code()
 		event.Type = classified.Type()

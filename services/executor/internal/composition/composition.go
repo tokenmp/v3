@@ -242,7 +242,7 @@ func Build(ctx context.Context, cfg config.Config, lookupEnv func(string) (strin
 
 	// ── Generated handler with strict non-stream + SSE stream dispatch ──
 	nonStreamAdapter := executorv1api.NewNonStream(executorv1api.Options{Executor: facade, Catalog: catalogFacade})
-	hybrid := executorv1api.NewHybrid(executorv1api.HybridOptions{Strict: nonStreamAdapter, StreamExecutor: streamFacade})
+	hybrid := executorv1api.NewHybrid(executorv1api.HybridOptions{Strict: nonStreamAdapter, StreamExecutor: streamFacade, RequestIDs: executorv1api.EdgeRequestIDSource{}})
 	generated := executorv1.Handler(hybrid)
 
 	// AuthMiddleware is the outer boundary: it protects all /v1 paths,
@@ -250,6 +250,12 @@ func Build(ctx context.Context, cfg config.Config, lookupEnv func(string) (strin
 	// anonymous. CaptureRawBody sits inside it so rejected requests never
 	// read or parse their body.
 	authed := executorv1api.AuthMiddleware(identitySource)(executorv1api.CaptureRawBody(generated))
+
+	// EdgeRequestIDMiddleware reads the X-Request-ID header set by the
+	// trusted Edge so Edge and executor log under the same request ID.
+	// It sits inside AuthMiddleware (already authenticated) and outside
+	// CaptureRawBody so the ID is available at normalization time.
+	authed = executorv1api.EdgeRequestIDMiddleware(authed)
 
 	// ── Metrics collector ──
 	var metricsHandler http.Handler

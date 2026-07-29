@@ -7,6 +7,7 @@
 package logging
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -253,6 +254,61 @@ func (c *Client) get(ctx context.Context, path string, dst any) error {
 		return ErrUnavailable
 	}
 	if err := httpresp.UnwrapData(data, dst); err != nil {
+		return ErrUnavailable
+	}
+	return nil
+}
+
+// ingestRequest is the POST /v1/logs/ingest body shape.
+type ingestRequest struct {
+	Log    IngestLog     `json:"log"`
+	Events []IngestEvent `json:"events,omitempty"`
+}
+
+// IngestLog is the minimal request_log fields Edge sends on receipt.
+type IngestLog struct {
+	RequestID   string    `json:"request_id"`
+	UserID      string    `json:"user_id,omitempty"`
+	ClientKeyID string    `json:"client_key_id,omitempty"`
+	FinalStatus string    `json:"final_status"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+// IngestEvent is a minimal timeline event.
+type IngestEvent struct {
+	RequestID string    `json:"request_id"`
+	Source    string    `json:"source"`
+	Stage     string    `json:"stage"`
+	Status    string    `json:"status"`
+	Message   string    `json:"message,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// Ingest sends a minimal log batch to the Logging Service. It is fire-and-
+// forget: errors are returned but the caller should never block on them.
+// Used by the Edge to create an early "processing" row at request receipt.
+func (c *Client) Ingest(ctx context.Context, log IngestLog, events []IngestEvent) error {
+	if !c.Available() {
+		return ErrUnavailable
+	}
+	payload, err := json.Marshal(ingestRequest{Log: log, Events: events})
+	if err != nil {
+		return ErrUnavailable
+	}
+	target := c.baseURL + "/v1/logs/ingest"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, bytes.NewReader(payload))
+	if err != nil {
+		return ErrUnavailable
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return ErrUnavailable
+	}
+	defer func() { _ = resp.Body.Close() }()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return ErrUnavailable
 	}
 	return nil

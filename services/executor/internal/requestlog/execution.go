@@ -85,6 +85,14 @@ type ExecutionEvent struct {
 	// RetryStop is the retry State stop reason for Kind=attempt failure
 	// events (e.g. "no_match", "retry_none", "max_total_attempts").
 	RetryStop string
+	// TTFT is the time-to-first-token for streaming attempts. It is
+	// non-zero only for streaming Kind=attempt events where the bridge
+	// measured the elapsed time from stream start to first committed
+	// semantic event.
+	TTFT time.Duration
+	// Stream reports whether the request was a streaming request.
+	// Set by the StreamDriver for streaming attempts.
+	Stream bool
 	// Usage carries bounded token counters when available.
 	Usage ExecutionUsage
 	// UsageKnown reports whether Usage was explicitly confirmed by the

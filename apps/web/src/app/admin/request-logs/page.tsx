@@ -11,6 +11,12 @@ import { FilterChip } from '@/components/filter-chip';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import type { AdminRequestLog } from '@/types/admin';
 
+function statusBadge(status: string) {
+  if (status === 'success') return { label: '成功', cls: 'bg-green-100 text-green-700' };
+  if (status === 'processing') return { label: '处理中', cls: 'bg-blue-100 text-blue-700 animate-pulse' };
+  return { label: '失败', cls: 'bg-red-100 text-red-700' };
+}
+
 function formatTime(iso: string) {
   if (!iso) return '-';
   return new Date(iso).toLocaleString('zh-CN', {
@@ -78,6 +84,7 @@ export default function AdminRequestLogsPage() {
           <FilterChip label="全部" active={!statusF} onClick={() => setStatusF(undefined)} />
           <FilterChip label="成功" active={statusF === 'success'} onClick={() => setStatusF('success')} />
           <FilterChip label="失败" active={statusF === 'failed'} onClick={() => setStatusF('failed')} />
+          <FilterChip label="处理中" active={statusF === 'processing'} onClick={() => setStatusF('processing')} />
         </div>
       </div>
 
@@ -116,8 +123,8 @@ export default function AdminRequestLogsPage() {
                   </TableCell>
                   <TableCell>
                     <Link href={`/admin/request-logs/${log.requestId}`} className="block">
-                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${log.status === 'success' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                        {log.status === 'success' ? '成功' : '失败'}
+                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${statusBadge(log.status).cls}`}>
+                        {statusBadge(log.status).label}
                       </span>
                     </Link>
                   </TableCell>
@@ -160,8 +167,8 @@ export default function AdminRequestLogsPage() {
           >
             <div className="flex items-center justify-between gap-2">
               <span className="text-sm font-medium truncate">{log.model || '—'}</span>
-              <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${log.status === 'success' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                {log.status === 'success' ? '成功' : '失败'}
+              <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${statusBadge(log.status).cls}`}>
+                {statusBadge(log.status).label}
               </span>
             </div>
             <p className="mt-1 text-xs text-muted-foreground truncate">{formatUser(log)}</p>

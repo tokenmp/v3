@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"net/http"
 	"reflect"
 )
 
@@ -15,6 +16,39 @@ type defaultRequestIDSource struct{}
 // requestIDPrefix marks the identifier as service-generated and never accepted
 // from a client request. The suffix is unguessable random material.
 const requestIDPrefix = "req_"
+
+// edgeRequestIDKey is the context key for the Edge-supplied X-Request-ID
+// header value. When present (trusted Edge only), the request ID source
+// reuses it so Edge and executor log under the same ID.
+type edgeRequestIDKey struct{}
+
+// EdgeRequestIDMiddleware reads the X-Request-ID header from the incoming
+// request and stores it in the request context. The Edge (services/api) sets
+// this header after authenticating the user; the executor trusts it because
+// it only accepts Edge-forwarded traffic. When absent, the default
+// crypto-random req_ source is used.
+func EdgeRequestIDMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if rid := r.Header.Get("X-Request-ID"); rid != "" {
+			r = r.WithContext(context.WithValue(r.Context(), edgeRequestIDKey{}, rid))
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// EdgeRequestIDSource returns a RequestIDSource that prefers the Edge-supplied
+// X-Request-ID from the context, falling back to the default crypto-random
+// req_ generator when absent (direct calls, tests).
+type EdgeRequestIDSource struct{}
+
+// RequestID returns the Edge-supplied request ID from the context, or
+// generates a new req_ ID when none is present.
+func (EdgeRequestIDSource) RequestID(ctx context.Context) string {
+	if rid, ok := ctx.Value(edgeRequestIDKey{}).(string); ok && rid != "" {
+		return rid
+	}
+	return defaultRequestIDSourceInstance.RequestID(ctx)
+}
 
 func (defaultRequestIDSource) RequestID(context.Context) string {
 	var buffer [12]byte

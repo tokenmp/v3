@@ -6,9 +6,11 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"encoding/pem"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -85,21 +87,19 @@ func TestEdgeFullFlow_AuthQuotaProxyFinalize(t *testing.T) {
 	}
 
 	// Fake billing backend.
-	reserveHits := 0
-	finalizeHits := 0
-	releaseHits := 0
+	var reserveHits, finalizeHits, releaseHits atomic.Int32
 	billBackend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/v1/billing/quota/reserve":
-			reserveHits++
+			reserveHits.Add(1)
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`{"reservation_id":"rsv_1","status":"reserved"}`))
 		case "/v1/billing/quota/finalize":
-			finalizeHits++
+			finalizeHits.Add(1)
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`{"status":"finalized"}`))
 		case "/v1/billing/quota/release":
-			releaseHits++
+			releaseHits.Add(1)
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`{"status":"released"}`))
 		}
@@ -122,7 +122,12 @@ func TestEdgeFullFlow_AuthQuotaProxyFinalize(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Do: %v", err)
 	}
-	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+
+	// The finalize/release call happens after the response is sent, so we
+	// wait briefly for the billing backend to receive it.
+	waitForCondition(t, func() bool { return finalizeHits.Load() > 0 || releaseHits.Load() > 0 }, 2*time.Second)
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
@@ -133,14 +138,14 @@ func TestEdgeFullFlow_AuthQuotaProxyFinalize(t *testing.T) {
 	if execPath != "/v1/chat/completions" {
 		t.Errorf("executor path = %q", execPath)
 	}
-	if reserveHits != 1 {
-		t.Errorf("reserve hits = %d, want 1", reserveHits)
+	if reserveHits.Load() != 1 {
+		t.Errorf("reserve hits = %d, want 1", reserveHits.Load())
 	}
-	if finalizeHits != 1 {
-		t.Errorf("finalize hits = %d, want 1", finalizeHits)
+	if finalizeHits.Load() != 1 {
+		t.Errorf("finalize hits = %d, want 1", finalizeHits.Load())
 	}
-	if releaseHits != 0 {
-		t.Errorf("release hits = %d, want 0 (success path)", releaseHits)
+	if releaseHits.Load() != 0 {
+		t.Errorf("release hits = %d, want 0 (success path)", releaseHits.Load())
 	}
 }
 
@@ -185,11 +190,11 @@ func TestEdgeQuotaReleaseOnUpstreamError(t *testing.T) {
 	defer execBackend.Close()
 	prx, _ := proxy.New(execBackend.URL, "tok", nil)
 
-	releaseHits := 0
+	var releaseHits atomic.Int32
 	billBackend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/v1/billing/quota/release":
-			releaseHits++
+			releaseHits.Add(1)
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`{"status":"released"}`))
 		default:
@@ -211,12 +216,16 @@ func TestEdgeQuotaReleaseOnUpstreamError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Do: %v", err)
 	}
-	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+
+	waitForCondition(t, func() bool { return releaseHits.Load() > 0 }, 2*time.Second)
+
 	if resp.StatusCode != http.StatusBadGateway {
 		t.Errorf("status = %d, want 502", resp.StatusCode)
 	}
-	if releaseHits != 1 {
-		t.Errorf("release hits = %d, want 1", releaseHits)
+	if releaseHits.Load() != 1 {
+		t.Errorf("release hits = %d, want 1", releaseHits.Load())
 	}
 }
 
@@ -277,3 +286,17 @@ func TestEdgeQuotaUnavailableReturns503(t *testing.T) {
 
 // _ keeps context import for future test extensions.
 var _ = context.Background
+
+// waitForCondition polls cond every 5ms until it returns true or timeout
+// elapses, at which point the test continues (the assertion will fail if the
+// expected condition was not met).
+func waitForCondition(t *testing.T, cond func() bool, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}

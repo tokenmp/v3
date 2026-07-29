@@ -176,8 +176,9 @@ function mapRequestLogEvent(e: Record<string, unknown>): Record<string, unknown>
 
 function mapRequestLog(r: Record<string, unknown>): AdminRequestLog {
   const rawStatus = String(r.final_status ?? r.status ?? '');
-  let status: 'success' | 'error' = 'error';
+  let status: 'success' | 'error' | 'processing' = 'error';
   if (rawStatus === 'success') status = 'success';
+  else if (rawStatus === 'processing') status = 'processing';
 
   const rawAttempts = r.attempts ?? r.events;
   const attempts = Array.isArray(rawAttempts)
