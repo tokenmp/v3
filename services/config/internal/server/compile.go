@@ -911,7 +911,7 @@ func autoGenerateAdapter(p repository.Provider, protocol, sdkKind, adapterID str
 
 	return wireAdapter{
 		ID:         adapterID,
-		Name:       p.Name + " Adapter",
+		Name:       p.Name + " " + protocol + " Adapter",
 		Version:    1,
 		SDKKind:    sdkKind,
 		Protocol:   protocol,
