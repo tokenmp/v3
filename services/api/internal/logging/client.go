@@ -134,6 +134,7 @@ type Stats struct {
 type ListFilter struct {
 	UserID    string
 	Model     string
+	Search    string
 	Statuses  []string
 	StartTime time.Time
 	EndTime   time.Time
@@ -175,6 +176,9 @@ func (c *Client) ListLogs(ctx context.Context, filter ListFilter) (ListResult, e
 	}
 	if filter.Model != "" {
 		q.Set("model", filter.Model)
+	}
+	if filter.Search != "" {
+		q.Set("search", filter.Search)
 	}
 	if n := len(filter.Statuses); n > 0 {
 		q.Set("status", strings.Join(filter.Statuses, ","))

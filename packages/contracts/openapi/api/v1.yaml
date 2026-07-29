@@ -278,6 +278,12 @@ paths:
           schema:
             type: string
           description: Filter by model ID
+        - name: search
+          in: query
+          schema:
+            type: string
+            maxLength: 200
+          description: Server-side search over request ID, model, resolved model, or user ID.
         - name: status
           in: query
           schema:

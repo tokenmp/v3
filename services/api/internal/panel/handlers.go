@@ -160,6 +160,7 @@ func (h *Handlers) ListRequestLogs(w http.ResponseWriter, r *http.Request) {
 	result, err := h.Logging.ListLogs(r.Context(), logging.ListFilter{
 		UserID:    claims.Subject,
 		Model:     q.Get("model"),
+		Search:    q.Get("search"),
 		Statuses:  statuses,
 		StartTime: start,
 		EndTime:   end,

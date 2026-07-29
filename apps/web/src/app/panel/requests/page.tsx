@@ -41,6 +41,8 @@ function speedFor(r: RequestLog): number | null {
     durationMs: r.durationMs,
     ttftMs: r.ttftMs,
     stream: r.stream,
+    createdAt: r.createdAt,
+    completedAt: r.completedAt,
   });
 }
 
@@ -49,9 +51,16 @@ export default function RequestsPage() {
   const [search, setSearch] = useState('');
   const [statusF, setStatusF] = useState<string | undefined>(undefined);
 
+  const setStatusFilter = (status: string | undefined) => {
+    setPage(1);
+    setStatusF(status);
+  };
+
+  const searchTerm = search.trim();
+
   const { data } = useQuery({
-    queryKey: ['requests', page],
-    queryFn: () => userApi.getRequests(page, 10),
+    queryKey: ['requests', page, searchTerm, statusF ?? 'all'],
+    queryFn: () => userApi.getRequests(page, 10, searchTerm, statusF ?? ''),
     // Keep in-flight rows live so users see processing → terminal transitions.
     refetchInterval: 2_000,
   });
@@ -59,15 +68,6 @@ export default function RequestsPage() {
   const items = data?.items ?? [];
   const total = data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / 10));
-
-  const filtered = items.filter((r) => {
-    if (statusF && r.status !== statusF) return false;
-    if (search) {
-      const q = search.toLowerCase();
-      if (!r.model?.toLowerCase().includes(q) && !r.requestId?.toLowerCase().includes(q)) return false;
-    }
-    return true;
-  });
 
   return (
     <div className="space-y-4">
@@ -78,16 +78,19 @@ export default function RequestsPage() {
             type="text"
             placeholder="搜索模型 / Request ID"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => {
+              setPage(1);
+              setSearch(e.target.value);
+            }}
             className="h-[var(--control-height-sm)] min-w-48 flex-1 rounded-sm border border-input bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
           />
         </div>
         <div className="flex flex-wrap gap-1.5 text-xs">
-          <FilterChip label="全部" active={!statusF} onClick={() => setStatusF(undefined)} />
-          <FilterChip label="成功" active={statusF === 'success'} onClick={() => setStatusF('success')} />
-          <FilterChip label="失败" active={statusF === 'error'} onClick={() => setStatusF('error')} />
-          <FilterChip label="已取消" active={statusF === 'cancelled'} onClick={() => setStatusF('cancelled')} />
-          <FilterChip label="处理中" active={statusF === 'processing'} onClick={() => setStatusF('processing')} />
+          <FilterChip label="全部" active={!statusF} onClick={() => setStatusFilter(undefined)} />
+          <FilterChip label="成功" active={statusF === 'success'} onClick={() => setStatusFilter('success')} />
+          <FilterChip label="失败" active={statusF === 'error'} onClick={() => setStatusFilter('error')} />
+          <FilterChip label="已取消" active={statusF === 'cancelled'} onClick={() => setStatusFilter('cancelled')} />
+          <FilterChip label="处理中" active={statusF === 'processing'} onClick={() => setStatusFilter('processing')} />
         </div>
       </div>
 
@@ -112,13 +115,22 @@ export default function RequestsPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filtered.map((r: RequestLog) => {
+              {items.map((r: RequestLog) => {
                 const speed = speedFor(r);
                 return (
                   <TableRow key={r.requestId}>
                     <TableCell className="text-xs font-mono whitespace-nowrap" title={r.requestId}>{shortRequestId(r.requestId)}</TableCell>
                     <TableCell className="text-sm whitespace-nowrap">{r.model || '—'}</TableCell>
-                    <TableCell className="text-sm whitespace-nowrap">{protocolLabel(r.protocol)}</TableCell>
+                    <TableCell className="text-sm whitespace-nowrap">
+                      <span className="flex items-center gap-1.5">
+                        <span>{protocolLabel(r.protocol)}</span>
+                        {r.stream != null && (
+                          <span className={`rounded px-1 py-px text-[10px] font-medium ${r.stream ? 'bg-blue-100 text-blue-700' : 'bg-muted text-muted-foreground'}`}>
+                            {streamLabel(r.stream)}
+                          </span>
+                        )}
+                      </span>
+                    </TableCell>
                     <TableCell>
                       <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${statusBadge(r.status).cls}`}>
                         {statusBadge(r.status).label}
@@ -135,7 +147,7 @@ export default function RequestsPage() {
                   </TableRow>
                 );
               })}
-              {filtered.length === 0 && (
+              {items.length === 0 && (
                 <TableRow>
                   <TableCell colSpan={12} className="py-8 text-center text-sm text-muted-foreground">
                     暂无请求记录
@@ -149,12 +161,14 @@ export default function RequestsPage() {
 
       {/* Mobile card list */}
       <div className="md:hidden space-y-3">
-        {filtered.map((r: RequestLog) => {
+        {items.map((r: RequestLog) => {
           const speed = calcTokensPerSecond({
             outputTokens: r.outputTokens,
             durationMs: r.durationMs,
             ttftMs: r.ttftMs,
             stream: r.stream,
+            createdAt: r.createdAt,
+            completedAt: r.completedAt,
           });
           return (
             <div key={r.requestId} className="rounded-lg border bg-card p-3 space-y-2">
@@ -195,7 +209,7 @@ export default function RequestsPage() {
             </div>
           );
         })}
-        {filtered.length === 0 && (
+        {items.length === 0 && (
           <p className="py-8 text-center text-sm text-muted-foreground">暂无请求记录</p>
         )}
       </div>

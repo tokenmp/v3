@@ -54,9 +54,11 @@ export const userApi = {
     return r.logs ?? [];
   },
   getRequests: async (
-    page = 1, pageSize = 10,
+    page = 1, pageSize = 10, search = '', status = '',
   ): Promise<{ items: RequestLog[]; total: number }> => {
     const qs = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+    if (search.trim()) qs.set('search', search.trim());
+    if (status) qs.set('status', status);
     const r = await request<{ logs: RequestLog[]; total: number }>(
       `/api/v1/request-logs?${qs}`, { baseUrl: BIZ_BASE },
     );

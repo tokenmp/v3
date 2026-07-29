@@ -128,6 +128,7 @@ type Writer interface {
 type ListFilter struct {
 	UserID    string
 	Model     string
+	Search    string
 	Statuses  []string  // final_status enum values; empty = all
 	StartTime time.Time // zero = no lower bound
 	EndTime   time.Time // zero = no upper bound
@@ -632,6 +633,11 @@ func applyListFilter(filter ListFilter) (string, []any) {
 	if filter.Model != "" {
 		clauses = append(clauses, "model_name = ?")
 		args = append(args, filter.Model)
+	}
+	if filter.Search != "" {
+		like := "%" + filter.Search + "%"
+		clauses = append(clauses, "(request_id ILIKE ? OR model_name ILIKE ? OR resolved_model ILIKE ? OR user_id ILIKE ?)")
+		args = append(args, like, like, like, like)
 	}
 	// Statuses filters final_status via IN. An empty slice means no status
 	// filter so the listing spans success and all error categories.

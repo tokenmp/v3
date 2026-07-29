@@ -59,6 +59,8 @@ function speedFor(log: AdminRequestLog): number | null {
     durationMs: log.durationMs,
     ttftMs: log.ttftMs,
     stream: log.stream,
+    createdAt: log.createdAt,
+    completedAt: log.completedAt,
   });
 }
 
@@ -67,9 +69,16 @@ export default function AdminRequestLogsPage() {
   const [search, setSearch] = useState('');
   const [statusF, setStatusF] = useState<string | undefined>(undefined);
 
+  const setStatusFilter = (status: string | undefined) => {
+    setPage(1);
+    setStatusF(status);
+  };
+
+  const searchTerm = search.trim();
+
   const { data } = useQuery({
-    queryKey: ['admin', 'request-logs', page],
-    queryFn: () => adminApi.listRequestLogs(page, 20),
+    queryKey: ['admin', 'request-logs', page, searchTerm, statusF ?? 'all'],
+    queryFn: () => adminApi.listRequestLogs(page, 20, searchTerm, statusF ?? ''),
     // Keep in-flight rows live so users see processing → terminal transitions.
     refetchInterval: 2_000,
   });
@@ -77,20 +86,6 @@ export default function AdminRequestLogsPage() {
   const logs = data?.logs ?? [];
   const total = data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / 20));
-
-  const filtered = logs.filter((log) => {
-    if (statusF && log.status !== statusF) return false;
-    if (search) {
-      const q = search.toLowerCase();
-      const matches =
-        log.requestId?.toLowerCase().includes(q) ||
-        log.model?.toLowerCase().includes(q) ||
-        log.userEmail?.toLowerCase().includes(q) ||
-        log.userId?.toLowerCase().includes(q);
-      if (!matches) return false;
-    }
-    return true;
-  });
 
   return (
     <div className="space-y-4">
@@ -103,16 +98,19 @@ export default function AdminRequestLogsPage() {
             type="text"
             placeholder="搜索 Request ID / 用户 / 模型"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => {
+              setPage(1);
+              setSearch(e.target.value);
+            }}
             className="h-[var(--control-height-sm)] min-w-56 flex-1 rounded-sm border border-input bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
           />
         </div>
         <div className="flex flex-wrap gap-1.5 text-xs">
-          <FilterChip label="全部" active={!statusF} onClick={() => setStatusF(undefined)} />
-          <FilterChip label="成功" active={statusF === 'success'} onClick={() => setStatusF('success')} />
-          <FilterChip label="失败" active={statusF === 'error'} onClick={() => setStatusF('error')} />
-          <FilterChip label="已取消" active={statusF === 'cancelled'} onClick={() => setStatusF('cancelled')} />
-          <FilterChip label="处理中" active={statusF === 'processing'} onClick={() => setStatusF('processing')} />
+          <FilterChip label="全部" active={!statusF} onClick={() => setStatusFilter(undefined)} />
+          <FilterChip label="成功" active={statusF === 'success'} onClick={() => setStatusFilter('success')} />
+          <FilterChip label="失败" active={statusF === 'error'} onClick={() => setStatusFilter('error')} />
+          <FilterChip label="已取消" active={statusF === 'cancelled'} onClick={() => setStatusFilter('cancelled')} />
+          <FilterChip label="处理中" active={statusF === 'processing'} onClick={() => setStatusFilter('processing')} />
         </div>
       </div>
 
@@ -140,7 +138,7 @@ export default function AdminRequestLogsPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filtered.map((log) => {
+              {logs.map((log) => {
                 const speed = speedFor(log);
                 return (
                   <TableRow key={log.requestId} className="cursor-pointer">
@@ -160,8 +158,13 @@ export default function AdminRequestLogsPage() {
                       </Link>
                     </TableCell>
                     <TableCell className="text-sm whitespace-nowrap">
-                      <Link href={`/admin/request-logs/${log.requestId}`} className="block">
-                        {protocolLabel(log.protocol)}
+                      <Link href={`/admin/request-logs/${log.requestId}`} className="flex items-center gap-1.5">
+                        <span>{protocolLabel(log.protocol)}</span>
+                        {log.stream != null && (
+                          <span className={`rounded px-1 py-px text-[10px] font-medium ${log.stream ? 'bg-blue-100 text-blue-700' : 'bg-muted text-muted-foreground'}`}>
+                            {streamLabel(log.stream)}
+                          </span>
+                        )}
                       </Link>
                     </TableCell>
                     <TableCell className="text-sm whitespace-nowrap">
@@ -214,7 +217,7 @@ export default function AdminRequestLogsPage() {
                   </TableRow>
                 );
               })}
-              {filtered.length === 0 && (
+              {logs.length === 0 && (
                 <TableRow>
                   <TableCell colSpan={15} className="py-8 text-center text-sm text-muted-foreground">
                     暂无请求记录
@@ -228,12 +231,14 @@ export default function AdminRequestLogsPage() {
 
       {/* Mobile card list */}
       <div className="md:hidden space-y-3">
-        {filtered.map((log) => {
+        {logs.map((log) => {
           const speed = calcTokensPerSecond({
             outputTokens: log.outputTokens,
             durationMs: log.durationMs,
             ttftMs: log.ttftMs,
             stream: log.stream,
+            createdAt: log.createdAt,
+            completedAt: log.completedAt,
           });
           return (
             <Link
@@ -286,7 +291,7 @@ export default function AdminRequestLogsPage() {
             </Link>
           );
         })}
-        {filtered.length === 0 && (
+        {logs.length === 0 && (
           <p className="py-8 text-center text-sm text-muted-foreground">暂无请求记录</p>
         )}
       </div>

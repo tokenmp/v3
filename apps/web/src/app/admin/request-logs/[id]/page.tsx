@@ -403,6 +403,8 @@ export default function RequestLogDetailPage() {
     durationMs: log.durationMs,
     ttftMs: log.ttftMs,
     stream: log.stream,
+    createdAt: log.createdAt,
+    completedAt: log.completedAt,
   });
 
   // Total tokens: prefer explicit field, fallback to sum
