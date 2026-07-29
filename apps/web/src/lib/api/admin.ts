@@ -89,8 +89,12 @@ async function realListKeys(page = 1, pageSize = 20): Promise<{ keys: AdminApiKe
 async function realListLogs(
   page = 1,
   pageSize = 20,
+  search = '',
+  status = '',
 ): Promise<AdminRequestLogListResponse> {
   const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+  if (search.trim()) params.set('search', search.trim());
+  if (status) params.set('status', status);
   const res = await request<{ logs: AdminRequestLog[]; total: number }>(
     `/api/v1/admin/request-logs?${params}`,
     { baseUrl: ADMIN_BASE },
@@ -204,10 +208,10 @@ function mapRequestLog(r: Record<string, unknown>): AdminRequestLog {
     totalTokens: r.total_tokens != null ? Number(r.total_tokens) : null,
     cacheTokens: r.cache_tokens != null ? Number(r.cache_tokens) : null,
     cost: null,
-    durationMs: r.latency_ms != null ? Number(r.latency_ms) : null,
-    ttftMs: r.ttft_ms != null ? Number(r.ttft_ms) : null,
+    durationMs: r.latency_ms != null ? Number(r.latency_ms) : (r.durationMs != null ? Number(r.durationMs) : null),
+    ttftMs: r.ttft_ms != null ? Number(r.ttft_ms) : (r.ttftMs != null ? Number(r.ttftMs) : null),
     createdAt: String(r.created_at ?? r.createdAt ?? ''),
-    completedAt: r.completed_at != null ? String(r.completed_at) : null,
+    completedAt: r.completed_at != null ? String(r.completed_at) : (r.completedAt != null ? String(r.completedAt) : null),
     routeId: r.route_id != null ? String(r.route_id) : null,
     provider: r.provider_id != null ? String(r.provider_id) : null,
     credentialId: r.credential_id != null ? String(r.credential_id) : null,

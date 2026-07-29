@@ -473,7 +473,10 @@ type ListRequestLogsParams struct {
 	PageSize *int `form:"pageSize,omitempty" json:"pageSize,omitempty"`
 
 	// Model Filter by model ID
-	Model     *string                      `form:"model,omitempty" json:"model,omitempty"`
+	Model *string `form:"model,omitempty" json:"model,omitempty"`
+
+	// Search Server-side search over request ID, model, resolved model, or user ID.
+	Search    *string                      `form:"search,omitempty" json:"search,omitempty"`
 	Status    *ListRequestLogsParamsStatus `form:"status,omitempty" json:"status,omitempty"`
 	StartDate *time.Time                   `form:"startDate,omitempty" json:"startDate,omitempty"`
 	EndDate   *time.Time                   `form:"endDate,omitempty" json:"endDate,omitempty"`

@@ -9,24 +9,34 @@
 
 /**
  * Compute output tokens per second.
- * - For streaming: generation time = durationMs - ttftMs
+ * - For streaming: generation time = total_time - ttftMs
  * - For non-streaming: generation time = durationMs
- * - Returns null when output/duration are absent or streaming generation time
- *   is non-positive (clock rounding can make TTFT equal/slightly exceed total)
+ * - total_time normally comes from durationMs. When durationMs is missing or
+ *   equals TTFT due to logging-source truncation, callers can provide
+ *   createdAt/completedAt; the formatter then uses completedAt - createdAt.
+ * - Returns null when output/duration are absent or generation time is non-positive.
  */
 export function calcTokensPerSecond(opts: {
   outputTokens: number | null | undefined;
   durationMs: number | null | undefined;
   ttftMs?: number | null | undefined;
   stream?: boolean | null;
+  createdAt?: string | null | undefined;
+  completedAt?: string | null | undefined;
 }): number | null {
   const out = opts.outputTokens;
-  const dur = opts.durationMs;
-  if (out == null || out <= 0 || dur == null || dur <= 0) return null;
+  if (out == null || out <= 0) return null;
+
+  let totalMs = opts.durationMs ?? null;
+  if ((totalMs == null || totalMs <= 0 || (opts.stream === true && opts.ttftMs != null && totalMs <= opts.ttftMs)) && opts.createdAt && opts.completedAt) {
+    const fromWallClock = new Date(opts.completedAt).getTime() - new Date(opts.createdAt).getTime();
+    if (Number.isFinite(fromWallClock) && fromWallClock > 0) totalMs = fromWallClock;
+  }
+  if (totalMs == null || totalMs <= 0) return null;
 
   const isStream = opts.stream === true;
   const ttft = opts.ttftMs ?? 0;
-  const genMs = isStream && ttft > 0 ? dur - ttft : dur;
+  const genMs = isStream && ttft > 0 ? totalMs - ttft : totalMs;
   if (genMs <= 0) return null;
   return (out / genMs) * 1000;
 }
@@ -54,7 +64,7 @@ function formatCompactNumber(n: number, unit = ''): string {
       return `${(n / value).toFixed(2)}${suffix}${unit}`;
     }
   }
-  return `${n.toLocaleString()}${unit}`;
+  return `${Number.isInteger(n) ? n.toLocaleString() : n.toFixed(2)}${unit}`;
 }
 
 /** Format token count with K/M/B compact suffix; null/undefined → "—" */

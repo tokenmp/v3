@@ -83,6 +83,7 @@ func (h *Handlers) ListRequestLogs(w http.ResponseWriter, r *http.Request) {
 	statuses := mapStatusFilter(q.Get("status"))
 	result, err := h.Logging.ListLogs(r.Context(), logging.ListFilter{
 		Model:    q.Get("model"),
+		Search:   q.Get("search"),
 		Statuses: statuses,
 		Page:     page,
 		PageSize: pageSize,

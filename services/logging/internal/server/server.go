@@ -223,11 +223,13 @@ type listLogsResponse struct {
 // status filter value outside this set is dropped rather than failing the
 // whole query, so a caller passing an unknown status simply gets no filter.
 var validFinalStatuses = map[string]bool{
-	"success":         true,
-	"client_error":    true,
-	"upstream_error":  true,
-	"timeout":         true,
-	"transport_error": true,
+	"processing":       true,
+	"success":          true,
+	"client_error":     true,
+	"client_cancelled": true,
+	"upstream_error":   true,
+	"timeout":          true,
+	"transport_error":  true,
 }
 
 func (s *Server) handleListLogs(w http.ResponseWriter, r *http.Request) {
@@ -235,6 +237,7 @@ func (s *Server) handleListLogs(w http.ResponseWriter, r *http.Request) {
 	filter := repository.ListFilter{
 		UserID:   q.Get("user_id"),
 		Model:    q.Get("model"),
+		Search:   strings.TrimSpace(q.Get("search")),
 		Page:     parsePositiveInt(q.Get("page"), 1),
 		PageSize: parsePositiveInt(q.Get("page_size"), 20),
 	}
