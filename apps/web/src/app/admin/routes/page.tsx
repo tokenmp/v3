@@ -30,6 +30,10 @@ const STATUS_FILTERS: { key: StatusFilter; label: string }[] = [
   { key: 'disabled', label: '已禁用' },
 ];
 
+function logicalCredentialId(id: string): string {
+  return id.replace(/-(openai|anthropic|responses)$/u, '');
+}
+
 export default function AdminRoutesPage() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
@@ -79,12 +83,23 @@ export default function AdminRoutesPage() {
   }, [filtered]);
 
   const credentialCountsByProvider = useMemo(() => {
-    const counts = new Map<string, { active: number; total: number }>();
+    const grouped = new Map<string, Map<string, { active: boolean; total: number }>>();
     for (const credential of credentials) {
-      const current = counts.get(credential.providerId) ?? { active: 0, total: 0 };
+      const providerMap = grouped.get(credential.providerId) ?? new Map<string, { active: boolean; total: number }>();
+      const logicalId = logicalCredentialId(credential.id);
+      const current = providerMap.get(logicalId) ?? { active: false, total: 0 };
       current.total += 1;
-      if (credential.status === 'active') current.active += 1;
-      counts.set(credential.providerId, current);
+      current.active = current.active || credential.status === 'active';
+      providerMap.set(logicalId, current);
+      grouped.set(credential.providerId, providerMap);
+    }
+    const counts = new Map<string, { active: number; total: number }>();
+    for (const [providerId, providerMap] of grouped) {
+      const accounts = Array.from(providerMap.values());
+      counts.set(providerId, {
+        active: accounts.filter((account) => account.active).length,
+        total: accounts.length,
+      });
     }
     return counts;
   }, [credentials]);
@@ -201,13 +216,26 @@ function ProviderRouteCard({
   onConfigureAccounts: () => void;
   onConfigureStrategy: () => void;
 }) {
+  const [expanded, setExpanded] = useState(false);
   const enabledProtocols = Array.from(new Set(group.routes.filter((r) => r.enabled && !r.quarantined).map((r) => r.protocol))).sort();
   const coveredModels = Array.from(new Set(group.routes.map((r) => r.modelId))).sort();
   const upstreamModels = Array.from(new Set(group.routes.map((r) => r.upstreamModel).filter(Boolean))).sort();
   const isAllModels = selectedModel === 'all';
   return (
     <section className="rounded-lg border bg-card p-4 shadow-sm">
-      <div className="flex flex-wrap items-center gap-3">
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={() => setExpanded((value) => !value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            setExpanded((value) => !value);
+          }
+        }}
+        className="flex w-full cursor-pointer flex-wrap items-center gap-3 text-left"
+        aria-expanded={expanded}
+      >
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="font-mono text-sm font-semibold">{group.providerId}</h2>
@@ -229,25 +257,43 @@ function ProviderRouteCard({
             )}
           </div>
         </div>
+        <span className="text-xs text-muted-foreground">{expanded ? '收起' : '展开'}</span>
         {isAllModels ? null : (
-          <div className="flex shrink-0 flex-wrap gap-2">
+          <span className="flex shrink-0 flex-wrap gap-2">
             <button
               type="button"
-              onClick={onConfigureAccounts}
+              onClick={(event) => { event.stopPropagation(); onConfigureAccounts(); }}
               className="inline-flex h-[var(--control-height-sm)] items-center gap-1 rounded-sm bg-primary px-3 text-xs font-medium text-primary-foreground hover:opacity-90"
             >
               <KeyRound className="size-3.5" /> 配置账号
             </button>
             <button
               type="button"
-              onClick={onConfigureStrategy}
+              onClick={(event) => { event.stopPropagation(); onConfigureStrategy(); }}
               className="inline-flex h-[var(--control-height-sm)] items-center rounded-sm border px-3 text-xs font-medium hover:bg-accent"
             >
               策略
             </button>
-          </div>
+          </span>
         )}
       </div>
+      {expanded ? (
+        <div className="mt-3 rounded-lg border bg-muted/20 p-3 text-xs text-muted-foreground">
+          {isAllModels ? (
+            <div className="space-y-2">
+              <div>覆盖模型：{coveredModels.slice(0, 8).join(' · ')}{coveredModels.length > 8 ? ` 等 ${coveredModels.length} 个` : ''}</div>
+              <div>能力摘要：{enabledProtocols.length > 0 ? enabledProtocols.map(protocolLabel).join(' · ') : '暂无'}</div>
+              <div>路由行数：{group.routes.length}（同一模型或协议可能有多条账号/上游映射）</div>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <div>上游模型：{upstreamModels.length > 0 ? upstreamModels.join(' · ') : '未配置'}</div>
+              <div>能力摘要：{enabledProtocols.length > 0 ? enabledProtocols.map(protocolLabel).join(' · ') : '暂无'}</div>
+              <div>路由行数：{group.routes.length}；账号候选统一在“配置账号”中编辑。</div>
+            </div>
+          )}
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -327,7 +373,7 @@ function GroupAccountsModal({ group, onClose }: { group: RouteProviderGroup; onC
   const [overrides, setOverrides] = useState<Record<string, Partial<AdminRouteCredential>>>({});
 
   const rows = useMemo(() => {
-    const activeCredentials = providerCredentials.filter((c) => c.status !== 'deleted');
+    const visibleCredentials = providerCredentials.filter((c) => c.status !== 'deleted');
     const anyExplicitBinding = routeCredentialSets.some((set) => set.length > 0);
     const bindingByCredential = new Map<string, AdminRouteCredential>();
     for (const set of routeCredentialSets) {
@@ -335,30 +381,40 @@ function GroupAccountsModal({ group, onClose }: { group: RouteProviderGroup; onC
         if (!bindingByCredential.has(binding.credentialId)) bindingByCredential.set(binding.credentialId, binding);
       }
     }
-    return activeCredentials.map((credential) => {
-      const binding = bindingByCredential.get(credential.id);
-      const override = overrides[credential.id] ?? {};
+    const groupedCredentials = new Map<string, typeof visibleCredentials>();
+    for (const credential of visibleCredentials) {
+      const logicalId = logicalCredentialId(credential.id);
+      groupedCredentials.set(logicalId, [...(groupedCredentials.get(logicalId) ?? []), credential]);
+    }
+    return Array.from(groupedCredentials.entries()).map(([logicalId, accountCredentials]) => {
+      const primary = (accountCredentials.find((credential) => credential.status === 'active') ?? accountCredentials[0])!;
+      const bindings = accountCredentials.map((credential) => bindingByCredential.get(credential.id)).filter((binding): binding is AdminRouteCredential => Boolean(binding));
+      const binding = bindings[0];
+      const override = overrides[logicalId] ?? {};
       return {
-        credential,
-        selected: override.enabled ?? binding?.enabled ?? !anyExplicitBinding,
-        priority: override.priority ?? binding?.priority ?? credential.priority,
+        logicalId,
+        credentialIds: accountCredentials.map((credential) => credential.id),
+        protocols: accountCredentials.map((credential) => credential.id.match(/-(openai|anthropic|responses)$/u)?.[1]).filter((value): value is string => Boolean(value)).sort(),
+        credential: primary,
+        selected: override.enabled ?? (bindings.length > 0 ? bindings.some((item) => item.enabled) : !anyExplicitBinding),
+        priority: override.priority ?? binding?.priority ?? primary.priority,
         rpm: override.rpm !== undefined ? override.rpm : (binding?.rpm ?? null),
         tpm: override.tpm !== undefined ? override.tpm : (binding?.tpm ?? null),
       };
-    });
+    }).sort((a, b) => a.logicalId.localeCompare(b.logicalId));
   }, [overrides, providerCredentials, routeCredentialSets]);
 
   const saveMut = useMutation({
     mutationFn: async () => {
       const selected = rows
         .filter((row) => row.selected)
-        .map((row) => ({
-          credentialId: row.credential.id,
+        .flatMap((row) => row.credentialIds.map((credentialId) => ({
+          credentialId,
           priority: row.priority,
           enabled: true,
           rpm: row.rpm,
           tpm: row.tpm,
-        }));
+        })));
       await Promise.all(enabledRoutes.map((route) => adminConfigApi.setRouteCredentials(
         route.id,
         selected.map((item) => ({
@@ -379,10 +435,10 @@ function GroupAccountsModal({ group, onClose }: { group: RouteProviderGroup; onC
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : '保存失败'),
   });
 
-  const patchRow = (credentialId: string, patch: Partial<AdminRouteCredential>) => {
+  const patchRow = (logicalId: string, patch: Partial<AdminRouteCredential>) => {
     setOverrides((current) => ({
       ...current,
-      [credentialId]: { ...(current[credentialId] ?? {}), ...patch },
+      [logicalId]: { ...(current[logicalId] ?? {}), ...patch },
     }));
   };
 
@@ -423,7 +479,7 @@ function GroupAccountsModal({ group, onClose }: { group: RouteProviderGroup; onC
           <div className="grid gap-3">
             {rows.map((row) => (
               <section
-                key={row.credential.id}
+                key={row.logicalId}
                 className={`rounded-lg border p-3 transition-colors ${row.selected ? 'border-primary/40 bg-primary/5' : 'bg-card'}`}
               >
                 <div className="flex flex-wrap items-start gap-3">
@@ -431,16 +487,24 @@ function GroupAccountsModal({ group, onClose }: { group: RouteProviderGroup; onC
                     <input
                       type="checkbox"
                       checked={row.selected}
-                      onChange={(e) => patchRow(row.credential.id, { enabled: e.target.checked })}
-                      aria-label={`启用账号 ${row.credential.id}`}
+                      onChange={(e) => patchRow(row.logicalId, { enabled: e.target.checked })}
+                      aria-label={`启用账号 ${row.logicalId}`}
                     />
                     {row.selected ? '启用' : '停用'}
                   </label>
                   <div className="min-w-0 flex-1">
-                    <div className="truncate font-mono text-xs font-medium" title={row.credential.id}>{row.credential.id}</div>
+                    <div className="truncate font-mono text-xs font-medium" title={row.logicalId}>{row.logicalId}</div>
                     <div className="mt-1 text-xs text-muted-foreground">
                       {row.credential.keyPrefix || '****'}…{row.credential.keySuffix || '****'} · 默认优先级 {row.credential.priority}
+                      {row.credentialIds.length > 1 ? ` · 合并 ${row.credentialIds.length} 条协议账号` : ''}
                     </div>
+                    {row.protocols.length > 0 ? (
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {row.protocols.map((protocol) => (
+                          <span key={protocol} className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{protocol}</span>
+                        ))}
+                      </div>
+                    ) : null}
                   </div>
                 </div>
                 <div className="mt-3 grid gap-3 sm:grid-cols-3">
@@ -448,7 +512,7 @@ function GroupAccountsModal({ group, onClose }: { group: RouteProviderGroup; onC
                     <div className="mb-1 text-[11px] text-muted-foreground">优先级</div>
                     <NumberField
                       value={String(row.priority)}
-                      onChange={(v) => patchRow(row.credential.id, { priority: Number(v) || 0 })}
+                      onChange={(v) => patchRow(row.logicalId, { priority: Number(v) || 0 })}
                       min={0}
                     />
                   </div>
@@ -456,7 +520,7 @@ function GroupAccountsModal({ group, onClose }: { group: RouteProviderGroup; onC
                     <div className="mb-1 text-[11px] text-muted-foreground">RPM</div>
                     <NullableNumberInput
                       value={row.rpm}
-                      onChange={(v) => patchRow(row.credential.id, { rpm: v })}
+                      onChange={(v) => patchRow(row.logicalId, { rpm: v })}
                       placeholder="继承"
                     />
                   </div>
@@ -464,7 +528,7 @@ function GroupAccountsModal({ group, onClose }: { group: RouteProviderGroup; onC
                     <div className="mb-1 text-[11px] text-muted-foreground">TPM</div>
                     <NullableNumberInput
                       value={row.tpm}
-                      onChange={(v) => patchRow(row.credential.id, { tpm: v })}
+                      onChange={(v) => patchRow(row.logicalId, { tpm: v })}
                       placeholder="继承"
                     />
                   </div>
