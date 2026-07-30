@@ -45,5 +45,6 @@
 - Executor Phase 11 Images HTTP：official `openai-go/v3` legacy Images Generate 已以 completion-only non-stream capability 注册到 execution registry、composition 与鉴权 `POST /v1/images/generations` runtime；facade 精确委托 Runner，Runner 一次 quota reservation 并按冻结策略 retry。SDK/transport 共用 `internal/imagecontract`：untrimmed nonempty prompt、1 MiB prompt、512-byte CTL-free user、default wire/renderer `url`、16 MiB wire/10 MiB item/12 MiB aggregate、URL/streaming base64、usage/extensions/revised-prompt 边界；所有 Images 终态 `Cache-Control: no-store`。不支持 GPT Image 特有参数或 usage quota；`/v1/models` 与 `/v1/responses` 已不再 501（Phase 13/14）；CI race 显式包含独立包 `./internal/imagecontract/...`：`executor/architecture.md`、`executor/testing-strategy.md`
 - Executor Phase 12.1 typed quota domain：`internal/quota.Repository`、`DomainInMemory`、`TypedMock` 与 shared contract/race/fuzz coverage 已实施；typed domain state 与仍被 Runner、StreamDriver、runtime 消费的 legacy `quota.Port` state 有意分离。Phase 12.2 必须迁移消费者并删除 legacy Port；尚无 usage charging、数据库或 durable storage：`executor/architecture.md`、`executor/testing-strategy.md`
 - UI 设计规范：`ui/design-system.md`
+- Admin Routes 简洁版设计预览：`ui/admin-routes-design-preview.html`
 
 新增、替代或删除文档时同步维护本索引或相应主题索引。
