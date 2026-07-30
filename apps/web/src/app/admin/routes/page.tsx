@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { KeyRound, Pencil, Plus, Trash2 } from 'lucide-react';
+import { KeyRound, Pencil, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import { adminConfigApi } from '@/lib/api/admin';
 import { FilterChip } from '@/components/filter-chip';
@@ -18,14 +18,6 @@ import {
   inputCls,
 } from '@/components/ui/field';
 import { PublishStatusHint } from '@/components/publish-status-hint';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
 import type { AdminRouteConfig, AdminRouteCredential } from '@/types/admin';
 
 const PROTOCOL_OPTIONS = [
@@ -36,6 +28,13 @@ const PROTOCOL_OPTIONS = [
 ];
 
 type StatusFilter = 'all' | 'active' | 'disabled';
+
+type RouteProviderGroup = {
+  key: string;
+  modelId: string;
+  providerId: string;
+  routes: AdminRouteConfig[];
+};
 
 const STATUS_FILTERS: { key: StatusFilter; label: string }[] = [
   { key: 'all', label: '全部' },
@@ -113,6 +112,7 @@ export default function AdminRoutesPage() {
   const [selectedModel, setSelectedModel] = useState('all');
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<AdminRouteConfig | null>(null);
+  const [providerEditor, setProviderEditor] = useState<RouteProviderGroup | null>(null);
   const [accountRoute, setAccountRoute] = useState<AdminRouteConfig | null>(null);
 
   const { data: routes = [], isLoading } = useQuery({
@@ -172,17 +172,6 @@ export default function AdminRoutesPage() {
     },
   });
 
-  const deleteMut = useMutation({
-    mutationFn: (id: string) => adminConfigApi.deleteRoute(id),
-    onSuccess: () => {
-      toast.success('路由已删除（需点编译并发布生效）');
-      queryClient.invalidateQueries({ queryKey: ['admin', 'route-configs'] });
-    },
-    onError: (e: unknown) => {
-      toast.error(e instanceof Error ? e.message : '删除失败');
-    },
-  });
-
   const routeModelOptions = useMemo(() => {
     const ids = new Set<string>(models.map((m) => m.id));
     routes.forEach((r) => ids.add(r.modelId));
@@ -211,10 +200,28 @@ export default function AdminRoutesPage() {
     return { providers: providers.size, protocols: protocols.size, routes: filtered.length };
   }, [filtered]);
 
-  const onDelete = (r: AdminRouteConfig) => {
-    if (!confirm(`确定删除路由「${r.id}」？`)) return;
-    deleteMut.mutate(r.id);
-  };
+  const providerGroups = useMemo<RouteProviderGroup[]>(() => {
+    const groups = new Map<string, RouteProviderGroup>();
+    for (const route of filtered) {
+      const key = `${route.modelId}::${route.providerId}`;
+      const existing = groups.get(key);
+      if (existing) {
+        existing.routes.push(route);
+      } else {
+        groups.set(key, {
+          key,
+          modelId: route.modelId,
+          providerId: route.providerId,
+          routes: [route],
+        });
+      }
+    }
+    return Array.from(groups.values()).sort((a, b) => {
+      const modelCmp = a.modelId.localeCompare(b.modelId);
+      if (modelCmp !== 0) return modelCmp;
+      return a.providerId.localeCompare(b.providerId);
+    });
+  }, [filtered]);
 
   return (
     <div className="space-y-4">
@@ -273,121 +280,22 @@ export default function AdminRoutesPage() {
         <span className="ml-1">一个模型可以绑定多个 Provider；每条 Provider+协议路由可再绑定多个账号候选。</span>
       </div>
 
-      {/* 表格 */}
+      {/* Provider 分组列表 */}
       {isLoading ? (
         <div className="py-12 text-center text-sm text-muted-foreground">加载中…</div>
-      ) : filtered.length === 0 ? (
+      ) : providerGroups.length === 0 ? (
         <div className="py-12 text-center text-sm text-muted-foreground">暂无路由配置</div>
       ) : (
-        <>
-        <div className="hidden md:block overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>ID</TableHead>
-                <TableHead>模型</TableHead>
-                <TableHead>Provider</TableHead>
-                <TableHead>上游模型</TableHead>
-                <TableHead>账号协议</TableHead>
-                <TableHead>优先级</TableHead>
-                <TableHead className="text-right">TPM</TableHead>
-                <TableHead>状态</TableHead>
-                <TableHead className="text-right">操作</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filtered.map((r) => (
-                <TableRow key={r.id}>
-                  <TableCell className="font-mono text-xs">{r.id}</TableCell>
-                  <TableCell className="font-mono text-xs">{r.modelId}</TableCell>
-                  <TableCell className="font-mono text-xs">{r.providerId}</TableCell>
-                  <TableCell className="font-mono text-xs">{r.upstreamModel}</TableCell>
-                  <TableCell>
-                    <div className="space-y-0.5">
-                      <div className="font-mono text-xs text-muted-foreground">{r.protocol}</div>
-                      <button
-                        type="button"
-                        onClick={() => setAccountRoute(r)}
-                        className="inline-flex items-center gap-1 rounded-sm text-[11px] text-primary hover:underline"
-                      >
-                        <KeyRound className="size-3" /> 配置账号
-                      </button>
-                    </div>
-                  </TableCell>
-                  <TableCell className="tabular-nums">{r.priority}</TableCell>
-                  <TableCell className="text-right font-mono text-xs">{r.tpm != null ? r.tpm.toLocaleString() : '继承'}</TableCell>
-                  <TableCell>
-                    <StatusPill enabled={r.enabled} quarantined={r.quarantined} />
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex justify-end gap-1">
-                      <button
-                        type="button"
-                        onClick={() => setAccountRoute(r)}
-                        className="rounded-sm p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-                        aria-label="配置账号"
-                        title="配置账号"
-                      >
-                        <KeyRound className="size-3.5" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setEditing(r)}
-                        className="rounded-sm p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-                        aria-label="编辑"
-                        title="编辑"
-                      >
-                        <Pencil className="size-3.5" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => onDelete(r)}
-                        className="rounded-sm p-1.5 text-muted-foreground hover:bg-red-100 hover:text-red-700"
-                        aria-label="删除"
-                        title="删除"
-                      >
-                        <Trash2 className="size-3.5" />
-                      </button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+        <div className="grid gap-3">
+          {providerGroups.map((group) => (
+            <ProviderRouteCard
+              key={group.key}
+              group={group}
+              onEdit={() => setProviderEditor(group)}
+              onConfigureAccounts={(route) => setAccountRoute(route)}
+            />
+          ))}
         </div>
-
-        {/* 移动端卡片 */}
-        <div className="md:hidden space-y-3">
-          {filtered.length === 0 ? (
-            <p className="py-8 text-center text-sm text-muted-foreground">暂无路由配置</p>
-          ) : (
-            filtered.map((r) => (
-              <button
-                key={r.id}
-                type="button"
-                onClick={() => setEditing(r)}
-                className="w-full text-left rounded-lg border bg-card p-3 space-y-2 active:bg-accent/50 transition-colors"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="font-mono text-xs truncate">{r.id}</span>
-                  <StatusPill enabled={r.enabled} quarantined={r.quarantined} />
-                </div>
-                <div className="flex items-center justify-between text-xs">
-                  <span className="font-medium truncate">{r.modelId}</span>
-                  <span className="text-muted-foreground">{r.protocol}</span>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  {r.providerId} → {r.upstreamModel}
-                </p>
-                <span className="text-xs text-muted-foreground">优先级 {r.priority}</span>
-                <span className="inline-flex items-center gap-1 text-xs text-primary">
-                  <KeyRound className="size-3" /> 点击编辑；账号在桌面端表格或编辑后配置
-                </span>
-              </button>
-            ))
-          )}
-        </div>
-        </>
       )}
 
       {creating ? (
@@ -405,11 +313,311 @@ export default function AdminRoutesPage() {
           submitting={updateMut.isPending}
         />
       ) : null}
+      {providerEditor ? (
+        <ProviderRouteModal
+          group={providerEditor}
+          onClose={() => setProviderEditor(null)}
+          onConfigureAccounts={(route) => setAccountRoute(route)}
+        />
+      ) : null}
       {accountRoute ? (
         <RouteAccountsModal route={accountRoute} onClose={() => setAccountRoute(null)} />
       ) : null}
     </div>
   );
+}
+
+function ProviderRouteCard({
+  group,
+  onEdit,
+  onConfigureAccounts,
+}: {
+  group: RouteProviderGroup;
+  onEdit: () => void;
+  onConfigureAccounts: (route: AdminRouteConfig) => void;
+}) {
+  const activeRoutes = group.routes.filter((r) => r.enabled && !r.quarantined);
+  const disabledRoutes = group.routes.filter((r) => !r.enabled || r.quarantined);
+  const protocols = group.routes.map((r) => r.protocol).sort();
+  return (
+    <section className="rounded-lg border bg-card p-4 shadow-sm">
+      <div className="flex flex-wrap items-start gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="font-mono text-sm font-semibold">{group.providerId}</h2>
+            <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
+              {group.modelId}
+            </span>
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {activeRoutes.length} 个启用协议 · {disabledRoutes.length} 个关闭/隔离协议 · {protocols.length} 个已配置协议
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onEdit}
+          className="inline-flex h-[var(--control-height-sm)] items-center gap-1.5 rounded-sm border px-3 text-xs font-medium hover:bg-accent"
+        >
+          <Pencil className="size-3.5" /> 编辑 Provider 路由
+        </button>
+      </div>
+
+      <div className="mt-3 grid gap-2 md:grid-cols-3">
+        {PROTOCOL_OPTIONS.map((protocol) => {
+          const route = group.routes.find((r) => r.protocol === protocol);
+          return (
+            <div key={protocol} className="rounded-md border bg-muted/20 p-3">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-mono text-xs">{protocol}</span>
+                {route ? <StatusPill enabled={route.enabled} quarantined={route.quarantined} /> : (
+                  <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">未配置</span>
+                )}
+              </div>
+              <div className="mt-2 min-h-8 text-xs text-muted-foreground">
+                {route ? (
+                  <>
+                    <div className="truncate font-mono">{route.upstreamModel}</div>
+                    <div>优先级 {route.priority} · TPM {route.tpm != null ? route.tpm.toLocaleString() : '继承'}</div>
+                  </>
+                ) : '可在编辑中开启该协议'}
+              </div>
+              {route ? (
+                <button
+                  type="button"
+                  onClick={() => onConfigureAccounts(route)}
+                  className="mt-2 inline-flex items-center gap-1 text-xs text-primary hover:underline"
+                >
+                  <KeyRound className="size-3" /> 账号候选
+                </button>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function ProviderRouteModal({
+  group,
+  onClose,
+  onConfigureAccounts,
+}: {
+  group: RouteProviderGroup;
+  onClose: () => void;
+  onConfigureAccounts: (route: AdminRouteConfig) => void;
+}) {
+  const queryClient = useQueryClient();
+  const routeByProtocol = useMemo(() => new Map(group.routes.map((r) => [r.protocol, r])), [group.routes]);
+  const [drafts, setDrafts] = useState<Record<string, RouteDraft>>(() => {
+    const initial: Record<string, RouteDraft> = {};
+    for (const protocol of PROTOCOL_OPTIONS) {
+      const route = routeByProtocol.get(protocol);
+      initial[protocol] = route
+        ? fromRoute(route)
+        : defaultRouteDraft(group.modelId, group.providerId, protocol);
+    }
+    return initial;
+  });
+  const [limitInputs, setLimitInputs] = useState<Record<string, { contextWindow: string; maxOutputTokens: string; rpm: string; tpm: string }>>(() => {
+    const initial: Record<string, { contextWindow: string; maxOutputTokens: string; rpm: string; tpm: string }> = {};
+    for (const protocol of PROTOCOL_OPTIONS) {
+      const route = routeByProtocol.get(protocol);
+      initial[protocol] = route
+        ? {
+            contextWindow: route.contextWindow != null ? String(route.contextWindow) : '',
+            maxOutputTokens: route.maxOutputTokens != null ? String(route.maxOutputTokens) : '',
+            rpm: route.rpm != null ? String(route.rpm) : '',
+            tpm: route.tpm != null ? String(route.tpm) : '',
+          }
+        : emptyLimitInputs();
+    }
+    return initial;
+  });
+
+  const parseNullableInt = (v: string): number | null => {
+    const trimmed = v.trim();
+    if (trimmed === '') return null;
+    const n = Number(trimmed);
+    return Number.isNaN(n) ? null : n;
+  };
+
+  const saveMut = useMutation({
+    mutationFn: async () => {
+      for (const protocol of PROTOCOL_OPTIONS) {
+        const draft = drafts[protocol] ?? defaultRouteDraft(group.modelId, group.providerId, protocol);
+        const limits = limitInputs[protocol] ?? emptyLimitInputs();
+        const finalDraft: RouteDraft = {
+          ...draft,
+          contextWindow: parseNullableInt(limits.contextWindow),
+          maxOutputTokens: parseNullableInt(limits.maxOutputTokens),
+          rpm: parseNullableInt(limits.rpm),
+          tpm: parseNullableInt(limits.tpm),
+        };
+        const existing = routeByProtocol.get(protocol);
+        if (existing) {
+          await adminConfigApi.updateRoute(existing.id, {
+            modelId: finalDraft.modelId,
+            providerId: finalDraft.providerId,
+            upstreamModel: finalDraft.upstreamModel,
+            protocol: finalDraft.protocol,
+            priority: finalDraft.priority,
+            enabled: finalDraft.enabled,
+            contextWindow: finalDraft.contextWindow,
+            maxOutputTokens: finalDraft.maxOutputTokens,
+            rpm: finalDraft.rpm,
+            tpm: finalDraft.tpm,
+          });
+        } else if (finalDraft.enabled) {
+          await adminConfigApi.createRoute({
+            id: finalDraft.id,
+            modelId: finalDraft.modelId,
+            providerId: finalDraft.providerId,
+            upstreamModel: finalDraft.upstreamModel,
+            protocol: finalDraft.protocol,
+            priority: finalDraft.priority,
+            contextWindow: finalDraft.contextWindow,
+            maxOutputTokens: finalDraft.maxOutputTokens,
+            rpm: finalDraft.rpm,
+            tpm: finalDraft.tpm,
+          });
+        }
+      }
+    },
+    onSuccess: () => {
+      toast.success('Provider 路由协议已保存（需点编译并发布生效）');
+      queryClient.invalidateQueries({ queryKey: ['admin', 'route-configs'] });
+      onClose();
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : '保存失败'),
+  });
+
+  const patchDraft = (protocol: string, patch: Partial<RouteDraft>) => {
+    setDrafts((current) => ({
+      ...current,
+      [protocol]: { ...(current[protocol] ?? defaultRouteDraft(group.modelId, group.providerId, protocol)), ...patch },
+    }));
+  };
+  const patchLimit = (protocol: string, patch: Partial<{ contextWindow: string; maxOutputTokens: string; rpm: string; tpm: string }>) => {
+    setLimitInputs((current) => ({
+      ...current,
+      [protocol]: { ...(current[protocol] ?? emptyLimitInputs()), ...patch },
+    }));
+  };
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="编辑 Provider 的协议路由"
+      maxWidth="lg"
+      footer={
+        <FormActions
+          onCancel={onClose}
+          onSubmit={() => saveMut.mutate()}
+          submitLabel="保存协议配置"
+          submitting={saveMut.isPending}
+        />
+      }
+    >
+      <div className="space-y-4">
+        <div className="rounded-lg border bg-muted/30 p-3 text-xs text-muted-foreground">
+          模型 <span className="font-mono text-foreground">{group.modelId}</span> · Provider <span className="font-mono text-foreground">{group.providerId}</span>。
+          在这里开启/关闭 OpenAI Chat、Responses、Anthropic Messages 等协议；账号候选可按协议路由单独配置，也可共用 Provider 下账号。
+        </div>
+        <div className="space-y-3">
+          {PROTOCOL_OPTIONS.map((protocol) => {
+            const draft = drafts[protocol] ?? defaultRouteDraft(group.modelId, group.providerId, protocol);
+            const limits = limitInputs[protocol] ?? emptyLimitInputs();
+            const existing = routeByProtocol.get(protocol);
+            return (
+              <section key={protocol} className="rounded-lg border p-3">
+                <div className="flex flex-wrap items-center gap-3">
+                  <SwitchField
+                    checked={draft.enabled}
+                    onChange={(v) => patchDraft(protocol, { enabled: v })}
+                    label={draft.enabled ? '开启' : '关闭'}
+                  />
+                  <div>
+                    <div className="font-mono text-sm font-medium">{protocol}</div>
+                    <div className="text-xs text-muted-foreground">{existing ? existing.id : '开启后自动创建路由'}</div>
+                  </div>
+                  {existing ? (
+                    <button
+                      type="button"
+                      onClick={() => onConfigureAccounts(existing)}
+                      className="ml-auto inline-flex items-center gap-1 text-xs text-primary hover:underline"
+                    >
+                      <KeyRound className="size-3" /> 配置账号
+                    </button>
+                  ) : null}
+                </div>
+                <div className="mt-3 grid gap-3 md:grid-cols-3">
+                  <Field label="上游模型">
+                    <TextField
+                      value={draft.upstreamModel}
+                      onChange={(v) => patchDraft(protocol, { upstreamModel: v })}
+                      disabled={!draft.enabled}
+                      className="font-mono"
+                    />
+                  </Field>
+                  <Field label="优先级" hint="数字越小优先级越高">
+                    <NumberField
+                      value={String(draft.priority)}
+                      onChange={(v) => patchDraft(protocol, { priority: Number(v) || 0 })}
+                      min={0}
+                      disabled={!draft.enabled}
+                    />
+                  </Field>
+                  <Field label="路由状态">
+                    <StatusPill enabled={draft.enabled} quarantined={existing?.quarantined ?? false} />
+                  </Field>
+                </div>
+                <div className="mt-3 grid gap-3 md:grid-cols-4">
+                  <Field label="Context" hint="留空继承">
+                    <NumberField value={limits.contextWindow} onChange={(v) => patchLimit(protocol, { contextWindow: v })} min={1} disabled={!draft.enabled} />
+                  </Field>
+                  <Field label="Max Output" hint="留空继承">
+                    <NumberField value={limits.maxOutputTokens} onChange={(v) => patchLimit(protocol, { maxOutputTokens: v })} min={1} disabled={!draft.enabled} />
+                  </Field>
+                  <Field label="RPM" hint="留空继承">
+                    <NumberField value={limits.rpm} onChange={(v) => patchLimit(protocol, { rpm: v })} min={1} disabled={!draft.enabled} />
+                  </Field>
+                  <Field label="TPM" hint="留空继承">
+                    <NumberField value={limits.tpm} onChange={(v) => patchLimit(protocol, { tpm: v })} min={1} disabled={!draft.enabled} />
+                  </Field>
+                </div>
+              </section>
+            );
+          })}
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function defaultRouteDraft(modelId: string, providerId: string, protocol: string): RouteDraft {
+  return {
+    ...emptyDraft(),
+    id: routeIDFor(modelId, providerId, protocol),
+    modelId,
+    providerId,
+    upstreamModel: modelId,
+    protocol,
+    enabled: false,
+  };
+}
+
+function emptyLimitInputs() {
+  return { contextWindow: '', maxOutputTokens: '', rpm: '', tpm: '' };
+}
+
+function routeIDFor(modelId: string, providerId: string, protocol: string): string {
+  const safe = `${modelId}-${providerId}-${protocol}`
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return `route-${safe}`.slice(0, 120);
 }
 
 function RouteFormModal({
