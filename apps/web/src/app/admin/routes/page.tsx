@@ -831,7 +831,7 @@ function NewRouteModal({
 }) {
   const queryClient = useQueryClient();
   const [providerId, setProviderId] = useState(providers[0]?.id ?? '');
-  const [protocol, setProtocol] = useState('openai_chat');
+  const [protocols, setProtocols] = useState<Set<string>>(new Set(['openai_chat']));
   const [upstreamModel, setUpstreamModel] = useState(modelId);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
@@ -871,38 +871,62 @@ function NewRouteModal({
     });
   };
 
+  const toggleProtocol = (value: string) => {
+    setProtocols((current) => {
+      const next = new Set(current);
+      if (next.has(value)) next.delete(value);
+      else next.add(value);
+      return next;
+    });
+  };
+
   const createMut = useMutation({
     mutationFn: async () => {
-      const created = await adminConfigApi.createRoute({
-        id: routeIdFor(modelId, providerId, protocol, upstreamModel),
-        modelId,
-        providerId,
-        protocol,
-        upstreamModel: upstreamModel.trim(),
-        priority: 0,
-      });
-      if (selectedIds.size > 0) {
-        const bindings = providerAccounts
-          .filter((account) => account.credentialIds.some((id) => selectedIds.has(id)))
-          .flatMap((account) =>
-            account.credentialIds
-              .filter((id) => selectedIds.has(id))
-              .map((credentialId) => ({
-                routeId: created.id,
-                credentialId,
-                priority: account.credential.priority,
-                enabled: true,
-                rpm: null,
-                tpm: null,
-              })),
-          );
-        if (bindings.length > 0) {
-          await adminConfigApi.setRouteCredentials(created.id, bindings);
+      const selectedProtocols = PROTOCOL_OPTIONS.filter((p) => protocols.has(p));
+      const bindingsFor = (routeId: string) => selectedIds.size > 0
+        ? providerAccounts
+            .filter((account) => account.credentialIds.some((id) => selectedIds.has(id)))
+            .flatMap((account) =>
+              account.credentialIds
+                .filter((id) => selectedIds.has(id))
+                .map((credentialId) => ({
+                  routeId,
+                  credentialId,
+                  priority: account.credential.priority,
+                  enabled: true,
+                  rpm: null,
+                  tpm: null,
+                })),
+            )
+        : [];
+      const results: { protocol: string; ok: boolean; error?: string }[] = [];
+      for (const protocol of selectedProtocols) {
+        try {
+          const created = await adminConfigApi.createRoute({
+            id: routeIdFor(modelId, providerId, protocol, upstreamModel),
+            modelId,
+            providerId,
+            protocol,
+            upstreamModel: upstreamModel.trim(),
+            priority: 0,
+          });
+          const bindings = bindingsFor(created.id);
+          if (bindings.length > 0) {
+            await adminConfigApi.setRouteCredentials(created.id, bindings);
+          }
+          results.push({ protocol, ok: true });
+        } catch (e) {
+          results.push({ protocol, ok: false, error: e instanceof Error ? e.message : String(e) });
         }
+      }
+      const failed = results.filter((r) => !r.ok);
+      if (failed.length > 0) {
+        throw new Error(`${results.length - failed.length}/${results.length} 条创建成功，失败：${failed.map((f) => protocolLabel(f.protocol)).join('、')}`);
       }
     },
     onSuccess: () => {
-      toast.success('路由已创建（需点编译并发布生效）');
+      const count = PROTOCOL_OPTIONS.filter((p) => protocols.has(p)).length;
+      toast.success(`已创建 ${count} 条路由（需点编译并发布生效）`);
       queryClient.invalidateQueries({ queryKey: ['admin', 'route-configs'] });
       queryClient.invalidateQueries({ queryKey: ['admin', 'route-credentials'] });
       onClose();
@@ -910,7 +934,8 @@ function NewRouteModal({
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : '创建失败'),
   });
 
-  const valid = providerId.trim() && protocol.trim() && upstreamModel.trim();
+  const valid = providerId.trim() && protocols.size > 0 && upstreamModel.trim();
+  const selectedProtocolCount = PROTOCOL_OPTIONS.filter((p) => protocols.has(p)).length;
 
   return (
     <Modal
@@ -923,7 +948,7 @@ function NewRouteModal({
         <FormActions
           onCancel={onClose}
           onSubmit={() => createMut.mutate()}
-          submitLabel="创建路由"
+          submitLabel={selectedProtocolCount > 1 ? `创建 ${selectedProtocolCount} 条路由` : '创建路由'}
           submitting={createMut.isPending}
           disabled={!valid || createMut.isPending}
         />
@@ -931,17 +956,27 @@ function NewRouteModal({
     >
       <FormSection cols={1}>
         <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
-          为模型 <span className="font-medium text-foreground">{modelId}</span> 新增一条转发路由，并选择参与该路由的上游账号。
+          为模型 <span className="font-medium text-foreground">{modelId}</span> 新增转发路由：可多选能力协议，每个协议各创建一条路由；选择的账号会绑定到全部新建路由。
         </div>
         <Field label="Provider" required>
           <SelectField value={providerId} onChange={(v) => { setProviderId(v); setSelectedIds(new Set()); }} options={providerOptions} />
         </Field>
-        <Field label="能力协议" required>
-          <SelectField
-            value={protocol}
-            onChange={setProtocol}
-            options={PROTOCOL_OPTIONS.map((p) => ({ value: p, label: protocolLabel(p) }))}
-          />
+        <Field label="能力协议" required hint={`已选 ${selectedProtocolCount} 个，将为每个协议各创建一条路由`}>
+          <div className="flex flex-wrap gap-2">
+            {PROTOCOL_OPTIONS.map((p) => {
+              const selected = protocols.has(p);
+              return (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => toggleProtocol(p)}
+                  className={`rounded-md border px-3 py-1.5 text-sm transition-colors ${selected ? 'border-primary bg-primary/10 font-medium text-primary' : 'hover:bg-muted/30'}`}
+                >
+                  {protocolLabel(p)}
+                </button>
+              );
+            })}
+          </div>
         </Field>
         <Field label="上游模型" required>
           <TextField value={upstreamModel} onChange={setUpstreamModel} placeholder="真正发给上游的模型名" className="font-mono" />
