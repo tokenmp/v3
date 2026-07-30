@@ -307,6 +307,16 @@ export interface AdminRouteConfig {
 
 // ---- Upstream credentials (上游账号) ----
 
+export interface AdminRouteCredential {
+  routeId: string;
+  credentialId: string;
+  priority: number;
+  enabled: boolean;
+  rpm: number | null;
+  tpm: number | null;
+  createdAt?: string;
+}
+
 export interface AdminUpstreamCredential {
   id: string;
   providerId: string;
