@@ -2,7 +2,6 @@
 
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { KeyRound } from 'lucide-react';
 import { toast } from 'sonner';
 import { adminConfigApi } from '@/lib/api/admin';
 import { FilterChip } from '@/components/filter-chip';
@@ -40,6 +39,7 @@ export default function AdminRoutesPage() {
   const [selectedModel, setSelectedModel] = useState('all');
   const [accountGroup, setAccountGroup] = useState<RouteProviderGroup | null>(null);
   const [strategyGroup, setStrategyGroup] = useState<RouteProviderGroup | null>(null);
+  const [expandedGroupKey, setExpandedGroupKey] = useState<string | null>(null);
 
   const { data: routes = [], isLoading } = useQuery({
     queryKey: ['admin', 'route-configs'],
@@ -176,17 +176,33 @@ export default function AdminRoutesPage() {
       ) : providerGroups.length === 0 ? (
         <div className="py-12 text-center text-sm text-muted-foreground">暂无路由配置</div>
       ) : (
-        <div className="grid gap-3">
-          {providerGroups.map((group) => (
-            <ProviderRouteCard
-              key={group.key}
-              group={group}
-              selectedModel={selectedModel}
-              credentialCount={credentialCountsByProvider.get(group.providerId)}
-              onConfigureAccounts={() => setAccountGroup(group)}
-              onConfigureStrategy={() => setStrategyGroup(group)}
-            />
-          ))}
+        <div className="overflow-x-auto rounded-lg border bg-card">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/50 text-xs text-muted-foreground">
+              <tr>
+                <th className="px-3 py-2 text-left font-medium">Provider</th>
+                <th className="px-3 py-2 text-left font-medium">范围</th>
+                <th className="px-3 py-2 text-left font-medium">账号</th>
+                <th className="px-3 py-2 text-left font-medium">能力</th>
+                <th className="px-3 py-2 text-left font-medium">上游 / 路由</th>
+                <th className="px-3 py-2 text-right font-medium">操作</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {providerGroups.map((group) => (
+                <ProviderRouteRow
+                  key={group.key}
+                  group={group}
+                  selectedModel={selectedModel}
+                  credentialCount={credentialCountsByProvider.get(group.providerId)}
+                  expanded={expandedGroupKey === group.key}
+                  onToggle={() => setExpandedGroupKey((current) => current === group.key ? null : group.key)}
+                  onConfigureAccounts={() => setAccountGroup(group)}
+                  onConfigureStrategy={() => setStrategyGroup(group)}
+                />
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
 
@@ -203,100 +219,86 @@ export default function AdminRoutesPage() {
   );
 }
 
-function ProviderRouteCard({
+function ProviderRouteRow({
   group,
   selectedModel,
   credentialCount,
+  expanded,
+  onToggle,
   onConfigureAccounts,
   onConfigureStrategy,
 }: {
   group: RouteProviderGroup;
   selectedModel: string;
   credentialCount?: { active: number; total: number };
+  expanded: boolean;
+  onToggle: () => void;
   onConfigureAccounts: () => void;
   onConfigureStrategy: () => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
   const enabledProtocols = Array.from(new Set(group.routes.filter((r) => r.enabled && !r.quarantined).map((r) => r.protocol))).sort();
   const coveredModels = Array.from(new Set(group.routes.map((r) => r.modelId))).sort();
   const upstreamModels = Array.from(new Set(group.routes.map((r) => r.upstreamModel).filter(Boolean))).sort();
   const isAllModels = selectedModel === 'all';
+  const summary = isAllModels
+    ? `${coveredModels.length} 个模型`
+    : group.modelId;
+  const upstreamSummary = isAllModels
+    ? `${group.routes.length} 条路由`
+    : (upstreamModels.length > 0 ? upstreamModels.join(' · ') : '未配置');
+
   return (
-    <section className="rounded-lg border bg-card p-4 shadow-sm">
-      <div
-        role="button"
-        tabIndex={0}
-        onClick={() => setExpanded((value) => !value)}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault();
-            setExpanded((value) => !value);
-          }
-        }}
-        className="flex w-full cursor-pointer flex-wrap items-center gap-3 text-left"
-        aria-expanded={expanded}
-      >
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <h2 className="font-mono text-sm font-semibold">{group.providerId}</h2>
-            <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
-              {isAllModels ? `${coveredModels.length} 个模型` : group.modelId}
-            </span>
-          </div>
-          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-            <span>账号：{credentialCount ? `${credentialCount.active} / ${credentialCount.total}` : '—'}</span>
-            {!isAllModels && upstreamModels.length === 1 ? <span>上游：{upstreamModels[0]}</span> : null}
-          </div>
-          <div className="mt-2 flex flex-wrap gap-1.5">
+    <>
+      <tr className="align-top hover:bg-muted/20">
+        <td className="px-3 py-2">
+          <button type="button" onClick={onToggle} className="font-mono text-sm font-medium text-primary hover:underline">
+            {group.providerId}
+          </button>
+        </td>
+        <td className="px-3 py-2 text-xs text-muted-foreground">{summary}</td>
+        <td className="px-3 py-2 text-xs text-muted-foreground">{credentialCount ? `${credentialCount.active} / ${credentialCount.total}` : '—'}</td>
+        <td className="px-3 py-2">
+          <div className="flex flex-wrap gap-1">
             {enabledProtocols.length > 0 ? enabledProtocols.map((protocol) => (
-              <span key={protocol} className="rounded-full bg-primary/10 px-2 py-0.5 font-mono text-[10px] text-primary">
+              <span key={protocol} className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
                 {protocolLabel(protocol)}
               </span>
-            )) : (
-              <span className="text-xs text-muted-foreground">暂无启用能力</span>
+            )) : <span className="text-xs text-muted-foreground">暂无</span>}
+          </div>
+        </td>
+        <td className="max-w-[320px] px-3 py-2 text-xs text-muted-foreground">
+          <span className="line-clamp-2">{upstreamSummary}</span>
+        </td>
+        <td className="px-3 py-2 text-right">
+          <div className="inline-flex items-center gap-2">
+            <button type="button" onClick={onToggle} className="rounded-sm border px-2 py-1 text-xs hover:bg-accent">
+              {expanded ? '收起' : '查看'}
+            </button>
+            {isAllModels ? null : (
+              <>
+                <button type="button" onClick={onConfigureAccounts} className="rounded-sm border px-2 py-1 text-xs hover:bg-accent">账号</button>
+                <button type="button" onClick={onConfigureStrategy} className="rounded-sm border px-2 py-1 text-xs hover:bg-accent">策略</button>
+              </>
             )}
           </div>
-        </div>
-        <span className="text-xs text-muted-foreground">{expanded ? '收起' : '展开'}</span>
-        {isAllModels ? null : (
-          <span className="flex shrink-0 flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={(event) => { event.stopPropagation(); onConfigureAccounts(); }}
-              className="inline-flex h-[var(--control-height-sm)] items-center gap-1 rounded-sm bg-primary px-3 text-xs font-medium text-primary-foreground hover:opacity-90"
-            >
-              <KeyRound className="size-3.5" /> 配置账号
-            </button>
-            <button
-              type="button"
-              onClick={(event) => { event.stopPropagation(); onConfigureStrategy(); }}
-              className="inline-flex h-[var(--control-height-sm)] items-center rounded-sm border px-3 text-xs font-medium hover:bg-accent"
-            >
-              策略
-            </button>
-          </span>
-        )}
-      </div>
+        </td>
+      </tr>
       {expanded ? (
-        <div className="mt-3 rounded-lg border bg-muted/20 p-3 text-xs text-muted-foreground">
-          {isAllModels ? (
-            <div className="space-y-2">
-              <div>覆盖模型：{coveredModels.slice(0, 8).join(' · ')}{coveredModels.length > 8 ? ` 等 ${coveredModels.length} 个` : ''}</div>
-              <div>能力摘要：{enabledProtocols.length > 0 ? enabledProtocols.map(protocolLabel).join(' · ') : '暂无'}</div>
-              <div>路由行数：{group.routes.length}（同一模型或协议可能有多条账号/上游映射）</div>
+        <tr className="bg-muted/10">
+          <td colSpan={6} className="px-3 py-3 text-xs text-muted-foreground">
+            <div className="grid gap-2 sm:grid-cols-3">
+              <div><span className="text-foreground">覆盖模型：</span>{coveredModels.slice(0, 10).join(' · ')}{coveredModels.length > 10 ? ` 等 ${coveredModels.length} 个` : ''}</div>
+              <div><span className="text-foreground">能力：</span>{enabledProtocols.length > 0 ? enabledProtocols.map(protocolLabel).join(' · ') : '暂无'}</div>
+              <div><span className="text-foreground">路由：</span>{group.routes.length} 条</div>
+              {!isAllModels ? <div className="sm:col-span-3"><span className="text-foreground">上游模型：</span>{upstreamModels.length > 0 ? upstreamModels.join(' · ') : '未配置'}</div> : null}
             </div>
-          ) : (
-            <div className="space-y-2">
-              <div>上游模型：{upstreamModels.length > 0 ? upstreamModels.join(' · ') : '未配置'}</div>
-              <div>能力摘要：{enabledProtocols.length > 0 ? enabledProtocols.map(protocolLabel).join(' · ') : '暂无'}</div>
-              <div>路由行数：{group.routes.length}；账号候选统一在“配置账号”中编辑。</div>
-            </div>
-          )}
-        </div>
+          </td>
+        </tr>
       ) : null}
-    </section>
+    </>
   );
 }
+
 
 function protocolLabel(protocol: string): string {
   switch (protocol) {
@@ -476,65 +478,64 @@ function GroupAccountsModal({ group, onClose }: { group: RouteProviderGroup; onC
             当前 Provider 暂无账号，请先在“账号管理”中为 {group.providerId} 添加账号。
           </div>
         ) : (
-          <div className="grid gap-3">
-            {rows.map((row) => (
-              <section
-                key={row.logicalId}
-                className={`rounded-lg border p-3 transition-colors ${row.selected ? 'border-primary/40 bg-primary/5' : 'bg-card'}`}
-              >
-                <div className="flex flex-wrap items-start gap-3">
-                  <label className="flex items-center gap-2 text-sm font-medium">
-                    <input
-                      type="checkbox"
-                      checked={row.selected}
-                      onChange={(e) => patchRow(row.logicalId, { enabled: e.target.checked })}
-                      aria-label={`启用账号 ${row.logicalId}`}
-                    />
-                    {row.selected ? '启用' : '停用'}
-                  </label>
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate font-mono text-xs font-medium" title={row.logicalId}>{row.logicalId}</div>
-                    <div className="mt-1 text-xs text-muted-foreground">
-                      {row.credential.keyPrefix || '****'}…{row.credential.keySuffix || '****'} · 默认优先级 {row.credential.priority}
-                      {row.credentialIds.length > 1 ? ` · 合并 ${row.credentialIds.length} 条协议账号` : ''}
-                    </div>
-                    {row.protocols.length > 0 ? (
-                      <div className="mt-1 flex flex-wrap gap-1">
-                        {row.protocols.map((protocol) => (
-                          <span key={protocol} className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{protocol}</span>
-                        ))}
+          <div className="overflow-x-auto rounded-lg border">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/50 text-xs text-muted-foreground">
+                <tr>
+                  <th className="px-3 py-2 text-left font-medium">启用</th>
+                  <th className="px-3 py-2 text-left font-medium">账号</th>
+                  <th className="px-3 py-2 text-left font-medium">能力行</th>
+                  <th className="px-3 py-2 text-left font-medium">优先级</th>
+                  <th className="px-3 py-2 text-left font-medium">RPM</th>
+                  <th className="px-3 py-2 text-left font-medium">TPM</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {rows.map((row) => (
+                  <tr key={row.logicalId} className={row.selected ? 'bg-primary/5' : undefined}>
+                    <td className="px-3 py-2">
+                      <input
+                        type="checkbox"
+                        checked={row.selected}
+                        onChange={(e) => patchRow(row.logicalId, { enabled: e.target.checked })}
+                        aria-label={`启用账号 ${row.logicalId}`}
+                      />
+                    </td>
+                    <td className="min-w-[260px] px-3 py-2">
+                      <div className="truncate font-mono text-xs font-medium" title={row.logicalId}>{row.logicalId}</div>
+                      <div className="mt-0.5 text-xs text-muted-foreground">
+                        {row.credential.keyPrefix || '****'}…{row.credential.keySuffix || '****'} · 默认 {row.credential.priority}
                       </div>
-                    ) : null}
-                  </div>
-                </div>
-                <div className="mt-3 grid gap-3 sm:grid-cols-3">
-                  <div>
-                    <div className="mb-1 text-[11px] text-muted-foreground">优先级</div>
-                    <NumberField
-                      value={String(row.priority)}
-                      onChange={(v) => patchRow(row.logicalId, { priority: Number(v) || 0 })}
-                      min={0}
-                    />
-                  </div>
-                  <div>
-                    <div className="mb-1 text-[11px] text-muted-foreground">RPM</div>
-                    <NullableNumberInput
-                      value={row.rpm}
-                      onChange={(v) => patchRow(row.logicalId, { rpm: v })}
-                      placeholder="继承"
-                    />
-                  </div>
-                  <div>
-                    <div className="mb-1 text-[11px] text-muted-foreground">TPM</div>
-                    <NullableNumberInput
-                      value={row.tpm}
-                      onChange={(v) => patchRow(row.logicalId, { tpm: v })}
-                      placeholder="继承"
-                    />
-                  </div>
-                </div>
-              </section>
-            ))}
+                    </td>
+                    <td className="px-3 py-2 text-xs text-muted-foreground">
+                      {row.credentialIds.length > 1 ? `${row.credentialIds.length} 条` : '1 条'}
+                      {row.protocols.length > 0 ? ` · ${row.protocols.join(' / ')}` : ''}
+                    </td>
+                    <td className="w-28 px-3 py-2">
+                      <NumberField
+                        value={String(row.priority)}
+                        onChange={(v) => patchRow(row.logicalId, { priority: Number(v) || 0 })}
+                        min={0}
+                      />
+                    </td>
+                    <td className="w-28 px-3 py-2">
+                      <NullableNumberInput
+                        value={row.rpm}
+                        onChange={(v) => patchRow(row.logicalId, { rpm: v })}
+                        placeholder="继承"
+                      />
+                    </td>
+                    <td className="w-28 px-3 py-2">
+                      <NullableNumberInput
+                        value={row.tpm}
+                        onChange={(v) => patchRow(row.logicalId, { tpm: v })}
+                        placeholder="继承"
+                      />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>        )}
       </div>
     </Modal>
