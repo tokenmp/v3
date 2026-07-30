@@ -94,6 +94,8 @@ export default function AdminRoutesPage() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [selectedModel, setSelectedModel] = useState('all');
   const [creating, setCreating] = useState(false);
+  const [protocolGroup, setProtocolGroup] = useState<RouteProviderGroup | null>(null);
+  const [accountGroup, setAccountGroup] = useState<RouteProviderGroup | null>(null);
   const [accountRoute, setAccountRoute] = useState<AdminRouteConfig | null>(null);
 
   const { data: routes = [], isLoading } = useQuery({
@@ -275,9 +277,8 @@ export default function AdminRoutesPage() {
             <ProviderRouteCard
               key={group.key}
               group={group}
-              toggling={toggleProtocolMut.isPending}
-              onToggleProtocol={(protocol) => toggleProtocolMut.mutate({ group, protocol })}
-              onConfigureAccounts={(route) => setAccountRoute(route)}
+              onEditProtocols={() => setProtocolGroup(group)}
+              onConfigureAccounts={() => setAccountGroup(group)}
             />
           ))}
         </div>
@@ -290,6 +291,24 @@ export default function AdminRoutesPage() {
           submitting={createMut.isPending}
         />
       ) : null}
+      {protocolGroup ? (
+        <ProtocolToggleModal
+          group={providerGroups.find((g) => g.key === protocolGroup.key) ?? protocolGroup}
+          toggling={toggleProtocolMut.isPending}
+          onToggleProtocol={(protocol) => toggleProtocolMut.mutate({ group: protocolGroup, protocol })}
+          onClose={() => setProtocolGroup(null)}
+        />
+      ) : null}
+      {accountGroup ? (
+        <ProviderAccountsModal
+          group={providerGroups.find((g) => g.key === accountGroup.key) ?? accountGroup}
+          onSelectRoute={(route) => {
+            setAccountGroup(null);
+            setAccountRoute(route);
+          }}
+          onClose={() => setAccountGroup(null)}
+        />
+      ) : null}
       {accountRoute ? (
         <RouteAccountsModal route={accountRoute} onClose={() => setAccountRoute(null)} />
       ) : null}
@@ -299,19 +318,19 @@ export default function AdminRoutesPage() {
 
 function ProviderRouteCard({
   group,
-  toggling,
-  onToggleProtocol,
+  onEditProtocols,
   onConfigureAccounts,
 }: {
   group: RouteProviderGroup;
-  toggling?: boolean;
-  onToggleProtocol: (protocol: string) => void;
-  onConfigureAccounts: (route: AdminRouteConfig) => void;
+  onEditProtocols: () => void;
+  onConfigureAccounts: () => void;
 }) {
-  const enabledCount = group.routes.filter((r) => r.enabled && !r.quarantined).length;
+  const enabledRoutes = group.routes.filter((r) => r.enabled && !r.quarantined);
+  const disabledRoutes = group.routes.filter((r) => !r.enabled || r.quarantined);
+  const enabledProtocols = enabledRoutes.map((r) => r.protocol).sort();
   return (
     <section className="rounded-lg border bg-card p-4 shadow-sm">
-      <div className="flex flex-wrap items-start gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="font-mono text-sm font-semibold">{group.providerId}</h2>
@@ -320,25 +339,68 @@ function ProviderRouteCard({
             </span>
           </div>
           <p className="mt-1 text-xs text-muted-foreground">
-            已启用 {enabledCount} 个协议。点击下面协议块即可开启/关闭；其它上游模型、Context、Max Output、RPM/TPM 都沿用当前路由/Provider 默认配置。
+            {enabledRoutes.length} 个启用协议 · {disabledRoutes.length} 个关闭/隔离协议
           </p>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {enabledProtocols.length > 0 ? enabledProtocols.map((protocol) => (
+              <span key={protocol} className="rounded-full bg-primary/10 px-2 py-0.5 font-mono text-[10px] text-primary">
+                {protocol}
+              </span>
+            )) : (
+              <span className="text-xs text-muted-foreground">暂无启用协议</span>
+            )}
+          </div>
+        </div>
+        <div className="flex shrink-0 flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={onEditProtocols}
+            className="inline-flex h-[var(--control-height-sm)] items-center rounded-sm border px-3 text-xs font-medium hover:bg-accent"
+          >
+            编辑协议
+          </button>
+          <button
+            type="button"
+            onClick={onConfigureAccounts}
+            className="inline-flex h-[var(--control-height-sm)] items-center gap-1 rounded-sm border px-3 text-xs font-medium hover:bg-accent"
+          >
+            <KeyRound className="size-3.5" /> 配置账号
+          </button>
         </div>
       </div>
+    </section>
+  );
+}
 
-      <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-        {PROTOCOL_OPTIONS.map((protocol) => {
-          const route = group.routes.find((r) => r.protocol === protocol);
-          const active = !!route?.enabled && !route.quarantined;
-          return (
-            <div
-              key={protocol}
-              className={`rounded-lg border p-3 transition-colors ${active ? 'border-primary/50 bg-primary/5' : 'bg-muted/20'}`}
-            >
+function ProtocolToggleModal({
+  group,
+  toggling,
+  onToggleProtocol,
+  onClose,
+}: {
+  group: RouteProviderGroup;
+  toggling?: boolean;
+  onToggleProtocol: (protocol: string) => void;
+  onClose: () => void;
+}) {
+  return (
+    <Modal open onClose={onClose} title="编辑协议" maxWidth="md">
+      <div className="space-y-4">
+        <div className="rounded-lg border bg-muted/30 p-3 text-xs text-muted-foreground">
+          模型 <span className="font-mono text-foreground">{group.modelId}</span> · Provider <span className="font-mono text-foreground">{group.providerId}</span>。
+          只控制协议是否可用；上游模型、Context、Max Output、RPM/TPM 继续沿用当前 route / Provider 默认配置。
+        </div>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {PROTOCOL_OPTIONS.map((protocol) => {
+            const route = group.routes.find((r) => r.protocol === protocol);
+            const active = !!route?.enabled && !route.quarantined;
+            return (
               <button
+                key={protocol}
                 type="button"
                 disabled={toggling}
                 onClick={() => onToggleProtocol(protocol)}
-                className="flex w-full items-center justify-between gap-2 text-left disabled:opacity-60"
+                className={`flex items-center justify-between gap-3 rounded-lg border p-3 text-left transition-colors disabled:opacity-60 ${active ? 'border-primary/50 bg-primary/5' : 'bg-muted/20'}`}
               >
                 <span>
                   <span className="block font-mono text-xs font-medium">{protocol}</span>
@@ -350,23 +412,59 @@ function ProviderRouteCard({
                   <span className={`size-4 rounded-full bg-white transition-transform ${active ? 'translate-x-4' : ''}`} />
                 </span>
               </button>
-              {route ? (
-                <div className="mt-3 flex items-center justify-between gap-2 border-t pt-2 text-[11px] text-muted-foreground">
-                  <span className="truncate font-mono" title={route.upstreamModel}>{route.upstreamModel}</span>
-                  <button
-                    type="button"
-                    onClick={() => onConfigureAccounts(route)}
-                    className="inline-flex shrink-0 items-center gap-1 text-primary hover:underline"
-                  >
-                    <KeyRound className="size-3" /> 账号
-                  </button>
-                </div>
-              ) : null}
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </div>
-    </section>
+    </Modal>
+  );
+}
+
+function ProviderAccountsModal({
+  group,
+  onSelectRoute,
+  onClose,
+}: {
+  group: RouteProviderGroup;
+  onSelectRoute: (route: AdminRouteConfig) => void;
+  onClose: () => void;
+}) {
+  const routes = group.routes
+    .filter((r) => r.enabled && !r.quarantined)
+    .sort((a, b) => a.protocol.localeCompare(b.protocol));
+  return (
+    <Modal open onClose={onClose} title="配置账号" maxWidth="md">
+      <div className="space-y-4">
+        <div className="rounded-lg border bg-muted/30 p-3 text-xs text-muted-foreground">
+          模型 <span className="font-mono text-foreground">{group.modelId}</span> · Provider <span className="font-mono text-foreground">{group.providerId}</span>。
+          选择一个已启用协议后配置它的账号候选；未单独配置时会使用 Provider 下全部 active 账号。
+        </div>
+        {routes.length === 0 ? (
+          <div className="rounded-lg border border-dashed py-10 text-center text-sm text-muted-foreground">
+            当前 Provider 没有启用协议，请先在“编辑协议”中开启至少一个协议。
+          </div>
+        ) : (
+          <div className="grid gap-2">
+            {routes.map((route) => (
+              <button
+                key={route.id}
+                type="button"
+                onClick={() => onSelectRoute(route)}
+                className="flex items-center justify-between rounded-lg border p-3 text-left hover:bg-accent"
+              >
+                <span>
+                  <span className="block font-mono text-xs font-medium">{route.protocol}</span>
+                  <span className="mt-1 block truncate text-[11px] text-muted-foreground">{route.upstreamModel}</span>
+                </span>
+                <span className="inline-flex items-center gap-1 text-xs text-primary">
+                  <KeyRound className="size-3" /> 配置
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </Modal>
   );
 }
 
