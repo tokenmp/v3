@@ -8,7 +8,6 @@ import { FilterChip } from '@/components/filter-chip';
 import { Modal } from '@/components/ui/modal';
 import {
   FormActions,
-  NumberField,
   inputCls,
 } from '@/components/ui/field';
 import { PublishStatusHint } from '@/components/publish-status-hint';
@@ -31,6 +30,11 @@ const STATUS_FILTERS: { key: StatusFilter; label: string }[] = [
 
 function logicalCredentialId(id: string): string {
   return id.replace(/-(openai|anthropic|responses)$/u, '');
+}
+
+function shortCredentialLabel(id: string, providerId: string): string {
+  const stripped = id.replace(/^cred-/u, '').replace(new RegExp(`-${providerId}$`, 'u'), '');
+  return stripped.length > 12 ? `${stripped.slice(0, 8)}…${stripped.slice(-4)}` : stripped;
 }
 
 export default function AdminRoutesPage() {
@@ -480,20 +484,19 @@ function GroupAccountsModal({ group, onClose }: { group: RouteProviderGroup; onC
         ) : (
           <div className="overflow-x-auto rounded-lg border">
             <table className="w-full text-sm">
-              <thead className="bg-muted/50 text-xs text-muted-foreground">
+              <thead className="bg-muted/40 text-xs text-muted-foreground">
                 <tr>
-                  <th className="px-3 py-2 text-left font-medium">启用</th>
+                  <th className="w-16 px-3 py-2 text-left font-medium">启用</th>
                   <th className="px-3 py-2 text-left font-medium">账号</th>
-                  <th className="px-3 py-2 text-left font-medium">能力行</th>
-                  <th className="px-3 py-2 text-left font-medium">优先级</th>
-                  <th className="px-3 py-2 text-left font-medium">RPM</th>
-                  <th className="px-3 py-2 text-left font-medium">TPM</th>
+                  <th className="w-24 px-3 py-2 text-left font-medium">优先级</th>
+                  <th className="w-24 px-3 py-2 text-left font-medium">RPM</th>
+                  <th className="w-24 px-3 py-2 text-left font-medium">TPM</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
                 {rows.map((row) => (
-                  <tr key={row.logicalId} className={row.selected ? 'bg-primary/5' : undefined}>
-                    <td className="px-3 py-2">
+                  <tr key={row.logicalId} className="hover:bg-muted/20">
+                    <td className="px-3 py-2 align-middle">
                       <input
                         type="checkbox"
                         checked={row.selected}
@@ -501,34 +504,38 @@ function GroupAccountsModal({ group, onClose }: { group: RouteProviderGroup; onC
                         aria-label={`启用账号 ${row.logicalId}`}
                       />
                     </td>
-                    <td className="min-w-[260px] px-3 py-2">
-                      <div className="truncate font-mono text-xs font-medium" title={row.logicalId}>{row.logicalId}</div>
+                    <td className="min-w-[280px] px-3 py-2 align-middle">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <span className="font-mono text-xs font-medium" title={row.logicalId}>
+                          {shortCredentialLabel(row.logicalId, group.providerId)}
+                        </span>
+                        {row.selected ? <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">已选</span> : null}
+                      </div>
                       <div className="mt-0.5 text-xs text-muted-foreground">
-                        {row.credential.keyPrefix || '****'}…{row.credential.keySuffix || '****'} · 默认 {row.credential.priority}
+                        {row.credential.keyPrefix || '****'}…{row.credential.keySuffix || '****'}
+                        {row.credentialIds.length > 1 ? ` · ${row.credentialIds.length} 条能力合并` : ''}
                       </div>
                     </td>
-                    <td className="px-3 py-2 text-xs text-muted-foreground">
-                      {row.credentialIds.length > 1 ? `${row.credentialIds.length} 条` : '1 条'}
-                      {row.protocols.length > 0 ? ` · ${row.protocols.join(' / ')}` : ''}
-                    </td>
-                    <td className="w-28 px-3 py-2">
-                      <NumberField
-                        value={String(row.priority)}
-                        onChange={(v) => patchRow(row.logicalId, { priority: Number(v) || 0 })}
+                    <td className="px-3 py-2 align-middle">
+                      <CompactNumberInput
+                        value={row.priority}
+                        onChange={(v) => patchRow(row.logicalId, { priority: v ?? 0 })}
                         min={0}
                       />
                     </td>
-                    <td className="w-28 px-3 py-2">
-                      <NullableNumberInput
+                    <td className="px-3 py-2 align-middle">
+                      <CompactNumberInput
                         value={row.rpm}
                         onChange={(v) => patchRow(row.logicalId, { rpm: v })}
+                        min={1}
                         placeholder="继承"
                       />
                     </td>
-                    <td className="w-28 px-3 py-2">
-                      <NullableNumberInput
+                    <td className="px-3 py-2 align-middle">
+                      <CompactNumberInput
                         value={row.tpm}
                         onChange={(v) => patchRow(row.logicalId, { tpm: v })}
+                        min={1}
                         placeholder="继承"
                       />
                     </td>
@@ -544,16 +551,28 @@ function GroupAccountsModal({ group, onClose }: { group: RouteProviderGroup; onC
 
 
 
-function NullableNumberInput({ value, onChange, placeholder }: { value: number | null; onChange: (v: number | null) => void; placeholder?: string }) {
+function CompactNumberInput({
+  value,
+  onChange,
+  min,
+  placeholder,
+}: {
+  value: number | null;
+  onChange: (v: number | null) => void;
+  min?: number;
+  placeholder?: string;
+}) {
   return (
-    <NumberField
+    <input
+      type="number"
       value={value != null ? String(value) : ''}
-      onChange={(v) => {
-        const trimmed = v.trim();
+      onChange={(event) => {
+        const trimmed = event.target.value.trim();
         onChange(trimmed === '' ? null : (Number(trimmed) || null));
       }}
-      min={1}
+      min={min}
       placeholder={placeholder}
+      className="h-8 w-20 rounded-sm border bg-background px-2 text-xs outline-none focus:border-primary"
     />
   );
 }
