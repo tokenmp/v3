@@ -52,11 +52,17 @@ type RevisionSummary struct {
 	ChangeLog   string     `json:"change_log,omitempty"`
 }
 
-// ErrConflict indicates a state conflict (e.g. publishing a non-draft).
+// ErrConflict indicates a state conflict (e.g. publishing a non-draft) or a
+// unique-constraint violation (PostgreSQL SQLSTATE 23505).
 var ErrConflict = errors.New("repository: conflicting state")
 
 // ErrInsertFailed indicates an insert failure.
 var ErrInsertFailed = errors.New("repository: insert failed")
+
+// ErrForeignKeyViolation indicates a foreign-key constraint violation
+// (PostgreSQL SQLSTATE 23503), typically a reference to a row that does not
+// exist (e.g. a route mapping referencing an unknown model/provider).
+var ErrForeignKeyViolation = errors.New("repository: foreign key violation")
 
 // ---- Writer implementation ----
 

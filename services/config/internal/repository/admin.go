@@ -3,7 +3,9 @@ package repository
 import (
 	"context"
 	"errors"
+	"fmt"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
 )
 
@@ -344,5 +346,19 @@ func classifyReadErr(err error) error {
 }
 
 func classifyWriteErr(err error) error {
-	return ErrInsertFailed
+	if err == nil {
+		return nil
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		switch pgErr.Code {
+		case "23505": // unique_violation
+			return fmt.Errorf("%w: %w", ErrConflict, err)
+		case "23503": // foreign_key_violation
+			return fmt.Errorf("%w: %w", ErrForeignKeyViolation, err)
+		default:
+			return fmt.Errorf("%w: %w", ErrInsertFailed, err)
+		}
+	}
+	return fmt.Errorf("%w: %w", ErrInsertFailed, err)
 }

@@ -5,11 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/tokenmp/v3/packages/go/httpresp"
 	"github.com/tokenmp/v3/services/config/internal/repository"
 )
@@ -698,19 +701,75 @@ func writeAdminReadErr(w http.ResponseWriter, err error) {
 		httpresp.Error(w, httpresp.CodeNotFound, "not found")
 		return
 	}
+	slog.Error("admin read failed", "error", err)
 	httpresp.Error(w, httpresp.CodeInternalError, "internal error")
 }
 
 func writeAdminWriteErr(w http.ResponseWriter, err error) {
-	if errors.Is(err, repository.ErrNotFound) {
+	switch {
+	case errors.Is(err, repository.ErrNotFound):
 		httpresp.Error(w, httpresp.CodeNotFound, "not found")
-		return
+	case errors.Is(err, repository.ErrConflict):
+		// Unique-constraint violation; expose the underlying message which is
+		// already safe (PG constraint name + generic message, no secrets).
+		slog.Warn("admin write conflict", "error", err)
+		httpresp.Error(w, httpresp.CodeConflict, errorMessage(err))
+	case errors.Is(err, repository.ErrForeignKeyViolation):
+		// A referenced row does not exist (e.g. route → unknown model). Report
+		// it as a client error so callers see the cause instead of a generic
+		// 500 that reads as "service unavailable".
+		slog.Warn("admin write foreign key violation", "error", err)
+		httpresp.Error(w, httpresp.CodeBadRequest, errorMessage(err))
+	default:
+		slog.Error("admin write failed", "error", err)
+		httpresp.Error(w, httpresp.CodeInternalError, "internal error")
 	}
-	if errors.Is(err, repository.ErrConflict) {
-		httpresp.Error(w, httpresp.CodeConflict, "conflict")
-		return
+}
+
+// errorMessage maps a wrapped write error to a safe, human-readable Chinese
+// message. It inspects the underlying PostgreSQL error (via errors.As) and
+// derives a concise cause from its SQLSTATE code and constraint name, so the
+// client sees "模型不存在..." instead of an opaque "internal error" or a
+// raw English SQL message.
+func errorMessage(err error) string {
+	if err == nil {
+		return ""
 	}
-	httpresp.Error(w, httpresp.CodeInternalError, "internal error")
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgWriteMessage(pgErr)
+	}
+	return "数据写入失败，请稍后重试或联系管理员"
+}
+
+// pgWriteMessage maps a PostgreSQL error to a friendly Chinese hint.
+func pgWriteMessage(e *pgconn.PgError) string {
+	switch e.Code {
+	case "23503": // foreign_key_violation: a referenced row does not exist
+		return foreignKeyMessage(e)
+	case "23505": // unique_violation: duplicate key
+		return "该记录已存在（主键或唯一约束冲突），请勿重复创建"
+	default:
+		return "数据写入失败：" + e.Message
+	}
+}
+
+// foreignKeyMessage derives which referenced entity is missing from the
+// constraint name (e.g. route_mappings_model_id_fkey → model_id) and returns
+// a targeted hint. Unknown constraints fall back to a generic message that
+// still names the constraint for diagnosis.
+func foreignKeyMessage(e *pgconn.PgError) string {
+	c := e.ConstraintName
+	switch {
+	case strings.Contains(c, "model_id"):
+		return "模型不存在，请先在「模型配置」中创建该模型后再配置路由"
+	case strings.Contains(c, "provider_id"):
+		return "Provider 不存在，请先在 Provider 配置中创建"
+	case strings.Contains(c, "credential_id"):
+		return "关联的上游账号不存在，请检查账号是否已删除"
+	default:
+		return "引用的数据不存在（外键约束 " + c + "），请检查关联数据是否存在"
+	}
 }
 
 // handleModelsCatalog returns active model IDs for plan allowedModels selector.
