@@ -14,6 +14,14 @@
 - Git 开发流程：`.agents/gitflow.md`
 - 操作约束：`.agents/operations.md`
 
+## 核心设计约束：如无必要，勿增实体
+
+**如无必要，勿增实体。** 在已有服务、模块、包、接口、端口、facade、数据表、OpenAPI 字段、配置项、环境变量、状态枚举、抽象层或通用模型足以表达当前需求时，禁止为了“看起来更完整”“以后可能会用”“更通用”“更分层”而新增实体。
+
+新增实体前必须先证明：现有实体无法安全、清晰、可维护地承载当前已确认需求；新增后不会制造重复权威来源、跨服务同步负担、契约膨胀、主路径额外依赖、隐藏降级语义或 exactly-once/强一致等未经承诺的幻觉。不能证明时，应优先复用、收敛或扩展现有事实来源，并在最近作用域的 `AGENTS.md` 或契约文档中说明原因。
+
+典型禁止方向：不要重新引入已被 Auth-owned `api_keys` 统一取代的 `user_api_keys`/`bot_keys`；不要给 Executor 增加本地 `executor_users` 来复制 Auth 身份；不要把 Notice 的通用数据驱动 `action` 拆成一组页面专用字段；不要在未证明必要前新增大一统 `UniversalLLMRequest`、独立 Config Runtime Service、强一致日志确认协议或提前暴露未支持的 GPT Image 参数。
+
 ## Monorepo 分区
 
 - Apps：`apps/AGENTS.md`

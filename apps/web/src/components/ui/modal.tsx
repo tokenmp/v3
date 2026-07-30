@@ -26,7 +26,7 @@ export function Modal({
   children: ReactNode;
   footer?: ReactNode;
   onClose: () => void;
-  maxWidth?: 'sm' | 'md' | 'lg';
+  maxWidth?: 'sm' | 'md' | 'lg' | 'xl' | '2xl' | '3xl';
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const pointerDownOnBackdropRef = useRef(false);
@@ -49,7 +49,13 @@ export function Modal({
     return () => d.removeEventListener('cancel', onCancel);
   }, [onClose]);
 
-  const maxW = maxWidth === 'sm' ? 'max-w-sm' : maxWidth === 'lg' ? 'max-w-2xl' : 'max-w-md';
+  const maxW =
+    maxWidth === 'sm' ? 'max-w-sm' :
+    maxWidth === 'lg' ? 'max-w-2xl' :
+    maxWidth === 'xl' ? 'max-w-3xl' :
+    maxWidth === '2xl' ? 'max-w-4xl' :
+    maxWidth === '3xl' ? 'max-w-5xl' :
+    'max-w-md';
 
   return (
     <dialog
