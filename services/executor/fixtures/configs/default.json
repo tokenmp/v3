@@ -11,13 +11,20 @@
         {
           "ID": "global-retry-429",
           "Priority": 10,
-          "HTTPStatuses": [429],
+          "HTTPStatuses": [
+            429
+          ],
           "Action": "next_credential"
         },
         {
           "ID": "global-retry-5xx",
           "Priority": 20,
-          "HTTPStatuses": [500, 502, 503, 504],
+          "HTTPStatuses": [
+            500,
+            502,
+            503,
+            504
+          ],
           "Action": "next_route"
         }
       ]
@@ -34,7 +41,11 @@
     "chat-default": {
       "ID": "chat-default",
       "DisplayName": "Default Chat",
-      "Capabilities": ["chat", "streaming", "tools"],
+      "Capabilities": [
+        "chat",
+        "streaming",
+        "tools"
+      ],
       "Thinking": {
         "Supported": true,
         "DefaultEffort": "medium",
@@ -51,9 +62,14 @@
       "Name": "OpenAI Default",
       "BaseURL": "https://api.openai.example/v1",
       "SDKKind": "openai",
-      "Protocol": "openai_chat",
       "Retry": {},
-      "Timeout": {}
+      "Timeout": {},
+      "Endpoints": [
+        {
+          "Protocol": "openai_chat",
+          "Path": "/v1/chat/completions"
+        }
+      ]
     }
   },
   "Routes": [
@@ -61,11 +77,9 @@
       "ID": "route-chat-default",
       "ModelID": "chat-default",
       "ProviderID": "openai-default",
-      "AdapterID": "adapter-openai-default",
       "UpstreamModel": "gpt-default",
       "Priority": 100,
       "Enabled": true,
-      "Protocol": "openai_chat",
       "Retry": {},
       "Timeout": {},
       "Credentials": []
@@ -85,7 +99,10 @@
         "CredentialRef": "vault://openai-default/credential/default"
       },
       "Capability": {
-        "Require": ["chat", "streaming"],
+        "Require": [
+          "chat",
+          "streaming"
+        ],
         "Deny": []
       },
       "Thinking": {
@@ -109,7 +126,10 @@
         "MaxBudgetToken": 8000
       },
       "Request": {
-        "AllowedHeaders": ["Content-Type", "Accept"],
+        "AllowedHeaders": [
+          "Content-Type",
+          "Accept"
+        ],
         "AllowedQuery": [],
         "Rules": []
       },
@@ -119,7 +139,9 @@
             "ID": "resp-429",
             "Priority": 10,
             "Match": {
-              "HTTPStatuses": [429]
+              "HTTPStatuses": [
+                429
+              ]
             },
             "Output": {
               "HTTPStatus": 429,
@@ -139,13 +161,20 @@
           {
             "ID": "retry-429",
             "Priority": 10,
-            "HTTPStatuses": [429],
+            "HTTPStatuses": [
+              429
+            ],
             "Action": "next_credential"
           },
           {
             "ID": "retry-5xx",
             "Priority": 20,
-            "HTTPStatuses": [500, 502, 503, 504],
+            "HTTPStatuses": [
+              500,
+              502,
+              503,
+              504
+            ],
             "Action": "next_route"
           }
         ]

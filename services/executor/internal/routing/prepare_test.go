@@ -29,6 +29,8 @@ func (r *prepareCredentialResolver) Resolve(ctx context.Context, ref string) (sd
 	return sdk.NewCredentialSecret([]byte("prepared-secret")), nil
 }
 
+func preparePtrString(v string) *string { return &v }
+
 func prepareSnapshot(t *testing.T) *snapshot.CompiledSnapshot {
 	t.Helper()
 	config, err := adapter.Compile(adapter.ConfigInput{
@@ -37,12 +39,12 @@ func prepareSnapshot(t *testing.T) *snapshot.CompiledSnapshot {
 			"model": {ID: "model", Capabilities: []adapter.Capability{adapter.CapabilityChat}},
 		},
 		Providers: map[string]adapter.ProviderInput{
-			"provider": {ID: "provider", Name: "provider", Selector: "selected", BaseURL: "https://provider.example/v1", SDKKind: adapter.SDKKindOpenAI, Protocol: adapter.ProtocolOpenAIChat},
+			"provider": {ID: "provider", Name: "provider", Selector: "selected", BaseURL: "https://provider.example/v1", SDKKind: adapter.SDKKindOpenAI, Endpoints: []adapter.EndpointInput{{Protocol: adapter.ProtocolOpenAIChat, Path: "/v1/chat/completions"}}},
 		},
 		Adapters: map[string]adapter.AdapterConfig{
-			"adapter": {ID: "adapter", Name: "adapter", Version: 1, SDKKind: adapter.SDKKindOpenAI, Protocol: adapter.ProtocolOpenAIChat, Auth: adapter.AuthRule{Kind: adapter.AuthBearerHeader, Header: "Authorization"}, Request: adapter.RequestPolicy{AllowedHeaders: []string{"X-Test"}}},
+			"adapter": {ID: "adapter", Name: "adapter", Version: 1, SDKKind: adapter.SDKKindOpenAI, Protocol: adapter.ProtocolOpenAIChat, ProviderID: preparePtrString("provider"), Auth: adapter.AuthRule{Kind: adapter.AuthBearerHeader, Header: "Authorization"}, Request: adapter.RequestPolicy{AllowedHeaders: []string{"X-Test"}}},
 		},
-		Routes: []adapter.RouteInput{{ID: "route", ModelID: "model", ProviderID: "provider", AdapterID: "adapter", UpstreamModel: "upstream", Priority: 7, Enabled: true, Protocol: adapter.ProtocolOpenAIChat, RouteGroup: "group", Credentials: []adapter.CredentialInput{{ID: "credential", CredentialRef: "vault://private/credential", Priority: 3, Enabled: true}}}},
+		Routes: []adapter.RouteInput{{ID: "route", ModelID: "model", ProviderID: "provider", UpstreamModel: "upstream", Priority: 7, Enabled: true, RouteGroup: "group", Credentials: []adapter.CredentialInput{{ID: "credential", CredentialRef: "vault://private/credential", Priority: 3, Enabled: true}}}},
 	})
 	if err != nil {
 		t.Fatalf("Compile: %v", err)
@@ -92,7 +94,7 @@ func TestResolverPreparePinsPrivateConfigAndRedactsReference(t *testing.T) {
 	if prepared.Target != (sdk.Target{BaseURL: "https://provider.example/v1", UpstreamModel: "upstream", Protocol: adapter.ProtocolOpenAIChat}) {
 		t.Fatalf("Target = %+v", prepared.Target)
 	}
-	if prepared.Candidate != (sdk.CandidateIdentity{ModelID: "model", ProviderID: "provider", RouteID: "route", CredentialID: "credential", AdapterID: "adapter"}) {
+	if prepared.Candidate != (sdk.CandidateIdentity{ModelID: "model", ProviderID: "provider", RouteID: "route--openai_chat", CredentialID: "credential", AdapterID: "adapter"}) {
 		t.Fatalf("Candidate = %+v", prepared.Candidate)
 	}
 	if prepared.Revision != "prepare-revision" || prepared.Generation != 42 || prepared.Adapter.Auth.CredentialRef != "" {
@@ -192,7 +194,7 @@ func TestResolverPrepareAuthNoneAndContextAndSafeErrors(t *testing.T) {
 			t.Fatalf("Resolve legacy: candidates=%d err=%v", len(plan.Candidates), resolveErr)
 		}
 		candidate := plan.Candidates[0]
-		legacyRef := config.Adapters[config.Routes[0].AdapterID].Auth.CredentialRef
+		legacyRef := config.Adapters["adapter-openai-default"].Auth.CredentialRef
 		credentials := &prepareCredentialResolver{err: fmt.Errorf("legacy resolver failed for %s", legacyRef)}
 		prepared, err := resolver.Prepare(candidate)
 		if err != nil || strings.Contains(fmt.Sprintf("%+v", prepared), legacyRef) {

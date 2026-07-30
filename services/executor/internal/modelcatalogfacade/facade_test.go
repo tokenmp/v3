@@ -74,9 +74,9 @@ func buildStoreWithModels(t *testing.T, models map[string]adapter.ModelInput, ro
 		Revision: "catalog-test",
 		Models:   models,
 		Providers: map[string]adapter.ProviderInput{
-			"openai":     {ID: "openai", Name: "openai", Selector: "openai", BaseURL: "https://openai.example/v1", SDKKind: adapter.SDKKindOpenAI, Protocol: adapter.ProtocolOpenAIChat},
-			"anthropic":  {ID: "anthropic", Name: "anthropic", Selector: "anthropic", BaseURL: "https://anthropic.example/v1", SDKKind: adapter.SDKKindAnthropic, Protocol: adapter.ProtocolAnthropic},
-			"openai-img": {ID: "openai-img", Name: "OpenAI Images", Selector: "openai-img", BaseURL: "https://openai.example/v1", SDKKind: adapter.SDKKindOpenAI, Protocol: adapter.ProtocolOpenAIImages},
+			"openai":     {ID: "openai", Name: "openai", Selector: "openai", BaseURL: "https://openai.example/v1", SDKKind: adapter.SDKKindOpenAI, Endpoints: []adapter.EndpointInput{{Protocol: adapter.ProtocolOpenAIChat, Path: "/v1/chat/completions"}}},
+			"anthropic":  {ID: "anthropic", Name: "anthropic", Selector: "anthropic", BaseURL: "https://anthropic.example/v1", SDKKind: adapter.SDKKindAnthropic, Endpoints: []adapter.EndpointInput{{Protocol: adapter.ProtocolAnthropic, Path: "/v1/messages"}}},
+			"openai-img": {ID: "openai-img", Name: "OpenAI Images", Selector: "openai-img", BaseURL: "https://openai.example/v1", SDKKind: adapter.SDKKindOpenAI, Endpoints: []adapter.EndpointInput{{Protocol: adapter.ProtocolOpenAIImages, Path: "/v1/images/generations"}}},
 		},
 		Adapters: map[string]adapter.AdapterConfig{
 			"chat-adapter": {
@@ -111,13 +111,13 @@ func buildStoreWithModels(t *testing.T, models map[string]adapter.ModelInput, ro
 func defaultRoutes() []adapter.RouteInput {
 	return []adapter.RouteInput{
 		{
-			ID: "chat-route", ModelID: "chat-model", ProviderID: "openai", AdapterID: "chat-adapter", UpstreamModel: "gpt-upstream",
-			Priority: 1, Enabled: true, Protocol: adapter.ProtocolOpenAIChat,
+			ID: "chat-route", ModelID: "chat-model", ProviderID: "openai", UpstreamModel: "gpt-upstream",
+			Priority: 1, Enabled: true,
 			Credentials: []adapter.CredentialInput{{ID: "cred-a", CredentialRef: "vault://private/cred-a", Priority: 1, Enabled: true}},
 		},
 		{
-			ID: "anthropic-route", ModelID: "anthropic-model", ProviderID: "anthropic", AdapterID: "anthropic-adapter", UpstreamModel: "claude-upstream",
-			Priority: 1, Enabled: true, Protocol: adapter.ProtocolAnthropic,
+			ID: "anthropic-route", ModelID: "anthropic-model", ProviderID: "anthropic", UpstreamModel: "claude-upstream",
+			Priority: 1, Enabled: true,
 			Credentials: []adapter.CredentialInput{{ID: "cred-b", CredentialRef: "vault://private/cred-b", Priority: 1, Enabled: true}},
 		},
 	}
@@ -227,13 +227,13 @@ func TestListModelsExcludesModelsWithNoEnabledRoute(t *testing.T) {
 	}
 	routes := []adapter.RouteInput{
 		{
-			ID: "enabled-route", ModelID: "enabled-model", ProviderID: "openai", AdapterID: "chat-adapter", UpstreamModel: "gpt-upstream",
-			Priority: 1, Enabled: true, Protocol: adapter.ProtocolOpenAIChat,
+			ID: "enabled-route", ModelID: "enabled-model", ProviderID: "openai", UpstreamModel: "gpt-upstream",
+			Priority: 1, Enabled: true,
 			Credentials: []adapter.CredentialInput{{ID: "cred-a", CredentialRef: "vault://private/cred-a", Priority: 1, Enabled: true}},
 		},
 		{
-			ID: "disabled-route", ModelID: "disabled-model", ProviderID: "openai", AdapterID: "chat-adapter", UpstreamModel: "gpt-upstream",
-			Priority: 2, Enabled: false, Protocol: adapter.ProtocolOpenAIChat,
+			ID: "disabled-route", ModelID: "disabled-model", ProviderID: "openai", UpstreamModel: "gpt-upstream",
+			Priority: 2, Enabled: false,
 			Credentials: []adapter.CredentialInput{{ID: "cred-b", CredentialRef: "vault://private/cred-b", Priority: 1, Enabled: true}},
 		},
 	}
@@ -306,7 +306,7 @@ func TestListModelsEmptyConfigReturnsEmpty(t *testing.T) {
 		Revision: "empty-test",
 		Models:   map[string]adapter.ModelInput{},
 		Providers: map[string]adapter.ProviderInput{
-			"openai": {ID: "openai", Name: "openai", Selector: "openai", BaseURL: "https://openai.example/v1", SDKKind: adapter.SDKKindOpenAI, Protocol: adapter.ProtocolOpenAIChat},
+			"openai": {ID: "openai", Name: "openai", Selector: "openai", BaseURL: "https://openai.example/v1", SDKKind: adapter.SDKKindOpenAI, Endpoints: []adapter.EndpointInput{{Protocol: adapter.ProtocolOpenAIChat, Path: "/v1/chat/completions"}}},
 		},
 		Adapters: map[string]adapter.AdapterConfig{
 			"chat-adapter": {
@@ -347,9 +347,9 @@ func TestListModelsMultipleModelsSorted(t *testing.T) {
 		"middle": {ID: "middle", Capabilities: []adapter.Capability{adapter.CapabilityChat}},
 	}
 	routes := []adapter.RouteInput{
-		{ID: "r1", ModelID: "zebra", ProviderID: "openai", AdapterID: "chat-adapter", UpstreamModel: "z", Priority: 1, Enabled: true, Protocol: adapter.ProtocolOpenAIChat, Credentials: []adapter.CredentialInput{{ID: "c1", CredentialRef: "vault://p/c1", Priority: 1, Enabled: true}}},
-		{ID: "r2", ModelID: "alpha", ProviderID: "openai", AdapterID: "chat-adapter", UpstreamModel: "a", Priority: 1, Enabled: true, Protocol: adapter.ProtocolOpenAIChat, Credentials: []adapter.CredentialInput{{ID: "c2", CredentialRef: "vault://p/c2", Priority: 1, Enabled: true}}},
-		{ID: "r3", ModelID: "middle", ProviderID: "openai", AdapterID: "chat-adapter", UpstreamModel: "m", Priority: 1, Enabled: true, Protocol: adapter.ProtocolOpenAIChat, Credentials: []adapter.CredentialInput{{ID: "c3", CredentialRef: "vault://p/c3", Priority: 1, Enabled: true}}},
+		{ID: "r1", ModelID: "zebra", ProviderID: "openai", UpstreamModel: "z", Priority: 1, Enabled: true, Credentials: []adapter.CredentialInput{{ID: "c1", CredentialRef: "vault://p/c1", Priority: 1, Enabled: true}}},
+		{ID: "r2", ModelID: "alpha", ProviderID: "openai", UpstreamModel: "a", Priority: 1, Enabled: true, Credentials: []adapter.CredentialInput{{ID: "c2", CredentialRef: "vault://p/c2", Priority: 1, Enabled: true}}},
+		{ID: "r3", ModelID: "middle", ProviderID: "openai", UpstreamModel: "m", Priority: 1, Enabled: true, Credentials: []adapter.CredentialInput{{ID: "c3", CredentialRef: "vault://p/c3", Priority: 1, Enabled: true}}},
 	}
 	store := buildStoreWithModels(t, models, routes, time.Time{})
 	facade := New(Options{Store: store, Quarantine: noopQuarantine{}})
@@ -386,7 +386,7 @@ func TestListModelsThinkingMapping(t *testing.T) {
 		},
 	}
 	routes := []adapter.RouteInput{
-		{ID: "r1", ModelID: "thinking-model", ProviderID: "openai", AdapterID: "thinking-chat-adapter", UpstreamModel: "t", Priority: 1, Enabled: true, Protocol: adapter.ProtocolOpenAIChat, Credentials: []adapter.CredentialInput{{ID: "c1", CredentialRef: "vault://p/c1", Priority: 1, Enabled: true}}},
+		{ID: "r1", ModelID: "thinking-model", ProviderID: "openai", UpstreamModel: "t", Priority: 1, Enabled: true, Credentials: []adapter.CredentialInput{{ID: "c1", CredentialRef: "vault://p/c1", Priority: 1, Enabled: true}}},
 	}
 
 	// Build a custom store with a thinking-capable adapter.
@@ -394,7 +394,7 @@ func TestListModelsThinkingMapping(t *testing.T) {
 		Revision: "thinking-test",
 		Models:   models,
 		Providers: map[string]adapter.ProviderInput{
-			"openai": {ID: "openai", Name: "openai", Selector: "openai", BaseURL: "https://openai.example/v1", SDKKind: adapter.SDKKindOpenAI, Protocol: adapter.ProtocolOpenAIChat},
+			"openai": {ID: "openai", Name: "openai", Selector: "openai", BaseURL: "https://openai.example/v1", SDKKind: adapter.SDKKindOpenAI, Endpoints: []adapter.EndpointInput{{Protocol: adapter.ProtocolOpenAIChat, Path: "/v1/chat/completions"}}},
 		},
 		Adapters: map[string]adapter.AdapterConfig{
 			"thinking-chat-adapter": {
@@ -475,7 +475,7 @@ func TestListModelsNoThinkingOmitsField(t *testing.T) {
 		"no-thinking": {ID: "no-thinking", Capabilities: []adapter.Capability{adapter.CapabilityChat}, Thinking: adapter.ThinkingInput{Supported: false}},
 	}
 	routes := []adapter.RouteInput{
-		{ID: "r1", ModelID: "no-thinking", ProviderID: "openai", AdapterID: "chat-adapter", UpstreamModel: "n", Priority: 1, Enabled: true, Protocol: adapter.ProtocolOpenAIChat, Credentials: []adapter.CredentialInput{{ID: "c1", CredentialRef: "vault://p/c1", Priority: 1, Enabled: true}}},
+		{ID: "r1", ModelID: "no-thinking", ProviderID: "openai", UpstreamModel: "n", Priority: 1, Enabled: true, Credentials: []adapter.CredentialInput{{ID: "c1", CredentialRef: "vault://p/c1", Priority: 1, Enabled: true}}},
 	}
 	store := buildStoreWithModels(t, models, routes, time.Time{})
 	facade := New(Options{Store: store, Quarantine: noopQuarantine{}})

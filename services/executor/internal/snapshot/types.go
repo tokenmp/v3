@@ -47,30 +47,40 @@ type ModelThinkingConfig struct {
 	MaxBudgetToken int
 }
 
-// ProviderConfig identifies an upstream provider and its default transport
-// configuration. BaseURL contains no credentials.
+// ProviderConfig identifies an upstream provider and its transport configuration.
+// BaseURL contains no credentials. Endpoints advertise the protocols the
+// provider supports and the path each protocol targets; protocol selection is
+// resolved at runtime per request from these endpoints (routes no longer carry
+// a protocol).
 type ProviderConfig struct {
-	ID       string
-	Name     string
-	Selector string
-	BaseURL  string
-	SDKKind  adapter.SDKKind
-	Protocol adapter.Protocol
-	Retry    adapter.RetryPolicy
-	Timeout  adapter.TimeoutPolicy
+	ID        string
+	Name      string
+	Selector  string
+	BaseURL   string
+	SDKKind   adapter.SDKKind
+	Endpoints []EndpointConfig
+	Retry     adapter.RetryPolicy
+	Timeout   adapter.TimeoutPolicy
 }
 
-// RouteConfig maps one public model to an upstream provider and adapter.
+// EndpointConfig advertises one protocol the provider can serve and the path
+// prefix that protocol targets. Auth is derived from the provider SDKKind,
+// not stored per endpoint.
+type EndpointConfig struct {
+	Protocol adapter.Protocol
+	Path     string
+}
+
+// RouteConfig maps one public model to an upstream provider. Protocol,
+// adapter and base URL are no longer stored on the route; they are resolved at
+// runtime from the provider's endpoints and the request protocol.
 type RouteConfig struct {
 	ID               string
 	ModelID          string
 	ProviderID       string
-	AdapterID        string
 	UpstreamModel    string
-	BaseURL          string
 	Priority         int
 	Enabled          bool
-	Protocol         adapter.Protocol
 	Retry            adapter.RetryPolicy
 	Timeout          adapter.TimeoutPolicy
 	FallbackRouteIDs []string

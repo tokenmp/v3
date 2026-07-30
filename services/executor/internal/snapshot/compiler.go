@@ -15,7 +15,11 @@ func Compile(raw ConfigSnapshot) (CompiledConfig, error) {
 	}
 	providers := make(map[string]adapter.ProviderInput, len(raw.Providers))
 	for k, v := range raw.Providers {
-		providers[k] = adapter.ProviderInput{ID: v.ID, Name: v.Name, Selector: v.Selector, BaseURL: v.BaseURL, SDKKind: v.SDKKind, Protocol: v.Protocol, Retry: v.Retry, Timeout: v.Timeout}
+		endpoints := make([]adapter.EndpointInput, len(v.Endpoints))
+		for i, e := range v.Endpoints {
+			endpoints[i] = adapter.EndpointInput{Protocol: e.Protocol, Path: e.Path}
+		}
+		providers[k] = adapter.ProviderInput{ID: v.ID, Name: v.Name, Selector: v.Selector, BaseURL: v.BaseURL, SDKKind: v.SDKKind, Endpoints: endpoints, Retry: v.Retry, Timeout: v.Timeout}
 	}
 	routes := make([]adapter.RouteInput, len(raw.Routes))
 	for i, v := range raw.Routes {
@@ -23,7 +27,7 @@ func Compile(raw ConfigSnapshot) (CompiledConfig, error) {
 		for j, credential := range v.Credentials {
 			credentials[j] = adapter.CredentialInput{ID: credential.ID, CredentialRef: credential.CredentialRef, Priority: credential.Priority, Enabled: credential.Enabled}
 		}
-		routes[i] = adapter.RouteInput{ID: v.ID, ModelID: v.ModelID, ProviderID: v.ProviderID, AdapterID: v.AdapterID, UpstreamModel: v.UpstreamModel, BaseURL: v.BaseURL, Priority: v.Priority, Enabled: v.Enabled, Protocol: v.Protocol, Retry: v.Retry, Timeout: v.Timeout, FallbackRouteIDs: v.FallbackRouteIDs, RouteGroup: v.RouteGroup, Credentials: credentials}
+		routes[i] = adapter.RouteInput{ID: v.ID, ModelID: v.ModelID, ProviderID: v.ProviderID, UpstreamModel: v.UpstreamModel, Priority: v.Priority, Enabled: v.Enabled, Retry: v.Retry, Timeout: v.Timeout, FallbackRouteIDs: v.FallbackRouteIDs, RouteGroup: v.RouteGroup, Credentials: credentials}
 	}
 	return adapter.Compile(adapter.ConfigInput{Revision: raw.Revision, Models: models, Providers: providers, Routes: routes, Adapters: raw.Adapters, Global: adapter.GlobalInput{Retry: raw.Global.Retry, Timeout: raw.Global.Timeout, AutoModelIDs: raw.Global.AutoModelIDs}})
 }

@@ -73,8 +73,8 @@ func buildStore(t *testing.T) *snapshot.Store {
 			"anthropic-model": {ID: "anthropic-model", Capabilities: []adapter.Capability{adapter.CapabilityMessages}},
 		},
 		Providers: map[string]adapter.ProviderInput{
-			"openai":    {ID: "openai", Name: "openai", Selector: "openai", BaseURL: "https://openai.example/v1", SDKKind: adapter.SDKKindOpenAI, Protocol: adapter.ProtocolOpenAIChat},
-			"anthropic": {ID: "anthropic", Name: "anthropic", Selector: "anthropic", BaseURL: "https://anthropic.example/v1", SDKKind: adapter.SDKKindAnthropic, Protocol: adapter.ProtocolAnthropic},
+			"openai":    {ID: "openai", Name: "openai", Selector: "openai", BaseURL: "https://openai.example/v1", SDKKind: adapter.SDKKindOpenAI, Endpoints: []adapter.EndpointInput{{Protocol: adapter.ProtocolOpenAIChat, Path: "/v1/chat/completions"}}},
+			"anthropic": {ID: "anthropic", Name: "anthropic", Selector: "anthropic", BaseURL: "https://anthropic.example/v1", SDKKind: adapter.SDKKindAnthropic, Endpoints: []adapter.EndpointInput{{Protocol: adapter.ProtocolAnthropic, Path: "/v1/messages"}}},
 		},
 		Adapters: map[string]adapter.AdapterConfig{
 			"chat-adapter": {
@@ -88,13 +88,13 @@ func buildStore(t *testing.T) *snapshot.Store {
 		},
 		Routes: []adapter.RouteInput{
 			{
-				ID: "chat-route", ModelID: "chat-model", ProviderID: "openai", AdapterID: "chat-adapter", UpstreamModel: "gpt-upstream",
-				Priority: 1, Enabled: true, Protocol: adapter.ProtocolOpenAIChat,
+				ID: "chat-route", ModelID: "chat-model", ProviderID: "openai", UpstreamModel: "gpt-upstream",
+				Priority: 1, Enabled: true,
 				Credentials: []adapter.CredentialInput{{ID: "cred-a", CredentialRef: "vault://private/cred-a", Priority: 1, Enabled: true}},
 			},
 			{
-				ID: "anthropic-route", ModelID: "anthropic-model", ProviderID: "anthropic", AdapterID: "anthropic-adapter", UpstreamModel: "claude-upstream",
-				Priority: 1, Enabled: true, Protocol: adapter.ProtocolAnthropic,
+				ID: "anthropic-route", ModelID: "anthropic-model", ProviderID: "anthropic", UpstreamModel: "claude-upstream",
+				Priority: 1, Enabled: true,
 				Credentials: []adapter.CredentialInput{{ID: "cred-b", CredentialRef: "vault://private/cred-b", Priority: 1, Enabled: true}},
 			},
 		},

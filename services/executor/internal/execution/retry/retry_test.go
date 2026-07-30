@@ -26,13 +26,13 @@ func testPlan(t *testing.T) routing.Plan {
 			"m": {ID: "m", Capabilities: []adapter.Capability{adapter.CapabilityChat}},
 		},
 		Providers: map[string]adapter.ProviderInput{
-			"p": {ID: "p", Name: "p", BaseURL: "https://p.example/v1", SDKKind: adapter.SDKKindOpenAI, Protocol: adapter.ProtocolOpenAIChat},
+			"p": {ID: "p", Name: "p", BaseURL: "https://p.example/v1", SDKKind: adapter.SDKKindOpenAI, Endpoints: []adapter.EndpointInput{{Protocol: adapter.ProtocolOpenAIChat, Path: "/v1/chat/completions"}}},
 		},
 		Adapters: map[string]adapter.AdapterConfig{
 			"a": {ID: "a", Name: "a", Version: 1, SDKKind: adapter.SDKKindOpenAI, Protocol: adapter.ProtocolOpenAIChat, Auth: adapter.AuthRule{Kind: adapter.AuthBearerHeader, Header: "Authorization"}},
 		},
 		Routes: []adapter.RouteInput{
-			{ID: "r", ModelID: "m", ProviderID: "p", AdapterID: "a", UpstreamModel: "one", Enabled: true, Protocol: adapter.ProtocolOpenAIChat, Credentials: []adapter.CredentialInput{{ID: "one", CredentialRef: "vault://p/one", Enabled: true}, {ID: "two", CredentialRef: "vault://p/two", Enabled: true}}},
+			{ID: "r", ModelID: "m", ProviderID: "p", UpstreamModel: "one", Enabled: true, Credentials: []adapter.CredentialInput{{ID: "one", CredentialRef: "vault://p/one", Enabled: true}, {ID: "two", CredentialRef: "vault://p/two", Enabled: true}}},
 		},
 	})
 	if err != nil {

@@ -11,7 +11,9 @@
         {
           "ID": "global-retry-429",
           "Priority": 10,
-          "HTTPStatuses": [429],
+          "HTTPStatuses": [
+            429
+          ],
           "Action": "next_credential"
         }
       ]
@@ -28,7 +30,13 @@
     "chat-anthropic": {
       "ID": "chat-anthropic",
       "DisplayName": "Anthropic Chat",
-      "Capabilities": ["chat", "streaming", "tools", "vision", "thinking"],
+      "Capabilities": [
+        "chat",
+        "streaming",
+        "tools",
+        "vision",
+        "thinking"
+      ],
       "Thinking": {
         "Supported": true,
         "DefaultEffort": "medium",
@@ -45,9 +53,14 @@
       "Name": "Anthropic Default",
       "BaseURL": "https://api.anthropic.example",
       "SDKKind": "anthropic",
-      "Protocol": "anthropic_messages",
       "Retry": {},
-      "Timeout": {}
+      "Timeout": {},
+      "Endpoints": [
+        {
+          "Protocol": "anthropic_messages",
+          "Path": "/v1/messages"
+        }
+      ]
     }
   },
   "Routes": [
@@ -55,11 +68,9 @@
       "ID": "route-chat-anthropic",
       "ModelID": "chat-anthropic",
       "ProviderID": "anthropic-default",
-      "AdapterID": "adapter-anthropic-default",
       "UpstreamModel": "claude-default",
       "Priority": 100,
       "Enabled": true,
-      "Protocol": "anthropic_messages",
       "Retry": {},
       "Timeout": {},
       "Credentials": []
@@ -79,7 +90,11 @@
         "CredentialRef": "vault://anthropic-default/credential/default"
       },
       "Capability": {
-        "Require": ["chat", "streaming", "tools"],
+        "Require": [
+          "chat",
+          "streaming",
+          "tools"
+        ],
         "Deny": []
       },
       "Thinking": {
@@ -104,7 +119,12 @@
         "MaxBudgetToken": 32000
       },
       "Request": {
-        "AllowedHeaders": ["Content-Type", "Accept", "x-api-key", "anthropic-version"],
+        "AllowedHeaders": [
+          "Content-Type",
+          "Accept",
+          "x-api-key",
+          "anthropic-version"
+        ],
         "AllowedQuery": [],
         "Rules": []
       },
@@ -114,8 +134,12 @@
             "ID": "resp-529-to-429",
             "Priority": 10,
             "Match": {
-              "HTTPStatuses": [529],
-              "ErrorTypes": ["overloaded_error"]
+              "HTTPStatuses": [
+                529
+              ],
+              "ErrorTypes": [
+                "overloaded_error"
+              ]
             },
             "Output": {
               "HTTPStatus": 429,
@@ -128,7 +152,9 @@
             "ID": "resp-429",
             "Priority": 20,
             "Match": {
-              "HTTPStatuses": [429]
+              "HTTPStatuses": [
+                429
+              ]
             },
             "Output": {
               "HTTPStatus": 429,
@@ -148,13 +174,20 @@
           {
             "ID": "retry-429",
             "Priority": 10,
-            "HTTPStatuses": [429],
+            "HTTPStatuses": [
+              429
+            ],
             "Action": "next_credential"
           },
           {
             "ID": "retry-5xx",
             "Priority": 20,
-            "HTTPStatuses": [500, 502, 503, 529],
+            "HTTPStatuses": [
+              500,
+              502,
+              503,
+              529
+            ],
             "Action": "next_route"
           }
         ]

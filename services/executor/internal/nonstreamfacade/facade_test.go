@@ -500,13 +500,13 @@ func TestFacadePinsSnapshotPerRequest(t *testing.T) {
 		Revision: "facade-revision-2",
 		Models:   map[string]adapter.ModelInput{"chat-model": {ID: "chat-model", Capabilities: []adapter.Capability{adapter.CapabilityChat}}},
 		Providers: map[string]adapter.ProviderInput{
-			"openai": {ID: "openai", Name: "openai", Selector: "openai", BaseURL: "https://openai.example/v1", SDKKind: adapter.SDKKindOpenAI, Protocol: adapter.ProtocolOpenAIChat},
+			"openai": {ID: "openai", Name: "openai", Selector: "openai", BaseURL: "https://openai.example/v1", SDKKind: adapter.SDKKindOpenAI, Endpoints: []adapter.EndpointInput{{Protocol: adapter.ProtocolOpenAIChat, Path: "/v1/chat/completions"}}},
 		},
 		Adapters: map[string]adapter.AdapterConfig{
 			"chat-adapter": {ID: "chat-adapter", Name: "chat-adapter", Version: 1, SDKKind: adapter.SDKKindOpenAI, Protocol: adapter.ProtocolOpenAIChat, Auth: adapter.AuthRule{Kind: adapter.AuthBearerHeader, Header: "Authorization"}},
 		},
 		Routes: []adapter.RouteInput{
-			{ID: "chat-route", ModelID: "chat-model", ProviderID: "openai", AdapterID: "chat-adapter", UpstreamModel: "gpt-upstream", Priority: 1, Enabled: true, Protocol: adapter.ProtocolOpenAIChat, Credentials: []adapter.CredentialInput{{ID: "cred-a", CredentialRef: "vault://private/cred-a", Priority: 1, Enabled: true}}},
+			{ID: "chat-route", ModelID: "chat-model", ProviderID: "openai", UpstreamModel: "gpt-upstream", Priority: 1, Enabled: true, Credentials: []adapter.CredentialInput{{ID: "cred-a", CredentialRef: "vault://private/cred-a", Priority: 1, Enabled: true}}},
 		},
 	})
 	if err != nil {

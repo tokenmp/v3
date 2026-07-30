@@ -30,7 +30,7 @@ func crossProtocolFixture(t *testing.T) (*routing.Resolver, routing.Plan) {
 			"model": {ID: "model", Capabilities: []adapter.Capability{adapter.CapabilityChat, adapter.CapabilityMessages}},
 		},
 		Providers: map[string]adapter.ProviderInput{
-			"provider": {ID: "provider", Name: "provider", Selector: "selected", BaseURL: "https://provider.example/v1", SDKKind: adapter.SDKKindAnthropic, Protocol: adapter.ProtocolAnthropic},
+			"provider": {ID: "provider", Name: "provider", Selector: "selected", BaseURL: "https://provider.example/v1", SDKKind: adapter.SDKKindAnthropic, Endpoints: []adapter.EndpointInput{{Protocol: adapter.ProtocolAnthropic, Path: "/v1/messages"}}},
 		},
 		Adapters: map[string]adapter.AdapterConfig{
 			"adapter": {
@@ -40,8 +40,8 @@ func crossProtocolFixture(t *testing.T) (*routing.Resolver, routing.Plan) {
 		},
 		Routes: []adapter.RouteInput{
 			{
-				ID: "route", ModelID: "model", ProviderID: "provider", AdapterID: "adapter", UpstreamModel: "claude-upstream",
-				Priority: 1, Enabled: true, Protocol: adapter.ProtocolAnthropic, RouteGroup: "group",
+				ID: "route", ModelID: "model", ProviderID: "provider", UpstreamModel: "claude-upstream",
+				Priority: 1, Enabled: true, RouteGroup: "group",
 				Credentials: []adapter.CredentialInput{
 					{ID: "cred-a", CredentialRef: "vault://private/cred-a", Priority: 1, Enabled: true},
 				},
@@ -78,7 +78,7 @@ func crossProtocolOpenAIFixture(t *testing.T) (*routing.Resolver, routing.Plan) 
 			"model": {ID: "model", Capabilities: []adapter.Capability{adapter.CapabilityChat}},
 		},
 		Providers: map[string]adapter.ProviderInput{
-			"provider": {ID: "provider", Name: "provider", Selector: "selected", BaseURL: "https://provider.example/v1", SDKKind: adapter.SDKKindOpenAI, Protocol: adapter.ProtocolOpenAIChat},
+			"provider": {ID: "provider", Name: "provider", Selector: "selected", BaseURL: "https://provider.example/v1", SDKKind: adapter.SDKKindOpenAI, Endpoints: []adapter.EndpointInput{{Protocol: adapter.ProtocolOpenAIChat, Path: "/v1/chat/completions"}}},
 		},
 		Adapters: map[string]adapter.AdapterConfig{
 			"adapter": {
@@ -88,8 +88,8 @@ func crossProtocolOpenAIFixture(t *testing.T) (*routing.Resolver, routing.Plan) 
 		},
 		Routes: []adapter.RouteInput{
 			{
-				ID: "route", ModelID: "model", ProviderID: "provider", AdapterID: "adapter", UpstreamModel: "gpt-upstream",
-				Priority: 1, Enabled: true, Protocol: adapter.ProtocolOpenAIChat, RouteGroup: "group",
+				ID: "route", ModelID: "model", ProviderID: "provider", UpstreamModel: "gpt-upstream",
+				Priority: 1, Enabled: true, RouteGroup: "group",
 				Credentials: []adapter.CredentialInput{
 					{ID: "cred-a", CredentialRef: "vault://private/cred-a", Priority: 1, Enabled: true},
 				},

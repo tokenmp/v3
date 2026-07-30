@@ -150,13 +150,10 @@ func (s *Server) handleAdminCreateProvider(w http.ResponseWriter, r *http.Reques
 		httpresp.Error(w, httpresp.CodeBadRequest, "missing required fields")
 		return
 	}
-	// Provider SDK/protocol are legacy DB fields kept for compatibility while
-	// routing semantics move protocol selection to routes/adapters/endpoints.
+	// Provider SDKKind selects the auth/SDK family (openai/anthropic).
+	// Protocol is no longer provider-scoped (it lives on endpoints since 000004).
 	if p.SDKKind == "" {
 		p.SDKKind = "openai"
-	}
-	if p.Protocol == "" {
-		p.Protocol = "openai_chat"
 	}
 	if err := s.adminWriter.CreateProvider(r.Context(), &p); err != nil {
 		writeAdminWriteErr(w, err)
@@ -268,8 +265,8 @@ func (s *Server) handleAdminCreateEndpoint(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	e.ProviderID = chi.URLParam(r, "id")
-	if e.Path == "" || e.Protocol == "" || e.AuthKind == "" {
-		httpresp.Error(w, httpresp.CodeBadRequest, "missing required fields")
+	if e.Path == "" || e.Protocol == "" {
+		httpresp.Error(w, httpresp.CodeBadRequest, "missing required fields (path, protocol)")
 		return
 	}
 	if err := s.adminWriter.CreateEndpoint(r.Context(), &e); err != nil {
@@ -393,7 +390,7 @@ func (s *Server) handleAdminCreateRoute(w http.ResponseWriter, r *http.Request) 
 	if err := decodeAdminBody(w, r, &rm); err != nil {
 		return
 	}
-	if rm.ID == "" || rm.ModelID == "" || rm.ProviderID == "" || rm.UpstreamModel == "" || rm.Protocol == "" {
+	if rm.ID == "" || rm.ModelID == "" || rm.ProviderID == "" || rm.UpstreamModel == "" {
 		httpresp.Error(w, httpresp.CodeBadRequest, "missing required fields")
 		return
 	}

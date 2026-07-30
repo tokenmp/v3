@@ -57,7 +57,7 @@ const unsupportedRouteConfig = `{
       "Name": "Generic",
       "BaseURL": "https://upstream.example/v1",
       "SDKKind": "generic_http",
-      "Protocol": "openai_responses",
+      "Endpoints": [{"Protocol": "openai_responses", "Path": "/v1/responses"}],
       "Retry": {},
       "Timeout": {}
     }
@@ -67,11 +67,9 @@ const unsupportedRouteConfig = `{
       "ID": "route-resp",
       "ModelID": "resp-model",
       "ProviderID": "generic-provider",
-      "AdapterID": "adapter-generic",
       "UpstreamModel": "resp-upstream",
       "Priority": 100,
       "Enabled": true,
-      "Protocol": "openai_responses",
       "Retry": {},
       "Timeout": {},
       "Credentials": []
@@ -398,8 +396,8 @@ func TestBuildAcceptsEnabledOpenAIImagesWithoutStreamCapability(t *testing.T) {
 	const imageOnlyConfig = `{
 		"Revision":"composition-images", "CreatedAt":"2026-07-22T00:00:00Z",
 		"Models":{"image":{"ID":"image","DisplayName":"Image","Capabilities":["images"],"Thinking":{"Supported":false}}},
-		"Providers":{"openai":{"ID":"openai","Selector":"openai","Name":"OpenAI","BaseURL":"https://upstream.example/v1","SDKKind":"openai","Protocol":"openai_images","Retry":{},"Timeout":{}}},
-		"Routes":[{"ID":"image-route","ModelID":"image","ProviderID":"openai","AdapterID":"image-adapter","UpstreamModel":"dall-e-3","Priority":1,"Enabled":true,"Protocol":"openai_images","Retry":{},"Timeout":{},"Credentials":[]}],
+		"Providers":{"openai":{"ID":"openai","Selector":"openai","Name":"OpenAI","BaseURL":"https://upstream.example/v1","SDKKind":"openai","Endpoints":[{"Protocol":"openai_images","Path":"/v1/images/generations"}],"Retry":{},"Timeout":{}}},
+		"Routes":[{"ID":"image-route","ModelID":"image","ProviderID":"openai","UpstreamModel":"dall-e-3","Priority":1,"Enabled":true,"Retry":{},"Timeout":{},"Credentials":[]}],
 		"Adapters":{"image-adapter":{"ID":"image-adapter","Name":"Images","Version":1,"SDKKind":"openai","Protocol":"openai_images","Auth":{"Kind":"bearer_header","Header":"Authorization","CredentialRef":"vault://openai/images"},"Capability":{"Require":["images"],"Deny":[]},"Thinking":{"Supported":false},"Request":{"AllowedHeaders":["Content-Type"],"AllowedQuery":[],"Rules":[]},"Response":{"Rules":[]},"Retry":{},"Timeout":{}}}
 	}`
 	path := writeConfig(t, imageOnlyConfig)

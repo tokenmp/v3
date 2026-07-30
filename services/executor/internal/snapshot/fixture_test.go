@@ -176,14 +176,14 @@ func assertEnumsValid(t *testing.T, cfg ConfigSnapshot) {
 		if !p.SDKKind.Valid() {
 			t.Errorf("provider %s: invalid SDKKind %q", p.ID, p.SDKKind)
 		}
-		if !p.Protocol.Valid() {
-			t.Errorf("provider %s: invalid Protocol %q", p.ID, p.Protocol)
+		for _, e := range p.Endpoints {
+			if !e.Protocol.Valid() {
+				t.Errorf("provider %s: invalid endpoint Protocol %q", p.ID, e.Protocol)
+			}
 		}
 	}
-	for _, r := range cfg.Routes {
-		if !r.Protocol.Valid() {
-			t.Errorf("route %s: invalid Protocol %q", r.ID, r.Protocol)
-		}
+	for range cfg.Routes {
+		// Routes are protocol-neutral; no Protocol field to validate.
 	}
 }
 

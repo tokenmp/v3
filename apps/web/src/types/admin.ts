@@ -265,7 +265,8 @@ export interface AdminProvider {
   selector: string;
   baseURL: string;
   sdkKind: 'openai' | 'anthropic';
-  protocol: string;
+  /** @deprecated protocol 现在由 endpoints 决定 */
+  protocol?: string;
   contextWindow: number | null;
   maxOutputTokens: number | null;
   rpm: number | null;
@@ -294,7 +295,8 @@ export interface AdminRouteConfig {
   modelId: string;
   providerId: string;
   upstreamModel: string;
-  protocol: string;
+  /** @deprecated protocol 现在由 provider endpoints 决定，route 不再携带 */
+  protocol?: string;
   priority: number;
   enabled: boolean;
   quarantined: boolean;
@@ -335,16 +337,13 @@ export interface AdminUpstreamCredential {
 }
 
 // ---- Upstream endpoints (上游端点) ----
+// endpoint = (provider, protocol, path)；认证由 SDK kind 决定，不再携带 auth 字段
 
 export interface AdminUpstreamEndpoint {
   id: number;
   providerId: string;
   path: string;
   protocol: string;
-  authKind: 'bearer_header' | 'api_key_header' | 'api_key_query';
-  authHeader: string | null;
-  authQuery: string | null;
-  authPrefix: string | null;
   status: 'active' | 'disabled' | 'deleted';
   createdAt: string;
   updatedAt: string;

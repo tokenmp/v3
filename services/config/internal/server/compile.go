@@ -3,9 +3,8 @@ package server
 import (
 	"encoding/json"
 	"fmt"
-	"net/url"
 	"sort"
-	"strings"
+
 	"time"
 
 	"github.com/tokenmp/v3/services/config/internal/repository"
@@ -73,27 +72,29 @@ type wireModelThinking struct {
 	MaxBudgetToken int    `json:"MaxBudgetToken"`
 }
 
+type wireEndpoint struct {
+	Protocol string `json:"Protocol"`
+	Path     string `json:"Path"`
+}
+
 type wireProvider struct {
-	ID       string            `json:"ID"`
-	Selector string            `json:"Selector"`
-	Name     string            `json:"Name"`
-	BaseURL  string            `json:"BaseURL"`
-	SDKKind  string            `json:"SDKKind"`
-	Protocol string            `json:"Protocol"`
-	Retry    wireRetryPolicy   `json:"Retry"`
-	Timeout  wireTimeoutPolicy `json:"Timeout"`
+	ID        string            `json:"ID"`
+	Selector  string            `json:"Selector"`
+	Name      string            `json:"Name"`
+	BaseURL   string            `json:"BaseURL"`
+	SDKKind   string            `json:"SDKKind"`
+	Endpoints []wireEndpoint    `json:"Endpoints"`
+	Retry     wireRetryPolicy   `json:"Retry"`
+	Timeout   wireTimeoutPolicy `json:"Timeout"`
 }
 
 type wireRoute struct {
 	ID               string            `json:"ID"`
 	ModelID          string            `json:"ModelID"`
 	ProviderID       string            `json:"ProviderID"`
-	AdapterID        string            `json:"AdapterID"`
 	UpstreamModel    string            `json:"UpstreamModel"`
-	BaseURL          string            `json:"BaseURL,omitempty"`
 	Priority         int               `json:"Priority"`
 	Enabled          bool              `json:"Enabled"`
-	Protocol         string            `json:"Protocol"`
 	Retry            wireRetryPolicy   `json:"Retry"`
 	Timeout          wireTimeoutPolicy `json:"Timeout"`
 	Credentials      []wireCredential  `json:"Credentials"`
@@ -114,6 +115,7 @@ type wireAdapter struct {
 	Version    int                 `json:"Version"`
 	SDKKind    string              `json:"SDKKind"`
 	Protocol   string              `json:"Protocol"`
+	ProviderID *string             `json:"ProviderID,omitempty"`
 	Auth       wireAuth            `json:"Auth"`
 	Capability wireCapability      `json:"Capability"`
 	Thinking   wireAdapterThinking `json:"Thinking"`
@@ -391,7 +393,22 @@ func compileSnapshot(
 	adapters []repository.Adapter,
 	global repository.GlobalPolicy,
 ) ([]byte, error) {
-	return compileSnapshotWithEndpoints(models, providers, routes, credentialsByProvider, routeCredentialsByRoute, nil, adapters, global)
+	// Legacy callers without explicit endpoints: derive one endpoint per
+	// provider from the provider's legacy Protocol field so protocol-neutral
+	// routes still resolve an adapter for that protocol.
+	endpointsByProvider := map[string][]repository.UpstreamEndpoint{}
+	for _, p := range providers {
+		if p.Status == "deleted" || p.Protocol == "" {
+			continue
+		}
+		endpointsByProvider[p.ID] = append(endpointsByProvider[p.ID], repository.UpstreamEndpoint{
+			ProviderID: p.ID,
+			Protocol:   p.Protocol,
+			Path:       endpointPathForProtocol(p.Protocol),
+			Status:     "active",
+		})
+	}
+	return compileSnapshotWithEndpoints(models, providers, routes, credentialsByProvider, routeCredentialsByRoute, endpointsByProvider, adapters, global)
 }
 
 func compileSnapshotWithEndpoints(
@@ -484,22 +501,16 @@ func compileSnapshotWithEndpoints(
 		}
 	}
 
-	protocolsByProvider := routeProtocolsByProvider(routes)
+	protocolsByProvider := endpointProtocolsByProvider(endpointsByProvider, providers)
 	for _, p := range providers {
 		if p.Status == "deleted" {
 			continue
 		}
-		protocols := protocolsByProvider[p.ID]
-		if len(protocols) == 0 && p.Protocol != "" {
-			// Backward-compatible behavior for legacy provider-scoped protocol
-			// rows with no routes yet: still expose the historical default adapter.
-			protocols = []string{p.Protocol}
-		}
-		for _, protocol := range protocols {
+		for _, protocol := range protocolsByProvider[p.ID] {
 			if existingDefaultAdapterID(p.ID, protocol, providerAdapterByProtocol, genericAdapterBySDKProtocol) != "" {
 				continue
 			}
-			adapterID := autoAdapterID(p.ID, protocol, len(protocols) > 1)
+			adapterID := autoAdapterID(p.ID, protocol, len(protocolsByProvider[p.ID]) > 1)
 			if _, exists := wireAdapters[adapterID]; exists {
 				continue
 			}
@@ -523,14 +534,14 @@ func compileSnapshotWithEndpoints(
 			_ = json.Unmarshal(p.DefaultTimeout, &timeout)
 		}
 		wireProviders[p.ID] = wireProvider{
-			ID:       p.ID,
-			Selector: p.Selector,
-			Name:     p.Name,
-			BaseURL:  p.BaseURL,
-			SDKKind:  p.SDKKind,
-			Protocol: p.Protocol,
-			Retry:    retry,
-			Timeout:  timeout,
+			ID:        p.ID,
+			Selector:  p.Selector,
+			Name:      p.Name,
+			BaseURL:   p.BaseURL,
+			SDKKind:   p.SDKKind,
+			Endpoints: wireEndpoints(endpointsByProvider[p.ID]),
+			Retry:     retry,
+			Timeout:   timeout,
 		}
 	}
 
@@ -546,20 +557,8 @@ func compileSnapshotWithEndpoints(
 			continue
 		}
 
-		// Determine adapter ID. Providers are protocol-neutral, so implicit
-		// adapters are selected per route protocol rather than per provider row.
-		adapterID := ""
-		if rm.AdapterID != nil && *rm.AdapterID != "" {
-			adapterID = *rm.AdapterID
-		}
-		if adapterID == "" {
-			adapterID = existingDefaultAdapterID(rm.ProviderID, rm.Protocol, providerAdapterByProtocol, genericAdapterBySDKProtocol)
-		}
-		if adapterID == "" {
-			protocolCount := len(protocolsByProvider[rm.ProviderID])
-			adapterID = autoAdapterID(rm.ProviderID, rm.Protocol, protocolCount > 1)
-		}
-
+		// Adapter and protocol are resolved at runtime from the provider's
+		// endpoints; routes no longer carry an adapter_id, protocol, or baseURL.
 		// Determine credentials for this route.
 		routeCreds := routeCredentialsByRoute[rm.ID]
 		wireCreds := make([]wireCredential, 0)
@@ -615,21 +614,13 @@ func compileSnapshotWithEndpoints(
 			routeGroup = *rm.RouteGroup
 		}
 
-		baseURL := ""
-		if provider, ok := providerByID[rm.ProviderID]; ok {
-			baseURL = routeBaseURL(provider.BaseURL, endpointForProtocol(endpointsByProvider[rm.ProviderID], rm.Protocol))
-		}
-
 		wireRoutes = append(wireRoutes, wireRoute{
 			ID:            rm.ID,
 			ModelID:       rm.ModelID,
 			ProviderID:    rm.ProviderID,
-			AdapterID:     adapterID,
 			UpstreamModel: rm.UpstreamModel,
-			BaseURL:       baseURL,
 			Priority:      rm.Priority,
 			Enabled:       rm.Enabled,
-			Protocol:      rm.Protocol,
 			Retry:         retry,
 			Timeout:       timeout,
 			Credentials:   wireCreds,
@@ -725,6 +716,7 @@ func dbAdapterToWire(a repository.Adapter, credentialsByProvider map[string][]re
 		Version:    a.Version,
 		SDKKind:    a.SDKKind,
 		Protocol:   a.Protocol,
+		ProviderID: a.ProviderID,
 		Auth:       auth,
 		Capability: cap_,
 		Thinking:   thinking,
@@ -735,77 +727,58 @@ func dbAdapterToWire(a repository.Adapter, credentialsByProvider map[string][]re
 	}, nil
 }
 
-func endpointForProtocol(endpoints []repository.UpstreamEndpoint, protocol string) *repository.UpstreamEndpoint {
-	for i := range endpoints {
-		if endpoints[i].Status != "deleted" && endpoints[i].Protocol == protocol {
-			return &endpoints[i]
-		}
+// endpointPathForProtocol returns the canonical upstream path for a protocol.
+func endpointPathForProtocol(protocol string) string {
+	switch protocol {
+	case "openai_chat":
+		return "/v1/chat/completions"
+	case "anthropic_messages":
+		return "/v1/messages"
+	case "openai_responses":
+		return "/v1/responses"
+	case "openai_images":
+		return "/v1/images/generations"
+	default:
+		return "/v1/chat/completions"
 	}
-	return nil
 }
 
-func routeBaseURL(providerBaseURL string, endpoint *repository.UpstreamEndpoint) string {
-	if endpoint == nil || strings.TrimSpace(endpoint.Path) == "" {
-		return ""
-	}
-	base, err := url.Parse(providerBaseURL)
-	if err != nil || base.Scheme == "" || base.Host == "" {
-		return ""
-	}
-	prefix := sdkBasePathForEndpoint(endpoint.Protocol, endpoint.Path)
-	if prefix == "" {
-		return ""
-	}
-	basePath := strings.TrimRight(base.Path, "/")
-	if basePath == prefix || strings.HasSuffix(basePath, prefix) {
-		base.Path = basePath
-	} else {
-		base.Path = basePath + prefix
-	}
-	base.RawQuery = ""
-	base.Fragment = ""
-	return base.String()
-}
-
-func sdkBasePathForEndpoint(protocol, endpointPath string) string {
-	path := "/" + strings.TrimLeft(endpointPath, "/")
-	operationSuffix := map[string]string{
-		"openai_chat":        "/chat/completions",
-		"openai_responses":   "/responses",
-		"openai_images":      "/images/generations",
-		"anthropic_messages": "/messages",
-	}[protocol]
-	if operationSuffix == "" || !strings.HasSuffix(path, operationSuffix) {
-		return ""
-	}
-	prefix := strings.TrimSuffix(path, operationSuffix)
-	if prefix == "" {
-		return ""
-	}
-	return prefix
-}
-
-func routeProtocolsByProvider(routes []repository.RouteMapping) map[string][]string {
-	seen := make(map[string]map[string]bool)
-	for _, route := range routes {
-		if route.Status == "deleted" || route.ProviderID == "" || route.Protocol == "" || route.AdapterID != nil && *route.AdapterID != "" {
+// wireEndpoints projects a provider's endpoints into the snapshot shape,
+// dropping deleted and duplicate-protocol entries, sorted by protocol.
+func wireEndpoints(endpoints []repository.UpstreamEndpoint) []wireEndpoint {
+	seen := make(map[string]bool, len(endpoints))
+	out := make([]wireEndpoint, 0, len(endpoints))
+	for _, e := range endpoints {
+		if e.Status == "deleted" || seen[e.Protocol] {
 			continue
 		}
-		byProtocol := seen[route.ProviderID]
-		if byProtocol == nil {
-			byProtocol = make(map[string]bool)
-			seen[route.ProviderID] = byProtocol
-		}
-		byProtocol[route.Protocol] = true
+		seen[e.Protocol] = true
+		out = append(out, wireEndpoint{Protocol: e.Protocol, Path: e.Path})
 	}
-	out := make(map[string][]string, len(seen))
-	for providerID, byProtocol := range seen {
-		protocols := make([]string, 0, len(byProtocol))
-		for protocol := range byProtocol {
-			protocols = append(protocols, protocol)
+	sort.Slice(out, func(i, j int) bool { return out[i].Protocol < out[j].Protocol })
+	return out
+}
+
+// endpointProtocolsByProvider returns the distinct active protocols advertised
+// by each provider's endpoints. This is the protocol dimension for the provider
+// (routes no longer carry a protocol).
+func endpointProtocolsByProvider(endpointsByProvider map[string][]repository.UpstreamEndpoint, providers []repository.Provider) map[string][]string {
+	out := make(map[string][]string, len(providers))
+	for _, p := range providers {
+		if p.Status == "deleted" {
+			continue
 		}
-		sort.Strings(protocols)
-		out[providerID] = protocols
+		seen := make(map[string]bool)
+		var protos []string
+		for _, e := range endpointsByProvider[p.ID] {
+			if e.Status == "deleted" || seen[e.Protocol] {
+				continue
+			}
+			seen[e.Protocol] = true
+			protos = append(protos, e.Protocol)
+		}
+		sort.Strings(protos)
+		out[p.ID] = protos
 	}
 	return out
 }
@@ -915,6 +888,7 @@ func autoGenerateAdapter(p repository.Provider, protocol, sdkKind, adapterID str
 		Version:    1,
 		SDKKind:    sdkKind,
 		Protocol:   protocol,
+		ProviderID: &p.ID,
 		Auth:       auth,
 		Capability: capability,
 		Thinking:   thinking,

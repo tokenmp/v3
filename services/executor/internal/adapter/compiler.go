@@ -78,26 +78,27 @@ type ThinkingInput struct {
 }
 type ProviderInput struct {
 	ID, Name, BaseURL, Selector string
-	// SDKKind and Protocol are legacy provider-scoped fields accepted for
-	// backward compatibility with already-published snapshots. New routing
-	// semantics are provider-neutral: SDK/protocol compatibility is determined
-	// by the selected route and adapter, not by the provider row.
-	SDKKind  SDKKind
-	Protocol Protocol
-	Retry    RetryPolicy
-	Timeout  TimeoutPolicy
+	// SDKKind selects the auth/SDK family (openai/anthropic).
+	SDKKind   SDKKind
+	Endpoints []EndpointInput
+	Retry     RetryPolicy
+	Timeout   TimeoutPolicy
 }
+
+type EndpointInput struct {
+	Protocol Protocol
+	Path    string
+}
+
 type RouteInput struct {
-	ID, ModelID, ProviderID, AdapterID, UpstreamModel string
-	BaseURL                                           string
-	Priority                                          int
-	Enabled                                           bool
-	Protocol                                          Protocol
-	Retry                                             RetryPolicy
-	Timeout                                           TimeoutPolicy
-	FallbackRouteIDs                                  []string
-	RouteGroup                                        string
-	Credentials                                       []CredentialInput
+	ID, ModelID, ProviderID, UpstreamModel string
+	Priority                                int
+	Enabled                                 bool
+	Retry                                   RetryPolicy
+	Timeout                                 TimeoutPolicy
+	FallbackRouteIDs                        []string
+	RouteGroup                              string
+	Credentials                             []CredentialInput
 }
 type CredentialInput struct {
 	ID, CredentialRef string
@@ -114,6 +115,12 @@ type CompiledConfig struct {
 	Providers    map[string]CompiledProvider
 	Adapters     map[string]CompiledAdapter
 	Routes       []CompiledRoute
+	// ProviderAdapters maps (providerID, protocol) to the adapter ID compiled
+	// for that provider+protocol. Built at compile time from provider-scoped
+	// adapters and the auto-generated per-(provider,endpoint-protocol)
+	// adapters. Resolved at runtime per request once the target protocol is
+	// selected from the provider's endpoints.
+	ProviderAdapters map[string]map[string]string
 }
 type CompiledModel struct {
 	ID               string
@@ -123,12 +130,15 @@ type CompiledModel struct {
 }
 type CompiledProvider struct {
 	ID, Name, BaseURL, Selector string
-	// SDKKind and Protocol are retained only as legacy metadata. Execution and
-	// routing must use the adapter's SDKKind and the route's Protocol.
-	SDKKind  SDKKind
+	SDKKind                      SDKKind
+	Endpoints                   []CompiledEndpoint
+	Retry                       CompiledRetry
+	Timeout                     CompiledTimeout
+}
+
+type CompiledEndpoint struct {
 	Protocol Protocol
-	Retry    CompiledRetry
-	Timeout  CompiledTimeout
+	Path    string
 }
 type CompiledRoute struct {
 	ID, ModelID, ProviderID, AdapterID, UpstreamModel string
@@ -212,7 +222,7 @@ func Compile(in ConfigInput) (CompiledConfig, error) {
 			return CompiledConfig{}, fmt.Errorf("duplicate provider name %q", p.Name)
 		}
 		providerNames[p.Name] = true
-		if key == "" || p.ID == "" || key != p.ID || strings.TrimSpace(p.Name) == "" || (p.SDKKind != "" && !p.SDKKind.Valid()) || (p.Protocol != "" && !p.Protocol.Valid()) {
+		if key == "" || p.ID == "" || key != p.ID || strings.TrimSpace(p.Name) == "" || (p.SDKKind != "" && !p.SDKKind.Valid()) {
 			return CompiledConfig{}, fmt.Errorf("invalid provider %q", key)
 		}
 		selector := p.Selector
@@ -236,7 +246,19 @@ func Compile(in ConfigInput) (CompiledConfig, error) {
 		if err != nil {
 			return CompiledConfig{}, fmt.Errorf("provider %q timeout: %w", key, err)
 		}
-		out.Providers[key] = CompiledProvider{ID: p.ID, Name: p.Name, BaseURL: p.BaseURL, Selector: selector, SDKKind: p.SDKKind, Protocol: p.Protocol, Retry: r, Timeout: t}
+		endpoints := make([]CompiledEndpoint, 0, len(p.Endpoints))
+		seenProto := map[Protocol]bool{}
+		for _, e := range p.Endpoints {
+			if !e.Protocol.Valid() || strings.TrimSpace(e.Path) == "" {
+				return CompiledConfig{}, fmt.Errorf("provider %q has invalid endpoint (protocol/path)", key)
+			}
+			if seenProto[e.Protocol] {
+				return CompiledConfig{}, fmt.Errorf("provider %q has duplicate endpoint protocol %q", key, e.Protocol)
+			}
+			seenProto[e.Protocol] = true
+			endpoints = append(endpoints, CompiledEndpoint{Protocol: e.Protocol, Path: e.Path})
+		}
+		out.Providers[key] = CompiledProvider{ID: p.ID, Name: p.Name, BaseURL: p.BaseURL, Selector: selector, SDKKind: p.SDKKind, Endpoints: endpoints, Retry: r, Timeout: t}
 	}
 	adapterNames := map[string]bool{}
 	for key, raw := range in.Adapters {
@@ -260,6 +282,46 @@ func Compile(in ConfigInput) (CompiledConfig, error) {
 		}
 		out.Adapters[key] = CompiledAdapter{ID: raw.ID, Name: raw.Name, Version: raw.Version, SDKKind: raw.SDKKind, Protocol: raw.Protocol, Auth: cloneAuth(raw.Auth), Capability: cloneCapability(raw.Capability), Thinking: cloneThinking(raw.Thinking), Request: cloneRequest(raw.Request), ResponseRules: cloneResponseRules(sortedResponse(raw.Response.Rules)), Retry: r, Timeout: t}
 	}
+	// Build the (provider, protocol) -> adapterID index. An adapter with a
+	// ProviderID binds to that provider; an adapter without a ProviderID is a
+	// generic fallback keyed by (sdk_kind, protocol) and is used when no
+	// provider-specific adapter exists.
+	out.ProviderAdapters = map[string]map[string]string{}
+	genericBySDKProto := map[string]string{}
+	for _, raw := range in.Adapters {
+		if raw.ProviderID != nil && *raw.ProviderID != "" {
+			pid := *raw.ProviderID
+			byProto := out.ProviderAdapters[pid]
+			if byProto == nil {
+				byProto = map[string]string{}
+				out.ProviderAdapters[pid] = byProto
+			}
+			if _, exists := byProto[string(raw.Protocol)]; !exists {
+				byProto[string(raw.Protocol)] = raw.ID
+			}
+		} else {
+			key := string(raw.SDKKind) + "|" + string(raw.Protocol)
+			if _, exists := genericBySDKProto[key]; !exists {
+				genericBySDKProto[key] = raw.ID
+			}
+		}
+	}
+	// Fill provider-scoped adapters for each provider+endpoint-protocol that
+	// lacks an explicit DB adapter, using the generic SDK/protocol adapter.
+	for pid, p := range out.Providers {
+		byProto := out.ProviderAdapters[pid]
+		if byProto == nil {
+			byProto = map[string]string{}
+			out.ProviderAdapters[pid] = byProto
+		}
+		for _, e := range p.Endpoints {
+			if _, ok := byProto[string(e.Protocol)]; !ok {
+				if id, ok := genericBySDKProto[string(p.SDKKind)+"|"+string(e.Protocol)]; ok {
+					byProto[string(e.Protocol)] = id
+				}
+			}
+		}
+	}
 	seen := map[string]bool{}
 	for _, route := range in.Routes {
 		if route.ID == "" || seen[route.ID] {
@@ -270,39 +332,52 @@ func Compile(in ConfigInput) (CompiledConfig, error) {
 		if !ok {
 			return CompiledConfig{}, fmt.Errorf("route %q references unknown model %q", route.ID, route.ModelID)
 		}
-		if _, ok := out.Providers[route.ProviderID]; !ok {
+		provider, ok := out.Providers[route.ProviderID]
+		if !ok {
 			return CompiledConfig{}, fmt.Errorf("route %q references unknown provider %q", route.ID, route.ProviderID)
 		}
-		a, ok := out.Adapters[route.AdapterID]
-		if !ok {
-			return CompiledConfig{}, fmt.Errorf("route %q references unknown adapter %q", route.ID, route.AdapterID)
+		if strings.TrimSpace(route.UpstreamModel) == "" {
+			return CompiledConfig{}, fmt.Errorf("route %q has empty upstream model", route.ID)
 		}
-		if strings.TrimSpace(route.UpstreamModel) == "" || !route.Protocol.Valid() || route.Protocol != a.Protocol {
-			return CompiledConfig{}, fmt.Errorf("route %q has incompatible adapter/protocol", route.ID)
+		if len(provider.Endpoints) == 0 {
+			return CompiledConfig{}, fmt.Errorf("route %q provider %q has no endpoints", route.ID, route.ProviderID)
 		}
-		if route.BaseURL != "" {
-			baseURL, err := url.Parse(route.BaseURL)
-			if err != nil || (baseURL.Scheme != "https" && baseURL.Scheme != "http") || baseURL.Host == "" || baseURL.User != nil || baseURL.RawQuery != "" || baseURL.ForceQuery || baseURL.Fragment != "" {
-				return CompiledConfig{}, fmt.Errorf("route %q has invalid base URL", route.ID)
+		// Verify the provider advertises at least one endpoint protocol that
+		// resolves to a capability-compatible adapter. This is a startup safety
+		// gate; the actual expansion happens below. Also determine whether the
+		// route needs credentials: only when every resolvable endpoint adapter
+		// is AuthNone may the route run without credentials.
+		compatOK := false
+		var firstAuthAdapter AuthRule
+		var firstCompatErr error
+		for _, e := range provider.Endpoints {
+			aID, ok := out.resolveAdapter(route.ProviderID, e.Protocol)
+			if !ok {
+				continue
+			}
+			a := out.Adapters[aID]
+			if err := compatible(m, a); err == nil {
+				compatOK = true
+				if a.Auth.Kind != AuthNone && firstAuthAdapter.Kind == "" {
+					firstAuthAdapter = a.Auth
+				}
+			} else if firstCompatErr == nil {
+				firstCompatErr = err
 			}
 		}
-		if err := compatible(m, a); err != nil {
-			return CompiledConfig{}, fmt.Errorf("route %q: %w", route.ID, err)
+		if !compatOK {
+			if firstCompatErr != nil {
+				return CompiledConfig{}, fmt.Errorf("route %q: %w", route.ID, firstCompatErr)
+			}
+			return CompiledConfig{}, fmt.Errorf("route %q: no provider endpoint resolves to a capability-compatible adapter", route.ID)
 		}
-		// Policies always merge code defaults -> global -> adapter -> provider -> route.
-		adapterRetry, err := compileRetry(in.Adapters[route.AdapterID].Retry, globalRetry)
-		if err != nil {
-			return CompiledConfig{}, fmt.Errorf("route %q adapter retry: %w", route.ID, err)
-		}
-		adapterTimeout, err := compileTimeout(in.Adapters[route.AdapterID].Timeout, globalTimeout)
-		if err != nil {
-			return CompiledConfig{}, fmt.Errorf("route %q adapter timeout: %w", route.ID, err)
-		}
-		providerRetry, err := compileRetry(in.Providers[route.ProviderID].Retry, adapterRetry)
+		// Policies merge code defaults -> global -> provider -> route. The
+		// adapter layer is applied at runtime once the target protocol resolves.
+		providerRetry, err := compileRetry(in.Providers[route.ProviderID].Retry, globalRetry)
 		if err != nil {
 			return CompiledConfig{}, fmt.Errorf("route %q provider retry: %w", route.ID, err)
 		}
-		providerTimeout, err := compileTimeout(in.Providers[route.ProviderID].Timeout, adapterTimeout)
+		providerTimeout, err := compileTimeout(in.Providers[route.ProviderID].Timeout, globalTimeout)
 		if err != nil {
 			return CompiledConfig{}, fmt.Errorf("route %q provider timeout: %w", route.ID, err)
 		}
@@ -310,10 +385,7 @@ func Compile(in ConfigInput) (CompiledConfig, error) {
 		if err != nil {
 			return CompiledConfig{}, fmt.Errorf("route %q retry: %w", route.ID, err)
 		}
-		// An explicit zero at adapter or provider level is an opt-out, not a
-		// value a more-specific layer may re-enable. Global remains a default
-		// layer and is intentionally overridable.
-		if retriesDisabled(in.Adapters[route.AdapterID].Retry) || retriesDisabled(in.Providers[route.ProviderID].Retry) {
+		if retriesDisabled(in.Providers[route.ProviderID].Retry) {
 			r.MaxTotalAttempts = 0
 			r.MaxSameTargetAttempts = 0
 		}
@@ -321,11 +393,84 @@ func Compile(in ConfigInput) (CompiledConfig, error) {
 		if err != nil {
 			return CompiledConfig{}, fmt.Errorf("route %q timeout: %w", route.ID, err)
 		}
-		credentials, err := compileCredentials(route, a.Auth)
+		// Credentials use a synthetic auth rule derived from the first
+		// authenticated endpoint adapter (carrying any legacy CredentialRef).
+		// The real auth placement is resolved at runtime from the selected
+		// adapter. A route needs no credentials only when every resolvable
+		// endpoint adapter is AuthNone.
+		placeholderAuth := firstAuthAdapter
+		if placeholderAuth.Kind == "" {
+			placeholderAuth = AuthRule{Kind: AuthNone}
+		}
+		credentials, err := compileCredentials(route, placeholderAuth)
 		if err != nil {
 			return CompiledConfig{}, fmt.Errorf("route %q: %w", route.ID, err)
 		}
-		out.Routes = append(out.Routes, CompiledRoute{ID: route.ID, ModelID: route.ModelID, ProviderID: route.ProviderID, AdapterID: route.AdapterID, UpstreamModel: route.UpstreamModel, BaseURL: route.BaseURL, Priority: route.Priority, Enabled: route.Enabled, Protocol: route.Protocol, Retry: r, Timeout: t, FallbackRouteIDs: append([]string(nil), route.FallbackRouteIDs...), RouteGroup: route.RouteGroup, Credentials: credentials})
+		base := CompiledRoute{ID: route.ID, ModelID: route.ModelID, ProviderID: route.ProviderID, UpstreamModel: route.UpstreamModel, Priority: route.Priority, Enabled: route.Enabled, Retry: r, Timeout: t, FallbackRouteIDs: append([]string(nil), route.FallbackRouteIDs...), RouteGroup: route.RouteGroup, Credentials: credentials}
+		// Expand the protocol-neutral route into one compiled route per
+		// provider endpoint protocol. Each expanded route carries the runtime
+		// protocol, the resolved adapter ID, and a base URL built from the
+		// provider base + endpoint path. The route ID is suffixed with the
+		// protocol so downstream (resolver/quarantine/retry) still sees stable
+		// per-protocol candidates without touching the DB row identity.
+		for _, endpoint := range provider.Endpoints {
+			adapterID, ok := out.resolveAdapter(route.ProviderID, endpoint.Protocol)
+			if !ok {
+				continue
+			}
+			a := out.Adapters[adapterID]
+			if err := compatible(m, a); err != nil {
+				continue
+			}
+			expanded := base
+			expanded.ID = route.ID + "--" + string(endpoint.Protocol)
+			expanded.AdapterID = adapterID
+			expanded.Protocol = endpoint.Protocol
+			expanded.BaseURL = buildRouteBaseURL(provider.BaseURL, endpoint.Path, endpoint.Protocol)
+			// Re-merge retry/timeout with the adapter layer inserted between
+			// global and provider, so adapter-level opt-out (zero) is honored.
+			rawAdapter := in.Adapters[adapterID]
+			adapterRetry, arErr := compileRetry(rawAdapter.Retry, globalRetry)
+			if arErr != nil {
+				return CompiledConfig{}, fmt.Errorf("route %q adapter retry: %w", route.ID, arErr)
+			}
+			adapterTimeout, atErr := compileTimeout(rawAdapter.Timeout, globalTimeout)
+			if atErr != nil {
+				return CompiledConfig{}, fmt.Errorf("route %q adapter timeout: %w", route.ID, atErr)
+			}
+			provRetry, prErr := compileRetry(in.Providers[route.ProviderID].Retry, adapterRetry)
+			if prErr != nil {
+				return CompiledConfig{}, fmt.Errorf("route %q provider retry: %w", route.ID, prErr)
+			}
+			provTimeout, ptErr := compileTimeout(in.Providers[route.ProviderID].Timeout, adapterTimeout)
+			if ptErr != nil {
+				return CompiledConfig{}, fmt.Errorf("route %q provider timeout: %w", route.ID, ptErr)
+			}
+			rtRetry, rrErr := compileRetry(route.Retry, provRetry)
+			if rrErr != nil {
+				return CompiledConfig{}, fmt.Errorf("route %q retry: %w", route.ID, rrErr)
+			}
+			if retriesDisabled(rawAdapter.Retry) || retriesDisabled(in.Providers[route.ProviderID].Retry) {
+				rtRetry.MaxTotalAttempts = 0
+				rtRetry.MaxSameTargetAttempts = 0
+			}
+			rtTimeout, rtErr := compileTimeout(route.Timeout, provTimeout)
+			if rtErr != nil {
+				return CompiledConfig{}, fmt.Errorf("route %q timeout: %w", route.ID, rtErr)
+			}
+			expanded.Retry = rtRetry
+			expanded.Timeout = rtTimeout
+			// Remap fallback route IDs to the same protocol suffix so they resolve
+			// to the corresponding expanded fallback routes.
+			if len(expanded.FallbackRouteIDs) > 0 {
+				suffixed := make([]string, len(expanded.FallbackRouteIDs))
+				for i, fid := range expanded.FallbackRouteIDs {
+					suffixed[i] = fid + "--" + string(endpoint.Protocol)
+				}
+				expanded.FallbackRouteIDs = suffixed
+			}
+			out.Routes = append(out.Routes, expanded)
+		}
 	}
 	if err := validateRouteCredentials(out.Routes); err != nil {
 		return CompiledConfig{}, err
@@ -363,6 +508,14 @@ func compileCredentials(route RouteInput, auth AuthRule) ([]CompiledCredential, 
 		credentials = []CredentialInput{{ID: legacyCredentialID(route.ID), CredentialRef: auth.CredentialRef, Enabled: true}}
 	}
 	if len(credentials) == 0 {
+		// A disabled route may legitimately have no credential binding (e.g.
+		// temporarily disabled while a credential is being rotated or removed).
+		// Requiring one would block the whole snapshot from compiling and
+		// freeze every other route. Skip the enabled-credential requirement;
+		// the route is already disabled so it cannot serve traffic.
+		if !route.Enabled {
+			return nil, nil
+		}
 		return nil, fmt.Errorf("authenticated route requires an enabled credential")
 	}
 	seenRefs := map[string]bool{}
@@ -386,6 +539,13 @@ func compileCredentials(route RouteInput, auth AuthRule) ([]CompiledCredential, 
 		out = append(out, CompiledCredential{ID: credential.ID, CredentialRef: credential.CredentialRef, Priority: credential.Priority, Enabled: credential.Enabled})
 	}
 	if !enabled {
+		// Disabled routes are exempt from the enabled-credential requirement
+		// (see the len(credentials)==0 branch above) so a route can be
+		// turned off while its credential is being reconfigured without
+		// stalling the entire snapshot.
+		if !route.Enabled {
+			return out, nil
+		}
 		return nil, fmt.Errorf("authenticated route requires an enabled credential")
 	}
 	sort.SliceStable(out, func(i, j int) bool {
@@ -1252,6 +1412,47 @@ func compatible(m CompiledModel, a CompiledAdapter) error {
 	}
 	return nil
 }
+
+// buildRouteBaseURL joins a provider base URL with an endpoint path prefix for
+// the given protocol. The endpoint path includes the operation suffix (e.g.
+// /v1/chat/completions); buildRouteBaseURL trims the operation suffix so the
+// upstream SDK can append it. Returns "" when the base URL or path is invalid.
+func buildRouteBaseURL(providerBaseURL, endpointPath string, protocol Protocol) string {
+	path := "/" + strings.TrimLeft(endpointPath, "/")
+	suffix := map[Protocol]string{
+		ProtocolOpenAIChat:      "/chat/completions",
+		ProtocolOpenAIResponses: "/responses",
+		ProtocolOpenAIImages:    "/images/generations",
+		// The Anthropic SDK appends the relative path "v1/messages" below the
+		// base URL, so the endpoint suffix includes the v1 segment. Endpoint
+		// paths like "/anthropic/v1/messages" or "/v1/messages" are reduced
+		// to the prefix before the v1 segment (e.g. "/anthropic" or ""),
+		// which the SDK combines with its own "v1/messages" to form the
+		// final upstream URL. Using "/messages" here would drop the v1
+		// segment and let the SDK re-add it, producing a duplicated path.
+		ProtocolAnthropic: "/v1/messages",
+	}[protocol]
+	if suffix == "" || !strings.HasSuffix(path, suffix) {
+		return ""
+	}
+	prefix := strings.TrimSuffix(path, suffix)
+	// An empty prefix is valid: it means the endpoint path equals the SDK's
+	// own relative path (e.g. "/v1/messages" for Anthropic), so the base
+	// URL is the provider origin with no extra path segment.
+	base, err := url.Parse(providerBaseURL)
+	if err != nil || (base.Scheme != "https" && base.Scheme != "http") || base.Host == "" || base.User != nil || base.RawQuery != "" || base.ForceQuery || base.Fragment != "" {
+		return ""
+	}
+	basePath := strings.TrimRight(base.Path, "/")
+	if basePath == prefix || strings.HasSuffix(basePath, prefix) {
+		base.Path = basePath
+	} else {
+		base.Path = basePath + prefix
+	}
+	base.RawQuery = ""
+	base.Fragment = ""
+	return base.String()
+}
 func validateRouteCredentials(routes []CompiledRoute) error {
 	for _, route := range routes {
 		if route.RouteGroup != "" && !safeSegment(route.RouteGroup) {
@@ -1358,6 +1559,18 @@ func rank(e ThinkingEffort) int {
 }
 
 // CloneCompiledConfig deep-copies every mutable member of c for Store use.
+// resolveAdapter returns the adapter ID compiled for (providerID, protocol).
+// It looks up the ProviderAdapters index built at compile time. Returns false
+// when no adapter exists for that provider+protocol.
+func (c CompiledConfig) resolveAdapter(providerID string, protocol Protocol) (string, bool) {
+	byProto := c.ProviderAdapters[providerID]
+	if byProto == nil {
+		return "", false
+	}
+	id, ok := byProto[string(protocol)]
+	return id, ok
+}
+
 func CloneCompiledConfig(c CompiledConfig) CompiledConfig {
 	out := c
 	out.AutoModelIDs = append([]string(nil), c.AutoModelIDs...)

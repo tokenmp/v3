@@ -130,7 +130,7 @@ func runnerFixtureWithRuleTimeout(t *testing.T, rule adapter.RetryRule, maxSame 
 			"model": {ID: "model", Capabilities: []adapter.Capability{adapter.CapabilityChat}},
 		},
 		Providers: map[string]adapter.ProviderInput{
-			"provider": {ID: "provider", Name: "provider", Selector: "selected", BaseURL: "https://provider.example/v1", SDKKind: adapter.SDKKindOpenAI, Protocol: adapter.ProtocolOpenAIChat},
+			"provider": {ID: "provider", Name: "provider", Selector: "selected", BaseURL: "https://provider.example/v1", SDKKind: adapter.SDKKindOpenAI, Endpoints: []adapter.EndpointInput{{Protocol: adapter.ProtocolOpenAIChat, Path: "/v1/chat/completions"}}},
 		},
 		Adapters: map[string]adapter.AdapterConfig{
 			"adapter": {
@@ -145,8 +145,8 @@ func runnerFixtureWithRuleTimeout(t *testing.T, rule adapter.RetryRule, maxSame 
 		},
 		Routes: []adapter.RouteInput{
 			{
-				ID: "route", ModelID: "model", ProviderID: "provider", AdapterID: "adapter", UpstreamModel: "upstream",
-				Priority: 1, Enabled: true, Protocol: adapter.ProtocolOpenAIChat, RouteGroup: "group",
+				ID: "route", ModelID: "model", ProviderID: "provider", UpstreamModel: "upstream",
+				Priority: 1, Enabled: true, RouteGroup: "group",
 				Credentials: []adapter.CredentialInput{
 					{ID: "cred-a", CredentialRef: "vault://private/cred-a", Priority: 1, Enabled: true},
 					{ID: "cred-b", CredentialRef: "vault://private/cred-b", Priority: 2, Enabled: true},
@@ -543,11 +543,11 @@ func TestRunnerFallbackUsesFrozenFirstRouteRetryPolicy(t *testing.T) {
 	config, err := adapter.Compile(adapter.ConfigInput{
 		Revision:  "frozen-retry-policy",
 		Models:    map[string]adapter.ModelInput{"model": {ID: "model", Capabilities: []adapter.Capability{adapter.CapabilityChat}}},
-		Providers: map[string]adapter.ProviderInput{"provider": {ID: "provider", Name: "provider", Selector: "selected", BaseURL: "https://provider.example/v1", SDKKind: adapter.SDKKindOpenAI, Protocol: adapter.ProtocolOpenAIChat}},
+		Providers: map[string]adapter.ProviderInput{"provider": {ID: "provider", Name: "provider", Selector: "selected", BaseURL: "https://provider.example/v1", SDKKind: adapter.SDKKindOpenAI,Endpoints: []adapter.EndpointInput{{Protocol: adapter.ProtocolOpenAIChat, Path: "/v1/chat/completions"}}}},
 		Adapters:  map[string]adapter.AdapterConfig{"adapter": {ID: "adapter", Name: "adapter", Version: 1, SDKKind: adapter.SDKKindOpenAI, Protocol: adapter.ProtocolOpenAIChat, Auth: adapter.AuthRule{Kind: adapter.AuthBearerHeader, Header: "Authorization"}}},
 		Routes: []adapter.RouteInput{
-			{ID: "primary", ModelID: "model", ProviderID: "provider", AdapterID: "adapter", UpstreamModel: "primary", Priority: 1, Enabled: true, Protocol: adapter.ProtocolOpenAIChat, Credentials: []adapter.CredentialInput{{ID: "primary-credential", CredentialRef: "vault://private/primary", Enabled: true}}, FallbackRouteIDs: []string{"fallback"}, Retry: adapter.RetryPolicy{Rules: []adapter.RetryRule{{ID: "primary-next-route", HTTPStatuses: []int{503}, Action: adapter.RetryNextRoute}}}},
-			{ID: "fallback", ModelID: "model", ProviderID: "provider", AdapterID: "adapter", UpstreamModel: "fallback", Priority: 2, Enabled: true, Protocol: adapter.ProtocolOpenAIChat, Credentials: []adapter.CredentialInput{{ID: "fallback-credential", CredentialRef: "vault://private/fallback", Enabled: true}}, Retry: adapter.RetryPolicy{Rules: []adapter.RetryRule{{ID: "fallback-same-credential", HTTPStatuses: []int{503}, Action: adapter.RetrySameCredential}}, MaxTotalAttempts: intPtr(3)}},
+			{ID: "primary", ModelID: "model", ProviderID: "provider", UpstreamModel: "primary", Priority: 1, Enabled: true, Credentials: []adapter.CredentialInput{{ID: "primary-credential", CredentialRef: "vault://private/primary", Enabled: true}}, FallbackRouteIDs: []string{"fallback"}, Retry: adapter.RetryPolicy{Rules: []adapter.RetryRule{{ID: "primary-next-route", HTTPStatuses: []int{503}, Action: adapter.RetryNextRoute}}}},
+			{ID: "fallback", ModelID: "model", ProviderID: "provider", UpstreamModel: "fallback", Priority: 2, Enabled: true, Credentials: []adapter.CredentialInput{{ID: "fallback-credential", CredentialRef: "vault://private/fallback", Enabled: true}}, Retry: adapter.RetryPolicy{Rules: []adapter.RetryRule{{ID: "fallback-same-credential", HTTPStatuses: []int{503}, Action: adapter.RetrySameCredential}}, MaxTotalAttempts: intPtr(3)}},
 		},
 	})
 	if err != nil {
@@ -578,7 +578,7 @@ func TestRunnerFallbackUsesFrozenFirstRouteRetryPolicy(t *testing.T) {
 	}
 	client.mu.Lock()
 	defer client.mu.Unlock()
-	if len(client.recordedCall) != 2 || client.recordedCall[0].Candidate.RouteID != "primary" || client.recordedCall[1].Candidate.RouteID != "fallback" {
+	if len(client.recordedCall) != 2 || client.recordedCall[0].Candidate.RouteID != "primary--openai_chat" || client.recordedCall[1].Candidate.RouteID != "fallback--openai_chat" {
 		t.Fatalf("actual fallback calls = %+v", client.recordedCall)
 	}
 }
@@ -1150,9 +1150,9 @@ func TestRunnerOfficialSDKRejectsIncompatibleAuthBeforeReserve(t *testing.T) {
 	// adapter/provider compatibility seen by Resolver.Prepare.
 	config, err := adapter.Compile(adapter.ConfigInput{
 		Revision: "incompatible-auth", Models: map[string]adapter.ModelInput{"model": {ID: "model", Capabilities: []adapter.Capability{adapter.CapabilityChat}}},
-		Providers: map[string]adapter.ProviderInput{"provider": {ID: "provider", Name: "provider", Selector: "selected", BaseURL: "https://provider.example/v1", SDKKind: adapter.SDKKindGenericHTTP, Protocol: adapter.ProtocolOpenAIChat}},
+		Providers: map[string]adapter.ProviderInput{"provider": {ID: "provider", Name: "provider", Selector: "selected", BaseURL: "https://provider.example/v1", SDKKind: adapter.SDKKindGenericHTTP,Endpoints: []adapter.EndpointInput{{Protocol: adapter.ProtocolOpenAIChat, Path: "/v1/chat/completions"}}}},
 		Adapters:  map[string]adapter.AdapterConfig{"adapter": {ID: "adapter", Name: "adapter", Version: 1, SDKKind: adapter.SDKKindGenericHTTP, Protocol: adapter.ProtocolOpenAIChat, Auth: adapter.AuthRule{Kind: adapter.AuthNone}}},
-		Routes:    []adapter.RouteInput{{ID: "route", ModelID: "model", ProviderID: "provider", AdapterID: "adapter", UpstreamModel: "upstream", Enabled: true, Protocol: adapter.ProtocolOpenAIChat}},
+		Routes:    []adapter.RouteInput{{ID: "route", ModelID: "model", ProviderID: "provider", UpstreamModel: "upstream", Enabled: true}},
 	})
 	if err != nil {
 		t.Fatalf("Compile fixture: %v", err)
@@ -1198,7 +1198,7 @@ func TestRunnerOfficialSDKRejectsIncompatibleAuthBeforeReserve(t *testing.T) {
 	if calls := genericQuota.TypedCalls(); len(calls) != 2 || calls[0].Method != "ReserveReservation" || calls[1].Method != "FinalizeReservation" || genericClient.callCount() != 1 {
 		t.Fatalf("generic AuthNone calls quota=%+v sdk=%d, want Reserve+Finalize and one Complete", calls, genericClient.callCount())
 	}
-	config.Providers["provider"] = adapter.CompiledProvider{ID: "provider", Name: "provider", Selector: "selected", BaseURL: "https://provider.example/v1", SDKKind: adapter.SDKKindOpenAI, Protocol: adapter.ProtocolOpenAIChat}
+	config.Providers["provider"] = adapter.CompiledProvider{ID: "provider", Name: "provider", Selector: "selected", BaseURL: "https://provider.example/v1", SDKKind: adapter.SDKKindOpenAI, Endpoints: []adapter.CompiledEndpoint{{Protocol: adapter.ProtocolOpenAIChat, Path: "/v1/chat/completions"}}}
 	config.Adapters["adapter"] = adapter.CompiledAdapter{ID: "adapter", SDKKind: adapter.SDKKindOpenAI, Protocol: adapter.ProtocolOpenAIChat, Auth: adapter.AuthRule{Kind: adapter.AuthNone}}
 	source, err := snapshot.NewCompiledSnapshot(config.Revision, &config, 9)
 	if err != nil {
@@ -1257,9 +1257,9 @@ func TestRunnerInvalidRequestTimeoutFailsPreflightWithoutQuotaOrSDK(t *testing.T
 	// Recreate the normal fixture and change only the compiled route timeout.
 	config, err := adapter.Compile(adapter.ConfigInput{
 		Revision: "zero-timeout", Models: map[string]adapter.ModelInput{"model": {ID: "model", Capabilities: []adapter.Capability{adapter.CapabilityChat}}},
-		Providers: map[string]adapter.ProviderInput{"provider": {ID: "provider", Name: "provider", Selector: "selected", BaseURL: "https://provider.example/v1", SDKKind: adapter.SDKKindOpenAI, Protocol: adapter.ProtocolOpenAIChat}},
+		Providers: map[string]adapter.ProviderInput{"provider": {ID: "provider", Name: "provider", Selector: "selected", BaseURL: "https://provider.example/v1", SDKKind: adapter.SDKKindOpenAI,Endpoints: []adapter.EndpointInput{{Protocol: adapter.ProtocolOpenAIChat, Path: "/v1/chat/completions"}}}},
 		Adapters:  map[string]adapter.AdapterConfig{"adapter": {ID: "adapter", Name: "adapter", Version: 1, SDKKind: adapter.SDKKindOpenAI, Protocol: adapter.ProtocolOpenAIChat, Auth: adapter.AuthRule{Kind: adapter.AuthBearerHeader, Header: "Authorization"}}},
-		Routes:    []adapter.RouteInput{{ID: "route", ModelID: "model", ProviderID: "provider", AdapterID: "adapter", UpstreamModel: "upstream", Enabled: true, Protocol: adapter.ProtocolOpenAIChat, Credentials: []adapter.CredentialInput{{ID: "credential", CredentialRef: "vault://private/timeout", Enabled: true}}}},
+		Routes:    []adapter.RouteInput{{ID: "route", ModelID: "model", ProviderID: "provider", UpstreamModel: "upstream", Enabled: true, Credentials: []adapter.CredentialInput{{ID: "credential", CredentialRef: "vault://private/timeout", Enabled: true}}}},
 	})
 	if err != nil {
 		t.Fatalf("Compile: %v", err)

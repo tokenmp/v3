@@ -20,7 +20,7 @@ func TestCompileBridgesRoutingCandidatesWithoutAliases(t *testing.T) {
 	provider := raw.Providers["openai-default"]
 	provider.Selector = "openai"
 	raw.Providers["openai-default"] = provider
-	adapterConfig := raw.Adapters[raw.Routes[0].AdapterID]
+	adapterConfig := raw.Adapters["adapter-openai-default"]
 	adapterConfig.Auth.CredentialRef = ""
 	raw.Adapters[adapterConfig.ID] = adapterConfig
 	raw.Routes[0].RouteGroup = "primary"
@@ -107,6 +107,7 @@ func TestCompileFixturePoliciesApplyDefaultsAndOverrides(t *testing.T) {
 func TestCompileC24RawCompiledSnapshotStoreCurrentAndOldViewHaveNoNestedAliases(t *testing.T) {
 	_, raw := loadRawConfig(t, "default")
 	adapterID, providerID, routeID, modelID := "adapter-openai-default", "openai-default", raw.Routes[0].ID, raw.Routes[0].ModelID
+	routeIDSuffix := routeID + "--openai_chat"
 	raw.Global.AutoModelIDs = []string{modelID}
 	model := raw.Models[modelID]
 	model.FallbackModelIDs = []string{"fallback-model"}
@@ -123,7 +124,7 @@ func TestCompileC24RawCompiledSnapshotStoreCurrentAndOldViewHaveNoNestedAliases(
 	p.Retry.Rules = []adapter.RetryRule{{ID: "provider-alias", Priority: 1, HTTPStatuses: []int{503}, Action: adapter.RetryNextRoute}}
 	raw.Providers[providerID] = p
 	raw.Routes[0].FallbackRouteIDs = []string{"fallback"}
-	raw.Routes = append(raw.Routes, RouteConfig{ID: "fallback", ModelID: raw.Routes[0].ModelID, ProviderID: providerID, AdapterID: adapterID, UpstreamModel: "fallback-model", Protocol: raw.Routes[0].Protocol, Credentials: []CredentialConfig{{ID: "fallback", CredentialRef: "vault://openai-default/credential/fallback", Enabled: true}}})
+	raw.Routes = append(raw.Routes, RouteConfig{ID: "fallback", ModelID: raw.Routes[0].ModelID, ProviderID: providerID, UpstreamModel: "fallback-model", Credentials: []CredentialConfig{{ID: "fallback", CredentialRef: "vault://openai-default/credential/fallback", Enabled: true}}})
 
 	compiled, err := Compile(raw)
 	if err != nil {
@@ -159,12 +160,12 @@ func TestCompileC24RawCompiledSnapshotStoreCurrentAndOldViewHaveNoNestedAliases(
 	oldAdapter := oldValue.Adapters[adapterID]
 	var oldRoute adapter.CompiledRoute
 	for _, route := range oldValue.Routes {
-		if route.ID == routeID {
+		if route.ID == routeIDSuffix {
 			oldRoute = route
 			break
 		}
 	}
-	if oldAdapter.Request.AllowedHeaders[0] == "X-Mutated" || oldAdapter.ResponseRules[0].Match.HTTPStatuses[0] != 429 || oldAdapter.Retry.Rules[0].HTTPStatuses[0] != 429 || oldValue.Providers[providerID].Retry.Rules[0].HTTPStatuses[0] != 503 || len(oldRoute.FallbackRouteIDs) != 1 || oldRoute.FallbackRouteIDs[0] != "fallback" || oldValue.AutoModelIDs[0] != modelID || oldValue.Models[modelID].FallbackModelIDs[0] != "fallback-model" || oldRoute.Credentials[0].ID != "primary" {
+	if oldAdapter.Request.AllowedHeaders[0] == "X-Mutated" || oldAdapter.ResponseRules[0].Match.HTTPStatuses[0] != 429 || oldAdapter.Retry.Rules[0].HTTPStatuses[0] != 429 || oldValue.Providers[providerID].Retry.Rules[0].HTTPStatuses[0] != 503 || len(oldRoute.FallbackRouteIDs) != 1 || oldRoute.FallbackRouteIDs[0] != "fallback--openai_chat" || oldValue.AutoModelIDs[0] != modelID || oldValue.Models[modelID].FallbackModelIDs[0] != "fallback-model" || oldRoute.Credentials[0].ID != "primary" {
 		t.Fatalf("raw nested mutation leaked through raw -> compiled -> snapshot -> store -> current: %#v", oldValue)
 	}
 
@@ -172,7 +173,7 @@ func TestCompileC24RawCompiledSnapshotStoreCurrentAndOldViewHaveNoNestedAliases(
 	oldAdapter.Request.AllowedHeaders[0] = "caller-mutation"
 	oldValue.Adapters[adapterID] = oldAdapter
 	for i := range oldValue.Routes {
-		if oldValue.Routes[i].ID == routeID {
+		if oldValue.Routes[i].ID == routeIDSuffix {
 			oldValue.Routes[i].FallbackRouteIDs[0] = "caller-mutation"
 			oldValue.Routes[i].Credentials[0].ID = "caller-mutation"
 			break
@@ -183,7 +184,7 @@ func TestCompileC24RawCompiledSnapshotStoreCurrentAndOldViewHaveNoNestedAliases(
 		t.Fatal("Current view retained an adapter nested alias")
 	}
 	for _, route := range isolated.Routes {
-		if route.ID == routeID && (route.FallbackRouteIDs[0] == "caller-mutation" || route.Credentials[0].ID == "caller-mutation") {
+		if route.ID == routeIDSuffix && (route.FallbackRouteIDs[0] == "caller-mutation" || route.Credentials[0].ID == "caller-mutation") {
 			t.Fatal("Current view retained a route nested alias")
 		}
 	}
@@ -199,7 +200,7 @@ func TestCompileC24RawCompiledSnapshotStoreCurrentAndOldViewHaveNoNestedAliases(
 	}
 	oldAfterPublish := old.Value()
 	for _, route := range oldAfterPublish.Routes {
-		if route.ID == routeID && route.FallbackRouteIDs[0] != "fallback" {
+		if route.ID == routeIDSuffix && route.FallbackRouteIDs[0] != "fallback--openai_chat" {
 			t.Fatalf("old view changed after later publication: %#v", oldAfterPublish)
 		}
 	}

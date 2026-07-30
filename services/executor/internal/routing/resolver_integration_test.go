@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -63,9 +64,9 @@ func routingIntegrationConfig(t *testing.T) snapshot.ConfigSnapshot {
 		{ID: "primary-2", CredentialRef: "vault://routing/primary-two", Priority: 2, Enabled: true},
 	}
 	config.Routes = []snapshot.RouteConfig{primary}
-	adapterConfig := config.Adapters[primary.AdapterID]
+	adapterConfig := config.Adapters["adapter-openai-default"]
 	adapterConfig.Auth.CredentialRef = ""
-	config.Adapters[primary.AdapterID] = adapterConfig
+	config.Adapters["adapter-openai-default"] = adapterConfig
 
 	modelB := config.Models["chat-default"]
 	modelB.ID = "model-b"
@@ -86,10 +87,10 @@ func routingIntegrationConfig(t *testing.T) snapshot.ConfigSnapshot {
 	config.Providers[providerOther.ID] = providerOther
 
 	config.Routes = append(config.Routes,
-		snapshot.RouteConfig{ID: "secondary", ModelID: "chat-default", ProviderID: "openai-default", AdapterID: primary.AdapterID, UpstreamModel: "secondary", Priority: 20, Enabled: true, Protocol: primary.Protocol, RouteGroup: "g", FallbackRouteIDs: []string{"other-provider"}, Credentials: []snapshot.CredentialConfig{{ID: "secondary-1", CredentialRef: "vault://routing/secondary", Enabled: true}}},
-		snapshot.RouteConfig{ID: "route-b", ModelID: "model-b", ProviderID: "openai-default", AdapterID: primary.AdapterID, UpstreamModel: "b", Priority: 20, Enabled: true, Protocol: primary.Protocol, RouteGroup: "g", Credentials: []snapshot.CredentialConfig{{ID: "b-1", CredentialRef: "vault://routing/b", Enabled: true}}},
-		snapshot.RouteConfig{ID: "other-provider", ModelID: "chat-default", ProviderID: providerOther.ID, AdapterID: primary.AdapterID, UpstreamModel: "other", Priority: 30, Enabled: true, Protocol: primary.Protocol, RouteGroup: "g", Credentials: []snapshot.CredentialConfig{{ID: "other-1", CredentialRef: "vault://routing/other", Enabled: true}}},
-		snapshot.RouteConfig{ID: "other-group", ModelID: "chat-default", ProviderID: "openai-default", AdapterID: primary.AdapterID, UpstreamModel: "other-group", Priority: 40, Enabled: true, Protocol: primary.Protocol, RouteGroup: "other", Credentials: []snapshot.CredentialConfig{{ID: "group-1", CredentialRef: "vault://routing/group", Enabled: true}}},
+		snapshot.RouteConfig{ID: "secondary", ModelID: "chat-default", ProviderID: "openai-default", UpstreamModel: "secondary", Priority: 20, Enabled: true, RouteGroup: "g", FallbackRouteIDs: []string{"other-provider"}, Credentials: []snapshot.CredentialConfig{{ID: "secondary-1", CredentialRef: "vault://routing/secondary", Enabled: true}}},
+		snapshot.RouteConfig{ID: "route-b", ModelID: "model-b", ProviderID: "openai-default", UpstreamModel: "b", Priority: 20, Enabled: true, RouteGroup: "g", Credentials: []snapshot.CredentialConfig{{ID: "b-1", CredentialRef: "vault://routing/b", Enabled: true}}},
+		snapshot.RouteConfig{ID: "other-provider", ModelID: "chat-default", ProviderID: providerOther.ID, UpstreamModel: "other", Priority: 30, Enabled: true, RouteGroup: "g", Credentials: []snapshot.CredentialConfig{{ID: "other-1", CredentialRef: "vault://routing/other", Enabled: true}}},
+		snapshot.RouteConfig{ID: "other-group", ModelID: "chat-default", ProviderID: "openai-default", UpstreamModel: "other-group", Priority: 40, Enabled: true, RouteGroup: "other", Credentials: []snapshot.CredentialConfig{{ID: "group-1", CredentialRef: "vault://routing/group", Enabled: true}}},
 	)
 	return config
 }
@@ -106,7 +107,13 @@ func integrationResolver(t *testing.T, source *snapshot.CompiledSnapshot, quaran
 func integrationCandidateIDs(candidates []Candidate) []string {
 	ids := make([]string, len(candidates))
 	for i, candidate := range candidates {
-		ids[i] = candidate.ModelID + "/" + candidate.RouteID + "/" + candidate.Credential.ID
+		// Strip the protocol suffix added during route expansion so test
+		// assertions use the original DB route identity.
+		routeID := candidate.RouteID
+		if idx := strings.LastIndex(routeID, "--"); idx > 0 {
+			routeID = routeID[:idx]
+		}
+		ids[i] = candidate.ModelID + "/" + routeID + "/" + candidate.Credential.ID
 	}
 	return ids
 }
@@ -210,6 +217,7 @@ func TestResolverIntegrationNextUsesFrozenPrivateUniverse(t *testing.T) {
 	}
 	current := plan.Candidates[0].target()
 
+
 	// Public candidates are caller-owned output. Replacing them must not alter
 	// any retry action's private, selector-scoped universe.
 	plan.Candidates = []Candidate{{ModelID: "attacker", RouteID: "attacker", Credential: Credential{ID: "attacker"}}}
@@ -233,9 +241,9 @@ func TestResolverIntegrationNextUsesFrozenPrivateUniverse(t *testing.T) {
 	}
 
 	visited := map[QuarantineTarget]struct{}{
-		{ModelID: "chat-default", ProviderID: "openai-default", RouteID: "primary", CredentialID: "primary-2"}:      {},
-		{ModelID: "chat-default", ProviderID: "openai-default", RouteID: "secondary", CredentialID: "secondary-1"}:  {},
-		{ModelID: "chat-default", ProviderID: "provider-other", RouteID: "other-provider", CredentialID: "other-1"}: {},
+		{ModelID: "chat-default", ProviderID: "openai-default", RouteID: "primary--openai_chat", CredentialID: "primary-2"}:      {},
+		{ModelID: "chat-default", ProviderID: "openai-default", RouteID: "secondary--openai_chat", CredentialID: "secondary-1"}:  {},
+		{ModelID: "chat-default", ProviderID: "provider-other", RouteID: "other-provider--openai_chat", CredentialID: "other-1"}: {},
 	}
 	if _, ok := plan.Next(adapter.RetryNextCredential, current, visited); ok {
 		t.Error("NextCredential ignored visited target")
@@ -246,7 +254,7 @@ func TestResolverIntegrationNextUsesFrozenPrivateUniverse(t *testing.T) {
 	if _, ok := plan.Next(adapter.RetryNextProvider, current, visited); ok {
 		t.Error("NextProvider ignored visited target")
 	}
-	if _, ok := plan.Next(adapter.RetryNextModel, current, map[QuarantineTarget]struct{}{{ModelID: "model-b", ProviderID: "openai-default", RouteID: "route-b", CredentialID: "b-1"}: {}}); ok {
+	if _, ok := plan.Next(adapter.RetryNextModel, current, map[QuarantineTarget]struct{}{{ModelID: "model-b", ProviderID: "openai-default", RouteID: "route-b--openai_chat", CredentialID: "b-1"}: {}}); ok {
 		t.Error("NextModel ignored exhausted candidate")
 	}
 	if _, ok := plan.Next(adapter.RetryNextRoute, QuarantineTarget{ModelID: "attacker"}, nil); ok {

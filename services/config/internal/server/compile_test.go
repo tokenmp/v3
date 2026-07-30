@@ -19,6 +19,7 @@ type fakeAdminReader struct {
 	providers []repository.Provider
 	routes    []repository.RouteMapping
 	adapters  []repository.Adapter
+	endpoints []repository.UpstreamEndpoint
 	// credentials by provider ID
 	credsByProvider map[string][]repository.UpstreamCredential
 	// route credentials by route ID
@@ -68,7 +69,7 @@ func (f *fakeAdminReader) GetAdapter(_ context.Context, id string) (repository.A
 	return repository.Adapter{}, repository.ErrNotFound
 }
 func (f *fakeAdminReader) ListEndpoints(_ context.Context, _ string) ([]repository.UpstreamEndpoint, error) {
-	return nil, nil
+	return f.endpoints, nil
 }
 func (f *fakeAdminReader) ListCredentials(_ context.Context, providerID string) ([]repository.UpstreamCredential, error) {
 	if f.credsByProvider != nil {
@@ -256,6 +257,9 @@ func sampleData() (*fakeAdminReader, map[string][]repository.UpstreamCredential,
 				Status:   "active",
 			},
 		},
+		endpoints: []repository.UpstreamEndpoint{
+			{ProviderID: "openai-default", Protocol: "openai_chat", Path: "/v1/chat/completions", Status: "active"},
+		},
 		routes: []repository.RouteMapping{
 			{
 				ID:            "route-chat-default",
@@ -264,7 +268,6 @@ func sampleData() (*fakeAdminReader, map[string][]repository.UpstreamCredential,
 				UpstreamModel: "gpt-default",
 				Priority:      100,
 				Enabled:       true,
-				Protocol:      "openai_chat",
 				Status:        "active",
 			},
 		},
@@ -429,7 +432,7 @@ func TestCompileSnapshot_AnthropicAutoAdapter(t *testing.T) {
 			{ID: "anthropic-default", Name: "Anthropic Default", Selector: "anthropic", BaseURL: "https://api.anthropic.example", SDKKind: "anthropic", Protocol: "anthropic_messages", Status: "active"},
 		},
 		routes: []repository.RouteMapping{
-			{ID: "route-chat-anthropic", ModelID: "chat-anthropic", ProviderID: "anthropic-default", UpstreamModel: "claude-default", Priority: 100, Enabled: true, Protocol: "anthropic_messages", Status: "active"},
+			{ID: "route-chat-anthropic", ModelID: "chat-anthropic", ProviderID: "anthropic-default", UpstreamModel: "claude-default", Priority: 100, Enabled: true, Status: "active"},
 		},
 		adapters: []repository.Adapter{},
 	}
@@ -475,12 +478,16 @@ func TestCompileSnapshot_ProviderUsesProtocolScopedImplicitAdapters(t *testing.T
 	models := []repository.Model{{ID: "m1", DisplayName: "M1", Capabilities: repository.StringArray{"chat", "messages"}, Status: "active"}}
 	providers := []repository.Provider{{ID: "p1", Name: "P1", Selector: "p1", BaseURL: "https://api.example.com/v1", SDKKind: "openai", Protocol: "openai_chat", Status: "active"}}
 	routes := []repository.RouteMapping{
-		{ID: "chat", ModelID: "m1", ProviderID: "p1", UpstreamModel: "gpt", Priority: 100, Enabled: true, Protocol: "openai_chat", Status: "active"},
-		{ID: "messages", ModelID: "m1", ProviderID: "p1", UpstreamModel: "claude", Priority: 100, Enabled: true, Protocol: "anthropic_messages", Status: "active"},
+		{ID: "chat", ModelID: "m1", ProviderID: "p1", UpstreamModel: "gpt", Priority: 100, Enabled: true, Status: "active"},
+		{ID: "messages", ModelID: "m1", ProviderID: "p1", UpstreamModel: "claude", Priority: 100, Enabled: true, Status: "active"},
+	}
+	endpoints := []repository.UpstreamEndpoint{
+		{ProviderID: "p1", Protocol: "openai_chat", Path: "/v1/chat/completions", Status: "active"},
+		{ProviderID: "p1", Protocol: "anthropic_messages", Path: "/v1/messages", Status: "active"},
 	}
 	credsByProvider := map[string][]repository.UpstreamCredential{"p1": {{ID: "c1", ProviderID: "p1", CredentialRef: "vault://p1/credential/c1", Priority: 100, Status: "active"}}}
 
-	data, err := compileSnapshot(models, providers, routes, credsByProvider, map[string][]repository.RouteCredential{}, nil, repository.GlobalPolicy{})
+	data, err := compileSnapshotWithEndpoints(models, providers, routes, credsByProvider, map[string][]repository.RouteCredential{}, map[string][]repository.UpstreamEndpoint{"p1": endpoints}, nil, repository.GlobalPolicy{})
 	if err != nil {
 		t.Fatalf("compileSnapshot: %v", err)
 	}
@@ -490,9 +497,7 @@ func TestCompileSnapshot_ProviderUsesProtocolScopedImplicitAdapters(t *testing.T
 			Protocol string `json:"Protocol"`
 		} `json:"Adapters"`
 		Routes []struct {
-			ID        string `json:"ID"`
-			AdapterID string `json:"AdapterID"`
-			Protocol  string `json:"Protocol"`
+			ID string `json:"ID"`
 		} `json:"Routes"`
 	}
 	if err := json.Unmarshal(data, &snap); err != nil {
@@ -503,13 +508,6 @@ func TestCompileSnapshot_ProviderUsesProtocolScopedImplicitAdapters(t *testing.T
 	}
 	if snap.Adapters["adapter-p1-anthropic_messages"].SDKKind != "anthropic" || snap.Adapters["adapter-p1-anthropic_messages"].Protocol != "anthropic_messages" {
 		t.Fatalf("messages implicit adapter = %#v", snap.Adapters["adapter-p1-anthropic_messages"])
-	}
-	byRoute := map[string]string{}
-	for _, route := range snap.Routes {
-		byRoute[route.ID] = route.AdapterID
-	}
-	if byRoute["chat"] != "adapter-p1-openai_chat" || byRoute["messages"] != "adapter-p1-anthropic_messages" {
-		t.Fatalf("route adapters = %#v", byRoute)
 	}
 }
 
@@ -522,7 +520,7 @@ func TestCompileSnapshot_RouteWithCredentials(t *testing.T) {
 			{ID: "p1", Name: "P1", Selector: "openai", BaseURL: "https://api.example.com/v1", SDKKind: "openai", Protocol: "openai_chat", Status: "active"},
 		},
 		routes: []repository.RouteMapping{
-			{ID: "r1", ModelID: "m1", ProviderID: "p1", UpstreamModel: "gpt-4", Priority: 100, Enabled: true, Protocol: "openai_chat", Status: "active"},
+			{ID: "r1", ModelID: "m1", ProviderID: "p1", UpstreamModel: "gpt-4", Priority: 100, Enabled: true, Status: "active"},
 		},
 		adapters: []repository.Adapter{},
 	}
@@ -567,7 +565,7 @@ func TestCompileSnapshot_RouteCredentialsOverride(t *testing.T) {
 			{ID: "p1", Name: "P1", Selector: "openai", BaseURL: "https://api.example.com/v1", SDKKind: "openai", Protocol: "openai_chat", Status: "active"},
 		},
 		routes: []repository.RouteMapping{
-			{ID: "r1", ModelID: "m1", ProviderID: "p1", UpstreamModel: "gpt-4", Priority: 100, Enabled: true, Protocol: "openai_chat", Status: "active"},
+			{ID: "r1", ModelID: "m1", ProviderID: "p1", UpstreamModel: "gpt-4", Priority: 100, Enabled: true, Status: "active"},
 		},
 		adapters: []repository.Adapter{},
 	}
@@ -854,7 +852,7 @@ func TestCompileSnapshot_JSONKeysMatchDefaultFixture(t *testing.T) {
 		t.Fatalf("unmarshal Routes: %v", err)
 	}
 	if len(routes) > 0 {
-		expectedRouteKeys := []string{"ID", "ModelID", "ProviderID", "AdapterID", "UpstreamModel", "Priority", "Enabled", "Protocol", "Retry", "Timeout", "Credentials"}
+		expectedRouteKeys := []string{"ID", "ModelID", "ProviderID", "UpstreamModel", "Priority", "Enabled", "Retry", "Timeout", "Credentials"}
 		for _, key := range expectedRouteKeys {
 			if _, ok := routes[0][key]; !ok {
 				t.Errorf("Route missing key %q", key)
@@ -920,7 +918,7 @@ func TestCompileSnapshot_DBAdapterPreferred(t *testing.T) {
 			{ID: "p1", Name: "P1", Selector: "openai", BaseURL: "https://api.example.com/v1", SDKKind: "openai", Protocol: "openai_chat", Status: "active"},
 		},
 		routes: []repository.RouteMapping{
-			{ID: "r1", ModelID: "m1", ProviderID: "p1", UpstreamModel: "gpt-4", Priority: 100, Enabled: true, Protocol: "openai_chat", Status: "active", AdapterID: strPtr("my-custom-adapter")},
+			{ID: "r1", ModelID: "m1", ProviderID: "p1", UpstreamModel: "gpt-4", Priority: 100, Enabled: true, Status: "active", AdapterID: strPtr("my-custom-adapter")},
 		},
 		adapters: []repository.Adapter{
 			{
@@ -929,7 +927,7 @@ func TestCompileSnapshot_DBAdapterPreferred(t *testing.T) {
 				Version:           2,
 				ProviderID:        strPtr("p1"),
 				SDKKind:           "openai",
-				Protocol:          "openai_chat",
+				Protocol: "openai_chat",
 				CapabilityRequire: capRequire,
 				Thinking:          thinking,
 				Status:            "active",
@@ -967,8 +965,8 @@ func TestCompileSnapshot_DBAdapterPreferred(t *testing.T) {
 		t.Error("auto-generated adapter adapter-p1 should not exist when DB adapter with provider_id exists")
 	}
 	// Route should reference the DB adapter.
-	if len(snap.Routes) != 1 || snap.Routes[0].AdapterID != "my-custom-adapter" {
-		t.Errorf("route AdapterID = %q, want %q", snap.Routes[0].AdapterID, "my-custom-adapter")
+	if len(snap.Routes) != 1 {
+		t.Errorf("route count = %d, want 1", len(snap.Routes))
 	}
 }
 
@@ -1112,25 +1110,28 @@ type strictModelThinking struct {
 }
 
 type strictProvider struct {
-	ID       string              `json:"ID"`
-	Selector string              `json:"Selector"`
-	Name     string              `json:"Name"`
-	BaseURL  string              `json:"BaseURL"`
-	SDKKind  string              `json:"SDKKind"`
-	Protocol string              `json:"Protocol"`
-	Retry    strictRetryPolicy   `json:"Retry"`
-	Timeout  strictTimeoutPolicy `json:"Timeout"`
+	ID        string              `json:"ID"`
+	Selector  string              `json:"Selector"`
+	Name      string              `json:"Name"`
+	BaseURL   string              `json:"BaseURL"`
+	SDKKind   string              `json:"SDKKind"`
+	Endpoints []strictEndpoint   `json:"Endpoints"`
+	Retry     strictRetryPolicy   `json:"Retry"`
+	Timeout   strictTimeoutPolicy `json:"Timeout"`
+}
+
+type strictEndpoint struct {
+	Protocol string `json:"Protocol"`
+	Path     string `json:"Path"`
 }
 
 type strictRoute struct {
 	ID               string              `json:"ID"`
 	ModelID          string              `json:"ModelID"`
 	ProviderID       string              `json:"ProviderID"`
-	AdapterID        string              `json:"AdapterID"`
 	UpstreamModel    string              `json:"UpstreamModel"`
 	Priority         int                 `json:"Priority"`
 	Enabled          bool                `json:"Enabled"`
-	Protocol         string              `json:"Protocol"`
 	Retry            strictRetryPolicy   `json:"Retry"`
 	Timeout          strictTimeoutPolicy `json:"Timeout"`
 	Credentials      []strictCredential  `json:"Credentials"`
@@ -1151,6 +1152,7 @@ type strictAdapter struct {
 	Version    int                   `json:"Version"`
 	SDKKind    string                `json:"SDKKind"`
 	Protocol   string                `json:"Protocol"`
+	ProviderID *string               `json:"ProviderID,omitempty"`
 	Auth       strictAuth            `json:"Auth"`
 	Capability strictCapability      `json:"Capability"`
 	Thinking   strictAdapterThinking `json:"Thinking"`
@@ -1450,7 +1452,7 @@ func TestCompileSnapshot_DBAdapterCapabilityMapping(t *testing.T) {
 			{ID: "p1", Name: "P1", Selector: "openai", BaseURL: "https://api.example.com/v1", SDKKind: "openai", Protocol: "openai_chat", Status: "active"},
 		},
 		routes: []repository.RouteMapping{
-			{ID: "r1", ModelID: "m1", ProviderID: "p1", UpstreamModel: "gpt-4", Priority: 100, Enabled: true, Protocol: "openai_chat", Status: "active", AdapterID: strPtr("my-adapter")},
+			{ID: "r1", ModelID: "m1", ProviderID: "p1", UpstreamModel: "gpt-4", Priority: 100, Enabled: true, Status: "active", AdapterID: strPtr("my-adapter")},
 		},
 		adapters: []repository.Adapter{
 			{
@@ -1459,7 +1461,7 @@ func TestCompileSnapshot_DBAdapterCapabilityMapping(t *testing.T) {
 				Version:           1,
 				ProviderID:        strPtr("p1"),
 				SDKKind:           "openai",
-				Protocol:          "openai_chat",
+				Protocol: "openai_chat",
 				CapabilityRequire: capRequire,
 				CapabilityDeny:    capDeny,
 				Status:            "active",

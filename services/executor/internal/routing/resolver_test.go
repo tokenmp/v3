@@ -73,12 +73,12 @@ func authNoneSnapshot(t *testing.T) *snapshot.CompiledSnapshot {
 			"model": {ID: "model", Capabilities: []adapter.Capability{adapter.CapabilityChat}},
 		},
 		Providers: map[string]adapter.ProviderInput{
-			"provider": {ID: "provider", Name: "provider", BaseURL: "https://provider.example/v1", SDKKind: adapter.SDKKindGenericHTTP, Protocol: adapter.ProtocolOpenAIChat},
+			"provider": {ID: "provider", Name: "provider", BaseURL: "https://provider.example/v1", SDKKind: adapter.SDKKindGenericHTTP, Endpoints: []adapter.EndpointInput{{Protocol: adapter.ProtocolOpenAIChat, Path: "/v1/chat/completions"}}},
 		},
 		Adapters: map[string]adapter.AdapterConfig{
 			"adapter": {ID: "adapter", Name: "adapter", Version: 1, SDKKind: adapter.SDKKindGenericHTTP, Protocol: adapter.ProtocolOpenAIChat, Auth: adapter.AuthRule{Kind: adapter.AuthNone}},
 		},
-		Routes: []adapter.RouteInput{{ID: "route", ModelID: "model", ProviderID: "provider", AdapterID: "adapter", UpstreamModel: "upstream", Enabled: true, Protocol: adapter.ProtocolOpenAIChat}},
+		Routes: []adapter.RouteInput{{ID: "route", ModelID: "model", ProviderID: "provider", UpstreamModel: "upstream", Enabled: true}},
 	})
 	if err != nil {
 		t.Fatalf("Compile(AuthNone) error = %v", err)
@@ -210,7 +210,7 @@ func TestResolveAuthNoneCandidateAndQuarantineScopes(t *testing.T) {
 		if _, err := resolver(t, authNoneSnapshot(t), reader).Resolve(context.Background(), Selector{Model: "model"}); err != nil {
 			t.Fatalf("Resolve(AuthNone) error = %v", err)
 		}
-		want := []QuarantineTarget{{ModelID: "model"}, {ProviderID: "provider"}, {RouteID: "route"}}
+		want := []QuarantineTarget{{ModelID: "model"}, {ProviderID: "provider"}, {RouteID: "route--openai_chat"}}
 		if len(reader.seen) != len(want) {
 			t.Fatalf("AuthNone quarantine targets = %v, want %v", reader.seen, want)
 		}
@@ -220,7 +220,7 @@ func TestResolveAuthNoneCandidateAndQuarantineScopes(t *testing.T) {
 			}
 		}
 	})
-	for _, target := range []QuarantineTarget{{ModelID: "model"}, {ProviderID: "provider"}, {RouteID: "route"}} {
+	for _, target := range []QuarantineTarget{{ModelID: "model"}, {ProviderID: "provider"}, {RouteID: "route--openai_chat"}} {
 		t.Run("quarantines "+fmt.Sprintf("%+v", target), func(t *testing.T) {
 			reader := &quarantineReader{byTarget: map[QuarantineTarget]Quarantine{target: {Until: now.Add(time.Second)}}}
 			_, err := resolver(t, authNoneSnapshot(t), reader).Resolve(context.Background(), Selector{Model: "model"})

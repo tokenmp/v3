@@ -71,15 +71,13 @@ type Adapter struct {
 func (Adapter) TableName() string { return "adapters" }
 
 // UpstreamEndpoint maps to the config.upstream_endpoints table.
+// Since 000004: auth is derived from the provider SDK kind, so the endpoint only
+// carries (provider, protocol, path).
 type UpstreamEndpoint struct {
 	ID         int64     `gorm:"column:id;primaryKey;autoIncrement" json:"id"`
 	ProviderID string    `gorm:"column:provider_id" json:"provider_id"`
 	Path       string    `gorm:"column:path" json:"path"`
 	Protocol   string    `gorm:"column:protocol" json:"protocol"`
-	AuthKind   string    `gorm:"column:auth_kind" json:"auth_kind"`
-	AuthHeader *string   `gorm:"column:auth_header" json:"auth_header,omitempty"`
-	AuthQuery  *string   `gorm:"column:auth_query" json:"auth_query,omitempty"`
-	AuthPrefix *string   `gorm:"column:auth_prefix" json:"auth_prefix,omitempty"`
 	Status     string    `gorm:"column:status" json:"status"`
 	CreatedAt  time.Time `gorm:"column:created_at" json:"created_at"`
 	UpdatedAt  time.Time `gorm:"column:updated_at" json:"updated_at"`
@@ -115,7 +113,7 @@ type RouteMapping struct {
 	ProviderID      string    `gorm:"column:provider_id" json:"provider_id"`
 	AdapterID       *string   `gorm:"column:adapter_id" json:"adapter_id,omitempty"`
 	UpstreamModel   string    `gorm:"column:upstream_model" json:"upstream_model"`
-	Protocol        string    `gorm:"column:protocol" json:"protocol"`
+	Protocol        *string   `gorm:"column:protocol" json:"protocol,omitempty"`
 	Priority        int       `gorm:"column:priority" json:"priority"`
 	Enabled         bool      `gorm:"column:enabled" json:"enabled"`
 	IsDefault       bool      `gorm:"column:is_default" json:"is_default"`

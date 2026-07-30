@@ -11,7 +11,9 @@
         {
           "ID": "global-retry-429",
           "Priority": 10,
-          "HTTPStatuses": [429],
+          "HTTPStatuses": [
+            429
+          ],
           "Action": "next_credential"
         }
       ]
@@ -28,7 +30,11 @@
     "chat-xfyun": {
       "ID": "chat-xfyun",
       "DisplayName": "XFYun Chat",
-      "Capabilities": ["chat", "streaming", "tools"],
+      "Capabilities": [
+        "chat",
+        "streaming",
+        "tools"
+      ],
       "Thinking": {
         "Supported": true,
         "DefaultEffort": "low",
@@ -45,9 +51,14 @@
       "Name": "XFYun Default",
       "BaseURL": "https://spark-api.xfyun.example/v1",
       "SDKKind": "generic_http",
-      "Protocol": "openai_chat",
       "Retry": {},
-      "Timeout": {}
+      "Timeout": {},
+      "Endpoints": [
+        {
+          "Protocol": "openai_chat",
+          "Path": "/v1/chat/completions"
+        }
+      ]
     }
   },
   "Routes": [
@@ -55,11 +66,9 @@
       "ID": "route-chat-xfyun",
       "ModelID": "chat-xfyun",
       "ProviderID": "xfyun-default",
-      "AdapterID": "adapter-xfyun-default",
       "UpstreamModel": "spark-default",
       "Priority": 100,
       "Enabled": true,
-      "Protocol": "openai_chat",
       "Retry": {},
       "Timeout": {},
       "Credentials": []
@@ -79,7 +88,10 @@
         "CredentialRef": "vault://xfyun-default/credential/default"
       },
       "Capability": {
-        "Require": ["chat", "streaming"],
+        "Require": [
+          "chat",
+          "streaming"
+        ],
         "Deny": []
       },
       "Thinking": {
@@ -103,7 +115,10 @@
         "MaxBudgetToken": 4000
       },
       "Request": {
-        "AllowedHeaders": ["Content-Type", "Accept"],
+        "AllowedHeaders": [
+          "Content-Type",
+          "Accept"
+        ],
         "AllowedQuery": [],
         "Rules": []
       },
@@ -113,8 +128,13 @@
             "ID": "resp-503-to-429",
             "Priority": 10,
             "Match": {
-              "HTTPStatuses": [503],
-              "ErrorCodes": ["service_unavailable", "traffic_overflow"]
+              "HTTPStatuses": [
+                503
+              ],
+              "ErrorCodes": [
+                "service_unavailable",
+                "traffic_overflow"
+              ]
             },
             "Output": {
               "HTTPStatus": 429,
@@ -127,7 +147,9 @@
             "ID": "resp-429",
             "Priority": 20,
             "Match": {
-              "HTTPStatuses": [429]
+              "HTTPStatuses": [
+                429
+              ]
             },
             "Output": {
               "HTTPStatus": 429,
@@ -147,13 +169,17 @@
           {
             "ID": "retry-503-as-429",
             "Priority": 10,
-            "HTTPStatuses": [503],
+            "HTTPStatuses": [
+              503
+            ],
             "Action": "next_credential"
           },
           {
             "ID": "retry-429",
             "Priority": 20,
-            "HTTPStatuses": [429],
+            "HTTPStatuses": [
+              429
+            ],
             "Action": "next_credential"
           }
         ]

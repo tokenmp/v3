@@ -11,6 +11,9 @@ type AdapterConfig struct {
 	Version  int
 	SDKKind  SDKKind
 	Protocol Protocol
+	// ProviderID, when non-nil, scopes this adapter to a provider. A nil
+	// ProviderID makes it a generic fallback keyed by (SDKKind, Protocol).
+	ProviderID *string
 
 	Auth       AuthRule
 	Capability CapabilityPolicy

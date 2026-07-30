@@ -5,6 +5,7 @@ const config: NextConfig = {
   reactStrictMode: true,
   transpilePackages: ['@tokenmp/ui-tokens'],
   output: 'standalone',
+  outputFileTracingRoot: resolve(__dirname, '../..'),
   turbopack: {
     root: resolve(__dirname, '../..'),
   },
