@@ -56,9 +56,10 @@ export default function AdminRoutesPage() {
 
   const toggleProtocolMut = useMutation({
     mutationFn: async ({ group, protocol }: { group: RouteProviderGroup; protocol: string }) => {
-      const existing = group.routes.find((r) => r.protocol === protocol);
-      if (existing) {
-        await adminConfigApi.updateRoute(existing.id, { enabled: !existing.enabled });
+      const existingRoutes = group.routes.filter((r) => r.protocol === protocol);
+      if (existingRoutes.length > 0) {
+        const anyActive = existingRoutes.some((r) => r.enabled && !r.quarantined);
+        await Promise.all(existingRoutes.map((route) => adminConfigApi.updateRoute(route.id, { enabled: !anyActive })));
         return;
       }
       await adminConfigApi.createRoute({
@@ -224,9 +225,8 @@ function ProviderRouteCard({
   onEditProtocols: () => void;
   onConfigureAccounts: () => void;
 }) {
-  const enabledRoutes = group.routes.filter((r) => r.enabled && !r.quarantined);
-  const disabledRoutes = group.routes.filter((r) => !r.enabled || r.quarantined);
-  const enabledProtocols = enabledRoutes.map((r) => r.protocol).sort();
+  const enabledProtocols = Array.from(new Set(group.routes.filter((r) => r.enabled && !r.quarantined).map((r) => r.protocol))).sort();
+  const disabledProtocols = PROTOCOL_OPTIONS.filter((protocol) => !enabledProtocols.includes(protocol) && group.routes.some((r) => r.protocol === protocol));
   return (
     <section className="rounded-lg border bg-card p-4 shadow-sm">
       <div className="flex flex-wrap items-center gap-3">
@@ -238,7 +238,7 @@ function ProviderRouteCard({
             </span>
           </div>
           <p className="mt-1 text-xs text-muted-foreground">
-            {enabledRoutes.length} 个启用协议 · {disabledRoutes.length} 个关闭/隔离协议
+            {enabledProtocols.length} 个启用协议 · {disabledProtocols.length} 个关闭/隔离协议
           </p>
           <div className="mt-2 flex flex-wrap gap-1.5">
             {enabledProtocols.length > 0 ? enabledProtocols.map((protocol) => (
@@ -291,8 +291,8 @@ function ProtocolToggleModal({
         </div>
         <div className="grid gap-2 sm:grid-cols-2">
           {PROTOCOL_OPTIONS.map((protocol) => {
-            const route = group.routes.find((r) => r.protocol === protocol);
-            const active = !!route?.enabled && !route.quarantined;
+            const protocolRoutes = group.routes.filter((r) => r.protocol === protocol);
+            const active = protocolRoutes.some((r) => r.enabled && !r.quarantined);
             return (
               <button
                 key={protocol}
@@ -304,7 +304,7 @@ function ProtocolToggleModal({
                 <span>
                   <span className="block font-mono text-xs font-medium">{protocol}</span>
                   <span className="mt-1 block text-[11px] text-muted-foreground">
-                    {route ? (active ? '已开启' : '已关闭') : '未创建，点击开启'}
+                    {protocolRoutes.length > 0 ? (active ? '已开启' : '已关闭') : '未创建，点击开启'}
                   </span>
                 </span>
                 <span className={`inline-flex h-5 w-9 items-center rounded-full p-0.5 transition-colors ${active ? 'bg-primary' : 'bg-muted-foreground/30'}`}>
