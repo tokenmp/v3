@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Admin Routes 简洁版设计预览</title>
+  <style>
+    :root {
+      --bg: #f7f8fb;
+      --card: #fff;
+      --text: #111827;
+      --muted: #6b7280;
+      --line: #e5e7eb;
+      --line-strong: #d1d5db;
+      --brand: #2563eb;
+      --brand-soft: #eff6ff;
+      --radius: 14px;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); }
+    main { max-width: 920px; margin: 0 auto; padding: 36px 24px 56px; }
+    h1 { margin: 0 0 18px; font-size: 26px; letter-spacing: -.03em; }
+    .panel { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; margin-bottom: 18px; }
+    .field-row { display: flex; align-items: center; gap: 12px; }
+    label { color: var(--muted); font-size: 14px; }
+    .select { min-width: 280px; height: 40px; border: 1px solid var(--line-strong); border-radius: 10px; padding: 0 12px; display: inline-flex; align-items: center; justify-content: space-between; font-size: 14px; background: #fff; }
+    .hint { margin-top: 12px; color: var(--muted); font-size: 13px; }
+    .section-title { margin: 24px 0 10px; color: var(--muted); font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
+    .cards { display: grid; gap: 12px; }
+    .provider-card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 18px; display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+    .provider-name { font-size: 17px; font-weight: 750; margin-bottom: 8px; }
+    .meta { display: flex; flex-wrap: wrap; gap: 10px 16px; color: var(--muted); font-size: 13px; }
+    .capabilities { color: var(--brand); background: var(--brand-soft); border-radius: 999px; padding: 3px 8px; }
+    .actions { display: flex; gap: 8px; flex-shrink: 0; }
+    button { height: 36px; border-radius: 10px; border: 1px solid var(--line-strong); background: #fff; padding: 0 13px; font-size: 13px; font-weight: 650; color: var(--text); }
+    button.primary { border-color: var(--brand); background: var(--brand); color: #fff; }
+    .note { margin-top: 22px; color: var(--muted); font-size: 12px; line-height: 1.7; }
+    .state-label { margin: 0 0 8px; color: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+    @media (max-width: 720px) {
+      .field-row, .provider-card { align-items: stretch; flex-direction: column; }
+      .select { min-width: 0; width: 100%; }
+      .actions { width: 100%; }
+      button { flex: 1; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>路由管理</h1>
+
+    <p class="state-label">State A：未选择模型，展示全部 Provider 概览</p>
+    <section class="panel">
+      <div class="field-row">
+        <label>模型</label>
+        <div class="select"><span>全部模型</span><span>⌄</span></div>
+      </div>
+      <div class="hint">未选择具体模型时，展示所有 Provider 的总体账号与能力概览；配置账号/策略需要先进入某个模型。</div>
+    </section>
+
+    <div class="section-title">全部 Provider 概览</div>
+    <section class="cards">
+      <article class="provider-card">
+        <div>
+          <div class="provider-name">astron</div>
+          <div class="meta">
+            <span>覆盖模型：85</span>
+            <span>账号：24 / 24</span>
+            <span class="capabilities">OpenAI Chat · Anthropic</span>
+          </div>
+        </div>
+        <div class="actions">
+          <button>查看模型</button>
+          <button>Provider 详情</button>
+        </div>
+      </article>
+
+      <article class="provider-card">
+        <div>
+          <div class="provider-name">minimax</div>
+          <div class="meta">
+            <span>覆盖模型：1</span>
+            <span>账号：3 / 3</span>
+            <span class="capabilities">OpenAI Chat · Responses · Anthropic</span>
+          </div>
+        </div>
+        <div class="actions">
+          <button>查看模型</button>
+          <button>Provider 详情</button>
+        </div>
+      </article>
+
+      <article class="provider-card">
+        <div>
+          <div class="provider-name">mimo-sgp</div>
+          <div class="meta">
+            <span>覆盖模型：8</span>
+            <span>账号：157 / 157</span>
+            <span class="capabilities">OpenAI Chat · Anthropic</span>
+          </div>
+        </div>
+        <div class="actions">
+          <button>查看模型</button>
+          <button>Provider 详情</button>
+        </div>
+      </article>
+    </section>
+
+    <p class="state-label" style="margin-top:32px;">State B：已选择模型，展示该模型的 Provider 配置</p>
+    <section class="panel">
+      <div class="field-row">
+        <label>模型</label>
+        <div class="select"><span>deepseek-v4-flash</span><span>⌄</span></div>
+      </div>
+      <div class="hint">选中模型后，Provider 卡片进入可配置状态。</div>
+    </section>
+
+    <div class="section-title">deepseek-v4-flash 的 Provider 配置</div>
+    <section class="cards">
+      <article class="provider-card">
+        <div>
+          <div class="provider-name">astron</div>
+          <div class="meta">
+            <span>账号：12 / 16</span>
+            <span class="capabilities">OpenAI Chat · Anthropic</span>
+          </div>
+        </div>
+        <div class="actions">
+          <button class="primary">配置账号</button>
+          <button>策略</button>
+        </div>
+      </article>
+
+      <article class="provider-card">
+        <div>
+          <div class="provider-name">minimax</div>
+          <div class="meta">
+            <span>账号：3 / 3</span>
+            <span class="capabilities">OpenAI Chat · Responses · Anthropic</span>
+          </div>
+        </div>
+        <div class="actions">
+          <button class="primary">配置账号</button>
+          <button>策略</button>
+        </div>
+      </article>
+    </section>
+
+    <p class="note">
+      设计约束：未选择具体模型时展示全部 Provider 概览，但不直接编辑账号/策略；选中模型后才展示该模型下 Provider 的账号和策略配置。协议只作为能力摘要展示，不在主列表展开；更细的 endpoint/protocol 配置归 Provider 管理页。
+    </p>
+  </main>
+</body>
+</html>
