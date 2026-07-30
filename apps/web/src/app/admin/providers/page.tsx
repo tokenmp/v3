@@ -41,12 +41,6 @@ const SDK_TAB_OPTIONS = [
   { value: 'anthropic', label: 'Anthropic' },
 ];
 
-const AUTH_KIND_OPTIONS = [
-  { value: 'bearer_header', label: 'Bearer Header' },
-  { value: 'api_key_header', label: 'API Key Header' },
-  { value: 'api_key_query', label: 'API Key Query' },
-];
-
 const PROTOCOL_LABELS: Record<string, string> = {
   openai_chat: 'Chat Completions',
   anthropic_messages: 'Messages',
@@ -127,7 +121,7 @@ export default function AdminProvidersPage() {
   const deleteMutation = useMutation({
     mutationFn: (id: string) => adminConfigApi.deleteProvider(id),
     onSuccess: () => {
-      toast.success('已删除 Provider（需点编译并发布生效）');
+      toast.success('已删除 Provider。编译发布后对 Executor 生效。');
       void queryClient.invalidateQueries({ queryKey: ['admin', 'providers'] });
     },
     onError: (e: unknown) => {
@@ -383,7 +377,7 @@ function ProviderFormModal({
         status: input.status,
       }),
     onSuccess: () => {
-      toast.success('已创建 Provider（需点编译并发布生效）');
+      toast.success('已创建 Provider。编译发布后对 Executor 生效。');
       void queryClient.invalidateQueries({ queryKey: ['admin', 'providers'] });
       onSaved();
     },
@@ -407,7 +401,7 @@ function ProviderFormModal({
         status: input.status,
       }),
     onSuccess: () => {
-      toast.success('已更新 Provider（需点编译并发布生效）');
+      toast.success('已更新 Provider。编译发布后对 Executor 生效。');
       void queryClient.invalidateQueries({ queryKey: ['admin', 'providers'] });
       onSaved();
     },
@@ -527,26 +521,10 @@ const PROTOCOL_DEFAULT_PATHS: Record<string, string> = {
   openai_images: '/v1/images/generations',
 };
 
-const DEFAULT_AUTH_HEADER: Record<string, string> = {
-  bearer_header: 'Authorization',
-  api_key_header: 'X-API-Key',
-  api_key_query: '',
-};
-
-const DEFAULT_AUTH_PREFIX: Record<string, string> = {
-  bearer_header: 'Bearer ',
-  api_key_header: '',
-  api_key_query: '',
-};
-
 type EndpointDraft = {
   id: number | null;
   path: string;
   protocol: string;
-  authKind: AdminUpstreamEndpoint['authKind'];
-  authHeader: string;
-  authQuery: string;
-  authPrefix: string;
   status: 'active' | 'disabled';
 };
 
@@ -555,10 +533,6 @@ function emptyEndpointDraft(): EndpointDraft {
     id: null,
     path: '/v1/chat/completions',
     protocol: 'openai_chat',
-    authKind: 'bearer_header',
-    authHeader: 'Authorization',
-    authQuery: '',
-    authPrefix: 'Bearer ',
     status: 'active',
   };
 }
@@ -568,10 +542,6 @@ function endpointToDraft(e: AdminUpstreamEndpoint): EndpointDraft {
     id: e.id,
     path: e.path,
     protocol: e.protocol,
-    authKind: e.authKind,
-    authHeader: e.authHeader ?? '',
-    authQuery: e.authQuery ?? '',
-    authPrefix: e.authPrefix ?? '',
     status: e.status === 'active' ? 'active' : 'disabled',
   };
 }
@@ -596,14 +566,10 @@ function EndpointsModal({
       adminConfigApi.createEndpoint(provider.id, {
         path: d.path,
         protocol: d.protocol,
-        authKind: d.authKind,
-        authHeader: d.authKind === 'api_key_query' ? null : (d.authHeader || null),
-        authQuery: d.authKind === 'api_key_query' ? (d.authQuery || null) : null,
-        authPrefix: d.authKind === 'bearer_header' ? (d.authPrefix || null) : null,
         status: d.status,
       }),
     onSuccess: () => {
-      toast.success('已创建端点（需点编译并发布生效）');
+      toast.success('已创建端点。编译发布后对 Executor 生效。');
       void queryClient.invalidateQueries({ queryKey: ['admin', 'provider-endpoints', provider.id] });
       setEditing(null);
     },
@@ -617,14 +583,10 @@ function EndpointsModal({
       adminConfigApi.updateEndpoint(d.id!, {
         path: d.path,
         protocol: d.protocol,
-        authKind: d.authKind,
-        authHeader: d.authKind === 'api_key_query' ? null : (d.authHeader || null),
-        authQuery: d.authKind === 'api_key_query' ? (d.authQuery || null) : null,
-        authPrefix: d.authKind === 'bearer_header' ? (d.authPrefix || null) : null,
         status: d.status,
       }),
     onSuccess: () => {
-      toast.success('已更新端点（需点编译并发布生效）');
+      toast.success('已更新端点。编译发布后对 Executor 生效。');
       void queryClient.invalidateQueries({ queryKey: ['admin', 'provider-endpoints', provider.id] });
       setEditing(null);
     },
@@ -636,7 +598,7 @@ function EndpointsModal({
   const deleteMutation = useMutation({
     mutationFn: (id: number) => adminConfigApi.deleteEndpoint(id),
     onSuccess: () => {
-      toast.success('已删除端点（需点编译并发布生效）');
+      toast.success('已删除端点。编译发布后对 Executor 生效。');
       void queryClient.invalidateQueries({ queryKey: ['admin', 'provider-endpoints', provider.id] });
     },
     onError: (e: unknown) => {
@@ -647,15 +609,6 @@ function EndpointsModal({
   const handleDelete = (e: AdminUpstreamEndpoint) => {
     if (!confirm(`删除端点「${e.path}」？`)) return;
     deleteMutation.mutate(e.id);
-  };
-
-  const onAuthKindChange = (v: string) => {
-    setEditing((d) => ({
-      ...d!,
-      authKind: v as EndpointDraft['authKind'],
-      authHeader: DEFAULT_AUTH_HEADER[v] ?? d!.authHeader,
-      authPrefix: DEFAULT_AUTH_PREFIX[v] ?? d!.authPrefix,
-    }));
   };
 
   const onProtocolChange = (v: string) => {
@@ -680,7 +633,7 @@ function EndpointsModal({
     <Modal
       open
       title={`${provider.displayLabel || provider.name} — 端点管理`}
-      description="每个 Provider 可配置多个协议端点。Executor 按 route.protocol 选择匹配的端点转发。"
+      description="每个 Provider 可配置多个协议端点。Executor 编译时会按端点协议展开路由。"
       onClose={onClose}
       maxWidth="lg"
     >
@@ -703,40 +656,6 @@ function EndpointsModal({
                 className="font-mono"
               />
             </Field>
-            <Field label="鉴权方式" required>
-              <SelectField
-                value={editing.authKind}
-                onChange={onAuthKindChange}
-                options={AUTH_KIND_OPTIONS}
-                disabled={isEditEndpoint}
-              />
-            </Field>
-            {editing.authKind === 'api_key_query' ? (
-              <Field label="Query 参数名" required hint="如 key">
-                <TextField
-                  value={editing.authQuery}
-                  onChange={(v) => setEditing({ ...editing, authQuery: v })}
-                  placeholder="key"
-                />
-              </Field>
-            ) : (
-              <Field label="Header 名称" required hint="如 Authorization">
-                <TextField
-                  value={editing.authHeader}
-                  onChange={(v) => setEditing({ ...editing, authHeader: v })}
-                  placeholder="Authorization"
-                />
-              </Field>
-            )}
-            {editing.authKind === 'bearer_header' ? (
-              <Field label="前缀" hint="如 Bearer （含空格）">
-                <TextField
-                  value={editing.authPrefix}
-                  onChange={(v) => setEditing({ ...editing, authPrefix: v })}
-                  placeholder="Bearer "
-                />
-              </Field>
-            ) : null}
             <Field label="状态">
               <SwitchField
                 checked={editing.status === 'active'}
@@ -767,7 +686,6 @@ function EndpointsModal({
                     <TableRow className="bg-muted/30">
                       <TableHead className="text-xs">协议</TableHead>
                       <TableHead className="text-xs">路径</TableHead>
-                      <TableHead className="text-xs">鉴权</TableHead>
                       <TableHead className="text-xs">状态</TableHead>
                       <TableHead className="text-right text-xs">操作</TableHead>
                     </TableRow>
@@ -781,11 +699,6 @@ function EndpointsModal({
                           </span>
                         </TableCell>
                         <TableCell className="font-mono text-xs">{e.path}</TableCell>
-                        <TableCell className="font-mono text-[10px] text-muted-foreground">
-                          {e.authKind === 'api_key_query'
-                            ? `?${e.authQuery ?? ''}=`
-                            : `${e.authHeader ?? ''}${e.authPrefix ? ` (${e.authPrefix.trim()})` : ''}`}
-                        </TableCell>
                         <TableCell>
                           <span
                             className={cn(

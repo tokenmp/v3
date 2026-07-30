@@ -9,8 +9,15 @@ import { PageHeader } from '@/components/page-header';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Modal } from '@/components/ui/modal';
-import { Sheet } from '@/components/ui/sheet';
 import { Switch } from '@/components/ui/switch';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 import {
   Field,
   FormActions,
@@ -31,18 +38,6 @@ type RouteProviderGroup = {
   routes: AdminRouteConfig[];
 };
 
-type RouteModelGroup = {
-  modelId: string;
-  routes: AdminRouteConfig[];
-  providers: string[];
-  protocols: string[];
-  upstreamModels: string[];
-  accountCount: number;
-  activeAccountCount: number;
-};
-
-const PROTOCOL_OPTIONS = ['openai_chat', 'anthropic_messages', 'openai_responses', 'openai_images'];
-
 const STATUS_FILTERS: { key: StatusFilter; label: string }[] = [
   { key: 'all', label: '全部' },
   { key: 'active', label: '正常' },
@@ -53,47 +48,32 @@ function logicalCredentialId(id: string): string {
   return id.replace(/-(openai|anthropic|responses)$/u, '');
 }
 
-function protocolLabel(protocol: string): string {
-  switch (protocol) {
-    case 'openai_chat':
-      return 'OpenAI Chat';
-    case 'openai_responses':
-      return 'Responses';
-    case 'anthropic_messages':
-      return 'Anthropic';
-    case 'openai_images':
-      return 'Images';
-    default:
-      return protocol;
-  }
-}
-
-function providerGroupsForModel(group: RouteModelGroup): RouteProviderGroup[] {
-  const groups = new Map<string, RouteProviderGroup>();
-  for (const route of group.routes) {
-    const key = `${group.modelId}::${route.providerId}`;
-    const existing = groups.get(key);
-    if (existing) {
-      existing.routes.push(route);
-    } else {
-      groups.set(key, { key, modelId: group.modelId, providerId: route.providerId, routes: [route] });
-    }
-  }
-  return Array.from(groups.values()).sort((a, b) => a.providerId.localeCompare(b.providerId));
-}
-
-function routeIdFor(modelId: string, providerId: string, protocol: string, upstreamModel: string): string {
+function routeIdFor(modelId: string, providerId: string, upstreamModel: string): string {
   const safe = (value: string) => value.trim().toLowerCase().replace(/[^a-z0-9._-]+/gu, '-').replace(/^-+|-+$/gu, '') || 'route';
-  return `${safe(modelId)}-${safe(providerId)}-${safe(protocol)}-${safe(upstreamModel)}`.slice(0, 180);
+  return `${safe(modelId)}-${safe(providerId)}-${safe(upstreamModel)}`.slice(0, 180);
+}
+
+function routeProviderGroup(route: AdminRouteConfig): RouteProviderGroup {
+  return { key: route.id, modelId: route.modelId, providerId: route.providerId, routes: [route] };
+}
+
+function sortRoutes(routes: AdminRouteConfig[]): AdminRouteConfig[] {
+  return [...routes].sort((a, b) => {
+    const byModel = a.modelId.localeCompare(b.modelId);
+    if (byModel !== 0) return byModel;
+    const byProvider = a.providerId.localeCompare(b.providerId);
+    if (byProvider !== 0) return byProvider;
+    return a.upstreamModel.localeCompare(b.upstreamModel);
+  });
 }
 
 export default function AdminRoutesPage() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [selectedModel, setSelectedModel] = useState('all');
-  const [pickerGroup, setPickerGroup] = useState<RouteProviderGroup | null>(null);
-  const [pickerModelGroup, setPickerModelGroup] = useState<RouteModelGroup | null>(null);
-  const [routeModelGroup, setRouteModelGroup] = useState<RouteModelGroup | null>(null);
+  const [pickerRoute, setPickerRoute] = useState<AdminRouteConfig | null>(null);
+  const [editingRoute, setEditingRoute] = useState<AdminRouteConfig | null>(null);
+  const [creating, setCreating] = useState(false);
 
   const { data: routes = [], isLoading } = useQuery({
     queryKey: ['admin', 'route-configs'],
@@ -107,6 +87,10 @@ export default function AdminRoutesPage() {
     queryKey: ['admin', 'credentials', 'all'],
     queryFn: adminConfigApi.listAllCredentials,
   });
+  const { data: models = [] } = useQuery({
+    queryKey: ['admin', 'models'],
+    queryFn: adminConfigApi.listModels,
+  });
 
   const routeIdsKey = useMemo(() => routes.map((route) => route.id).sort().join('|'), [routes]);
   const { data: allRouteCredentialSets = [] } = useQuery({
@@ -116,10 +100,16 @@ export default function AdminRoutesPage() {
   });
 
   const routeModelOptions = useMemo(() => {
+    // Models come from the models table (immediately persisted on create),
+    // not from existing routes, so a newly created model is selectable in
+    // the route dropdown without needing a compile/publish round-trip.
     const ids = new Set<string>();
+    models.forEach((m) => ids.add(m.id));
+    // also include any model referenced by an existing route but missing from
+    // the models table (defensive), so nothing disappears from the filter.
     routes.forEach((r) => ids.add(r.modelId));
     return Array.from(ids).sort((a, b) => a.localeCompare(b));
-  }, [routes]);
+  }, [models, routes]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -137,13 +127,14 @@ export default function AdminRoutesPage() {
     });
   }, [routes, search, selectedModel, statusFilter]);
 
+  const sortedRoutes = useMemo(() => sortRoutes(filtered), [filtered]);
+
   const routeStats = useMemo(() => ({
-    models: new Set(routes.map((route) => route.modelId)).size,
+    models: models.length,
     routes: routes.length,
     providers: new Set(routes.map((route) => route.providerId)).size,
-    protocols: new Set(routes.map((route) => route.protocol)).size,
     quarantined: routes.filter((route) => route.quarantined).length,
-  }), [routes]);
+  }), [models, routes]);
 
   const routeCredentialsByRouteId = useMemo(() => {
     const map = new Map<string, AdminRouteCredential[]>();
@@ -151,56 +142,32 @@ export default function AdminRoutesPage() {
     return map;
   }, [allRouteCredentialSets, routes]);
 
-  const credentialCountsByProvider = useMemo(() => {
-    const grouped = new Map<string, Map<string, { active: boolean; total: number }>>();
-    for (const credential of credentials) {
-      const providerMap = grouped.get(credential.providerId) ?? new Map<string, { active: boolean; total: number }>();
-      const logicalId = logicalCredentialId(credential.id);
-      const current = providerMap.get(logicalId) ?? { active: false, total: 0 };
-      current.total += 1;
-      current.active = current.active || credential.status === 'active';
-      providerMap.set(logicalId, current);
-      grouped.set(credential.providerId, providerMap);
-    }
-    const counts = new Map<string, { active: number; total: number }>();
-    for (const [providerId, providerMap] of grouped) {
-      const accounts = Array.from(providerMap.values());
-      counts.set(providerId, {
-        active: accounts.filter((account) => account.active).length,
-        total: accounts.length,
-      });
-    }
-    return counts;
-  }, [credentials]);
+  const credentialStatus = useMemo(
+    () => new Map(credentials.map((credential) => [credential.id, credential.status])),
+    [credentials],
+  );
 
-  const modelGroups = useMemo<RouteModelGroup[]>(() => {
-    const groups = new Map<string, AdminRouteConfig[]>();
-    const credentialStatus = new Map(credentials.map((credential) => [credential.id, credential.status]));
-    for (const route of filtered) {
-      groups.set(route.modelId, [...(groups.get(route.modelId) ?? []), route]);
-    }
-    return Array.from(groups.entries()).map(([modelId, groupRoutes]) => {
-      const accountIds = new Set<string>();
-      const activeAccountIds = new Set<string>();
-      for (const route of groupRoutes) {
-        for (const binding of routeCredentialsByRouteId.get(route.id) ?? []) {
-          if (!binding.enabled) continue;
-          const logicalId = logicalCredentialId(binding.credentialId);
-          accountIds.add(logicalId);
-          if (credentialStatus.get(binding.credentialId) === 'active') activeAccountIds.add(logicalId);
-        }
+  const routeAccountCount = useMemo(() => {
+    const map = new Map<string, { active: number; total: number }>();
+    for (const route of routes) {
+      const bindings = routeCredentialsByRouteId.get(route.id) ?? [];
+      const ids = new Set<string>();
+      const activeIds = new Set<string>();
+      for (const binding of bindings) {
+        if (!binding.enabled) continue;
+        const logicalId = logicalCredentialId(binding.credentialId);
+        ids.add(logicalId);
+        if (credentialStatus.get(binding.credentialId) === 'active') activeIds.add(logicalId);
       }
-      return {
-        modelId,
-        routes: groupRoutes,
-        providers: Array.from(new Set(groupRoutes.map((route) => route.providerId))).sort(),
-        protocols: Array.from(new Set(groupRoutes.map((route) => route.protocol))).sort(),
-        upstreamModels: Array.from(new Set(groupRoutes.map((route) => route.upstreamModel).filter(Boolean))).sort(),
-        accountCount: accountIds.size,
-        activeAccountCount: activeAccountIds.size,
-      };
-    }).sort((a, b) => a.modelId.localeCompare(b.modelId));
-  }, [credentials, filtered, routeCredentialsByRouteId]);
+      map.set(route.id, { active: activeIds.size, total: ids.size });
+    }
+    return map;
+  }, [routeCredentialsByRouteId, credentialStatus, routes]);
+
+  const activeProviders = useMemo(
+    () => providers.filter((provider) => provider.status !== 'deleted').sort((a, b) => a.id.localeCompare(b.id)),
+    [providers],
+  );
 
   return (
     <div className="space-y-6">
@@ -215,7 +182,6 @@ export default function AdminRoutesPage() {
           ['模型数', routeStats.models],
           ['路由数', routeStats.routes],
           ['Provider 数', routeStats.providers],
-          ['协议数', routeStats.protocols],
           ['异常数', routeStats.quarantined],
         ].map(([label, value]) => (
           <div key={label} className="rounded-lg border bg-card p-3">
@@ -241,7 +207,7 @@ export default function AdminRoutesPage() {
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="搜索 Provider / 模型 / 上游模型"
+          placeholder="搜索路由 ID / Provider / 模型 / 上游模型"
           className={`${inputCls} w-full max-w-xs`}
         />
         <div className="flex flex-wrap gap-1.5 sm:ml-auto">
@@ -258,110 +224,128 @@ export default function AdminRoutesPage() {
 
       {isLoading ? (
         <div className="rounded-xl border border-dashed py-16 text-center text-sm text-muted-foreground">加载中…</div>
-      ) : modelGroups.length === 0 ? (
+      ) : sortedRoutes.length === 0 ? (
         <div className="rounded-xl border border-dashed py-16 text-center text-sm text-muted-foreground">暂无路由配置</div>
       ) : (
-        <div className="grid gap-4 lg:grid-cols-2">
-          {modelGroups.map((group) => (
-            <ModelRouteCard
-              key={group.modelId}
-              group={group}
-              credentialCountsByProvider={credentialCountsByProvider}
-              onSelectAccounts={() => setPickerModelGroup(group)}
-              onConfigureRoutes={() => setRouteModelGroup(group)}
-            />
-          ))}
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-medium">
+              路由列表 <span className="text-muted-foreground">({sortedRoutes.length})</span>
+            </h2>
+            <Button type="button" variant="outline" size="sm" onClick={() => setCreating(true)}>新增路由</Button>
+          </div>
+
+          {/* Desktop table */}
+          <div className="hidden overflow-x-auto rounded-lg border bg-card md:block">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-24">状态</TableHead>
+                  <TableHead>路由 ID</TableHead>
+                  <TableHead>模型</TableHead>
+                  <TableHead>Provider</TableHead>
+                  <TableHead>上游模型</TableHead>
+                  <TableHead className="text-center">账号</TableHead>
+                  <TableHead className="w-28 text-right">操作</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {sortedRoutes.map((route) => {
+                  const count = routeAccountCount.get(route.id) ?? { active: 0, total: 0 };
+                  return (
+                    <TableRow key={route.id}>
+                      <TableCell>
+                        {route.enabled ? <Badge variant="success">启用</Badge> : <Badge variant="secondary">停用</Badge>}
+                        {route.quarantined ? <Badge variant="destructive" className="ml-1">异常</Badge> : null}
+                      </TableCell>
+                      <TableCell className="font-mono text-xs">{route.id}</TableCell>
+                      <TableCell className="font-mono text-xs">{route.modelId}</TableCell>
+                      <TableCell className="font-mono text-xs">{route.providerId}</TableCell>
+                      <TableCell className="font-mono text-xs text-muted-foreground">{route.upstreamModel || '—'}</TableCell>
+                      <TableCell className="text-center">
+                        <Badge variant={count.active > 0 ? 'default' : 'secondary'} className="tabular-nums">
+                          {count.active}/{count.total}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap text-right">
+                        <Button type="button" variant="ghost" size="sm" onClick={() => setPickerRoute(route)}>账号</Button>
+                        <Button type="button" variant="outline" size="sm" onClick={() => setEditingRoute(route)}>编辑</Button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
+
+          {/* Mobile card list */}
+          <div className="space-y-2 md:hidden">
+            {sortedRoutes.map((route) => {
+              const count = routeAccountCount.get(route.id) ?? { active: 0, total: 0 };
+              return (
+                <div key={route.id} className="rounded-lg border bg-card p-3 space-y-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setEditingRoute(route)}
+                    className="w-full text-left space-y-1.5 active:bg-accent/50 transition-colors"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="truncate font-mono text-xs">{route.id}</span>
+                      <div className="flex shrink-0 gap-1">
+                        {route.enabled ? <Badge variant="success">启用</Badge> : <Badge variant="secondary">停用</Badge>}
+                        {route.quarantined ? <Badge variant="destructive">异常</Badge> : null}
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-x-2 text-xs text-muted-foreground">
+                      <span className="font-mono">{route.modelId}</span>
+                      <span>·</span>
+                      <span className="font-mono">{route.providerId}</span>
+                      <span>·</span>
+                      <span className="font-mono">{route.upstreamModel || '—'}</span>
+                    </div>
+                    <div className="text-xs text-muted-foreground">账号 {count.active}/{count.total}</div>
+                  </button>
+                  <div className="flex justify-end gap-2 pt-1">
+                    <Button type="button" variant="ghost" size="sm" onClick={() => setPickerRoute(route)}>账号</Button>
+                    <Button type="button" variant="outline" size="sm" onClick={() => setEditingRoute(route)}>编辑</Button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="text-xs text-muted-foreground">
+            新增/编辑路由后已保存到 DB；点「编译并发布」后才会对 Executor 生效。
+          </div>
         </div>
       )}
 
-      {pickerModelGroup ? (
-        <AccountPickerModal
-          title="选择账号"
-          description={pickerModelGroup.modelId}
-          hint={`为 ${pickerModelGroup.modelId} 选择上游账号。账号按 Provider 分组展示，保存后同步到该模型下对应 Provider 的全部启用能力。`}
-          providerGroups={providerGroupsForModel(pickerModelGroup)}
-          credentials={credentials}
-          onClose={() => setPickerModelGroup(null)}
-        />
-      ) : null}
-      {pickerGroup ? (
+      {pickerRoute ? (
         <AccountPickerModal
           title="配置账号"
-          description={`${pickerGroup.modelId} · ${pickerGroup.providerId}`}
-          hint={`为 ${pickerGroup.modelId} 选择可参与路由的 ${pickerGroup.providerId} 上游账号。保存后会同步到当前 Provider 组的全部启用能力。`}
-          providerGroups={[pickerGroup]}
+          description={`${pickerRoute.modelId} · ${pickerRoute.providerId}`}
+          hint={`为 ${pickerRoute.modelId} 的 ${pickerRoute.providerId} 路由选择可参与的上游账号。`}
+          providerGroups={[routeProviderGroup(pickerRoute)]}
           credentials={credentials}
-          onClose={() => setPickerGroup(null)}
+          onClose={() => setPickerRoute(null)}
         />
       ) : null}
-      {routeModelGroup ? (
-        <RouteConfigSheet
-          group={routeModelGroup}
-          providers={providers}
+      {editingRoute ? (
+        <EditRouteModal
+          route={editingRoute}
+          providers={activeProviders}
+          onClose={() => setEditingRoute(null)}
+        />
+      ) : null}
+      {creating ? (
+        <NewRouteModal
+          modelOptions={routeModelOptions}
+          providers={activeProviders}
           credentials={credentials}
-          onClose={() => setRouteModelGroup(null)}
+          onClose={() => setCreating(false)}
         />
       ) : null}
     </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// 模型路由卡片（始终按模型分组，单模型视图也是同结构）
-// ---------------------------------------------------------------------------
-
-function ModelRouteCard({
-  group,
-  credentialCountsByProvider,
-  onSelectAccounts,
-  onConfigureRoutes,
-}: {
-  group: RouteModelGroup;
-  credentialCountsByProvider: Map<string, { active: number; total: number }>;
-  onSelectAccounts: () => void;
-  onConfigureRoutes: () => void;
-}) {
-  const providerEntries = group.providers.map((providerId) => {
-    const count = credentialCountsByProvider.get(providerId);
-    return { providerId, active: count?.active ?? 0, total: count?.total ?? 0 };
-  });
-  return (
-    <section className="flex flex-col gap-3 rounded-xl border bg-card p-4">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
-          <h2 className="break-all font-mono font-medium">{group.modelId}</h2>
-          <p className="mt-1 text-xs text-muted-foreground">{group.providers.length} 个 Provider · {group.routes.length} 条路由</p>
-        </div>
-        <div className="flex shrink-0 flex-wrap gap-2 text-xs text-muted-foreground">
-          <span>账号 {group.activeAccountCount}/{group.accountCount}</span>
-        </div>
-      </div>
-
-      <div className="space-y-2 border-y py-3">
-        <div className="flex flex-wrap gap-1.5">
-          {group.protocols.map((protocol) => (
-            <Badge key={protocol} variant="secondary">{protocolLabel(protocol)}</Badge>
-          ))}
-        </div>
-        <p className="line-clamp-2 text-sm text-muted-foreground">
-          {group.upstreamModels.length > 0 ? group.upstreamModels.join(' · ') : '未配置上游模型'}
-        </p>
-      </div>
-
-      <div className="space-y-1">
-        {providerEntries.map(({ providerId, active, total }) => (
-          <div key={providerId} className="flex items-center justify-between rounded-md bg-muted/30 px-3 py-2 text-xs">
-            <span className="font-mono text-muted-foreground">{providerId}</span>
-            <span className="tabular-nums text-muted-foreground">账号 {active}/{total}</span>
-          </div>
-        ))}
-      </div>
-
-      <div className="mt-auto flex flex-wrap gap-2 pt-1">
-        <Button type="button" variant="outline" size="sm" onClick={onSelectAccounts}>选择账号</Button>
-        <Button type="button" variant="outline" size="sm" onClick={onConfigureRoutes}>配置路由</Button>
-      </div>
-    </section>
   );
 }
 
@@ -480,7 +464,7 @@ function AccountPickerModal({
       }));
     },
     onSuccess: () => {
-      toast.success('账号选择已保存（需点编译并发布生效）');
+      toast.success('账号选择已保存。编译发布后对 Executor 生效。');
       queryClient.invalidateQueries({ queryKey: ['admin', 'route-credentials-picker'] });
       queryClient.invalidateQueries({ queryKey: ['admin', 'route-credentials'] });
       onClose();
@@ -621,123 +605,8 @@ function AccountPickerModal({
 }
 
 // ---------------------------------------------------------------------------
-// 路由配置抽屉：只读路由列表 + 编辑/新增走弹窗
+// 编辑路由弹窗
 // ---------------------------------------------------------------------------
-
-function RouteConfigSheet({
-  group,
-  providers,
-  credentials,
-  onClose,
-}: {
-  group: RouteModelGroup;
-  providers: AdminProvider[];
-  credentials: AdminUpstreamCredential[];
-  onClose: () => void;
-}) {
-  const activeProviders = useMemo(
-    () => providers.filter((provider) => provider.status !== 'deleted').sort((a, b) => a.id.localeCompare(b.id)),
-    [providers],
-  );
-  const sortedRoutes = useMemo(() => [...group.routes].sort((a, b) => {
-    const provider = a.providerId.localeCompare(b.providerId);
-    if (provider !== 0) return provider;
-    const protocol = a.protocol.localeCompare(b.protocol);
-    if (protocol !== 0) return protocol;
-    return a.upstreamModel.localeCompare(b.upstreamModel);
-  }), [group.routes]);
-
-  const [editingRoute, setEditingRoute] = useState<AdminRouteConfig | null>(null);
-  const [creating, setCreating] = useState(false);
-
-  return (
-    <Sheet
-      open
-      onClose={onClose}
-      title="配置路由"
-      description={group.modelId}
-      width="lg"
-      footer={
-        <div className="flex justify-end">
-          <Button type="button" variant="outline" size="sm" onClick={onClose}>完成</Button>
-        </div>
-      }
-    >
-      <div className="space-y-4">
-        <div className="rounded-md border bg-muted/30 p-3 text-sm text-muted-foreground">
-          配置 <span className="font-medium text-foreground">{group.modelId}</span> 的模型转发能力：选择 Provider、能力协议，并指定真正发给上游的模型名。已有 {sortedRoutes.length} 条路由。
-        </div>
-
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-medium">已有路由</h3>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => setCreating(true)}
-          >
-            新增路由
-          </Button>
-        </div>
-
-        <div className="overflow-x-auto rounded-lg border bg-card">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/30 text-xs text-muted-foreground">
-              <tr>
-                <th className="px-4 py-2 text-left font-medium">启用</th>
-                <th className="px-4 py-2 text-left font-medium">Provider</th>
-                <th className="px-4 py-2 text-left font-medium">能力</th>
-                <th className="px-4 py-2 text-left font-medium">上游模型</th>
-                <th className="w-20 px-4 py-2 text-right font-medium">操作</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {sortedRoutes.map((route) => (
-                <tr key={route.id} className="hover:bg-muted/20">
-                  <td className="px-4 py-3 align-middle">
-                    {route.enabled ? <Badge variant="success">启用</Badge> : <Badge variant="secondary">停用</Badge>}
-                    {route.quarantined ? <Badge variant="destructive" className="ml-1">异常</Badge> : null}
-                  </td>
-                  <td className="px-4 py-3 align-middle font-mono text-xs font-medium">{route.providerId}</td>
-                  <td className="px-4 py-3 align-middle"><Badge variant="secondary">{protocolLabel(route.protocol)}</Badge></td>
-                  <td className="px-4 py-3 align-middle font-mono text-xs text-muted-foreground">{route.upstreamModel || '—'}</td>
-                  <td className="px-4 py-3 text-right">
-                    <Button type="button" variant="outline" size="sm" onClick={() => setEditingRoute(route)}>编辑</Button>
-                  </td>
-                </tr>
-              ))}
-              {sortedRoutes.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="px-4 py-8 text-center text-sm text-muted-foreground">暂无路由，点击「新增路由」创建。</td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
-
-        <div className="text-xs text-muted-foreground">
-          新增/编辑路由后需点编译并发布配置才会影响 Executor。
-        </div>
-      </div>
-
-      {editingRoute ? (
-        <EditRouteModal
-          route={editingRoute}
-          providers={activeProviders}
-          onClose={() => setEditingRoute(null)}
-        />
-      ) : null}
-      {creating ? (
-        <NewRouteModal
-          modelId={group.modelId}
-          providers={activeProviders}
-          credentials={credentials}
-          onClose={() => setCreating(false)}
-        />
-      ) : null}
-    </Sheet>
-  );
-}
 
 function EditRouteModal({
   route,
@@ -758,7 +627,7 @@ function EditRouteModal({
       enabled,
     }),
     onSuccess: () => {
-      toast.success('路由已更新（需点编译并发布生效）');
+      toast.success('路由已更新。编译发布后对 Executor 生效。');
       queryClient.invalidateQueries({ queryKey: ['admin', 'route-configs'] });
       onClose();
     },
@@ -772,7 +641,7 @@ function EditRouteModal({
       open
       onClose={onClose}
       title="编辑路由"
-      description={`${route.modelId} · ${route.providerId} · ${protocolLabel(route.protocol)}`}
+      description={`${route.modelId} · ${route.providerId}`}
       maxWidth="md"
       footer={
         <FormActions
@@ -795,12 +664,12 @@ function EditRouteModal({
             <div className="mt-1 break-all font-mono text-sm font-medium">{provider?.displayLabel || route.providerId}</div>
           </div>
           <div className="rounded-lg border bg-muted/30 p-3">
-            <div className="text-xs text-muted-foreground">能力协议</div>
-            <div className="mt-1 text-sm font-medium">{protocolLabel(route.protocol)}</div>
-          </div>
-          <div className="rounded-lg border bg-muted/30 p-3">
             <div className="text-xs text-muted-foreground">优先级</div>
             <div className="mt-1 text-sm font-medium tabular-nums">{route.priority}</div>
+          </div>
+          <div className="rounded-lg border bg-muted/30 p-3">
+            <div className="text-xs text-muted-foreground">路由 ID</div>
+            <div className="mt-1 break-all font-mono text-xs text-muted-foreground">{route.id}</div>
           </div>
         </div>
         <Field label="上游模型" required>
@@ -809,7 +678,7 @@ function EditRouteModal({
         <div className="flex items-center justify-between rounded-lg border p-3">
           <div>
             <p className="text-sm font-medium">启用此路由</p>
-            <p className="mt-0.5 text-xs text-muted-foreground">停用后该 Provider 协议不再承接此模型的请求</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">停用后该 Provider 不再承接此模型的请求</p>
           </div>
           <Switch checked={enabled} onChange={setEnabled} />
         </div>
@@ -818,21 +687,25 @@ function EditRouteModal({
   );
 }
 
+// ---------------------------------------------------------------------------
+// 新增路由弹窗
+// ---------------------------------------------------------------------------
+
 function NewRouteModal({
-  modelId,
+  modelOptions,
   providers,
   credentials,
   onClose,
 }: {
-  modelId: string;
+  modelOptions: string[];
   providers: AdminProvider[];
   credentials: AdminUpstreamCredential[];
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
+  const [modelId, setModelId] = useState('');
   const [providerId, setProviderId] = useState(providers[0]?.id ?? '');
-  const [protocols, setProtocols] = useState<Set<string>>(new Set(['openai_chat']));
-  const [upstreamModel, setUpstreamModel] = useState(modelId);
+  const [upstreamModel, setUpstreamModel] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const providerOptions = providers.map((p) => ({ value: p.id, label: p.displayLabel || p.id }));
@@ -871,18 +744,8 @@ function NewRouteModal({
     });
   };
 
-  const toggleProtocol = (value: string) => {
-    setProtocols((current) => {
-      const next = new Set(current);
-      if (next.has(value)) next.delete(value);
-      else next.add(value);
-      return next;
-    });
-  };
-
   const createMut = useMutation({
     mutationFn: async () => {
-      const selectedProtocols = PROTOCOL_OPTIONS.filter((p) => protocols.has(p));
       const bindingsFor = (routeId: string) => selectedIds.size > 0
         ? providerAccounts
             .filter((account) => account.credentialIds.some((id) => selectedIds.has(id)))
@@ -899,34 +762,20 @@ function NewRouteModal({
                 })),
             )
         : [];
-      const results: { protocol: string; ok: boolean; error?: string }[] = [];
-      for (const protocol of selectedProtocols) {
-        try {
-          const created = await adminConfigApi.createRoute({
-            id: routeIdFor(modelId, providerId, protocol, upstreamModel),
-            modelId,
-            providerId,
-            protocol,
-            upstreamModel: upstreamModel.trim(),
-            priority: 0,
-          });
-          const bindings = bindingsFor(created.id);
-          if (bindings.length > 0) {
-            await adminConfigApi.setRouteCredentials(created.id, bindings);
-          }
-          results.push({ protocol, ok: true });
-        } catch (e) {
-          results.push({ protocol, ok: false, error: e instanceof Error ? e.message : String(e) });
-        }
-      }
-      const failed = results.filter((r) => !r.ok);
-      if (failed.length > 0) {
-        throw new Error(`${results.length - failed.length}/${results.length} 条创建成功，失败：${failed.map((f) => protocolLabel(f.protocol)).join('、')}`);
+      const created = await adminConfigApi.createRoute({
+        id: routeIdFor(modelId, providerId, upstreamModel),
+        modelId,
+        providerId,
+        upstreamModel: upstreamModel.trim(),
+        priority: 0,
+      });
+      const bindings = bindingsFor(created.id);
+      if (bindings.length > 0) {
+        await adminConfigApi.setRouteCredentials(created.id, bindings);
       }
     },
     onSuccess: () => {
-      const count = PROTOCOL_OPTIONS.filter((p) => protocols.has(p)).length;
-      toast.success(`已创建 ${count} 条路由（需点编译并发布生效）`);
+      toast.success('已创建路由。编译发布后对 Executor 生效。');
       queryClient.invalidateQueries({ queryKey: ['admin', 'route-configs'] });
       queryClient.invalidateQueries({ queryKey: ['admin', 'route-credentials'] });
       onClose();
@@ -934,21 +783,19 @@ function NewRouteModal({
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : '创建失败'),
   });
 
-  const valid = providerId.trim() && protocols.size > 0 && upstreamModel.trim();
-  const selectedProtocolCount = PROTOCOL_OPTIONS.filter((p) => protocols.has(p)).length;
+  const valid = modelId.trim() && providerId.trim() && upstreamModel.trim();
 
   return (
     <Modal
       open
       onClose={onClose}
       title="新增路由"
-      description={modelId}
       maxWidth="md"
       footer={
         <FormActions
           onCancel={onClose}
           onSubmit={() => createMut.mutate()}
-          submitLabel={selectedProtocolCount > 1 ? `创建 ${selectedProtocolCount} 条路由` : '创建路由'}
+          submitLabel="创建路由"
           submitting={createMut.isPending}
           disabled={!valid || createMut.isPending}
         />
@@ -956,27 +803,18 @@ function NewRouteModal({
     >
       <FormSection cols={1}>
         <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
-          为模型 <span className="font-medium text-foreground">{modelId}</span> 新增转发路由：可多选能力协议，每个协议各创建一条路由；选择的账号会绑定到全部新建路由。
+          为模型新增转发路由：选择 Provider 与上游模型名；支持的协议由 Provider 的端点决定。选择的账号会绑定到新建路由。
         </div>
+        <Field label="模型" required>
+          <SelectField
+            value={modelId}
+            onChange={setModelId}
+            options={modelOptions.map((id) => ({ value: id, label: id }))}
+            placeholder="选择已有模型"
+          />
+        </Field>
         <Field label="Provider" required>
           <SelectField value={providerId} onChange={(v) => { setProviderId(v); setSelectedIds(new Set()); }} options={providerOptions} />
-        </Field>
-        <Field label="能力协议" required hint={`已选 ${selectedProtocolCount} 个，将为每个协议各创建一条路由`}>
-          <div className="flex flex-wrap gap-2">
-            {PROTOCOL_OPTIONS.map((p) => {
-              const selected = protocols.has(p);
-              return (
-                <button
-                  key={p}
-                  type="button"
-                  onClick={() => toggleProtocol(p)}
-                  className={`rounded-md border px-3 py-1.5 text-sm transition-colors ${selected ? 'border-primary bg-primary/10 font-medium text-primary' : 'hover:bg-muted/30'}`}
-                >
-                  {protocolLabel(p)}
-                </button>
-              );
-            })}
-          </div>
         </Field>
         <Field label="上游模型" required>
           <TextField value={upstreamModel} onChange={setUpstreamModel} placeholder="真正发给上游的模型名" className="font-mono" />

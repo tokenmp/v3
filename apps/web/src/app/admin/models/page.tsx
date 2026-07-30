@@ -103,7 +103,7 @@ export default function AdminModelsPage() {
   const deleteMutation = useMutation({
     mutationFn: (id: string) => adminConfigApi.deleteModel(id),
     onSuccess: () => {
-      toast.success('已删除（需点编译并发布生效）');
+      toast.success('已删除。编译发布后对 Executor 生效。');
       setEditing(null);
       void queryClient.invalidateQueries({ queryKey: QUERY_KEY });
     },
@@ -403,7 +403,7 @@ function ModelFormModal({
       maxOutputTokens?: number | null;
     }) => adminConfigApi.createModel(input),
     onSuccess: () => {
-      toast.success('模型已创建（需点“编译并发布”生效）');
+      toast.success('模型已创建。编译发布后对 Executor 生效。');
       onSaved();
     },
     onError: (e: unknown) => {
@@ -415,7 +415,7 @@ function ModelFormModal({
     mutationFn: (input: Partial<AdminModelConfig>) =>
       adminConfigApi.updateModel(item!.id, input),
     onSuccess: () => {
-      toast.success('已保存（需点“编译并发布”生效）');
+      toast.success('已保存。编译发布后对 Executor 生效。');
       onSaved();
     },
     onError: (e: unknown) => {
