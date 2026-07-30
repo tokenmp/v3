@@ -229,17 +229,7 @@ function ProviderRouteCard({
             )}
           </div>
         </div>
-        {isAllModels ? (
-          <div className="flex shrink-0 flex-wrap gap-2">
-            <button
-              type="button"
-              className="inline-flex h-[var(--control-height-sm)] items-center rounded-sm border px-3 text-xs font-medium hover:bg-accent"
-              onClick={() => { window.location.href = '/admin/providers'; }}
-            >
-              Provider 详情
-            </button>
-          </div>
-        ) : (
+        {isAllModels ? null : (
           <div className="flex shrink-0 flex-wrap gap-2">
             <button
               type="button"
@@ -278,15 +268,39 @@ function protocolLabel(protocol: string): string {
 }
 
 function StrategyModal({ group, onClose }: { group: RouteProviderGroup; onClose: () => void }) {
+  const enabledProtocols = Array.from(new Set(group.routes.filter((r) => r.enabled && !r.quarantined).map((r) => r.protocol))).sort();
+  const priorities = group.routes.map((r) => r.priority);
+  const minPriority = priorities.length > 0 ? Math.min(...priorities) : 0;
+  const rpmOverrides = group.routes.filter((r) => r.rpm != null).length;
+  const tpmOverrides = group.routes.filter((r) => r.tpm != null).length;
   return (
-    <Modal open onClose={onClose} title="路由策略" maxWidth="md">
+    <Modal open onClose={onClose} title="策略" maxWidth="md">
       <div className="space-y-4">
         <div className="rounded-lg border bg-muted/30 p-3 text-xs text-muted-foreground">
           模型 <span className="font-mono text-foreground">{group.modelId}</span> · Provider <span className="font-mono text-foreground">{group.providerId}</span>。
-          这里后续用于配置该模型在该 Provider 下的选号策略、优先级和容量覆盖；当前先保留入口，实际 softmax/enforcement 仍在后续批次接入。
+          当前页面只展示和确认该 Provider 组使用的路由策略来源；全局 softmax 权重在“重试策略”页维护。
         </div>
-        <div className="rounded-lg border border-dashed py-10 text-center text-sm text-muted-foreground">
-          策略配置表单待接入。当前路由继续继承全局策略和已有 route/provider 配置。
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="rounded-lg border bg-card p-3">
+            <div className="text-xs text-muted-foreground">选号策略</div>
+            <div className="mt-1 text-sm font-medium">继承全局策略</div>
+            <div className="mt-1 text-xs text-muted-foreground">priority / softmax 由全局配置决定</div>
+          </div>
+          <div className="rounded-lg border bg-card p-3">
+            <div className="text-xs text-muted-foreground">启用能力</div>
+            <div className="mt-1 text-sm font-medium">{enabledProtocols.length > 0 ? enabledProtocols.map(protocolLabel).join(' · ') : '暂无'}</div>
+            <div className="mt-1 text-xs text-muted-foreground">协议能力来自 Provider endpoints</div>
+          </div>
+          <div className="rounded-lg border bg-card p-3">
+            <div className="text-xs text-muted-foreground">优先级</div>
+            <div className="mt-1 text-sm font-medium">当前最小 priority：{minPriority}</div>
+            <div className="mt-1 text-xs text-muted-foreground">数字越小越优先</div>
+          </div>
+          <div className="rounded-lg border bg-card p-3">
+            <div className="text-xs text-muted-foreground">容量覆盖</div>
+            <div className="mt-1 text-sm font-medium">RPM {rpmOverrides} 项 · TPM {tpmOverrides} 项</div>
+            <div className="mt-1 text-xs text-muted-foreground">未覆盖时继承 Provider/账号默认值</div>
+          </div>
         </div>
       </div>
     </Modal>
@@ -406,61 +420,58 @@ function GroupAccountsModal({ group, onClose }: { group: RouteProviderGroup; onC
             当前 Provider 暂无账号，请先在“账号管理”中为 {group.providerId} 添加账号。
           </div>
         ) : (
-          <div className="overflow-x-auto rounded-lg border">
-            <table className="min-w-full divide-y text-sm">
-              <thead className="bg-muted/50 text-xs text-muted-foreground">
-                <tr>
-                  <th className="px-3 py-2 text-left font-medium">启用</th>
-                  <th className="px-3 py-2 text-left font-medium">账号</th>
-                  <th className="px-3 py-2 text-left font-medium">优先级</th>
-                  <th className="px-3 py-2 text-left font-medium">RPM</th>
-                  <th className="px-3 py-2 text-left font-medium">TPM</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {rows.map((row) => (
-                  <tr key={row.credential.id}>
-                    <td className="px-3 py-2">
-                      <input
-                        type="checkbox"
-                        checked={row.selected}
-                        onChange={(e) => patchRow(row.credential.id, { enabled: e.target.checked })}
-                        aria-label={`启用账号 ${row.credential.id}`}
-                      />
-                    </td>
-                    <td className="px-3 py-2">
-                      <div className="font-mono text-xs">{row.credential.id}</div>
-                      <div className="text-xs text-muted-foreground">
-                        {row.credential.keyPrefix || '****'}…{row.credential.keySuffix || '****'} · 默认优先级 {row.credential.priority}
-                      </div>
-                    </td>
-                    <td className="px-3 py-2">
-                      <NumberField
-                        value={String(row.priority)}
-                        onChange={(v) => patchRow(row.credential.id, { priority: Number(v) || 0 })}
-                        min={0}
-                      />
-                    </td>
-                    <td className="px-3 py-2">
-                      <NullableNumberInput
-                        value={row.rpm}
-                        onChange={(v) => patchRow(row.credential.id, { rpm: v })}
-                        placeholder="继承"
-                      />
-                    </td>
-                    <td className="px-3 py-2">
-                      <NullableNumberInput
-                        value={row.tpm}
-                        onChange={(v) => patchRow(row.credential.id, { tpm: v })}
-                        placeholder="继承"
-                      />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+          <div className="grid gap-3">
+            {rows.map((row) => (
+              <section
+                key={row.credential.id}
+                className={`rounded-lg border p-3 transition-colors ${row.selected ? 'border-primary/40 bg-primary/5' : 'bg-card'}`}
+              >
+                <div className="flex flex-wrap items-start gap-3">
+                  <label className="flex items-center gap-2 text-sm font-medium">
+                    <input
+                      type="checkbox"
+                      checked={row.selected}
+                      onChange={(e) => patchRow(row.credential.id, { enabled: e.target.checked })}
+                      aria-label={`启用账号 ${row.credential.id}`}
+                    />
+                    {row.selected ? '启用' : '停用'}
+                  </label>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate font-mono text-xs font-medium" title={row.credential.id}>{row.credential.id}</div>
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      {row.credential.keyPrefix || '****'}…{row.credential.keySuffix || '****'} · 默认优先级 {row.credential.priority}
+                    </div>
+                  </div>
+                </div>
+                <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                  <div>
+                    <div className="mb-1 text-[11px] text-muted-foreground">优先级</div>
+                    <NumberField
+                      value={String(row.priority)}
+                      onChange={(v) => patchRow(row.credential.id, { priority: Number(v) || 0 })}
+                      min={0}
+                    />
+                  </div>
+                  <div>
+                    <div className="mb-1 text-[11px] text-muted-foreground">RPM</div>
+                    <NullableNumberInput
+                      value={row.rpm}
+                      onChange={(v) => patchRow(row.credential.id, { rpm: v })}
+                      placeholder="继承"
+                    />
+                  </div>
+                  <div>
+                    <div className="mb-1 text-[11px] text-muted-foreground">TPM</div>
+                    <NullableNumberInput
+                      value={row.tpm}
+                      onChange={(v) => patchRow(row.credential.id, { tpm: v })}
+                      placeholder="继承"
+                    />
+                  </div>
+                </div>
+              </section>
+            ))}
+          </div>        )}
       </div>
     </Modal>
   );
