@@ -2,19 +2,14 @@
 
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { KeyRound, Plus } from 'lucide-react';
+import { KeyRound } from 'lucide-react';
 import { toast } from 'sonner';
 import { adminConfigApi } from '@/lib/api/admin';
 import { FilterChip } from '@/components/filter-chip';
 import { Modal } from '@/components/ui/modal';
 import {
-  Field,
   FormActions,
-  FormSection,
   NumberField,
-  SelectField,
-  SwitchField,
-  TextField,
   inputCls,
 } from '@/components/ui/field';
 import { PublishStatusHint } from '@/components/publish-status-hint';
@@ -42,61 +37,13 @@ const STATUS_FILTERS: { key: StatusFilter; label: string }[] = [
   { key: 'disabled', label: '已禁用' },
 ];
 
-type RouteDraft = {
-  id: string;
-  modelId: string;
-  providerId: string;
-  upstreamModel: string;
-  protocol: string;
-  priority: number;
-  enabled: boolean;
-  contextWindow: number | null;
-  maxOutputTokens: number | null;
-  rpm: number | null;
-  tpm: number | null;
-};
-
-function emptyDraft(): RouteDraft {
-  return {
-    id: '',
-    modelId: '',
-    providerId: '',
-    upstreamModel: '',
-    protocol: 'openai_chat',
-    priority: 0,
-    enabled: true,
-    contextWindow: null,
-    maxOutputTokens: null,
-    rpm: null,
-    tpm: null,
-  };
-}
-
-function fromRoute(r: AdminRouteConfig): RouteDraft {
-  return {
-    id: r.id,
-    modelId: r.modelId,
-    providerId: r.providerId,
-    upstreamModel: r.upstreamModel,
-    protocol: r.protocol,
-    priority: r.priority,
-    enabled: r.enabled,
-    contextWindow: r.contextWindow,
-    maxOutputTokens: r.maxOutputTokens,
-    rpm: r.rpm,
-    tpm: r.tpm,
-  };
-}
-
 export default function AdminRoutesPage() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [selectedModel, setSelectedModel] = useState('all');
-  const [creating, setCreating] = useState(false);
   const [protocolGroup, setProtocolGroup] = useState<RouteProviderGroup | null>(null);
   const [accountGroup, setAccountGroup] = useState<RouteProviderGroup | null>(null);
-  const [accountRoute, setAccountRoute] = useState<AdminRouteConfig | null>(null);
 
   const { data: routes = [], isLoading } = useQuery({
     queryKey: ['admin', 'route-configs'],
@@ -105,30 +52,6 @@ export default function AdminRoutesPage() {
   const { data: models = [] } = useQuery({
     queryKey: ['admin', 'model-configs'],
     queryFn: adminConfigApi.listModels,
-  });
-
-  const createMut = useMutation({
-    mutationFn: (input: RouteDraft) =>
-      adminConfigApi.createRoute({
-        id: input.id,
-        modelId: input.modelId,
-        providerId: input.providerId,
-        upstreamModel: input.upstreamModel,
-        protocol: input.protocol,
-        priority: input.priority,
-        contextWindow: input.contextWindow,
-        maxOutputTokens: input.maxOutputTokens,
-        rpm: input.rpm,
-        tpm: input.tpm,
-      }),
-    onSuccess: () => {
-      toast.success('路由已创建（需点编译并发布生效）');
-      queryClient.invalidateQueries({ queryKey: ['admin', 'route-configs'] });
-      setCreating(false);
-    },
-    onError: (e: unknown) => {
-      toast.error(e instanceof Error ? e.message : '创建失败');
-    },
   });
 
   const toggleProtocolMut = useMutation({
@@ -248,16 +171,6 @@ export default function AdminRoutesPage() {
             />
           ))}
         </div>
-        <div className="ml-auto">
-          <button
-            type="button"
-            onClick={() => setCreating(true)}
-            className="inline-flex h-[var(--control-height-sm)] items-center gap-1.5 rounded-sm bg-primary px-3 text-xs font-medium text-primary-foreground hover:opacity-90"
-          >
-            <Plus className="size-3.5" />
-            新建路由
-          </button>
-        </div>
       </div>
 
       <div className="rounded-lg border bg-card p-3 text-xs text-muted-foreground">
@@ -284,13 +197,6 @@ export default function AdminRoutesPage() {
         </div>
       )}
 
-      {creating ? (
-        <RouteFormModal
-          onClose={() => setCreating(false)}
-          onSubmit={(d) => createMut.mutate(d)}
-          submitting={createMut.isPending}
-        />
-      ) : null}
       {protocolGroup ? (
         <ProtocolToggleModal
           group={providerGroups.find((g) => g.key === protocolGroup.key) ?? protocolGroup}
@@ -300,17 +206,10 @@ export default function AdminRoutesPage() {
         />
       ) : null}
       {accountGroup ? (
-        <ProviderAccountsModal
+        <GroupAccountsModal
           group={providerGroups.find((g) => g.key === accountGroup.key) ?? accountGroup}
-          onSelectRoute={(route) => {
-            setAccountGroup(null);
-            setAccountRoute(route);
-          }}
           onClose={() => setAccountGroup(null)}
         />
-      ) : null}
-      {accountRoute ? (
-        <RouteAccountsModal route={accountRoute} onClose={() => setAccountRoute(null)} />
       ) : null}
     </div>
   );
@@ -420,290 +319,75 @@ function ProtocolToggleModal({
   );
 }
 
-function ProviderAccountsModal({
-  group,
-  onSelectRoute,
-  onClose,
-}: {
-  group: RouteProviderGroup;
-  onSelectRoute: (route: AdminRouteConfig) => void;
-  onClose: () => void;
-}) {
-  const routes = group.routes
-    .filter((r) => r.enabled && !r.quarantined)
-    .sort((a, b) => a.protocol.localeCompare(b.protocol));
-  return (
-    <Modal open onClose={onClose} title="配置账号" maxWidth="md">
-      <div className="space-y-4">
-        <div className="rounded-lg border bg-muted/30 p-3 text-xs text-muted-foreground">
-          模型 <span className="font-mono text-foreground">{group.modelId}</span> · Provider <span className="font-mono text-foreground">{group.providerId}</span>。
-          选择一个已启用协议后配置它的账号候选；未单独配置时会使用 Provider 下全部 active 账号。
-        </div>
-        {routes.length === 0 ? (
-          <div className="rounded-lg border border-dashed py-10 text-center text-sm text-muted-foreground">
-            当前 Provider 没有启用协议，请先在“编辑协议”中开启至少一个协议。
-          </div>
-        ) : (
-          <div className="grid gap-2">
-            {routes.map((route) => (
-              <button
-                key={route.id}
-                type="button"
-                onClick={() => onSelectRoute(route)}
-                className="flex items-center justify-between rounded-lg border p-3 text-left hover:bg-accent"
-              >
-                <span>
-                  <span className="block font-mono text-xs font-medium">{route.protocol}</span>
-                  <span className="mt-1 block truncate text-[11px] text-muted-foreground">{route.upstreamModel}</span>
-                </span>
-                <span className="inline-flex items-center gap-1 text-xs text-primary">
-                  <KeyRound className="size-3" /> 配置
-                </span>
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-    </Modal>
-  );
-}
-
-function routeIDFor(modelId: string, providerId: string, protocol: string): string {
-  const safe = `${modelId}-${providerId}-${protocol}`
-    .toLowerCase()
-    .replace(/[^a-z0-9._-]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-  return `route-${safe}`.slice(0, 120);
-}
-
-function RouteFormModal({
-  initial,
-  onClose,
-  onSubmit,
-  submitting,
-}: {
-  initial?: AdminRouteConfig;
-  onClose: () => void;
-  onSubmit: (d: RouteDraft) => void;
-  submitting?: boolean;
-}) {
-  const isEdit = !!initial;
-  const [draft, setDraft] = useState<RouteDraft>(initial ? fromRoute(initial) : emptyDraft());
-  const [contextWindowStr, setContextWindowStr] = useState<string>(
-    initial?.contextWindow != null ? String(initial.contextWindow) : '',
-  );
-  const [maxOutputTokensStr, setMaxOutputTokensStr] = useState<string>(
-    initial?.maxOutputTokens != null ? String(initial.maxOutputTokens) : '',
-  );
-  const [rpmStr, setRPMStr] = useState<string>(initial?.rpm != null ? String(initial.rpm) : '');
-  const [tpmStr, setTPMStr] = useState<string>(initial?.tpm != null ? String(initial.tpm) : '');
-
-  const { data: providers = [] } = useQuery({
-    queryKey: ['admin', 'providers'],
-    queryFn: adminConfigApi.listProviders,
-  });
-  const { data: models = [] } = useQuery({
-    queryKey: ['admin', 'model-configs'],
-    queryFn: adminConfigApi.listModels,
-  });
-
-  const providerOptions = providers.map((p) => ({
-    value: p.id,
-    label: p.displayLabel || p.name,
-  }));
-  const modelOptions = models.map((m) => ({
-    value: m.id,
-    label: m.displayName || m.id,
-  }));
-
-  /** Parse empty string → null, non-empty → number */
-  const parseNullableInt = (v: string): number | null => {
-    const trimmed = v.trim();
-    if (trimmed === '') return null;
-    const n = Number(trimmed);
-    return Number.isNaN(n) ? null : n;
-  };
-
-  const canSubmit =
-    draft.id.trim() !== '' &&
-    draft.modelId !== '' &&
-    draft.providerId !== '' &&
-    draft.upstreamModel.trim() !== '' &&
-    draft.protocol !== '';
-
-  const submit = () => {
-    if (!canSubmit) return;
-    const finalDraft: RouteDraft = {
-      ...draft,
-      contextWindow: parseNullableInt(contextWindowStr),
-      maxOutputTokens: parseNullableInt(maxOutputTokensStr),
-      rpm: parseNullableInt(rpmStr),
-      tpm: parseNullableInt(tpmStr),
-    };
-    onSubmit(finalDraft);
-  };
-
-  return (
-    <Modal
-      open
-      onClose={onClose}
-      title={isEdit ? '编辑模型路由目标' : '新建模型路由目标'}
-      maxWidth="lg"
-      footer={
-        <FormActions
-          onCancel={onClose}
-          onSubmit={submit}
-          submitLabel={isEdit ? '保存' : '创建'}
-          submitting={submitting}
-          disabled={!canSubmit}
-        />
-      }
-    >
-      <div className="space-y-5">
-        <FormSection title="指定模型与上游目标" cols={2} description="先选择对外模型，再为该模型添加一个 Provider + 协议目标；同一模型可添加多条路由。">
-          <Field label="路由 ID" required>
-            <TextField
-              value={draft.id}
-              onChange={(v) => setDraft((d) => ({ ...d, id: v }))}
-              placeholder="例如 openai-gpt-4o-mini"
-              disabled={isEdit}
-              className="font-mono"
-            />
-          </Field>
-          <Field label="上游模型" required>
-            <TextField
-              value={draft.upstreamModel}
-              onChange={(v) => setDraft((d) => ({ ...d, upstreamModel: v }))}
-              placeholder="例如 deepseek-chat"
-              className="font-mono"
-            />
-          </Field>
-        </FormSection>
-
-        <FormSection title="Provider 与账号协议" cols={2} description="Provider 表示供应商/账号池；协议决定使用哪个 endpoint/adapter。账号候选在列表的“配置账号”里绑定。">
-          <Field label="模型" required>
-            <SelectField
-              value={draft.modelId}
-              onChange={(v) => setDraft((d) => ({ ...d, modelId: v }))}
-              options={modelOptions}
-              placeholder="选择模型"
-            />
-          </Field>
-          <Field label="Provider" required>
-            <SelectField
-              value={draft.providerId}
-              onChange={(v) => setDraft((d) => ({ ...d, providerId: v }))}
-              options={providerOptions}
-              placeholder="选择 Provider"
-            />
-          </Field>
-        </FormSection>
-
-        <FormSection title="协议与调度" cols={3}>
-          <Field label="协议" required>
-            <SelectField
-              value={draft.protocol}
-              onChange={(v) => setDraft((d) => ({ ...d, protocol: v }))}
-              options={PROTOCOL_OPTIONS}
-            />
-          </Field>
-          <Field label="优先级" hint="数字越小优先级越高">
-            <NumberField
-              value={String(draft.priority)}
-              onChange={(v) => setDraft((d) => ({ ...d, priority: Number(v) || 0 }))}
-              min={0}
-            />
-          </Field>
-          <Field label="启用">
-            <SwitchField
-              checked={draft.enabled}
-              onChange={(v) => setDraft((d) => ({ ...d, enabled: v }))}
-              label={draft.enabled ? '已启用' : '已禁用'}
-            />
-          </Field>
-        </FormSection>
-
-        <FormSection title="Provider+模型覆盖" cols={2} description="留空表示继承 Provider 默认值；用于某个模型在某个供应商下的上下文、输出和 RPM/TPM 覆盖。">
-          <Field label="上下文窗口（token）" hint="留空继承 Provider 默认">
-            <NumberField
-              value={contextWindowStr}
-              onChange={setContextWindowStr}
-              placeholder="留空继承 Provider 默认"
-              min={1}
-            />
-          </Field>
-          <Field label="最大输出 Token" hint="留空继承 Provider 默认">
-            <NumberField
-              value={maxOutputTokensStr}
-              onChange={setMaxOutputTokensStr}
-              placeholder="留空继承 Provider 默认"
-              min={1}
-            />
-          </Field>
-          <Field label="RPM" hint="留空继承 Provider/账号设置">
-            <NumberField value={rpmStr} onChange={setRPMStr} placeholder="例如 500" min={1} />
-          </Field>
-          <Field label="TPM" hint="留空继承 Provider/账号设置">
-            <NumberField value={tpmStr} onChange={setTPMStr} placeholder="例如 1000000" min={1} />
-          </Field>
-        </FormSection>
-      </div>
-    </Modal>
-  );
-}
-
-function RouteAccountsModal({ route, onClose }: { route: AdminRouteConfig; onClose: () => void }) {
+function GroupAccountsModal({ group, onClose }: { group: RouteProviderGroup; onClose: () => void }) {
   const queryClient = useQueryClient();
+  const enabledRoutes = useMemo(
+    () => group.routes.filter((r) => r.enabled && !r.quarantined),
+    [group.routes],
+  );
   const { data: providerCredentials = [], isLoading: loadingCredentials } = useQuery({
-    queryKey: ['admin', 'provider-credentials', route.providerId],
-    queryFn: () => adminConfigApi.listCredentials(route.providerId),
+    queryKey: ['admin', 'provider-credentials', group.providerId],
+    queryFn: () => adminConfigApi.listCredentials(group.providerId),
   });
-  const { data: routeCredentials = [], isLoading: loadingBindings } = useQuery({
-    queryKey: ['admin', 'route-credentials', route.id],
-    queryFn: () => adminConfigApi.listRouteCredentials(route.id),
+  const { data: routeCredentialSets = [], isLoading: loadingBindings } = useQuery({
+    queryKey: ['admin', 'route-credentials-group', group.key, enabledRoutes.map((r) => r.id).join('|')],
+    queryFn: async () => Promise.all(enabledRoutes.map((route) => adminConfigApi.listRouteCredentials(route.id))),
+    enabled: enabledRoutes.length > 0,
   });
 
   const [overrides, setOverrides] = useState<Record<string, Partial<AdminRouteCredential>>>({});
 
   const rows = useMemo(() => {
-    const bindingByCredential = new Map(routeCredentials.map((c) => [c.credentialId, c]));
-    return providerCredentials
-      .filter((c) => c.status !== 'deleted')
-      .map((credential) => {
-        const binding = bindingByCredential.get(credential.id);
-        const override = overrides[credential.id] ?? {};
-        return {
-          credential,
-          selected: override.enabled ?? binding?.enabled ?? false,
-          priority: override.priority ?? binding?.priority ?? credential.priority,
-          rpm: override.rpm !== undefined ? override.rpm : (binding?.rpm ?? null),
-          tpm: override.tpm !== undefined ? override.tpm : (binding?.tpm ?? null),
-        };
-      });
-  }, [overrides, providerCredentials, routeCredentials]);
+    const activeCredentials = providerCredentials.filter((c) => c.status !== 'deleted');
+    const anyExplicitBinding = routeCredentialSets.some((set) => set.length > 0);
+    const bindingByCredential = new Map<string, AdminRouteCredential>();
+    for (const set of routeCredentialSets) {
+      for (const binding of set) {
+        if (!bindingByCredential.has(binding.credentialId)) bindingByCredential.set(binding.credentialId, binding);
+      }
+    }
+    return activeCredentials.map((credential) => {
+      const binding = bindingByCredential.get(credential.id);
+      const override = overrides[credential.id] ?? {};
+      return {
+        credential,
+        selected: override.enabled ?? binding?.enabled ?? !anyExplicitBinding,
+        priority: override.priority ?? binding?.priority ?? credential.priority,
+        rpm: override.rpm !== undefined ? override.rpm : (binding?.rpm ?? null),
+        tpm: override.tpm !== undefined ? override.tpm : (binding?.tpm ?? null),
+      };
+    });
+  }, [overrides, providerCredentials, routeCredentialSets]);
 
   const saveMut = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
       const selected = rows
         .filter((row) => row.selected)
         .map((row) => ({
-          routeId: route.id,
           credentialId: row.credential.id,
           priority: row.priority,
           enabled: true,
           rpm: row.rpm,
           tpm: row.tpm,
         }));
-      return adminConfigApi.setRouteCredentials(route.id, selected);
+      await Promise.all(enabledRoutes.map((route) => adminConfigApi.setRouteCredentials(
+        route.id,
+        selected.map((item) => ({
+          routeId: route.id,
+          credentialId: item.credentialId,
+          priority: item.priority,
+          enabled: item.enabled,
+          rpm: item.rpm,
+          tpm: item.tpm,
+        })),
+      )));
     },
     onSuccess: () => {
-      toast.success('路由账号候选已保存（需点编译并发布生效）');
-      queryClient.invalidateQueries({ queryKey: ['admin', 'route-credentials', route.id] });
+      toast.success('账号候选已同步到该 Provider 组的所有启用协议（需点编译并发布生效）');
+      queryClient.invalidateQueries({ queryKey: ['admin', 'route-credentials-group'] });
       onClose();
     },
-    onError: (e: unknown) => {
-      toast.error(e instanceof Error ? e.message : '保存失败');
-    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : '保存失败'),
   });
 
   const patchRow = (credentialId: string, patch: Partial<AdminRouteCredential>) => {
@@ -719,7 +403,7 @@ function RouteAccountsModal({ route, onClose }: { route: AdminRouteConfig; onClo
     <Modal
       open
       onClose={onClose}
-      title="配置路由账号候选"
+      title="配置账号"
       maxWidth="lg"
       footer={
         <FormActions
@@ -727,24 +411,24 @@ function RouteAccountsModal({ route, onClose }: { route: AdminRouteConfig; onClo
           onSubmit={() => saveMut.mutate()}
           submitLabel="保存账号候选"
           submitting={saveMut.isPending}
-          disabled={loading}
+          disabled={loading || enabledRoutes.length === 0}
         />
       }
     >
       <div className="space-y-4">
         <div className="rounded-lg border bg-muted/30 p-3 text-xs text-muted-foreground">
-          <div className="font-mono text-foreground">{route.modelId}</div>
-          <div className="mt-1">
-            Provider <span className="font-mono">{route.providerId}</span> · 协议 <span className="font-mono">{route.protocol}</span> · 上游模型 <span className="font-mono">{route.upstreamModel}</span>
-          </div>
-          <div className="mt-1">可为同一个 Provider+协议路由绑定多个账号候选，并按账号设置优先级/RPM/TPM 覆盖；不选择任何账号则清空绑定并回退为 Provider 下全部 active 账号。</div>
+          模型 <span className="font-mono text-foreground">{group.modelId}</span> · Provider <span className="font-mono text-foreground">{group.providerId}</span>。
+          这里统一配置该 Provider 组的账号候选；保存后会同步到此组下所有已启用协议 route。协议只是上游请求适配维度，不需要在账号配置里单独选择。
         </div>
-
-        {loading ? (
+        {enabledRoutes.length === 0 ? (
+          <div className="rounded-lg border border-dashed py-10 text-center text-sm text-muted-foreground">
+            当前 Provider 没有启用协议，请先在“编辑协议”中开启至少一个协议。
+          </div>
+        ) : loading ? (
           <div className="py-10 text-center text-sm text-muted-foreground">加载账号…</div>
         ) : rows.length === 0 ? (
           <div className="rounded-lg border border-dashed py-10 text-center text-sm text-muted-foreground">
-            当前 Provider 暂无账号，请先在“账号管理”中为 {route.providerId} 添加账号。
+            当前 Provider 暂无账号，请先在“账号管理”中为 {group.providerId} 添加账号。
           </div>
         ) : (
           <div className="overflow-x-auto rounded-lg border">
@@ -805,6 +489,15 @@ function RouteAccountsModal({ route, onClose }: { route: AdminRouteConfig; onClo
       </div>
     </Modal>
   );
+}
+
+
+function routeIDFor(modelId: string, providerId: string, protocol: string): string {
+  const safe = `${modelId}-${providerId}-${protocol}`
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return `route-${safe}`.slice(0, 120);
 }
 
 function NullableNumberInput({ value, onChange, placeholder }: { value: number | null; onChange: (v: number | null) => void; placeholder?: string }) {
