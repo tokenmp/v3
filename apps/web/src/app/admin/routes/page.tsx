@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Pencil, Plus, Trash2 } from 'lucide-react';
+import { KeyRound, Pencil, Plus, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { adminConfigApi } from '@/lib/api/admin';
 import { FilterChip } from '@/components/filter-chip';
@@ -26,7 +26,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import type { AdminRouteConfig } from '@/types/admin';
+import type { AdminRouteConfig, AdminRouteCredential } from '@/types/admin';
 
 const PROTOCOL_OPTIONS = [
   'openai_chat',
@@ -110,12 +110,18 @@ export default function AdminRoutesPage() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [selectedModel, setSelectedModel] = useState('all');
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<AdminRouteConfig | null>(null);
+  const [accountRoute, setAccountRoute] = useState<AdminRouteConfig | null>(null);
 
   const { data: routes = [], isLoading } = useQuery({
     queryKey: ['admin', 'route-configs'],
     queryFn: adminConfigApi.listRoutes,
+  });
+  const { data: models = [] } = useQuery({
+    queryKey: ['admin', 'model-configs'],
+    queryFn: adminConfigApi.listModels,
   });
 
   const createMut = useMutation({
@@ -177,9 +183,16 @@ export default function AdminRoutesPage() {
     },
   });
 
+  const routeModelOptions = useMemo(() => {
+    const ids = new Set<string>(models.map((m) => m.id));
+    routes.forEach((r) => ids.add(r.modelId));
+    return Array.from(ids).sort((a, b) => a.localeCompare(b));
+  }, [models, routes]);
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return routes.filter((r) => {
+      if (selectedModel !== 'all' && r.modelId !== selectedModel) return false;
       if (statusFilter === 'active' && !(r.enabled && !r.quarantined)) return false;
       if (statusFilter === 'disabled' && r.enabled) return false;
       if (!q) return true;
@@ -190,7 +203,13 @@ export default function AdminRoutesPage() {
         r.upstreamModel.toLowerCase().includes(q)
       );
     });
-  }, [routes, search, statusFilter]);
+  }, [routes, search, selectedModel, statusFilter]);
+
+  const modelSummary = useMemo(() => {
+    const providers = new Set(filtered.map((r) => r.providerId));
+    const protocols = new Set(filtered.map((r) => r.protocol));
+    return { providers: providers.size, protocols: protocols.size, routes: filtered.length };
+  }, [filtered]);
 
   const onDelete = (r: AdminRouteConfig) => {
     if (!confirm(`确定删除路由「${r.id}」？`)) return;
@@ -206,13 +225,24 @@ export default function AdminRoutesPage() {
         </div>
       </div>
 
-      {/* 工具栏：搜索 + 状态筛选 + 新建 */}
+      {/* 工具栏：模型过滤 + 搜索 + 状态筛选 + 新建 */}
       <div className="flex flex-wrap items-center gap-2">
+        <select
+          value={selectedModel}
+          onChange={(e) => setSelectedModel(e.target.value)}
+          className={`${inputCls} w-full sm:w-72 font-mono`}
+          aria-label="按模型过滤路由"
+        >
+          <option value="all">全部模型</option>
+          {routeModelOptions.map((id) => (
+            <option key={id} value={id}>{id}</option>
+          ))}
+        </select>
         <input
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="搜索 ID / 模型 / Provider / 上游模型"
+          placeholder="搜索 Provider / 上游模型 / 路由 ID"
           className={`${inputCls} max-w-xs`}
         />
         <div className="flex flex-wrap gap-1.5">
@@ -237,6 +267,12 @@ export default function AdminRoutesPage() {
         </div>
       </div>
 
+      <div className="rounded-lg border bg-card p-3 text-xs text-muted-foreground">
+        <span className="font-medium text-foreground">当前视图：</span>
+        {selectedModel === 'all' ? '全部模型' : selectedModel} · {modelSummary.routes} 条路由 · {modelSummary.providers} 个 Provider · {modelSummary.protocols} 个协议。
+        <span className="ml-1">一个模型可以绑定多个 Provider；每条 Provider+协议路由可再绑定多个账号候选。</span>
+      </div>
+
       {/* 表格 */}
       {isLoading ? (
         <div className="py-12 text-center text-sm text-muted-foreground">加载中…</div>
@@ -252,7 +288,7 @@ export default function AdminRoutesPage() {
                 <TableHead>模型</TableHead>
                 <TableHead>Provider</TableHead>
                 <TableHead>上游模型</TableHead>
-                <TableHead>协议</TableHead>
+                <TableHead>账号协议</TableHead>
                 <TableHead>优先级</TableHead>
                 <TableHead className="text-right">TPM</TableHead>
                 <TableHead>状态</TableHead>
@@ -266,7 +302,18 @@ export default function AdminRoutesPage() {
                   <TableCell className="font-mono text-xs">{r.modelId}</TableCell>
                   <TableCell className="font-mono text-xs">{r.providerId}</TableCell>
                   <TableCell className="font-mono text-xs">{r.upstreamModel}</TableCell>
-                  <TableCell className="font-mono text-xs text-muted-foreground">{r.protocol}</TableCell>
+                  <TableCell>
+                    <div className="space-y-0.5">
+                      <div className="font-mono text-xs text-muted-foreground">{r.protocol}</div>
+                      <button
+                        type="button"
+                        onClick={() => setAccountRoute(r)}
+                        className="inline-flex items-center gap-1 rounded-sm text-[11px] text-primary hover:underline"
+                      >
+                        <KeyRound className="size-3" /> 配置账号
+                      </button>
+                    </div>
+                  </TableCell>
                   <TableCell className="tabular-nums">{r.priority}</TableCell>
                   <TableCell className="text-right font-mono text-xs">{r.tpm != null ? r.tpm.toLocaleString() : '继承'}</TableCell>
                   <TableCell>
@@ -274,6 +321,15 @@ export default function AdminRoutesPage() {
                   </TableCell>
                   <TableCell>
                     <div className="flex justify-end gap-1">
+                      <button
+                        type="button"
+                        onClick={() => setAccountRoute(r)}
+                        className="rounded-sm p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                        aria-label="配置账号"
+                        title="配置账号"
+                      >
+                        <KeyRound className="size-3.5" />
+                      </button>
                       <button
                         type="button"
                         onClick={() => setEditing(r)}
@@ -324,6 +380,9 @@ export default function AdminRoutesPage() {
                   {r.providerId} → {r.upstreamModel}
                 </p>
                 <span className="text-xs text-muted-foreground">优先级 {r.priority}</span>
+                <span className="inline-flex items-center gap-1 text-xs text-primary">
+                  <KeyRound className="size-3" /> 点击编辑；账号在桌面端表格或编辑后配置
+                </span>
               </button>
             ))
           )}
@@ -345,6 +404,9 @@ export default function AdminRoutesPage() {
           onSubmit={(d) => updateMut.mutate({ id: editing.id, input: d })}
           submitting={updateMut.isPending}
         />
+      ) : null}
+      {accountRoute ? (
+        <RouteAccountsModal route={accountRoute} onClose={() => setAccountRoute(null)} />
       ) : null}
     </div>
   );
@@ -421,7 +483,7 @@ function RouteFormModal({
     <Modal
       open
       onClose={onClose}
-      title={isEdit ? '编辑路由' : '新建路由'}
+      title={isEdit ? '编辑模型路由目标' : '新建模型路由目标'}
       maxWidth="lg"
       footer={
         <FormActions
@@ -434,7 +496,7 @@ function RouteFormModal({
       }
     >
       <div className="space-y-5">
-        <FormSection title="基本信息" cols={2}>
+        <FormSection title="指定模型与上游目标" cols={2} description="先选择对外模型，再为该模型添加一个 Provider + 协议目标；同一模型可添加多条路由。">
           <Field label="路由 ID" required>
             <TextField
               value={draft.id}
@@ -454,7 +516,7 @@ function RouteFormModal({
           </Field>
         </FormSection>
 
-        <FormSection title="路由绑定" cols={2}>
+        <FormSection title="Provider 与账号协议" cols={2} description="Provider 表示供应商/账号池；协议决定使用哪个 endpoint/adapter。账号候选在列表的“配置账号”里绑定。">
           <Field label="模型" required>
             <SelectField
               value={draft.modelId}
@@ -523,5 +585,174 @@ function RouteFormModal({
         </FormSection>
       </div>
     </Modal>
+  );
+}
+
+function RouteAccountsModal({ route, onClose }: { route: AdminRouteConfig; onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const { data: providerCredentials = [], isLoading: loadingCredentials } = useQuery({
+    queryKey: ['admin', 'provider-credentials', route.providerId],
+    queryFn: () => adminConfigApi.listCredentials(route.providerId),
+  });
+  const { data: routeCredentials = [], isLoading: loadingBindings } = useQuery({
+    queryKey: ['admin', 'route-credentials', route.id],
+    queryFn: () => adminConfigApi.listRouteCredentials(route.id),
+  });
+
+  const [overrides, setOverrides] = useState<Record<string, Partial<AdminRouteCredential>>>({});
+
+  const rows = useMemo(() => {
+    const bindingByCredential = new Map(routeCredentials.map((c) => [c.credentialId, c]));
+    return providerCredentials
+      .filter((c) => c.status !== 'deleted')
+      .map((credential) => {
+        const binding = bindingByCredential.get(credential.id);
+        const override = overrides[credential.id] ?? {};
+        return {
+          credential,
+          selected: override.enabled ?? binding?.enabled ?? false,
+          priority: override.priority ?? binding?.priority ?? credential.priority,
+          rpm: override.rpm !== undefined ? override.rpm : (binding?.rpm ?? null),
+          tpm: override.tpm !== undefined ? override.tpm : (binding?.tpm ?? null),
+        };
+      });
+  }, [overrides, providerCredentials, routeCredentials]);
+
+  const saveMut = useMutation({
+    mutationFn: () => {
+      const selected = rows
+        .filter((row) => row.selected)
+        .map((row) => ({
+          routeId: route.id,
+          credentialId: row.credential.id,
+          priority: row.priority,
+          enabled: true,
+          rpm: row.rpm,
+          tpm: row.tpm,
+        }));
+      return adminConfigApi.setRouteCredentials(route.id, selected);
+    },
+    onSuccess: () => {
+      toast.success('路由账号候选已保存（需点编译并发布生效）');
+      queryClient.invalidateQueries({ queryKey: ['admin', 'route-credentials', route.id] });
+      onClose();
+    },
+    onError: (e: unknown) => {
+      toast.error(e instanceof Error ? e.message : '保存失败');
+    },
+  });
+
+  const patchRow = (credentialId: string, patch: Partial<AdminRouteCredential>) => {
+    setOverrides((current) => ({
+      ...current,
+      [credentialId]: { ...(current[credentialId] ?? {}), ...patch },
+    }));
+  };
+
+  const loading = loadingCredentials || loadingBindings;
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="配置路由账号候选"
+      maxWidth="lg"
+      footer={
+        <FormActions
+          onCancel={onClose}
+          onSubmit={() => saveMut.mutate()}
+          submitLabel="保存账号候选"
+          submitting={saveMut.isPending}
+          disabled={loading}
+        />
+      }
+    >
+      <div className="space-y-4">
+        <div className="rounded-lg border bg-muted/30 p-3 text-xs text-muted-foreground">
+          <div className="font-mono text-foreground">{route.modelId}</div>
+          <div className="mt-1">
+            Provider <span className="font-mono">{route.providerId}</span> · 协议 <span className="font-mono">{route.protocol}</span> · 上游模型 <span className="font-mono">{route.upstreamModel}</span>
+          </div>
+          <div className="mt-1">可为同一个 Provider+协议路由绑定多个账号候选，并按账号设置优先级/RPM/TPM 覆盖；不选择任何账号则清空绑定并回退为 Provider 下全部 active 账号。</div>
+        </div>
+
+        {loading ? (
+          <div className="py-10 text-center text-sm text-muted-foreground">加载账号…</div>
+        ) : rows.length === 0 ? (
+          <div className="rounded-lg border border-dashed py-10 text-center text-sm text-muted-foreground">
+            当前 Provider 暂无账号，请先在“账号管理”中为 {route.providerId} 添加账号。
+          </div>
+        ) : (
+          <div className="overflow-x-auto rounded-lg border">
+            <table className="min-w-full divide-y text-sm">
+              <thead className="bg-muted/50 text-xs text-muted-foreground">
+                <tr>
+                  <th className="px-3 py-2 text-left font-medium">启用</th>
+                  <th className="px-3 py-2 text-left font-medium">账号</th>
+                  <th className="px-3 py-2 text-left font-medium">优先级</th>
+                  <th className="px-3 py-2 text-left font-medium">RPM</th>
+                  <th className="px-3 py-2 text-left font-medium">TPM</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {rows.map((row) => (
+                  <tr key={row.credential.id}>
+                    <td className="px-3 py-2">
+                      <input
+                        type="checkbox"
+                        checked={row.selected}
+                        onChange={(e) => patchRow(row.credential.id, { enabled: e.target.checked })}
+                        aria-label={`启用账号 ${row.credential.id}`}
+                      />
+                    </td>
+                    <td className="px-3 py-2">
+                      <div className="font-mono text-xs">{row.credential.id}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {row.credential.keyPrefix || '****'}…{row.credential.keySuffix || '****'} · 默认优先级 {row.credential.priority}
+                      </div>
+                    </td>
+                    <td className="px-3 py-2">
+                      <NumberField
+                        value={String(row.priority)}
+                        onChange={(v) => patchRow(row.credential.id, { priority: Number(v) || 0 })}
+                        min={0}
+                      />
+                    </td>
+                    <td className="px-3 py-2">
+                      <NullableNumberInput
+                        value={row.rpm}
+                        onChange={(v) => patchRow(row.credential.id, { rpm: v })}
+                        placeholder="继承"
+                      />
+                    </td>
+                    <td className="px-3 py-2">
+                      <NullableNumberInput
+                        value={row.tpm}
+                        onChange={(v) => patchRow(row.credential.id, { tpm: v })}
+                        placeholder="继承"
+                      />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+function NullableNumberInput({ value, onChange, placeholder }: { value: number | null; onChange: (v: number | null) => void; placeholder?: string }) {
+  return (
+    <NumberField
+      value={value != null ? String(value) : ''}
+      onChange={(v) => {
+        const trimmed = v.trim();
+        onChange(trimmed === '' ? null : (Number(trimmed) || null));
+      }}
+      min={1}
+      placeholder={placeholder}
+    />
   );
 }

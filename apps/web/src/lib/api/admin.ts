@@ -28,6 +28,7 @@ import type {
   AdminProvider,
   AdminModelConfig,
   AdminRouteConfig,
+  AdminRouteCredential,
   AdminUpstreamCredential,
   AdminUpstreamEndpoint,
   AdminGlobalPolicy,
@@ -765,6 +766,29 @@ function routingPolicyToWire(policy: RoutingPolicy): Record<string, unknown> {
   };
 }
 
+function mapRouteCredential(c: Record<string, unknown>): AdminRouteCredential {
+  return {
+    routeId: String(c.route_id ?? c.routeId ?? ''),
+    credentialId: String(c.credential_id ?? c.credentialId ?? ''),
+    priority: Number(c.priority ?? 0),
+    enabled: Boolean(c.enabled ?? true),
+    rpm: c.rpm != null ? Number(c.rpm) : null,
+    tpm: c.tpm != null ? Number(c.tpm) : null,
+    createdAt: c.created_at != null ? String(c.created_at) : (c.createdAt != null ? String(c.createdAt) : undefined),
+  };
+}
+
+function routeCredentialToWire(c: AdminRouteCredential): Record<string, unknown> {
+  return {
+    route_id: c.routeId,
+    credential_id: c.credentialId,
+    priority: c.priority,
+    enabled: c.enabled,
+    rpm: c.rpm,
+    tpm: c.tpm,
+  };
+}
+
 function mapCredential(c: Record<string, unknown>): AdminUpstreamCredential {
   return {
     id: String(c.id ?? ''),
@@ -954,6 +978,21 @@ export const adminConfigApi = {
   deleteRoute: async (id: string): Promise<void> => {
     await request<void>(`/api/v1/admin/routes/${id}`, {
       method: 'DELETE',
+      baseUrl: ADMIN_BASE,
+    });
+  },
+  listRouteCredentials: async (routeId: string): Promise<AdminRouteCredential[]> => {
+    const res = await request<{ items: AdminRouteCredential[] } | AdminRouteCredential[]>(
+      `/api/v1/admin/routes/${routeId}/credentials`,
+      { baseUrl: ADMIN_BASE },
+    );
+    const items = Array.isArray(res) ? res : (res.items ?? []);
+    return items.map((c) => mapRouteCredential(c as unknown as Record<string, unknown>));
+  },
+  setRouteCredentials: async (routeId: string, credentials: AdminRouteCredential[]): Promise<void> => {
+    await request<void>(`/api/v1/admin/routes/${routeId}/credentials`, {
+      method: 'PUT',
+      body: { credentials: credentials.map(routeCredentialToWire) },
       baseUrl: ADMIN_BASE,
     });
   },
