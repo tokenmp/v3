@@ -61,16 +61,15 @@ func NewWithSettings(executorURL, serviceToken string, st *settings.Store, logge
 			// When serviceToken is empty, the client's Authorization header
 			// is forwarded as-is (JWT passthrough mode).
 
-			// Forward the verified end-user id so the executor records the
-			// real caller in its request log instead of the edge service
-			// identity. The edge has already authenticated the user (JWT or
-			// API key via Auth verify-key); the executor trusts this header
-			// because it only accepts requests bearing the edge service
-			// token. Strip any client-supplied value first to prevent
-			// spoofing in JWT-passthrough mode.
+			// X-User-ID is a delegated assertion and is only meaningful when
+			// this proxy injects its distinct Edge service token. In JWT
+			// passthrough mode the Executor derives the subject from JWT sub, so
+			// do not forward an assertion at all.
 			req.Header.Del("X-User-ID")
 			if claims, ok := identity.FromContext(req.Context()); ok && claims.Subject != "" {
-				req.Header.Set("X-User-ID", claims.Subject)
+				if serviceToken != "" {
+					req.Header.Set("X-User-ID", claims.Subject)
+				}
 				// Inject the per-user auto model pool override when configured.
 				// The executor honors it only for model=auto requests and ignores
 				// the header otherwise. Strip any client-supplied value first to

@@ -44,6 +44,7 @@ Executor 是 TokenMP v3 的 Mock-first 模型请求执行服务。runtime `main`
 | `EXECUTOR_JWT_PUBLIC_KEY_FILE` | （optional） | PKIX PEM 编码的 Ed25519 公钥文件路径；设置后启用 JWT 验证作为首选 identity source，identityenv 降为 fallback。公钥文件缺失或格式错误导致启动拒绝。 |
 | `EXECUTOR_JWT_ISSUER` | `tokenmp-auth` | JWT `iss` claim 期望值。 |
 | `EXECUTOR_JWT_AUDIENCE` | `tokenmp-web` | JWT `aud` claim 期望值。 |
+| `EXECUTOR_DELEGATED_EDGE_SUBJECT` | （unset） | 显式启用 delegated-edge 模式的 identityenv Edge service subject。仅当认证 API key 解析为该 subject 时才接受其 `X-User-ID` 断言；JWT passthrough 模式禁止设置。未设置时只信任认证主体，忽略 `X-User-ID`。 |
 | `EXECUTOR_CONFIG_RELOAD_INTERVAL` | `0`（禁用） | file source 时按 mtime/size stat 轮询；Config Service source 时按该间隔重新拉取并由 revision no-op 去重。默认 0 禁用轮询，仅 SIGHUP 触发 reload。非负 duration，0 或空值禁用轮询。 |
 | `EXECUTOR_METRICS_ENABLED` | `true` | 是否启用 `/metrics` Prometheus 端点；设为 `false`/`0`/`no`/`off` 禁用，禁用时 `/metrics` 返回 404。 |
 | `EXECUTOR_METRICS_PATH` | `/metrics` | Prometheus 端点 URL 路径；必须非空且以 `/` 开头。 |
@@ -111,6 +112,12 @@ Executor 支持两种 identity source：
 2. **identityenv（fallback）**：未设置 JWT 时，`EXECUTOR_IDENTITY_MAP_JSON` 为必填，使用 opaque API key 认证。
 
 **已知 trade-off**：JWT 验证为纯本地操作，不查询用户禁用状态或 `token_version` 当前值。Auth 签发的 access token TTL 为 15min，在此窗口内已 revoked 的 token 仍可被 Executor 接受。这是 accepted trade-off：避免每次请求的网络延迟和可用性依赖，以短 TTL 限制风险窗口。
+
+### 身份信任模型
+
+默认 **passthrough**：Executor 仅使用已认证 JWT `sub` 或 identityenv API-key subject，忽略所有 `X-User-ID`。因此直连请求不能以该 header 覆盖身份。
+
+Edge 使用服务 token 代理时，可设置 `EXECUTOR_DELEGATED_EDGE_SUBJECT` 为该独立 identityenv `service` role subject。只有该已认证 service token 对应 subject 的请求，且带有合法 `X-User-ID`，才会被视为 Edge 断言；缺失、无效、admin 或非 Edge service token 一律返回 401。此模式不能与 JWT source 共用。Edge 在 JWT passthrough 时不发送 `X-User-ID`，在服务 token 模式才注入其已验证的用户 subject。
 
 ### 空配置启动
 
