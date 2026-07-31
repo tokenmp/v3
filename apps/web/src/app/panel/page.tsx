@@ -315,9 +315,9 @@ export default function OverviewPage() {
                       <span className="inline-flex items-center gap-1.5">
                         <span>{protocolLabel(r.protocol)}</span>
                         {r.stream != null && (
-                          <span className={`rounded px-1 py-px text-[10px] font-medium ${r.stream ? 'bg-blue-100 text-blue-700' : 'bg-muted text-muted-foreground'}`}>
+                          <Badge variant={r.stream ? 'info' : 'secondary'} className="rounded px-1 py-px text-[10px]">
                             {streamLabel(r.stream)}
-                          </span>
+                          </Badge>
                         )}
                       </span>
                     </TableCell>

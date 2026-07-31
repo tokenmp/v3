@@ -17,6 +17,7 @@ import {
   SwitchField,
   TextField,
 } from '@/components/ui/field';
+import { StatusBadge } from '@/lib/status-badge';
 import { PublishStatusHint } from '@/components/publish-status-hint';
 import {
   Table,
@@ -26,7 +27,6 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { cn } from '@/lib/utils';
 
 type StatusFilter = 'all' | 'active' | 'disabled';
 
@@ -232,7 +232,7 @@ export default function AdminCredentialsPage() {
                           <button
                             type="button"
                             onClick={() => handleDelete(c)}
-                            className="rounded-sm p-1.5 text-muted-foreground hover:bg-red-100 hover:text-red-700"
+                            className="rounded-sm p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
                             aria-label="删除"
                             title="删除"
                           >
@@ -296,20 +296,6 @@ export default function AdminCredentialsPage() {
         />
       ) : null}
     </div>
-  );
-}
-
-function StatusBadge({ status }: { status: AdminUpstreamCredential['status'] }) {
-  const isActive = status === 'active';
-  return (
-    <span
-      className={cn(
-        'inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium',
-        isActive ? 'bg-green-100 text-green-700' : 'bg-muted text-muted-foreground',
-      )}
-    >
-      {isActive ? '启用' : status === 'disabled' ? '停用' : status}
-    </span>
   );
 }
 

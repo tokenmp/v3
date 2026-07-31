@@ -487,7 +487,7 @@ function RouteRetryCard() {
                   <TableCell>{r.providerId}</TableCell>
                   <TableCell>
                     {editing?.id === r.id ? (
-                      <span className="text-xs text-amber-600">编辑中…</span>
+                      <span className="text-xs text-warning">编辑中…</span>
                     ) : r.retryPolicy?.rules?.length ? (
                       <div className="flex flex-wrap gap-1">
                         {r.retryPolicy.rules.map((rule) => (

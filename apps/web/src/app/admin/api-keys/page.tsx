@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { adminApi } from '@/lib/api/admin';
 import { userApi } from '@/lib/api/user';
+import { StatusBadge } from '@/lib/status-badge';
 import { Button } from '@/components/ui/button';
 import {
   Table, TableHeader, TableRow, TableHead, TableBody, TableCell,
@@ -104,9 +105,7 @@ export default function AdminApiKeysPage() {
                   <TableCell className="text-sm font-medium">{k.name}</TableCell>
                   <TableCell className="font-mono text-xs">{k.keyPrefix}…{k.keySuffix}</TableCell>
                   <TableCell>
-                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${k.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-muted text-muted-foreground'}`}>
-                      {k.status === 'active' ? '活跃' : '已禁用'}
-                    </span>
+                    <StatusBadge status={k.status === 'active' ? 'active' : 'disabled'} />
                   </TableCell>
                   <TableCell className="text-xs text-muted-foreground">{formatTime(k.createdAt)}</TableCell>
                   <TableCell className="text-xs text-muted-foreground">{formatTime(k.lastUsedAt)}</TableCell>
@@ -147,9 +146,7 @@ export default function AdminApiKeysPage() {
           >
             <div className="flex items-center justify-between gap-2">
               <span className="text-sm font-medium truncate">{k.name}</span>
-              <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${k.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-muted text-muted-foreground'}`}>
-                {k.status === 'active' ? '活跃' : '已禁用'}
-              </span>
+              <StatusBadge status={k.status === 'active' ? 'active' : 'disabled'} />
             </div>
             <p className="text-xs text-muted-foreground truncate">{k.userEmail}</p>
             <p className="font-mono text-xs text-muted-foreground">{k.keyPrefix}…{k.keySuffix}</p>
@@ -184,9 +181,7 @@ export default function AdminApiKeysPage() {
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-muted-foreground">状态</span>
-                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${actionKey.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-muted text-muted-foreground'}`}>
-                    {actionKey.status === 'active' ? '活跃' : '已禁用'}
-                  </span>
+                  <StatusBadge status={actionKey.status === 'active' ? 'active' : 'disabled'} />
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-muted-foreground">创建时间</span>

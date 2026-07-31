@@ -3,6 +3,8 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { userApi } from '@/lib/api/user';
+import { Badge } from '@/components/ui/badge';
+import { StatusBadge } from '@/lib/status-badge';
 import {
   Table, TableHeader, TableRow, TableHead, TableBody, TableCell,
 } from '@/components/ui/table';
@@ -21,13 +23,6 @@ import {
 
 function formatTime(iso: string) {
   return new Date(iso).toLocaleString('zh-CN');
-}
-
-function statusBadge(status: string) {
-  if (status === 'success') return { label: '成功', cls: 'bg-green-100 text-green-700' };
-  if (status === 'processing') return { label: '处理中', cls: 'bg-blue-100 text-blue-700 animate-pulse' };
-  if (status === 'cancelled') return { label: '已取消', cls: 'bg-amber-100 text-amber-700' };
-  return { label: '失败', cls: 'bg-red-100 text-red-700' };
 }
 
 function shortRequestId(id: string | null | undefined): string {
@@ -125,16 +120,14 @@ export default function RequestsPage() {
                       <span className="flex items-center gap-1.5">
                         <span>{protocolLabel(r.protocol)}</span>
                         {r.stream != null && (
-                          <span className={`rounded px-1 py-px text-[10px] font-medium ${r.stream ? 'bg-blue-100 text-blue-700' : 'bg-muted text-muted-foreground'}`}>
+                          <Badge variant={r.stream ? 'info' : 'secondary'} className="rounded px-1 py-px text-[10px]">
                             {streamLabel(r.stream)}
-                          </span>
+                          </Badge>
                         )}
                       </span>
                     </TableCell>
                     <TableCell>
-                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${statusBadge(r.status).cls}`}>
-                        {statusBadge(r.status).label}
-                      </span>
+                      <StatusBadge status={r.status} className={r.status === 'processing' ? 'animate-pulse' : undefined} />
                     </TableCell>
                     <TableCell className="text-sm text-right tabular-nums">{formatTokens(r.inputTokens)}</TableCell>
                     <TableCell className="text-sm text-right tabular-nums">{formatTokens(r.outputTokens)}</TableCell>
@@ -174,17 +167,15 @@ export default function RequestsPage() {
             <div key={r.requestId} className="rounded-lg border bg-card p-3 space-y-2">
               <div className="flex items-center justify-between gap-2">
                 <span className="text-sm font-medium truncate">{r.model || '—'}</span>
-                <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${statusBadge(r.status).cls}`}>
-                  {statusBadge(r.status).label}
-                </span>
+                <StatusBadge status={r.status} className={`shrink-0 ${r.status === 'processing' ? 'animate-pulse' : ''}`} />
               </div>
               {/* Request type row */}
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
                 <span>{protocolLabel(r.protocol)}</span>
                 {r.stream != null && (
-                  <span className={`rounded px-1 py-px text-[10px] font-medium ${r.stream ? 'bg-blue-100 text-blue-700' : 'bg-muted text-muted-foreground'}`}>
+                  <Badge variant={r.stream ? 'info' : 'secondary'} className="rounded px-1 py-px text-[10px]">
                     {streamLabel(r.stream)}
-                  </span>
+                  </Badge>
                 )}
               </div>
               {/* Token row */}

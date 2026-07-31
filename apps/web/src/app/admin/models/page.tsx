@@ -12,6 +12,7 @@ import {
   FormActions,
   TextField,
 } from '@/components/ui/field';
+import { Badge } from '@/components/ui/badge';
 import { PublishStatusHint } from '@/components/publish-status-hint';
 import {
   Table,
@@ -28,13 +29,13 @@ type CapabilityKey = 'text' | 'tools' | 'vision' | 'thinking' | 'image';
 
 const CAPABILITY_META: Record<
   CapabilityKey,
-  { label: string; tone: string }
+  { label: string; variant: 'info' | 'default' | 'warning' | 'success' | 'destructive' | 'secondary' | 'outline' }
 > = {
-  text: { label: '文本', tone: 'bg-blue-50 text-blue-600' },
-  tools: { label: '工具', tone: 'bg-violet-50 text-violet-600' },
-  vision: { label: '视觉', tone: 'bg-amber-50 text-amber-600' },
-  thinking: { label: '思考', tone: 'bg-emerald-50 text-emerald-600' },
-  image: { label: '图像', tone: 'bg-pink-50 text-pink-600' },
+  text: { label: '文本', variant: 'info' },
+  tools: { label: '工具', variant: 'default' },
+  vision: { label: '视觉', variant: 'warning' },
+  thinking: { label: '思考', variant: 'success' },
+  image: { label: '图像', variant: 'destructive' },
 };
 
 const CAPABILITY_ORDER: CapabilityKey[] = [
@@ -66,10 +67,8 @@ const FILTER_OPTIONS: { value: CapabilityKey | undefined; label: string }[] = [
 
 const QUERY_KEY = ['admin', 'model-configs'] as const;
 
-function capabilityTone(cap: string): string {
-  return (
-    CAPABILITY_META[cap as CapabilityKey]?.tone ?? 'bg-muted text-muted-foreground'
-  );
+function capabilityVariant(cap: string) {
+  return CAPABILITY_META[cap as CapabilityKey]?.variant ?? 'secondary';
 }
 
 function capabilityLabel(cap: string): string {
@@ -189,27 +188,21 @@ export default function AdminModelsPage() {
                   <TableCell>
                     <div className="flex flex-wrap gap-1">
                       {m.capabilities.map((cap) => (
-                        <span
+                        <Badge
                           key={cap}
-                          className={cn(
-                            'rounded-full px-1.5 py-0.5 text-[10px] font-medium',
-                            capabilityTone(cap),
-                          )}
+                          variant={capabilityVariant(cap)}
+                          className="rounded-full px-1.5 py-0.5 text-[10px]"
                         >
                           {capabilityLabel(cap)}
-                        </span>
+                        </Badge>
                       ))}
                     </div>
                   </TableCell>
                   <TableCell>
                     {m.thinkingSupported ? (
-                      <span className="rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-600">
-                        支持
-                      </span>
+                      <Badge variant="success" className="rounded-full px-1.5 py-0.5 text-[10px]">支持</Badge>
                     ) : (
-                      <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-                        不支持
-                      </span>
+                      <Badge variant="secondary" className="rounded-full px-1.5 py-0.5 text-[10px]">不支持</Badge>
                     )}
                   </TableCell>
                   <TableCell className="text-center tabular-nums">{m.routeCount}</TableCell>
@@ -264,14 +257,14 @@ export default function AdminModelsPage() {
             </div>
             <div className="flex flex-wrap gap-1">
               {m.capabilities.map((cap) => (
-                <span key={cap} className={cn('rounded-full px-1.5 py-0.5 text-[10px] font-medium', capabilityTone(cap))}>
+                <Badge key={cap} variant={capabilityVariant(cap)} className="rounded-full px-1.5 py-0.5 text-[10px]">
                   {capabilityLabel(cap)}
-                </span>
+                </Badge>
               ))}
             </div>
-            <span className={cn('rounded-full px-1.5 py-0.5 text-[10px] font-medium', m.thinkingSupported ? 'bg-emerald-50 text-emerald-600' : 'bg-muted text-muted-foreground')}>
+            <Badge variant={m.thinkingSupported ? 'success' : 'secondary'} className="rounded-full px-1.5 py-0.5 text-[10px]">
               {m.thinkingSupported ? '支持思考' : '不支持思考'}
-            </span>
+            </Badge>
           </button>
         ))}
       </div>
@@ -324,14 +317,14 @@ function CapabilityEditor({
             onClick={() =>
               onChange(on ? value.filter((v) => v !== k) : [...value, k])
             }
-            className={cn(
-              'rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors',
-              on
-                ? CAPABILITY_META[k].tone
-                : 'bg-muted text-muted-foreground hover:bg-accent hover:text-foreground',
-            )}
+            className="p-0 leading-none"
           >
-            {CAPABILITY_META[k].label}
+            <Badge
+              variant={on ? CAPABILITY_META[k].variant : 'secondary'}
+              className="rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors hover:opacity-80"
+            >
+              {CAPABILITY_META[k].label}
+            </Badge>
           </button>
         );
       })}

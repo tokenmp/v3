@@ -215,9 +215,9 @@ export default function AdminUsersPage() {
                     </span>
                   </TableCell>
                   <TableCell>
-                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${user.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                    <Badge variant={user.status === 'active' ? 'success' : 'destructive'} className="text-[10px]">
                       {user.status === 'active' ? '正常' : '已禁用'}
-                    </span>
+                    </Badge>
                   </TableCell>
                   <TableCell className="text-xs text-muted-foreground">
                     {formatTime(user.createdAt)}
@@ -262,9 +262,9 @@ export default function AdminUsersPage() {
           >
             <div className="flex items-center justify-between gap-2">
               <span className="text-sm font-medium truncate">{user.email}</span>
-              <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${user.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+              <Badge variant={user.status === 'active' ? 'success' : 'destructive'} className="shrink-0 text-[10px]">
                 {user.status === 'active' ? '正常' : '已禁用'}
-              </span>
+              </Badge>
             </div>
             <div className="flex items-center justify-between">
               <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${user.role === 'admin' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>
@@ -298,9 +298,9 @@ export default function AdminUsersPage() {
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-muted-foreground">状态</span>
-                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${actionUser.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                  <Badge variant={actionUser.status === 'active' ? 'success' : 'destructive'} className="text-[10px]">
                     {actionUser.status === 'active' ? '正常' : '已禁用'}
-                  </span>
+                  </Badge>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-muted-foreground">注册时间</span>

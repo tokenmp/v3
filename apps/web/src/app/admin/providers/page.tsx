@@ -18,6 +18,7 @@ import {
   TabField,
   TextField,
 } from '@/components/ui/field';
+import { StatusBadge } from '@/lib/status-badge';
 import { PublishStatusHint } from '@/components/publish-status-hint';
 import {
   Table,
@@ -27,7 +28,6 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { cn } from '@/lib/utils';
 
 const PROTOCOL_OPTIONS = [
   { value: 'openai_chat', label: 'openai_chat' },
@@ -318,20 +318,6 @@ export default function AdminProvidersPage() {
         />
       ) : null}
     </div>
-  );
-}
-
-function StatusBadge({ status }: { status: AdminProvider['status'] }) {
-  const isActive = status === 'active';
-  return (
-    <span
-      className={cn(
-        'inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium',
-        isActive ? 'bg-green-100 text-green-700' : 'bg-muted text-muted-foreground',
-      )}
-    >
-      {isActive ? '启用' : status === 'disabled' ? '停用' : status}
-    </span>
   );
 }
 
@@ -787,14 +773,7 @@ function EndpointsModal({
                             : `${e.authHeader ?? ''}${e.authPrefix ? ` (${e.authPrefix.trim()})` : ''}`}
                         </TableCell>
                         <TableCell>
-                          <span
-                            className={cn(
-                              'inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium',
-                              e.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-muted text-muted-foreground',
-                            )}
-                          >
-                            {e.status === 'active' ? '启用' : '停用'}
-                          </span>
+                          <StatusBadge status={e.status} />
                         </TableCell>
                         <TableCell className="text-right">
                           <div className="flex justify-end gap-1">

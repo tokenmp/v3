@@ -26,7 +26,7 @@ function severityConfig(severity: AnnouncementSeverity) {
     case 'warning':
       return { label: '警告', variant: 'warning' as const };
     case 'maintenance':
-      return { label: '维护', variant: 'outline' as const, className: 'border-transparent bg-purple-500/15 text-purple-500' };
+      return { label: '维护', variant: 'info' as const };
     default:
       return { label: '通知', variant: 'default' as const };
   }
@@ -46,7 +46,7 @@ function AnnouncementRow({ item }: { item: Announcement }) {
       >
         <TableCell>
           <div className="flex items-center gap-2">
-            <Badge variant={cfg.variant} className={cfg.className}>{cfg.label}</Badge>
+            <Badge variant={cfg.variant}>{cfg.label}</Badge>
             <span className="font-medium">{item.title}</span>
           </div>
         </TableCell>
@@ -88,7 +88,7 @@ function AnnouncementCard({ item }: { item: Announcement }) {
       <CardContent className="p-4 space-y-2">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2 min-w-0">
-            <Badge variant={cfg.variant} className={cfg.className}>{cfg.label}</Badge>
+            <Badge variant={cfg.variant}>{cfg.label}</Badge>
             <span className="font-medium text-sm truncate">{item.title}</span>
           </div>
           {expanded ? <ChevronUp className="h-4 w-4 text-muted-foreground shrink-0" /> : <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />}

@@ -4,6 +4,8 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
 import { adminApi } from '@/lib/api/admin';
+import { Badge } from '@/components/ui/badge';
+import { StatusBadge } from '@/lib/status-badge';
 import {
   Table, TableHeader, TableRow, TableHead, TableBody, TableCell,
 } from '@/components/ui/table';
@@ -20,13 +22,6 @@ import {
   truncateUA,
   thinkingLabel,
 } from '@/lib/request-log-metrics';
-
-function statusBadge(status: string) {
-  if (status === 'success') return { label: '成功', cls: 'bg-green-100 text-green-700' };
-  if (status === 'processing') return { label: '处理中', cls: 'bg-blue-100 text-blue-700 animate-pulse' };
-  if (status === 'cancelled') return { label: '已取消', cls: 'bg-amber-100 text-amber-700' };
-  return { label: '失败', cls: 'bg-red-100 text-red-700' };
-}
 
 function formatTime(iso: string) {
   if (!iso) return '-';
@@ -161,9 +156,9 @@ export default function AdminRequestLogsPage() {
                       <Link href={`/admin/request-logs/${log.requestId}`} className="flex items-center gap-1.5">
                         <span>{protocolLabel(log.protocol)}</span>
                         {log.stream != null && (
-                          <span className={`rounded px-1 py-px text-[10px] font-medium ${log.stream ? 'bg-blue-100 text-blue-700' : 'bg-muted text-muted-foreground'}`}>
+                          <Badge variant={log.stream ? 'info' : 'secondary'} className="rounded px-1 py-px text-[10px]">
                             {streamLabel(log.stream)}
-                          </span>
+                          </Badge>
                         )}
                       </Link>
                     </TableCell>
@@ -174,9 +169,7 @@ export default function AdminRequestLogsPage() {
                     </TableCell>
                     <TableCell>
                       <Link href={`/admin/request-logs/${log.requestId}`} className="block">
-                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${statusBadge(log.status).cls}`}>
-                          {statusBadge(log.status).label}
-                        </span>
+                        <StatusBadge status={log.status} className={log.status === 'processing' ? 'animate-pulse' : undefined} />
                       </Link>
                     </TableCell>
                     <TableCell className="text-sm text-right tabular-nums">
@@ -248,18 +241,16 @@ export default function AdminRequestLogsPage() {
             >
               <div className="flex items-center justify-between gap-2">
                 <span className="text-sm font-medium truncate">{log.model || '—'}</span>
-                <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${statusBadge(log.status).cls}`}>
-                  {statusBadge(log.status).label}
-                </span>
+                <StatusBadge status={log.status} className={`shrink-0 ${log.status === 'processing' ? 'animate-pulse' : ''}`} />
               </div>
               <p className="mt-1 text-xs text-muted-foreground truncate">{formatUser(log)}</p>
               {/* Request type row */}
               <div className="mt-1.5 flex items-center gap-2 text-xs text-muted-foreground">
                 <span>{protocolLabel(log.protocol)}</span>
                 {log.stream != null && (
-                  <span className={`rounded px-1 py-px text-[10px] font-medium ${log.stream ? 'bg-blue-100 text-blue-700' : 'bg-muted text-muted-foreground'}`}>
+                  <Badge variant={log.stream ? 'info' : 'secondary'} className="rounded px-1 py-px text-[10px]">
                     {streamLabel(log.stream)}
-                  </span>
+                  </Badge>
                 )}
                 {log.provider && <span>· {log.provider}</span>}
               </div>
