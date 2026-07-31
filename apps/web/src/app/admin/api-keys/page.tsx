@@ -90,26 +90,26 @@ export default function AdminApiKeysPage() {
           <Table>
             <TableHeader className="bg-muted/30">
               <TableRow>
-                <TableHead className="text-xs">用户</TableHead>
-                <TableHead className="text-xs">名称</TableHead>
-                <TableHead className="text-xs">密钥</TableHead>
-                <TableHead className="text-xs">状态</TableHead>
-                <TableHead className="text-xs">创建时间</TableHead>
-                <TableHead className="text-xs">最近使用</TableHead>
-                <TableHead className="text-xs">操作</TableHead>
+                <TableHead>用户</TableHead>
+                <TableHead>名称</TableHead>
+                <TableHead>密钥</TableHead>
+                <TableHead>状态</TableHead>
+                <TableHead>创建时间</TableHead>
+                <TableHead>最近使用</TableHead>
+                <TableHead>操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {filtered.map((k: AdminApiKey) => (
                 <TableRow key={k.id}>
-                  <TableCell className="text-sm">{k.userEmail}</TableCell>
-                  <TableCell className="text-sm font-medium">{k.name}</TableCell>
-                  <TableCell className="font-mono text-xs">{k.keyPrefix}…{k.keySuffix}</TableCell>
+                  <TableCell >{k.userEmail}</TableCell>
+                  <TableCell className="font-medium">{k.name}</TableCell>
+                  <TableCell className="font-mono">{k.keyPrefix}…{k.keySuffix}</TableCell>
                   <TableCell>
                     <StatusBadge status={k.status === 'active' ? 'active' : 'disabled'} />
                   </TableCell>
-                  <TableCell className="text-xs text-muted-foreground">{formatTime(k.createdAt)}</TableCell>
-                  <TableCell className="text-xs text-muted-foreground">{formatTime(k.lastUsedAt)}</TableCell>
+                  <TableCell className="text-muted-foreground">{formatTime(k.createdAt)}</TableCell>
+                  <TableCell className="text-muted-foreground">{formatTime(k.lastUsedAt)}</TableCell>
                   <TableCell>
                     {k.status === 'active' && (
                       <Button
@@ -178,7 +178,7 @@ export default function AdminApiKeysPage() {
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-muted-foreground">密钥</span>
-                  <span className="font-mono text-xs">{actionKey.keyPrefix}…{actionKey.keySuffix}</span>
+                  <span className="font-mono">{actionKey.keyPrefix}…{actionKey.keySuffix}</span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-muted-foreground">状态</span>
@@ -186,11 +186,11 @@ export default function AdminApiKeysPage() {
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-muted-foreground">创建时间</span>
-                  <span className="text-sm">{formatTime(actionKey.createdAt)}</span>
+                  <span >{formatTime(actionKey.createdAt)}</span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-muted-foreground">最近使用</span>
-                  <span className="text-sm">{formatTime(actionKey.lastUsedAt)}</span>
+                  <span >{formatTime(actionKey.lastUsedAt)}</span>
                 </div>
               </div>
 
@@ -212,7 +212,7 @@ export default function AdminApiKeysPage() {
 
       {/* 分页 */}
       <div className="flex items-center justify-between gap-4 px-1 py-1 text-sm">
-        <p className="text-xs text-muted-foreground">共 {total} 条</p>
+        <p className="text-muted-foreground">共 {total} 条</p>
         <div className="flex items-center gap-1">
           <button
             onClick={() => setPage((p) => Math.max(1, p - 1))}

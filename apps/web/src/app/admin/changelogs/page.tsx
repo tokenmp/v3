@@ -184,7 +184,7 @@ export default function AdminChangelogsPage() {
                           {c.version}
                         </Badge>
                       </TableCell>
-                      <TableCell className="font-medium text-sm">{c.title}</TableCell>
+                      <TableCell className="font-medium">{c.title}</TableCell>
                       <TableCell>
                         {c.publishedAt !== null ? (
                           <Badge variant="success">已发布</Badge>
@@ -192,7 +192,7 @@ export default function AdminChangelogsPage() {
                           <Badge variant="secondary">草稿</Badge>
                         )}
                       </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">
+                      <TableCell className="text-muted-foreground">
                         {c.publishedAt ? formatTime(c.publishedAt) : '—'}
                       </TableCell>
                       <TableCell>
@@ -232,8 +232,8 @@ export default function AdminChangelogsPage() {
                       <Badge variant="secondary">草稿</Badge>
                     )}
                   </div>
-                  <p className="font-medium text-sm">{c.title}</p>
-                  <p className="text-xs text-muted-foreground">
+                  <p className="font-medium">{c.title}</p>
+                  <p className="text-muted-foreground">
                     {c.publishedAt ? formatTime(c.publishedAt) : '—'}
                   </p>
                   <div className="flex items-center gap-1">

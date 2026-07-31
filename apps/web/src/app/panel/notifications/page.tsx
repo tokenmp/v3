@@ -41,10 +41,10 @@ function NotificationRow({
       <TableCell>
         <div className={unread ? 'font-medium' : ''}>{item.title}</div>
       </TableCell>
-      <TableCell className="text-sm text-muted-foreground max-w-xs truncate hidden md:table-cell">
+      <TableCell className="text-muted-foreground max-w-xs truncate hidden md:table-cell">
         {item.body}
       </TableCell>
-      <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
+      <TableCell className="text-muted-foreground whitespace-nowrap">
         {formatTime(item.created_at)}
       </TableCell>
       <TableCell>
@@ -75,9 +75,9 @@ function NotificationCard({
             <p className={unread ? 'font-medium text-sm' : 'text-sm'}>{item.title}</p>
           </div>
         </div>
-        <p className="text-xs text-muted-foreground">{item.body}</p>
+        <p className="text-muted-foreground">{item.body}</p>
         <div className="flex items-center justify-between">
-          <span className="text-xs text-muted-foreground">{formatTime(item.created_at)}</span>
+          <span className="text-muted-foreground">{formatTime(item.created_at)}</span>
           <NotificationAction action={item.action} />
         </div>
       </CardContent>

@@ -170,14 +170,14 @@ export default function AdminCredentialsPage() {
           <Table>
             <TableHeader className="bg-muted/30">
               <TableRow>
-                <TableHead className="text-xs">ID</TableHead>
-                <TableHead className="text-xs">Provider</TableHead>
-                <TableHead className="text-xs">密钥前缀/后缀</TableHead>
-                <TableHead className="text-right text-xs">优先级</TableHead>
-                <TableHead className="text-right text-xs">并发</TableHead>
-                <TableHead className="text-right text-xs">TPM</TableHead>
-                <TableHead className="text-xs">状态</TableHead>
-                <TableHead className="text-right text-xs">操作</TableHead>
+                <TableHead>ID</TableHead>
+                <TableHead>Provider</TableHead>
+                <TableHead>密钥前缀/后缀</TableHead>
+                <TableHead className="text-right">优先级</TableHead>
+                <TableHead className="text-right">并发</TableHead>
+                <TableHead className="text-right">TPM</TableHead>
+                <TableHead>状态</TableHead>
+                <TableHead className="text-right">操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -202,14 +202,14 @@ export default function AdminCredentialsPage() {
                     : '-';
                   return (
                     <TableRow key={c.id}>
-                      <TableCell className="font-mono text-xs">{c.id}</TableCell>
-                      <TableCell className="text-sm">{providerLabel}</TableCell>
-                      <TableCell className="font-mono text-xs">{prefixSuffix}</TableCell>
-                      <TableCell className="text-right font-mono text-xs">{c.priority}</TableCell>
-                      <TableCell className="text-right font-mono text-xs">
+                      <TableCell className="font-mono">{c.id}</TableCell>
+                      <TableCell>{providerLabel}</TableCell>
+                      <TableCell className="font-mono">{prefixSuffix}</TableCell>
+                      <TableCell className="text-right font-mono">{c.priority}</TableCell>
+                      <TableCell className="text-right font-mono">
                         {c.maxConcurrency != null ? c.maxConcurrency : '∞'}
                       </TableCell>
-                      <TableCell className="text-right font-mono text-xs">
+                      <TableCell className="text-right font-mono">
                         {c.tpm != null ? c.tpm.toLocaleString() : '继承'}
                       </TableCell>
                       <TableCell>

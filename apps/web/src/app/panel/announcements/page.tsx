@@ -50,10 +50,10 @@ function AnnouncementRow({ item }: { item: Announcement }) {
             <span className="font-medium">{item.title}</span>
           </div>
         </TableCell>
-        <TableCell className="text-sm text-muted-foreground max-w-xs truncate hidden md:table-cell">
+        <TableCell className="text-muted-foreground max-w-xs truncate hidden md:table-cell">
           {item.summary}
         </TableCell>
-        <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
+        <TableCell className="text-muted-foreground whitespace-nowrap">
           {formatTime(item.published_at)}
         </TableCell>
         <TableCell className="w-8">
@@ -93,8 +93,8 @@ function AnnouncementCard({ item }: { item: Announcement }) {
           </div>
           {expanded ? <ChevronUp className="h-4 w-4 text-muted-foreground shrink-0" /> : <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />}
         </div>
-        <p className="text-xs text-muted-foreground">{item.summary}</p>
-        <p className="text-xs text-muted-foreground">{formatTime(item.published_at)}</p>
+        <p className="text-muted-foreground">{item.summary}</p>
+        <p className="text-muted-foreground">{formatTime(item.published_at)}</p>
         {expanded && (
           <div className="pt-2 border-t"><Markdown>{item.body}</Markdown></div>
         )}

@@ -182,7 +182,7 @@ export default function AdminModelsPage() {
             ) : (
               filtered.map((m) => (
                 <TableRow key={m.id}>
-                  <TableCell className="font-mono text-xs">{m.id}</TableCell>
+                  <TableCell className="font-mono">{m.id}</TableCell>
                   <TableCell className="font-medium">{m.displayName}</TableCell>
                   <TableCell>
                     <div className="flex flex-wrap gap-1">

@@ -114,11 +114,11 @@ export default function KeysPage() {
               {(keys ?? []).map((k: ApiKey) => (
                 <TableRow key={k.id}>
                   <TableCell className="font-medium">{k.name}</TableCell>
-                  <TableCell className="font-mono text-xs">{k.keyPrefix}…{k.keySuffix}</TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
+                  <TableCell className="font-mono">{k.keyPrefix}…{k.keySuffix}</TableCell>
+                  <TableCell className="text-muted-foreground">
                     {formatTime(k.createdAt)}
                   </TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
+                  <TableCell className="text-muted-foreground">
                     {k.lastUsedAt ? formatTime(k.lastUsedAt) : '—'}
                   </TableCell>
                   <TableCell>

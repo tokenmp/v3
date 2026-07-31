@@ -484,7 +484,7 @@ function RouteRetryCard() {
             <TableBody>
               {(routes ?? []).map((r) => (
                 <TableRow key={r.id}>
-                  <TableCell className="font-mono text-xs">{r.id}</TableCell>
+                  <TableCell className="font-mono">{r.id}</TableCell>
                   <TableCell>{r.modelId}</TableCell>
                   <TableCell>{r.providerId}</TableCell>
                   <TableCell>

@@ -395,16 +395,16 @@ export default function AdminUserDetailPage() {
               <TableBody>
                 {user.userPlans.map((plan: UserPlan) => (
                   <TableRow key={plan.id}>
-                    <TableCell className="text-sm font-medium">{plan.planName || `#${plan.planId}`}</TableCell>
-                    <TableCell className="text-sm">{plan.planType === 'token' ? 'Token' : '编程'}</TableCell>
-                    <TableCell className="text-sm">{formatPlanLimit(plan)}</TableCell>
-                    <TableCell className="text-sm">{Number(plan.remainingQuota || 0).toLocaleString()}</TableCell>
+                    <TableCell className="font-medium">{plan.planName || `#${plan.planId}`}</TableCell>
+                    <TableCell >{plan.planType === 'token' ? 'Token' : '编程'}</TableCell>
+                    <TableCell >{formatPlanLimit(plan)}</TableCell>
+                    <TableCell >{Number(plan.remainingQuota || 0).toLocaleString()}</TableCell>
                     <TableCell>
                       <Badge variant={userPlanStatusVariant(plan.status)}>
                         {userPlanStatusLabel(plan.status)}
                       </Badge>
                     </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
+                    <TableCell className="text-muted-foreground">
                       {formatDate(plan.expiresAt)}
                     </TableCell>
                     <TableCell className="text-right">
@@ -454,8 +454,8 @@ export default function AdminUserDetailPage() {
               <TableBody>
                 {user.apiKeys.slice(0, 5).map((key: ApiKey) => (
                   <TableRow key={key.id}>
-                    <TableCell className="text-sm">{key.name}</TableCell>
-                    <TableCell className="font-mono text-xs">
+                    <TableCell >{key.name}</TableCell>
+                    <TableCell className="font-mono">
                       {key.keyPrefix}…{key.keySuffix}
                     </TableCell>
                     <TableCell>
@@ -463,7 +463,7 @@ export default function AdminUserDetailPage() {
                         {key.status === 'active' ? '正常' : '已禁用'}
                       </Badge>
                     </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
+                    <TableCell className="text-muted-foreground">
                       {formatTime(key.createdAt)}
                     </TableCell>
                   </TableRow>
@@ -497,16 +497,16 @@ export default function AdminUserDetailPage() {
               <TableBody>
                 {user.recentRequests.slice(0, 5).map((req: RequestLog) => (
                   <TableRow key={req.requestId}>
-                    <TableCell className="text-sm">{req.model}</TableCell>
+                    <TableCell >{req.model}</TableCell>
                     <TableCell>
                       <Badge variant={requestStatusVariant(req.status)}>
                         {req.status === 'success' ? '成功' : '失败'}
                       </Badge>
                     </TableCell>
-                    <TableCell className="text-sm">
+                    <TableCell >
                       {req.durationMs != null ? `${req.durationMs}ms` : '—'}
                     </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
+                    <TableCell className="text-muted-foreground">
                       {formatTime(req.createdAt)}
                     </TableCell>
                   </TableRow>
@@ -584,7 +584,7 @@ export default function AdminUserDetailPage() {
                   value={renewSwitchForm.extendDays}
                   onChange={(e) => setRenewSwitchForm((f) => f ? { ...f, extendDays: e.target.value } : f)}
                 />
-                <p className="text-xs text-muted-foreground">默认按套餐周期填充：天卡 1 天、周卡 7 天、月卡 30 天、季卡 90 天、年卡 365 天；也可以清空天数，改用下面的新到期时间。</p>
+                <p className="text-muted-foreground">默认按套餐周期填充：天卡 1 天、周卡 7 天、月卡 30 天、季卡 90 天、年卡 365 天；也可以清空天数，改用下面的新到期时间。</p>
               </div>
             ) : (
               <div className="space-y-2">
@@ -600,7 +600,7 @@ export default function AdminUserDetailPage() {
                     <option key={p.id} value={p.id}>{p.name}</option>
                   ))}
                 </select>
-                <p className="text-xs text-muted-foreground">只显示同类型候选；后端会校验目标套餐用量不能低于当前套餐。</p>
+                <p className="text-muted-foreground">只显示同类型候选；后端会校验目标套餐用量不能低于当前套餐。</p>
               </div>
             )}
             <div className="space-y-2">
@@ -611,7 +611,7 @@ export default function AdminUserDetailPage() {
                 value={renewSwitchForm.expiresAt}
                 onChange={(e) => setRenewSwitchForm((f) => f ? { ...f, expiresAt: e.target.value } : f)}
               />
-              <p className="text-xs text-muted-foreground">填写后会优先使用此到期时间；切换时留空会保留原到期时间。</p>
+              <p className="text-muted-foreground">填写后会优先使用此到期时间；切换时留空会保留原到期时间。</p>
             </div>
           </div>
         )}

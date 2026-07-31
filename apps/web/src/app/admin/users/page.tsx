@@ -197,11 +197,11 @@ export default function AdminUsersPage() {
           <Table>
             <TableHeader className="bg-muted/30">
               <TableRow>
-                <TableHead className="text-xs">邮箱</TableHead>
-                <TableHead className="text-xs">角色</TableHead>
-                <TableHead className="text-xs">状态</TableHead>
-                <TableHead className="text-xs">注册时间</TableHead>
-                <TableHead className="text-xs">操作</TableHead>
+                <TableHead>邮箱</TableHead>
+                <TableHead>角色</TableHead>
+                <TableHead>状态</TableHead>
+                <TableHead>注册时间</TableHead>
+                <TableHead>操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -222,7 +222,7 @@ export default function AdminUsersPage() {
                       {user.status === 'active' ? '正常' : '已禁用'}
                     </Badge>
                   </TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
+                  <TableCell className="text-muted-foreground">
                     {formatTime(user.createdAt)}
                   </TableCell>
                   <TableCell>
@@ -273,7 +273,7 @@ export default function AdminUsersPage() {
               <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${user.role === 'admin' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>
                 {user.role === 'admin' ? '管理员' : '用户'}
               </span>
-              <span className="text-xs text-muted-foreground">{formatTime(user.createdAt)}</span>
+              <span className="text-muted-foreground">{formatTime(user.createdAt)}</span>
             </div>
           </button>
         ))}
@@ -335,7 +335,7 @@ export default function AdminUsersPage() {
                 {/* Active plans */}
                 {activePlans.length > 0 && (
                   <div className="space-y-2 mb-3">
-                    <p className="text-xs text-muted-foreground">当前套餐</p>
+                    <p className="text-muted-foreground">当前套餐</p>
                     {activePlans.map((plan) => (
                       <div key={plan.id} className="rounded-lg border p-3 space-y-2">
                         <div className="flex items-center justify-between">
@@ -459,7 +459,7 @@ export default function AdminUsersPage() {
               value={assignForm.expiresAt}
               onChange={(e) => setAssignForm((f) => ({ ...f, expiresAt: e.target.value }))}
             />
-            <p className="text-xs text-muted-foreground">留空表示永久有效</p>
+            <p className="text-muted-foreground">留空表示永久有效</p>
           </div>
           <div className="flex gap-2 pt-2">
             <Button variant="outline" className="flex-1" onClick={() => setAssignOpen(false)}>
@@ -478,7 +478,7 @@ export default function AdminUsersPage() {
 
       {/* 分页 */}
       <div className="flex items-center justify-between gap-4 px-1 py-1 text-sm">
-        <p className="text-xs text-muted-foreground">共 {total} 条</p>
+        <p className="text-muted-foreground">共 {total} 条</p>
         <div className="flex items-center gap-1">
           <button
             onClick={() => setPage((p) => Math.max(1, p - 1))}

@@ -209,16 +209,16 @@ export default function AdminProvidersPage() {
               ) : (
                 filtered.map((p) => (
                   <TableRow key={p.id}>
-                    <TableCell className="font-mono text-xs">{p.name}</TableCell>
-                    <TableCell className="text-sm">{p.displayLabel || '-'}</TableCell>
+                    <TableCell className="font-mono">{p.name}</TableCell>
+                    <TableCell >{p.displayLabel || '-'}</TableCell>
                     <TableCell
                       className="max-w-[220px] truncate font-mono text-[10px] text-muted-foreground"
                       title={p.baseURL}
                     >
                       {p.baseURL}
                     </TableCell>
-                    <TableCell className="text-xs">{p.sdkKind}</TableCell>
-                    <TableCell className="text-right font-mono text-xs">{p.tpm != null ? p.tpm.toLocaleString() : '∞'}</TableCell>
+                    <TableCell >{p.sdkKind}</TableCell>
+                    <TableCell className="text-right font-mono">{p.tpm != null ? p.tpm.toLocaleString() : '∞'}</TableCell>
                     <TableCell>
                       <StatusBadge status={p.status} />
                     </TableCell>
@@ -747,22 +747,22 @@ function EndpointsModal({
                 <Table>
                   <TableHeader className="bg-muted/30">
                     <TableRow>
-                      <TableHead className="text-xs">协议</TableHead>
-                      <TableHead className="text-xs">路径</TableHead>
-                      <TableHead className="text-xs">鉴权</TableHead>
-                      <TableHead className="text-xs">状态</TableHead>
-                      <TableHead className="text-right text-xs">操作</TableHead>
+                      <TableHead>协议</TableHead>
+                      <TableHead>路径</TableHead>
+                      <TableHead>鉴权</TableHead>
+                      <TableHead>状态</TableHead>
+                      <TableHead className="text-right">操作</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {endpoints.map((e) => (
                       <TableRow key={e.id}>
-                        <TableCell className="text-xs">
+                        <TableCell >
                           <span className="rounded-sm bg-muted px-1.5 py-0.5 font-mono text-[10px]">
                             {PROTOCOL_LABELS[e.protocol] ?? e.protocol}
                           </span>
                         </TableCell>
-                        <TableCell className="font-mono text-xs">{e.path}</TableCell>
+                        <TableCell className="font-mono">{e.path}</TableCell>
                         <TableCell className="font-mono text-[10px] text-muted-foreground">
                           {e.authKind === 'api_key_query'
                             ? `?${e.authQuery ?? ''}=`

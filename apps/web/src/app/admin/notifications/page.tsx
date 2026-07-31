@@ -262,12 +262,12 @@ export default function AdminNotificationsPage() {
                   </TableCell>
                   <TableCell>
                     {n.readAt ? (
-                      <span className="text-xs text-muted-foreground">{formatTime(n.readAt)}</span>
+                      <span className="text-muted-foreground">{formatTime(n.readAt)}</span>
                     ) : (
                       <Badge variant="warning">未读</Badge>
                     )}
                   </TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
+                  <TableCell className="text-muted-foreground">
                     {formatTime(n.createdAt)}
                   </TableCell>
                   <TableCell>
@@ -314,7 +314,7 @@ export default function AdminNotificationsPage() {
                 )}
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-xs text-muted-foreground">{formatTime(n.createdAt)}</span>
+                <span className="text-muted-foreground">{formatTime(n.createdAt)}</span>
                 <Button
                   variant="ghost"
                   size="icon"
@@ -364,7 +364,7 @@ export default function AdminNotificationsPage() {
                     <UserRound className="h-4 w-4 text-muted-foreground" />
                     <div className="min-w-0 flex-1">
                       <div className="truncate font-medium">{selectedUser.email}</div>
-                      <div className="text-xs text-muted-foreground">{selectedUser.role === 'admin' ? '管理员' : '用户'} · {selectedUser.status === 'active' ? '正常' : '已禁用'}</div>
+                      <div className="text-muted-foreground">{selectedUser.role === 'admin' ? '管理员' : '用户'} · {selectedUser.status === 'active' ? '正常' : '已禁用'}</div>
                     </div>
                     <button
                       type="button"
@@ -452,7 +452,7 @@ export default function AdminNotificationsPage() {
           <section className="space-y-3 rounded-lg border p-3">
             <div>
               <div className="text-sm font-medium">Action</div>
-              <p className="text-xs text-muted-foreground">当前仅支持 Link 类型；未知类型客户端会忽略。</p>
+              <p className="text-muted-foreground">当前仅支持 Link 类型；未知类型客户端会忽略。</p>
             </div>
             <select
               value={actionTarget}

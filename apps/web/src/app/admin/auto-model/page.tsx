@@ -116,7 +116,7 @@ export default function AdminAutoModelPage() {
           <Sparkles className="h-4 w-4 mr-1" />
           {save.isPending ? '保存中…' : '保存配置'}
         </Button>
-        <span className="text-xs text-muted-foreground">
+        <span className="text-muted-foreground">
           已选 {draft.length} / {allModels.length} 个模型
         </span>
       </div>
@@ -144,12 +144,12 @@ export default function AdminAutoModelPage() {
                 const orderIdx = inPool ? draft.indexOf(m.id) : -1;
                 return (
                   <TableRow key={m.id} className={cn(!inPool && 'opacity-60')}>
-                    <TableCell className="font-mono text-xs text-muted-foreground">
+                    <TableCell className="font-mono text-muted-foreground">
                       {orderIdx >= 0 ? orderIdx + 1 : '—'}
                     </TableCell>
-                    <TableCell className="font-mono text-xs">{m.id}</TableCell>
+                    <TableCell className="font-mono">{m.id}</TableCell>
                     <TableCell>{m.displayName}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
+                    <TableCell className="text-muted-foreground">
                       {(m.capabilities ?? []).join(', ') || '—'}
                     </TableCell>
                     <TableCell className="text-center">
@@ -212,7 +212,7 @@ export default function AdminAutoModelPage() {
                     className="h-4 w-4 rounded border-input"
                   />
                 </div>
-                <div className="text-xs text-muted-foreground">
+                <div className="text-muted-foreground">
                   {(m.capabilities ?? []).join(', ') || '—'}
                 </div>
                 <div className="flex items-center justify-between">

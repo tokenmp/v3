@@ -34,8 +34,8 @@ function ChangelogRow({ item }: { item: Changelog }) {
         <TableCell>
           <span className="text-lg font-bold font-mono">{item.version}</span>
         </TableCell>
-        <TableCell className="text-sm">{item.title}</TableCell>
-        <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
+        <TableCell >{item.title}</TableCell>
+        <TableCell className="text-muted-foreground whitespace-nowrap">
           {formatTime(item.published_at)}
         </TableCell>
         <TableCell className="w-8">
@@ -68,8 +68,8 @@ function ChangelogCard({ item }: { item: Changelog }) {
           <span className="text-lg font-bold font-mono">{item.version}</span>
           {expanded ? <ChevronUp className="h-4 w-4 text-muted-foreground shrink-0" /> : <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />}
         </div>
-        <p className="text-sm">{item.title}</p>
-        <p className="text-xs text-muted-foreground">{formatTime(item.published_at)}</p>
+        <p >{item.title}</p>
+        <p className="text-muted-foreground">{formatTime(item.published_at)}</p>
         {expanded && (
           <div className="pt-2 border-t"><Markdown>{item.body}</Markdown></div>
         )}

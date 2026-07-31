@@ -95,18 +95,18 @@ export default function RequestsPage() {
           <Table>
             <TableHeader className="bg-muted/30">
               <TableRow>
-                <TableHead className="text-xs whitespace-nowrap">请求ID</TableHead>
-                <TableHead className="text-xs whitespace-nowrap">模型</TableHead>
-                <TableHead className="text-xs whitespace-nowrap">协议</TableHead>
-                <TableHead className="text-xs whitespace-nowrap">状态</TableHead>
-                <TableHead className="text-xs whitespace-nowrap text-right">输入</TableHead>
-                <TableHead className="text-xs whitespace-nowrap text-right">输出</TableHead>
-                <TableHead className="text-xs whitespace-nowrap text-right">缓存</TableHead>
-                <TableHead className="text-xs whitespace-nowrap text-right">TTFT</TableHead>
-                <TableHead className="text-xs whitespace-nowrap text-right">速度</TableHead>
-                <TableHead className="text-xs whitespace-nowrap text-right">耗时</TableHead>
-                <TableHead className="text-xs whitespace-nowrap">Thinking</TableHead>
-                <TableHead className="text-xs whitespace-nowrap">时间</TableHead>
+                <TableHead className="whitespace-nowrap">请求ID</TableHead>
+                <TableHead className="whitespace-nowrap">模型</TableHead>
+                <TableHead className="whitespace-nowrap">协议</TableHead>
+                <TableHead className="whitespace-nowrap">状态</TableHead>
+                <TableHead className="whitespace-nowrap text-right">输入</TableHead>
+                <TableHead className="whitespace-nowrap text-right">输出</TableHead>
+                <TableHead className="whitespace-nowrap text-right">缓存</TableHead>
+                <TableHead className="whitespace-nowrap text-right">TTFT</TableHead>
+                <TableHead className="whitespace-nowrap text-right">速度</TableHead>
+                <TableHead className="whitespace-nowrap text-right">耗时</TableHead>
+                <TableHead className="whitespace-nowrap">Thinking</TableHead>
+                <TableHead className="whitespace-nowrap">时间</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -114,9 +114,9 @@ export default function RequestsPage() {
                 const speed = speedFor(r);
                 return (
                   <TableRow key={r.requestId}>
-                    <TableCell className="text-xs font-mono whitespace-nowrap" title={r.requestId}>{shortRequestId(r.requestId)}</TableCell>
-                    <TableCell className="text-sm whitespace-nowrap">{r.model || '—'}</TableCell>
-                    <TableCell className="text-sm whitespace-nowrap">
+                    <TableCell className="font-mono whitespace-nowrap" title={r.requestId}>{shortRequestId(r.requestId)}</TableCell>
+                    <TableCell className="whitespace-nowrap">{r.model || '—'}</TableCell>
+                    <TableCell className="whitespace-nowrap">
                       <span className="flex items-center gap-1.5">
                         <span>{protocolLabel(r.protocol)}</span>
                         {r.stream != null && (
@@ -129,14 +129,14 @@ export default function RequestsPage() {
                     <TableCell>
                       <StatusBadge status={r.status} className={r.status === 'processing' ? 'animate-pulse' : undefined} />
                     </TableCell>
-                    <TableCell className="text-sm text-right tabular-nums">{formatTokens(r.inputTokens)}</TableCell>
-                    <TableCell className="text-sm text-right tabular-nums">{formatTokens(r.outputTokens)}</TableCell>
-                    <TableCell className="text-sm text-right tabular-nums">{formatTokens(r.cacheTokens)}</TableCell>
-                    <TableCell className="text-sm text-right tabular-nums">{formatDuration(r.ttftMs)}</TableCell>
-                    <TableCell className="text-sm text-right tabular-nums">{formatTokensPerSecond(speed)}</TableCell>
-                    <TableCell className="text-sm text-right tabular-nums">{formatDuration(r.durationMs)}</TableCell>
-                    <TableCell className="text-sm whitespace-nowrap">{thinkingLabel(r.thinkingEffectiveEffort ?? r.thinkingEffort, null, r.thinkingRequestedEffort, r.thinkingEffortDegraded)}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{formatTime(r.createdAt)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{formatTokens(r.inputTokens)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{formatTokens(r.outputTokens)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{formatTokens(r.cacheTokens)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{formatDuration(r.ttftMs)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{formatTokensPerSecond(speed)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{formatDuration(r.durationMs)}</TableCell>
+                    <TableCell className="whitespace-nowrap">{thinkingLabel(r.thinkingEffectiveEffort ?? r.thinkingEffort, null, r.thinkingRequestedEffort, r.thinkingEffortDegraded)}</TableCell>
+                    <TableCell className="text-muted-foreground whitespace-nowrap">{formatTime(r.createdAt)}</TableCell>
                   </TableRow>
                 );
               })}
@@ -207,7 +207,7 @@ export default function RequestsPage() {
 
       {/* 分页 */}
       <div className="flex items-center justify-between gap-4 px-1 py-1 text-sm">
-        <p className="text-xs text-muted-foreground">共 {total} 条</p>
+        <p className="text-muted-foreground">共 {total} 条</p>
         <div className="flex items-center gap-1">
           <button
             onClick={() => setPage((p) => Math.max(1, p - 1))}

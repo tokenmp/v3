@@ -259,24 +259,24 @@ function ProviderRouteRow({
 
   return (
     <>
-      <TableRow className="align-top">
+      <TableRow>
         <TableCell>
           <button type="button" onClick={onToggle} className="font-mono text-sm font-medium text-primary hover:underline">
             {group.providerId}
           </button>
         </TableCell>
-        <TableCell className="text-xs text-muted-foreground">{summary}</TableCell>
-        <TableCell className="text-xs text-muted-foreground">{credentialCount ? `${credentialCount.active} / ${credentialCount.total}` : '—'}</TableCell>
+        <TableCell className="text-muted-foreground">{summary}</TableCell>
+        <TableCell className="text-muted-foreground">{credentialCount ? `${credentialCount.active} / ${credentialCount.total}` : '—'}</TableCell>
         <TableCell>
           <div className="flex flex-wrap gap-1">
             {enabledProtocols.length > 0 ? enabledProtocols.map((protocol) => (
               <span key={protocol} className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
                 {protocolLabel(protocol)}
               </span>
-            )) : <span className="text-xs text-muted-foreground">暂无</span>}
+            )) : <span className="text-muted-foreground">暂无</span>}
           </div>
         </TableCell>
-        <TableCell className="max-w-[320px] text-xs text-muted-foreground">
+        <TableCell className="max-w-[320px] text-muted-foreground">
           <span className="line-clamp-2">{upstreamSummary}</span>
         </TableCell>
         <TableCell className="text-right">
@@ -295,7 +295,7 @@ function ProviderRouteRow({
       </TableRow>
       {expanded ? (
         <TableRow className="bg-muted/10 hover:bg-muted/10">
-          <TableCell colSpan={6} className="py-3 text-xs text-muted-foreground">
+          <TableCell colSpan={6} className="py-3 text-muted-foreground">
             <div className="grid gap-2 sm:grid-cols-3">
               <div><span className="text-foreground">覆盖模型：</span>{coveredModels.slice(0, 10).join(' · ')}{coveredModels.length > 10 ? ` 等 ${coveredModels.length} 个` : ''}</div>
               <div><span className="text-foreground">能力：</span>{enabledProtocols.length > 0 ? enabledProtocols.map(protocolLabel).join(' · ') : '暂无'}</div>
@@ -340,22 +340,22 @@ function StrategyModal({ group, onClose }: { group: RouteProviderGroup; onClose:
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="rounded-lg border bg-card p-3">
-            <div className="text-xs text-muted-foreground">选号策略</div>
+            <div className="text-muted-foreground">选号策略</div>
             <div className="mt-1 text-sm font-medium">继承全局策略</div>
             <div className="mt-1 text-xs text-muted-foreground">priority / softmax 由全局配置决定</div>
           </div>
           <div className="rounded-lg border bg-card p-3">
-            <div className="text-xs text-muted-foreground">启用能力</div>
+            <div className="text-muted-foreground">启用能力</div>
             <div className="mt-1 text-sm font-medium">{enabledProtocols.length > 0 ? enabledProtocols.map(protocolLabel).join(' · ') : '暂无'}</div>
             <div className="mt-1 text-xs text-muted-foreground">协议能力来自 Provider endpoints</div>
           </div>
           <div className="rounded-lg border bg-card p-3">
-            <div className="text-xs text-muted-foreground">优先级</div>
+            <div className="text-muted-foreground">优先级</div>
             <div className="mt-1 text-sm font-medium">当前最小 priority：{minPriority}</div>
             <div className="mt-1 text-xs text-muted-foreground">数字越小越优先</div>
           </div>
           <div className="rounded-lg border bg-card p-3">
-            <div className="text-xs text-muted-foreground">容量覆盖</div>
+            <div className="text-muted-foreground">容量覆盖</div>
             <div className="mt-1 text-sm font-medium">RPM {rpmOverrides} 项 · TPM {tpmOverrides} 项</div>
             <div className="mt-1 text-xs text-muted-foreground">未覆盖时继承 Provider/账号默认值</div>
           </div>
@@ -502,7 +502,7 @@ function GroupAccountsModal({ group, onClose }: { group: RouteProviderGroup; onC
               <TableBody>
                 {rows.map((row) => (
                   <TableRow key={row.logicalId}>
-                    <TableCell className="align-middle">
+                    <TableCell >
                       <input
                         type="checkbox"
                         checked={row.selected}
@@ -510,7 +510,7 @@ function GroupAccountsModal({ group, onClose }: { group: RouteProviderGroup; onC
                         aria-label={`启用账号 ${row.logicalId}`}
                       />
                     </TableCell>
-                    <TableCell className="min-w-[280px] align-middle">
+                    <TableCell className="min-w-[280px]">
                       <div className="flex min-w-0 items-center gap-2">
                         <span className="font-mono text-xs font-medium" title={row.logicalId}>
                           {shortCredentialLabel(row.logicalId, group.providerId)}
@@ -522,14 +522,14 @@ function GroupAccountsModal({ group, onClose }: { group: RouteProviderGroup; onC
                         {row.credentialIds.length > 1 ? ` · ${row.credentialIds.length} 条能力合并` : ''}
                       </div>
                     </TableCell>
-                    <TableCell className="align-middle">
+                    <TableCell >
                       <CompactNumberInput
                         value={row.priority}
                         onChange={(v) => patchRow(row.logicalId, { priority: v ?? 0 })}
                         min={0}
                       />
                     </TableCell>
-                    <TableCell className="align-middle">
+                    <TableCell >
                       <CompactNumberInput
                         value={row.rpm}
                         onChange={(v) => patchRow(row.logicalId, { rpm: v })}
@@ -537,7 +537,7 @@ function GroupAccountsModal({ group, onClose }: { group: RouteProviderGroup; onC
                         placeholder="继承"
                       />
                     </TableCell>
-                    <TableCell className="align-middle">
+                    <TableCell >
                       <CompactNumberInput
                         value={row.tpm}
                         onChange={(v) => patchRow(row.logicalId, { tpm: v })}

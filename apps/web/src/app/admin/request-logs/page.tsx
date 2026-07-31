@@ -116,21 +116,21 @@ export default function AdminRequestLogsPage() {
           <Table>
             <TableHeader className="bg-muted/30">
               <TableRow>
-                <TableHead className="text-xs whitespace-nowrap">请求ID</TableHead>
-                <TableHead className="text-xs whitespace-nowrap">用户</TableHead>
-                <TableHead className="text-xs whitespace-nowrap">模型</TableHead>
-                <TableHead className="text-xs whitespace-nowrap">协议</TableHead>
-                <TableHead className="text-xs whitespace-nowrap">Provider</TableHead>
-                <TableHead className="text-xs whitespace-nowrap">状态</TableHead>
-                <TableHead className="text-xs whitespace-nowrap text-right">输入</TableHead>
-                <TableHead className="text-xs whitespace-nowrap text-right">输出</TableHead>
-                <TableHead className="text-xs whitespace-nowrap text-right">缓存</TableHead>
-                <TableHead className="text-xs whitespace-nowrap text-right">TTFT</TableHead>
-                <TableHead className="text-xs whitespace-nowrap text-right">速度</TableHead>
-                <TableHead className="text-xs whitespace-nowrap text-right">耗时</TableHead>
-                <TableHead className="text-xs whitespace-nowrap">Thinking</TableHead>
-                <TableHead className="text-xs whitespace-nowrap">UA</TableHead>
-                <TableHead className="text-xs whitespace-nowrap">时间</TableHead>
+                <TableHead className="whitespace-nowrap">请求ID</TableHead>
+                <TableHead className="whitespace-nowrap">用户</TableHead>
+                <TableHead className="whitespace-nowrap">模型</TableHead>
+                <TableHead className="whitespace-nowrap">协议</TableHead>
+                <TableHead className="whitespace-nowrap">Provider</TableHead>
+                <TableHead className="whitespace-nowrap">状态</TableHead>
+                <TableHead className="whitespace-nowrap text-right">输入</TableHead>
+                <TableHead className="whitespace-nowrap text-right">输出</TableHead>
+                <TableHead className="whitespace-nowrap text-right">缓存</TableHead>
+                <TableHead className="whitespace-nowrap text-right">TTFT</TableHead>
+                <TableHead className="whitespace-nowrap text-right">速度</TableHead>
+                <TableHead className="whitespace-nowrap text-right">耗时</TableHead>
+                <TableHead className="whitespace-nowrap">Thinking</TableHead>
+                <TableHead className="whitespace-nowrap">UA</TableHead>
+                <TableHead className="whitespace-nowrap">时间</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -138,22 +138,22 @@ export default function AdminRequestLogsPage() {
                 const speed = speedFor(log);
                 return (
                   <TableRow key={log.requestId} className="cursor-pointer">
-                    <TableCell className="text-xs font-mono whitespace-nowrap">
+                    <TableCell className="font-mono whitespace-nowrap">
                       <Link href={`/admin/request-logs/${log.requestId}`} title={log.requestId} className="block">
                         {shortRequestId(log.requestId)}
                       </Link>
                     </TableCell>
-                    <TableCell className="text-sm max-w-[180px]">
+                    <TableCell className="max-w-[180px]">
                       <Link href={`/admin/request-logs/${log.requestId}`} className="block truncate">
                         {formatUser(log)}
                       </Link>
                     </TableCell>
-                    <TableCell className="text-sm whitespace-nowrap">
+                    <TableCell className="whitespace-nowrap">
                       <Link href={`/admin/request-logs/${log.requestId}`} className="block">
                         {log.model || '—'}
                       </Link>
                     </TableCell>
-                    <TableCell className="text-sm whitespace-nowrap">
+                    <TableCell className="whitespace-nowrap">
                       <Link href={`/admin/request-logs/${log.requestId}`} className="flex items-center gap-1.5">
                         <span>{protocolLabel(log.protocol)}</span>
                         {log.stream != null && (
@@ -163,7 +163,7 @@ export default function AdminRequestLogsPage() {
                         )}
                       </Link>
                     </TableCell>
-                    <TableCell className="text-sm whitespace-nowrap">
+                    <TableCell className="whitespace-nowrap">
                       <Link href={`/admin/request-logs/${log.requestId}`} className="block">
                         {log.provider ?? '—'}
                       </Link>
@@ -173,37 +173,37 @@ export default function AdminRequestLogsPage() {
                         <StatusBadge status={log.status} className={log.status === 'processing' ? 'animate-pulse' : undefined} />
                       </Link>
                     </TableCell>
-                    <TableCell className="text-sm text-right tabular-nums">
+                    <TableCell className="text-right tabular-nums">
                       <Link href={`/admin/request-logs/${log.requestId}`} className="block">{formatTokens(log.inputTokens)}</Link>
                     </TableCell>
-                    <TableCell className="text-sm text-right tabular-nums">
+                    <TableCell className="text-right tabular-nums">
                       <Link href={`/admin/request-logs/${log.requestId}`} className="block">{formatTokens(log.outputTokens)}</Link>
                     </TableCell>
-                    <TableCell className="text-sm text-right tabular-nums">
+                    <TableCell className="text-right tabular-nums">
                       <Link href={`/admin/request-logs/${log.requestId}`} className="block">{formatTokens(log.cacheTokens)}</Link>
                     </TableCell>
-                    <TableCell className="text-sm text-right tabular-nums">
+                    <TableCell className="text-right tabular-nums">
                       <Link href={`/admin/request-logs/${log.requestId}`} className="block">{formatDuration(log.ttftMs)}</Link>
                     </TableCell>
-                    <TableCell className="text-sm text-right tabular-nums">
+                    <TableCell className="text-right tabular-nums">
                       <Link href={`/admin/request-logs/${log.requestId}`} className="block">{formatTokensPerSecond(speed)}</Link>
                     </TableCell>
-                    <TableCell className="text-sm text-right tabular-nums">
+                    <TableCell className="text-right tabular-nums">
                       <Link href={`/admin/request-logs/${log.requestId}`} className="block">{formatDuration(log.durationMs)}</Link>
                     </TableCell>
-                    <TableCell className="text-sm whitespace-nowrap">
+                    <TableCell className="whitespace-nowrap">
                       <Link href={`/admin/request-logs/${log.requestId}`} className="block">
                         {thinkingLabel(log.thinkingEffectiveEffort ?? log.thinkingEffort, log.thinkingMode, log.thinkingRequestedEffort, log.thinkingEffortDegraded)}
                       </Link>
                     </TableCell>
-                    <TableCell className="text-sm max-w-[160px]">
+                    <TableCell className="max-w-[160px]">
                       <Link href={`/admin/request-logs/${log.requestId}`} className="block">
                         <span title={log.userAgent ?? undefined} className="block truncate">
                           {truncateUA(log.userAgent)}
                         </span>
                       </Link>
                     </TableCell>
-                    <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
+                    <TableCell className="text-muted-foreground whitespace-nowrap">
                       <Link href={`/admin/request-logs/${log.requestId}`} className="block">
                         {formatTime(log.createdAt)}
                       </Link>

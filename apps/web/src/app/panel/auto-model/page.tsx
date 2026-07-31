@@ -117,7 +117,7 @@ export default function PanelAutoModelPage() {
             恢复平台默认
           </Button>
         )}
-        <span className="text-xs text-muted-foreground">已选 {pool.length} / {catalog.length} 个模型</span>
+        <span className="text-muted-foreground">已选 {pool.length} / {catalog.length} 个模型</span>
       </div>
 
       {pool.length === 0 && !loading && (
@@ -147,11 +147,11 @@ export default function PanelAutoModelPage() {
                 const orderIdx = inPool ? pool.indexOf(m.id) : -1;
                 return (
                   <TableRow key={m.id} className={cn(!inPool && 'opacity-60')}>
-                    <TableCell className="font-mono text-xs text-muted-foreground">
+                    <TableCell className="font-mono text-muted-foreground">
                       {orderIdx >= 0 ? orderIdx + 1 : '—'}
                     </TableCell>
-                    <TableCell className="font-mono text-xs">{m.id}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
+                    <TableCell className="font-mono">{m.id}</TableCell>
+                    <TableCell className="text-muted-foreground">
                       {(m.capabilities ?? []).join(', ') || '—'}
                     </TableCell>
                     <TableCell className="text-center">
