@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
+	"time"
 
 	"log/slog"
 
@@ -25,20 +27,36 @@ type APIKeyVerifier struct {
 }
 
 // NewAPIKeyVerifier returns a verifier that calls Auth POST /api/v1/auth/verify-key.
-// authURL is the base URL of the Auth service (no trailing slash).
+// authURL must be an http(s) base URL without userinfo, query, or fragment.
+// An invalid URL deliberately leaves the verifier unable to make a request,
+// causing API key authentication to fail closed.
 func NewAPIKeyVerifier(authURL string, logger *slog.Logger) *APIKeyVerifier {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &APIKeyVerifier{
-		authURL: strings.TrimSuffix(authURL, "/"),
-		http:    &http.Client{},
-		logger:  logger,
+		authURL: verifiedAuthBaseURL(authURL),
+		http: &http.Client{
+			Timeout: 10 * time.Second,
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		},
+		logger: logger,
 	}
 }
 
+func verifiedAuthBaseURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u == nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" ||
+		u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" {
+		return ""
+	}
+	return strings.TrimSuffix(u.String(), "/")
+}
+
 func (v *APIKeyVerifier) Verify(ctx context.Context, apiKey string) (Claims, error) {
-	if apiKey == "" {
+	if apiKey == "" || v.authURL == "" {
 		return Claims{}, ErrUnauthenticated
 	}
 	body := fmt.Sprintf(`{"api_key":%q}`, apiKey)
@@ -54,7 +72,7 @@ func (v *APIKeyVerifier) Verify(ctx context.Context, apiKey string) (Claims, err
 	}
 	defer resp.Body.Close()
 	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		v.logger.Debug("api key verify: rejected", "status", resp.StatusCode)
 		return Claims{}, ErrUnauthenticated
 	}
