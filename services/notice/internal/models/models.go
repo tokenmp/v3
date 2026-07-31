@@ -5,10 +5,15 @@
 package models
 
 import (
+	"bytes"
 	"database/sql/driver"
 	"encoding/json"
 	"errors"
+	"io"
+	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
 
 // BroadcastUserID is the sentinel UUID used for broadcast notifications.
@@ -26,6 +31,80 @@ type NotificationAction struct {
 	Href  string `json:"href,omitempty"` // client route, for "link"
 }
 
+const maxNotificationActionLabelRunes = 64
+
+// ErrInvalidNotificationAction is returned when an action cannot safely be
+// persisted or exposed to a notification consumer.
+var ErrInvalidNotificationAction = errors.New("notification action: invalid")
+
+// Validate verifies the only currently supported notification action. Its href
+// is a same-origin absolute path, never a scheme, protocol-relative URL, or
+// browser-ambiguous backslash path.
+func (a NotificationAction) Validate() error {
+	if a.Type != "link" || strings.TrimSpace(a.Label) == "" || utf8.RuneCountInString(a.Label) > maxNotificationActionLabelRunes {
+		return ErrInvalidNotificationAction
+	}
+	if !strings.HasPrefix(a.Href, "/") || strings.HasPrefix(a.Href, "//") || strings.Contains(a.Href, "\\") {
+		return ErrInvalidNotificationAction
+	}
+	for _, r := range a.Href {
+		if unicode.IsControl(r) {
+			return ErrInvalidNotificationAction
+		}
+	}
+	return nil
+}
+
+// ParseNotificationAction decodes one non-null action from JSONB while
+// rejecting duplicate and unknown fields before applying its semantic policy.
+func ParseNotificationAction(raw []byte) (*NotificationAction, error) {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	token, err := decoder.Token()
+	if err != nil {
+		return nil, ErrInvalidNotificationAction
+	}
+	if delimiter, ok := token.(json.Delim); !ok || delimiter != '{' {
+		return nil, ErrInvalidNotificationAction
+	}
+
+	var action NotificationAction
+	seen := make(map[string]struct{}, 3)
+	for decoder.More() {
+		token, err := decoder.Token()
+		key, ok := token.(string)
+		if err != nil || !ok {
+			return nil, ErrInvalidNotificationAction
+		}
+		if _, exists := seen[key]; exists {
+			return nil, ErrInvalidNotificationAction
+		}
+		seen[key] = struct{}{}
+		switch key {
+		case "type":
+			err = decoder.Decode(&action.Type)
+		case "label":
+			err = decoder.Decode(&action.Label)
+		case "href":
+			err = decoder.Decode(&action.Href)
+		default:
+			return nil, ErrInvalidNotificationAction
+		}
+		if err != nil {
+			return nil, ErrInvalidNotificationAction
+		}
+	}
+	if token, err = decoder.Token(); err != nil || token != json.Delim('}') {
+		return nil, ErrInvalidNotificationAction
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		return nil, ErrInvalidNotificationAction
+	}
+	if err := action.Validate(); err != nil {
+		return nil, ErrInvalidNotificationAction
+	}
+	return &action, nil
+}
+
 // NotificationActionPtr wraps *NotificationAction so GORM can scan a nullable
 // JSONB column. A NULL column scans into a nil pointer (no action).
 type NotificationActionPtr struct {
@@ -37,6 +116,9 @@ type NotificationActionPtr struct {
 func (n NotificationActionPtr) Value() (driver.Value, error) {
 	if n.Action == nil || n.IsNull {
 		return nil, nil
+	}
+	if err := n.Action.Validate(); err != nil {
+		return nil, ErrInvalidNotificationAction
 	}
 	return json.Marshal(n.Action)
 }
@@ -62,11 +144,11 @@ func (n *NotificationActionPtr) Scan(src any) error {
 		n.IsNull = true
 		return nil
 	}
-	var a NotificationAction
-	if err := json.Unmarshal(raw, &a); err != nil {
+	a, err := ParseNotificationAction(raw)
+	if err != nil {
 		return err
 	}
-	n.Action = &a
+	n.Action = a
 	n.IsNull = false
 	return nil
 }

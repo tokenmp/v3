@@ -649,6 +649,42 @@ func TestAdminSendNotification_BroadcastUsesSentinel(t *testing.T) {
 	}
 }
 
+func TestAdminSendNotification_RejectsInvalidActionAndJSON(t *testing.T) {
+	for _, body := range []string{
+		`{"title":"T","body":"B","action":{"type":"link","label":"Open","href":"javascript:alert(1)"}}`,
+		`{"title":"T","body":"B","action":{"type":"link","label":"Open","href":"https://example.test"}}`,
+		`{"title":"T","body":"B","action":{"type":"link","label":"Open","href":"//example.test"}}`,
+		`{"title":"T","body":"B","action":{"type":"link","label":"Open","href":"/\\\\example.test"}}`,
+		`{"title":"T","body":"B","action":{"type":"link","label":"Open","href":"/panel\\nsettings"}}`,
+		`{"title":"T","body":"B","action":{"type":"link","label":"Open","href":"/panel","href":"javascript:alert(1)"}}`,
+		`{"title":"T","body":"B","action":{"type":"link","label":"Open","href":"/panel","extra":true}}`,
+		`{"title":"T","body":"B","unexpected":true}`,
+		`{"title":"T","body":"B"} {}`,
+	} {
+		store := &fakeStore{}
+		s := newTestServer(t, store, adminVerifier())
+		rec := doAdminPost(s, "/api/v1/notice/admin/notifications/send", body)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("body %s: got %d, want 400: %s", body, rec.Code, rec.Body.String())
+		}
+		if store.createdNotification != nil {
+			t.Errorf("body %s: unsafe notification was created", body)
+		}
+	}
+}
+
+func TestAdminSendNotification_AcceptsSafeAction(t *testing.T) {
+	store := &fakeStore{}
+	s := newTestServer(t, store, adminVerifier())
+	rec := doAdminPost(s, "/api/v1/notice/admin/notifications/send", `{"title":"T","body":"B","action":{"type":"link","label":"Open","href":"/panel/settings?tab=profile#security"}}`)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("got %d: %s", rec.Code, rec.Body.String())
+	}
+	if store.createdNotification == nil || store.createdNotification.Action.Action == nil {
+		t.Fatal("safe action was not stored")
+	}
+}
+
 func TestAdminForbidden_NonAdmin(t *testing.T) {
 	s := newTestServer(t, &fakeStore{}, &fakeVerifier{subject: jwtverifier.Subject{UserID: "u1", Role: "user"}})
 	rec := doGet(s, "/api/v1/notice/admin/announcements", "user-token")
