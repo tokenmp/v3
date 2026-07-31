@@ -35,8 +35,8 @@ Next.js 16 (App Router) + React 19 + Tailwind CSS v4 + `@tokenmp/ui-tokens` + sh
 
 ## 认证与数据层
 
-- Auth store：`src/lib/auth.ts`（zustand persist，key `tokenmp-auth`）。
-- API client：`src/lib/api/core.ts`（fetch wrapper，自动注入 Bearer，401 自动 refresh 一次）。
+- Auth store：`src/lib/auth.ts`（纯内存 Zustand；access token 与用户信息不持久化，启动时清理旧 `tokenmp-auth` localStorage）。refresh token 只由同源 `/api/auth/session/*` Route Handler 通过 `Secure; HttpOnly; SameSite=Strict` cookie 持有并轮换，绝不暴露给浏览器 JS。
+- API client：`src/lib/api/core.ts`（fetch wrapper，自动注入内存 Bearer，401 通过同源 HttpOnly session cookie 自动 refresh 一次）。
 - `src/lib/api/auth.ts` 默认走 **mock auth**（`mock-auth.ts`），无需后端即可登录。设 `NEXT_PUBLIC_USE_MOCK_AUTH=0` 切回真实 fetch 客户端。
 - Mock 凭据（仅 mock 模式）：`demo@tokenmp.cn` / `demo1234`（user）；`admin@tokenmp.cn` / `admin1234`（admin）。任意邮箱 + 12 位以上密码可注册。
 - 真实后端凭据（dev 部署）：`demo@tokenmp.cn` / `demo12345678`（user）；`admin@tokenmp.cn` / `admin12345678`（admin）。Auth 密码策略要求 12–128 runes。
@@ -71,7 +71,7 @@ pnpm --filter @tokenmp/web build    # output: standalone
 
 - 允许访问：`packages/*` 公开入口。
 - 禁止访问：service 私有源码、服务数据库。
-- 配置和环境变量：`NEXT_PUBLIC_API_BASE`（auth service base，默认空=同源）、`NEXT_PUBLIC_NOTICE_API_BASE`（notice service base，默认空=同源）、`NEXT_PUBLIC_USE_MOCK_AUTH`（默认启用 mock）、`NEXT_PUBLIC_USE_MOCK_NOTICE`（默认启用 mock）。真实部署经 nginx 反代同源：`API_BASE=/auth-api`、`NOTICE_API_BASE=/notice-api`。
+- 配置和环境变量：`NEXT_PUBLIC_API_BASE`（浏览器 auth service base，默认空=同源）、`AUTH_API_BASE`（仅服务端 session BFF 的 auth service base；未设置时兼容回退 `NEXT_PUBLIC_API_BASE`）、`NEXT_PUBLIC_NOTICE_API_BASE`（notice service base，默认空=同源）、`NEXT_PUBLIC_USE_MOCK_AUTH`（默认启用 mock）、`NEXT_PUBLIC_USE_MOCK_NOTICE`（默认启用 mock）。真实部署经 nginx 反代同源：`API_BASE=/auth-api`、`NOTICE_API_BASE=/notice-api`。CSP `connect-src` 从公开 API/Biz/Notice base 构建 allowlist，并允许对应 SSE/WebSocket origin。
 - 设计 token：CSS 变量统一来自 `@tokenmp/ui-tokens`，组件内不内联颜色 hex（`--brand-solid: #111827` 除外，与 logo 一致）。
 
 ## 焦点样式体系

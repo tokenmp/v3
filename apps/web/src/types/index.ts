@@ -11,11 +11,15 @@ export interface User {
   created_at: string;
 }
 
-export interface TokenResponse {
+export interface AccessTokenResponse {
   access_token: string;
-  refresh_token: string;
   token_type: 'Bearer';
   expires_in: number;
+}
+
+/** Auth service wire response. Refresh tokens must never cross into browser JS. */
+export interface TokenResponse extends AccessTokenResponse {
+  refresh_token: string;
 }
 
 export type ErrorCode =

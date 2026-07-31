@@ -42,7 +42,6 @@ export function AppHeader({
   const router = useRouter();
   const pathname = usePathname();
   const user = useAuthStore((s) => s.user);
-  const refreshToken = useAuthStore((s) => s.refreshToken);
   const logout = useAuthStore((s) => s.logout);
 
   const [pwOpen, setPwOpen] = useState(false);
@@ -54,7 +53,7 @@ export function AppHeader({
   const currentLabel = findLabel(pathname);
 
   const logoutMutation = useMutation({
-    mutationFn: () => (refreshToken ? authApi.logout(refreshToken) : Promise.resolve()),
+    mutationFn: authApi.logout,
     onSuccess: () => {
       logout();
       router.push('/login');
