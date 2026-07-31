@@ -34,8 +34,8 @@ type ExecutionSettlement struct {
 }
 
 // ExecutionEvent is the safe, lifecycle execution record supplied to an
-// ExecutionPort. It intentionally has no request body, URL, header,
-// credential reference, or secret field.
+// ExecutionPort. It intentionally has no request or response body, URL,
+// header, credential reference, or secret field.
 //
 // This event is an in-process observation value. It provides neither durable
 // storage nor idempotency guarantees.
@@ -74,15 +74,9 @@ type ExecutionEvent struct {
 	// failure events (e.g. 401). 0 when no upstream response was received.
 	UpstreamStatus int
 	// UpstreamRequestID is the sanitized upstream x-request-id for
-	// Kind=attempt failure events.
+	// Kind=attempt failure events. Along with status, code, and type, it is
+	// the only upstream detail eligible for persistence by a remote sink.
 	UpstreamRequestID string
-	// UpstreamMessage is the sanitized upstream error message retained for
-	// admin diagnostics. Never returned to clients.
-	UpstreamMessage string
-	// UpstreamResponseBody is the sanitized raw upstream error response body
-	// retained for admin diagnostics/reproduction. Bounded by 4 KiB, control
-	// characters replaced with spaces. Never returned to clients.
-	UpstreamResponseBody string
 	// RetryStop is the retry State stop reason for Kind=attempt failure
 	// events (e.g. "no_match", "retry_none", "max_total_attempts").
 	RetryStop string

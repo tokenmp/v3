@@ -214,8 +214,6 @@ function AttemptNode({ a, isLast }: { a: RequestLogAttempt; isLast: boolean }) {
   const errorType = a.errorType ?? a.error_type;
   const retryClassified = a.retryClassified ?? a.retry_classified;
   const metadata = a.metadata as Record<string, string> | undefined;
-  const upstreamMessage = metadata?.upstream_message ?? metadata?.upstreamMessage;
-  const upstreamResponseBody = metadata?.upstream_response_body ?? metadata?.upstreamResponseBody;
   const retryStop = metadata?.retry_stop ?? metadata?.retryStop;
   const createdAt = a.created_at ?? a.createdAt;
 
@@ -290,17 +288,6 @@ function AttemptNode({ a, isLast }: { a: RequestLogAttempt; isLast: boolean }) {
         ) : null}
         {createdAt ? <span>{formatTime(String(createdAt))}</span> : null}
       </div>
-      {upstreamMessage ? (
-        <div className="mt-1 rounded bg-muted/50 px-2 py-1 text-xs text-muted-foreground break-all">
-          上游错误：{String(upstreamMessage)}
-        </div>
-      ) : null}
-      {upstreamResponseBody ? (
-        <div className="mt-1">
-          <p className="mb-1 text-xs font-medium text-muted-foreground">上游响应 Body：</p>
-          <pre className="max-h-48 overflow-auto rounded bg-muted/70 px-2 py-1 text-xs text-muted-foreground break-all whitespace-pre-wrap">{String(upstreamResponseBody)}</pre>
-        </div>
-      ) : null}
     </li>
   );
 }
@@ -480,29 +467,6 @@ export default function RequestLogDetailPage() {
               {log.errorMessage && (
                 <p className="text-sm break-all">{log.errorMessage}</p>
               )}
-              {/* upstream error message from attempts metadata */}
-              {(() => {
-                const firstAttemptMsg = attempts
-                  .map((a) => (a.metadata as Record<string, string> | undefined)?.upstream_message ?? (a.metadata as Record<string, string> | undefined)?.upstreamMessage)
-                  .find(Boolean);
-                return firstAttemptMsg ? (
-                  <p className="mt-1 rounded bg-muted/50 px-2 py-1 text-xs text-muted-foreground break-all">
-                    上游返回：{String(firstAttemptMsg)}
-                  </p>
-                ) : null;
-              })()}
-              {/* upstream raw response body for reproduction */}
-              {(() => {
-                const firstBody = attempts
-                  .map((a) => (a.metadata as Record<string, string> | undefined)?.upstream_response_body ?? (a.metadata as Record<string, string> | undefined)?.upstreamResponseBody)
-                  .find(Boolean);
-                return firstBody ? (
-                  <div className="mt-1.5">
-                    <p className="mb-1 text-xs font-medium text-muted-foreground">上游响应 Body：</p>
-                    <pre className="max-h-48 overflow-auto rounded bg-muted/70 px-2 py-1 text-xs text-muted-foreground break-all whitespace-pre-wrap">{String(firstBody)}</pre>
-                  </div>
-                ) : null;
-              })()}
             </div>
           </CardContent>
         </Card>

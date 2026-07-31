@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"strings"
 
@@ -171,7 +170,6 @@ func extractAnthropicMessagesUsage(raw json.RawMessage) (sdk.Usage, bool) {
 func classifyError(err error, response *http.Response) *sdk.ClassifiedError {
 	var apiErr *anthropic.Error
 	status, requestID, code, typ := 0, "", "", ""
-	var upstreamMsg, upstreamBody string
 	if response != nil {
 		status = response.StatusCode
 		requestID = response.Header.Get("request-id")
@@ -180,19 +178,6 @@ func classifyError(err error, response *http.Response) *sdk.ClassifiedError {
 		status, typ = apiErr.StatusCode, string(apiErr.Type())
 		if apiErr.RequestID != "" {
 			requestID = apiErr.RequestID
-		}
-		// Extract the human-readable message from the Anthropic error envelope
-		// {"error":{"type":"...","message":"..."}}.
-		rawJSON := apiErr.RawJSON()
-		upstreamMsg = extractAnthropicMessage(rawJSON)
-	}
-	// Capture the full upstream response body for admin reproduction. The
-	// Anthropic SDK restores response.Body after consuming it, so we can read
-	// it here. When errors.As failed (non-standard error format), this is the
-	// only way to retain the body.
-	if response != nil && response.Body != nil {
-		if body, readErr := io.ReadAll(io.LimitReader(response.Body, 1<<16)); readErr == nil {
-			upstreamBody = string(body)
 		}
 	}
 
@@ -208,14 +193,10 @@ func classifyError(err error, response *http.Response) *sdk.ClassifiedError {
 	// Parse Retry-After only for retryable statuses (429, 5xx, including 529).
 	if isRetryableHTTPStatus(status) && response != nil {
 		if ra, ok := sdk.ParseRetryAfter(response.Header); ok {
-			return sdk.NewClassifiedErrorWithRetryAfter(kind, status, requestID, code, typ, ra, true).
-				WithUpstreamMessage(upstreamMsg).
-				WithUpstreamBody(upstreamBody)
+			return sdk.NewClassifiedErrorWithRetryAfter(kind, status, requestID, code, typ, ra, true)
 		}
 	}
-	return sdk.NewClassifiedError(kind, status, requestID, code, typ).
-		WithUpstreamMessage(upstreamMsg).
-		WithUpstreamBody(upstreamBody)
+	return sdk.NewClassifiedError(kind, status, requestID, code, typ)
 }
 
 // isRetryableHTTPStatus reports whether the HTTP status is retryable and
@@ -241,23 +222,4 @@ func kindForHTTPStatus(status int) error {
 	default:
 		return sdk.ErrUpstream
 	}
-}
-
-// extractAnthropicMessage parses the Anthropic error envelope
-// {"error":{"type":"...","message":"..."}} to extract the human-readable
-// message. Returns empty if the envelope or message field is absent or
-// unparseable. The raw JSON is never retained beyond this function.
-func extractAnthropicMessage(raw string) string {
-	if raw == "" {
-		return ""
-	}
-	var env struct {
-		Error struct {
-			Message string `json:"message"`
-		} `json:"error"`
-	}
-	if json.Unmarshal([]byte(raw), &env) != nil {
-		return ""
-	}
-	return env.Error.Message
 }

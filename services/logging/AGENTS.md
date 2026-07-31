@@ -7,7 +7,7 @@
 Logging Service 是 TokenMP V3 分层架构的**业务平面**日志服务：
 
 - 接收 executor / Edge 推送的请求生命周期事件，落库到 Log DB（`infra/db/migrations/log/`）。
-- **不存客户端 request body 或成功 response body**；仅存摘要/计数/错误分类，以及 executor 提供的有界、脱敏、admin-only 上游错误响应片段（metadata）。
+- **不存客户端 request/response body 或上游 response body**；仅存摘要、计数、错误分类与 allowlist 化的安全元数据（status/code/type/request ID）。
 - Log DB 按天 RANGE 分区（PostgreSQL 原生，非旧版 2 小时分表 2000 张），自动清理旧分区。
 - executor 不直连此库；Logging Service 是唯一读写方，异步落库不阻塞 executor 主路径。
 
@@ -63,7 +63,7 @@ LOGGING_DATABASE_URL=... LOGGING_HTTP_ADDR=127.0.0.1:18084 go run ./cmd/logging
 ## 约束
 
 - **DO NOT** 用 `AutoMigrate`——schema 由 `migrations/` 版本化 SQL 管。
-- **DO NOT** 存客户端 request body 或成功 response body；上游错误 body 仅允许 executor 生成的有界、脱敏、admin-only metadata 片段。
+- **DO NOT** 存客户端 request/response body、上游 response body 或供应商自由文本 message；仅允许 status/code/type/request ID 等 allowlist 化安全元数据。
 - **DO NOT** 让 driver 错误经 `Error()`/`Unwrap()` 暴露 DSN。
 - **DO NOT** 提交密钥/连接串/生产数据。
 - DB 路径硬限 `/tokenmp_logging`，绝不连其他库。

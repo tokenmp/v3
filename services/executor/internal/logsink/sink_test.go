@@ -445,6 +445,56 @@ func TestBuildBatchStartedCreatesTTFTTimelineUpdate(t *testing.T) {
 	}
 }
 
+func TestBuildBatchAllowsOnlySafeUpstreamMetadata(t *testing.T) {
+	t.Parallel()
+
+	b, ok := buildBatch(requestlog.ExecutionEvent{
+		RequestID:         "req-safe",
+		Kind:              requestlog.KindAttempt,
+		Attempt:           1,
+		Status:            "failed",
+		HTTPStatus:        http.StatusBadGateway,
+		UpstreamStatus:    http.StatusServiceUnavailable,
+		UpstreamRequestID: "provider-request-safe",
+		Code:              "upstream_error",
+		Type:              "server_error",
+		RetryStop:         "retry_none",
+		Timestamp:         time.Date(2026, 7, 31, 0, 0, 0, 0, time.UTC),
+	})
+	if !ok {
+		t.Fatal("buildBatch() ok = false")
+	}
+	if b.Log.UpstreamHTTPStatus != http.StatusServiceUnavailable || b.Log.ErrorCode != "upstream_error" || b.Log.ErrorType != "server_error" {
+		t.Fatalf("log safe upstream fields = %+v", b.Log)
+	}
+	if len(b.Attempts) != 1 || len(b.Events) != 1 {
+		t.Fatalf("attempts/events = %d/%d, want 1/1", len(b.Attempts), len(b.Events))
+	}
+	for _, tc := range []struct {
+		name string
+		raw  json.RawMessage
+		want map[string]string
+	}{
+		{name: "attempt", raw: b.Attempts[0].Metadata, want: map[string]string{"upstream_request_id": "provider-request-safe", "retry_stop": "retry_none"}},
+		{name: "event", raw: b.Events[0].Metadata, want: map[string]string{"upstream_request_id": "provider-request-safe"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var got map[string]string
+			if err := json.Unmarshal(tc.raw, &got); err != nil {
+				t.Fatalf("unmarshal metadata: %v", err)
+			}
+			if len(got) != len(tc.want) {
+				t.Fatalf("metadata = %v, want %v", got, tc.want)
+			}
+			for key, value := range tc.want {
+				if got[key] != value {
+					t.Errorf("metadata[%q] = %q, want %q", key, got[key], value)
+				}
+			}
+		})
+	}
+}
+
 func TestRemoteSinkContract(t *testing.T) {
 	t.Parallel()
 
