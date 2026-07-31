@@ -56,3 +56,6 @@ services/executor/internal/snapshot/*-snapshot*.json
 services/executor/internal/snapshot/*-snapshot-resp.json
 e2e/test-results/
 e2e/playwright-report/
+
+# Local pi agent configs (project-local, not shared)
+.pi/agents/
