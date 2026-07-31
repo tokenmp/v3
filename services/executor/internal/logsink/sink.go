@@ -452,26 +452,14 @@ func buildEventMessage(e requestlog.ExecutionEvent) string {
 	return strings.Join(parts, " ")
 }
 
-// buildEventMetadata carries structured upstream detail for the timeline event
-// as bounded JSON. It includes the upstream request ID and error message.
+// buildEventMetadata carries the allowlisted upstream request ID for an
+// attempt timeline event. Provider-supplied messages and response bodies are
+// intentionally never persisted.
 func buildEventMetadata(e requestlog.ExecutionEvent) json.RawMessage {
-	if e.Kind != requestlog.KindAttempt {
+	if e.Kind != requestlog.KindAttempt || e.UpstreamRequestID == "" {
 		return nil
 	}
-	if e.UpstreamRequestID == "" && e.UpstreamMessage == "" && e.UpstreamResponseBody == "" {
-		return nil
-	}
-	m := map[string]string{}
-	if e.UpstreamRequestID != "" {
-		m["upstream_request_id"] = e.UpstreamRequestID
-	}
-	if e.UpstreamMessage != "" {
-		m["upstream_message"] = e.UpstreamMessage
-	}
-	if e.UpstreamResponseBody != "" {
-		m["upstream_response_body"] = e.UpstreamResponseBody
-	}
-	b, err := json.Marshal(m)
+	b, err := json.Marshal(map[string]string{"upstream_request_id": e.UpstreamRequestID})
 	if err != nil {
 		return nil
 	}
@@ -497,19 +485,14 @@ func mapRetryClassified(stop string) string {
 	}
 }
 
-// buildAttemptMetadata carries structured upstream detail for the attempt row
-// as bounded JSON. It includes the upstream request ID, error message, and
-// the detailed retry stop reason.
+// buildAttemptMetadata carries only allowlisted attempt metadata: the
+// upstream request ID and retry stop reason. Status, code, and type are
+// persisted in their dedicated repository-aligned fields; provider messages
+// and response bodies are intentionally excluded.
 func buildAttemptMetadata(e requestlog.ExecutionEvent) json.RawMessage {
 	m := map[string]string{}
 	if e.UpstreamRequestID != "" {
 		m["upstream_request_id"] = e.UpstreamRequestID
-	}
-	if e.UpstreamMessage != "" {
-		m["upstream_message"] = e.UpstreamMessage
-	}
-	if e.UpstreamResponseBody != "" {
-		m["upstream_response_body"] = e.UpstreamResponseBody
 	}
 	if e.RetryStop != "" {
 		m["retry_stop"] = e.RetryStop

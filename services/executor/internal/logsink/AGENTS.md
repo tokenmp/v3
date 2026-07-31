@@ -24,6 +24,7 @@
 - sentinel 错误不泄漏 endpoint URL、host、port、request body、response body
 - `MaxIngestBodyBytes = 2<<20`（2 MiB），与 Logging Service 一致
 - wire 类型（`requestLog`/`attempt`/`timelineEvent`/`batch`）json tag 与 Logging Service `repository.RequestLog/Attempt/Event` 精确对齐（设计/构建时对齐，无 Go runtime import）
+- 上游信息只允许 status/code/type/request ID：status/code/type 使用 repository 对齐的独立字段，request ID 仅使用 `upstream_request_id` metadata；绝不持久化供应商 message 或 response body
 
 ## 事件映射
 
@@ -40,8 +41,10 @@
 | Latency | Log.LatencyMS, Attempt.LatencyMS, Event.DurationMS |
 | TTFT + Stream | KindStarted 时 Log.TTFTMS/Stream=true + Event.Stage=upstream_started/Event.DurationMS=TTFT |
 | Thinking effective execution | Log.ThinkingMode + ThinkingEffort/effective/requested/budget/degraded；`thinking_effort` 是实际执行 effort 的兼容别名，不是用户请求原值 |
-| Code | Log.ErrorCode, Attempt.ErrorCode, Attempt.HTTPStatus（3 位数时） |
+| Code | Log.ErrorCode, Attempt.ErrorCode |
 | Type | Log.ErrorType, Attempt.ErrorType |
+| UpstreamStatus | Log.UpstreamHTTPStatus, Attempt.UpstreamHTTPStatus |
+| UpstreamRequestID | Attempt/Event Metadata `upstream_request_id`（唯一允许的上游 metadata） |
 | Kind=attempt | 产生 1 行 Attempt |
 | Kind=finalized/released | Log.CompletedAt = Timestamp |
 | 所有 Kind | 产生 1 行 Event（Source="executor"；reserved→quota_reserved、started→upstream_started、attempt→upstream_finished、terminal/completed） |
@@ -65,6 +68,7 @@ go test -race ./internal/logsink/...
 - QueryEvents 过滤委托
 - 并发 record + query（race）
 - wire shape 与 repository json tag 精确对齐
+- 上游 metadata allowlist：仅 `upstream_request_id`（及 executor-owned `retry_stop`）；绝不输出供应商 message 或 response body
 
 ## 约束
 

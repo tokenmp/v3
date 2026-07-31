@@ -18,7 +18,6 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 	"unicode"
@@ -274,9 +273,9 @@ func ParseRetryAfter(header http.Header) (time.Duration, bool) {
 // category, HTTP status, provider request ID, and the upstream error code and
 // type. Its fields are private so callers cannot attach a response, request,
 // body, secret, or arbitrary provider error to it. Error() returns the fixed
-// category string only and never echoes the upstream message, raw JSON body,
-// code, type, URL, or secret; Code() and Type() expose the sanitized upstream
-// code/type identifiers ([A-Za-z0-9_-]) for retry/response mapping.
+// category string only and never echoes provider content, code, type, URL, or
+// secret; Code() and Type() expose the sanitized upstream code/type identifiers
+// ([A-Za-z0-9_-]) for retry/response mapping.
 type ClassifiedError struct {
 	kind          error
 	causeClass    error
@@ -286,8 +285,6 @@ type ClassifiedError struct {
 	typ           string
 	retryAfter    time.Duration
 	hasRetryAfter bool
-	upstreamMsg   string
-	upstreamBody  string
 }
 
 // NewClassifiedError returns a classified error. Unknown kinds are reduced to
@@ -412,115 +409,6 @@ func (e *ClassifiedError) RetryAfter() (time.Duration, bool) {
 		return 0, false
 	}
 	return e.retryAfter, true
-}
-
-// maxUpstreamMessageBytes bounds the length of a sanitized upstream error
-// message retained for admin diagnostics. It is deliberately larger than
-// maxSafeTokenBytes (which bounds codes/types/request-IDs) to retain useful
-// diagnostic text while still preventing unbounded flooding.
-const maxUpstreamMessageBytes = 512
-
-// WithUpstreamMessage attaches a bounded, sanitized upstream error message to
-// the classified error for admin diagnostics only. The message is never
-// returned by Error() and never reaches a client response; it is surfaced
-// solely through execution logs. Sanitization: valid UTF-8, no control
-// characters, byte length bounded by [maxUpstreamMessageBytes]. Anything
-// outside that policy is reduced to empty.
-func (e *ClassifiedError) WithUpstreamMessage(msg string) *ClassifiedError {
-	if e == nil {
-		return e
-	}
-	e.upstreamMsg = sanitizeUpstreamMessage(msg)
-	return e
-}
-
-// UpstreamMessage returns the sanitized upstream error message retained for
-// admin diagnostics, or empty if none was set.
-func (e *ClassifiedError) UpstreamMessage() string {
-	if e == nil {
-		return ""
-	}
-	return e.upstreamMsg
-}
-
-// maxUpstreamBodyBytes bounds the length of a retained upstream error
-// response body. It is large enough to capture typical provider error
-// envelopes (including nested error codes, request IDs, and messages) while
-// preventing unbounded flooding. The raw body is stored for admin
-// diagnostics/reproduction only and never reaches a client response.
-const maxUpstreamBodyBytes = 4096
-
-// WithUpstreamBody attaches a bounded, sanitized copy of the raw upstream
-// error response body to the classified error for admin diagnostics. The
-// body is never returned by Error() and never reaches a client response; it
-// is surfaced solely through execution logs. Sanitization: valid UTF-8,
-// control characters replaced with spaces, byte length bounded by
-// [maxUpstreamBodyBytes].
-func (e *ClassifiedError) WithUpstreamBody(body string) *ClassifiedError {
-	if e == nil {
-		return e
-	}
-	e.upstreamBody = sanitizeUpstreamBody(body)
-	return e
-}
-
-// UpstreamBody returns the sanitized raw upstream error response body
-// retained for admin diagnostics, or empty if none was set.
-func (e *ClassifiedError) UpstreamBody() string {
-	if e == nil {
-		return ""
-	}
-	return e.upstreamBody
-}
-
-// sanitizeUpstreamMessage bounds and sanitizes an upstream-supplied error
-// message for admin-only logging. It permits printable ASCII and printable
-// Unicode (including spaces and common punctuation) while rejecting control
-// characters and oversized input.
-func sanitizeUpstreamMessage(v string) string {
-	if len(v) == 0 || !utf8.ValidString(v) {
-		return ""
-	}
-	if len(v) > maxUpstreamMessageBytes {
-		// Truncate on a rune boundary to avoid splitting a multi-byte sequence.
-		v = v[:maxUpstreamMessageBytes]
-		for len(v) > 0 && !utf8.ValidString(v) {
-			v = v[:len(v)-1]
-		}
-	}
-	for _, r := range v {
-		if unicode.IsControl(r) {
-			return ""
-		}
-	}
-	return v
-}
-
-// sanitizeUpstreamBody bounds and sanitizes a raw upstream error response
-// body for admin-only logging. Unlike sanitizeUpstreamMessage (which rejects
-// control chars entirely), it replaces control characters with spaces so that
-// JSON structure is preserved for reproduction while still preventing control
-// character injection. Valid UTF-8 is required; invalid input is rejected.
-func sanitizeUpstreamBody(v string) string {
-	if len(v) == 0 || !utf8.ValidString(v) {
-		return ""
-	}
-	if len(v) > maxUpstreamBodyBytes {
-		v = v[:maxUpstreamBodyBytes]
-		for len(v) > 0 && !utf8.ValidString(v) {
-			v = v[:len(v)-1]
-		}
-	}
-	var b strings.Builder
-	b.Grow(len(v))
-	for _, r := range v {
-		if unicode.IsControl(r) {
-			b.WriteByte(' ')
-		} else {
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
 }
 
 // NewClassifiedErrorWithRetryAfter returns a classified error with an optional

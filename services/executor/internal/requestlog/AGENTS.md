@@ -30,9 +30,11 @@
 - URL、header、credential reference 或 secret
 
 允许记录的是程序执行层的非正文 thinking 元数据：requested/effective effort、requested/effective budget、degraded 标记与 enabled/disabled mode；这些值来自 Adapter Engine 的 EffectiveThinking，代表实际执行配置，不包含模型推理文本。
-- 上游响应正文
+- 上游错误 message 或响应正文
 
 `TestExecutionEventSafeSurface` 通过反射检查字段名不含 `body`/`url`/`header`/`ref`/`secret`，并验证 `fmt` 渲染不泄露敏感标记。
+
+远端持久化时只允许 `UpstreamStatus`、`Code`、`Type` 与 `UpstreamRequestID`；供应商 message 和 response body 不进入 `ExecutionEvent`。
 
 ## Ring Buffer
 
