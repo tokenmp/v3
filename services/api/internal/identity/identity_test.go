@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -187,4 +188,88 @@ func TestMiddlewareRejectsMissingToken(t *testing.T) {
 func TestMiddlewareSkipsHealthz(t *testing.T) {
 	// Middleware is applied only to /v1 routes, so /healthz passes through
 	// without auth. This is tested at the app wiring level, not here.
+}
+
+func TestAPIKeyVerifierRejectsRedirectWithoutForwardingKey(t *testing.T) {
+	var redirected atomic.Int32
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		redirected.Add(1)
+		if got := r.URL.Path; got != "/stolen" {
+			t.Errorf("redirect target path = %q", got)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer target.Close()
+
+	auth := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Path; got != "/api/v1/auth/verify-key" {
+			t.Errorf("path = %q", got)
+		}
+		http.Redirect(w, r, target.URL+"/stolen", http.StatusFound)
+	}))
+	defer auth.Close()
+
+	verifier := NewAPIKeyVerifier(auth.URL, nil)
+	if _, err := verifier.Verify(context.Background(), "sk-secret-must-not-leak"); err != ErrUnauthenticated {
+		t.Fatalf("Verify() error = %v, want ErrUnauthenticated", err)
+	}
+	if got := redirected.Load(); got != 0 {
+		t.Errorf("redirect target requests = %d, want 0", got)
+	}
+}
+
+func TestAPIKeyVerifierRejectsUnauthorized(t *testing.T) {
+	auth := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer auth.Close()
+
+	verifier := NewAPIKeyVerifier(auth.URL, nil)
+	if _, err := verifier.Verify(context.Background(), "sk-invalid"); err != ErrUnauthenticated {
+		t.Fatalf("Verify() error = %v, want ErrUnauthenticated", err)
+	}
+}
+
+func TestAPIKeyVerifierTimesOut(t *testing.T) {
+	auth := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(100 * time.Millisecond)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer auth.Close()
+
+	verifier := NewAPIKeyVerifier(auth.URL, nil)
+	verifier.http.Timeout = 10 * time.Millisecond
+	if _, err := verifier.Verify(context.Background(), "sk-key"); err != ErrUnauthenticated {
+		t.Fatalf("Verify() error = %v, want ErrUnauthenticated", err)
+	}
+}
+
+func TestAPIKeyVerifierUsesBoundedNoRedirectClient(t *testing.T) {
+	verifier := NewAPIKeyVerifier("https://auth.example", nil)
+	if verifier.http.Timeout != 10*time.Second {
+		t.Errorf("client timeout = %s, want 10s", verifier.http.Timeout)
+	}
+	request := httptest.NewRequest(http.MethodGet, "https://redirect.example", nil)
+	if err := verifier.http.CheckRedirect(request, nil); err != http.ErrUseLastResponse {
+		t.Errorf("CheckRedirect() error = %v, want http.ErrUseLastResponse", err)
+	}
+}
+
+func TestAPIKeyVerifierRejectsUnsafeBaseURL(t *testing.T) {
+	for _, raw := range []string{
+		"ftp://auth.example",
+		"https://user:password@auth.example",
+		"https://auth.example?api_key=secret",
+		"https://auth.example?#fragment",
+	} {
+		t.Run(raw, func(t *testing.T) {
+			verifier := NewAPIKeyVerifier(raw, nil)
+			if verifier.authURL != "" {
+				t.Errorf("authURL = %q, want empty for unsafe URL", verifier.authURL)
+			}
+			if _, err := verifier.Verify(context.Background(), "sk-key"); err != ErrUnauthenticated {
+				t.Fatalf("Verify() error = %v, want ErrUnauthenticated", err)
+			}
+		})
+	}
 }
