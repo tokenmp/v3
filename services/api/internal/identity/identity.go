@@ -11,7 +11,6 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -35,8 +34,9 @@ type Verifier interface {
 	Verify(ctx context.Context, token string) (Claims, error)
 }
 
-// noopVerifier accepts any non-empty Bearer token. It is used when
-// API_JWT_PUBLIC_KEY_FILE is unset (dev-only).
+// noopVerifier accepts any non-empty Bearer token. It is available only via
+// NewNoopVerifier, which callers must explicitly opt into for local development
+// and tests.
 type noopVerifier struct{}
 
 func (noopVerifier) Verify(_ context.Context, token string) (Claims, error) {
@@ -54,36 +54,50 @@ type jwtVerifier struct {
 	logger   *slog.Logger
 }
 
-// ErrUnauthenticated is returned when the token is missing, malformed, or
-// fails verification. It never embeds the token or key material.
-var ErrUnauthenticated = errors.New("identity: unauthenticated")
+// Sentinel errors never embed key paths, PEM content, or token material.
+var (
+	ErrUnauthenticated       = errors.New("identity: unauthenticated")
+	ErrPublicKeyFileRequired = errors.New("identity: API_JWT_PUBLIC_KEY_FILE is required")
+	ErrPublicKeyReadFailed   = errors.New("identity: public key file could not be read")
+	ErrPublicKeyParseFailed  = errors.New("identity: public key is not a valid Ed25519 PEM (PKIX)")
+)
 
-// NewVerifier loads the Ed25519 public key from the given PEM file path. If
-// keyFile is empty, a noop verifier is returned (dev-only; production must
-// set a key file).
+// NewNoopVerifier returns the development-only verifier that accepts any
+// non-empty Bearer token. Production callers must use NewVerifier instead.
+func NewNoopVerifier() Verifier {
+	return noopVerifier{}
+}
+
+// NewVerifier loads an Ed25519 public key from a PKIX PEM file. Empty,
+// unreadable, or malformed public-key configuration fails closed.
 func NewVerifier(keyFile, issuer, audience string, logger *slog.Logger) (Verifier, error) {
+	if keyFile == "" {
+		return nil, ErrPublicKeyFileRequired
+	}
+	if issuer == "" {
+		return nil, errors.New("identity: JWT issuer is required")
+	}
+	if audience == "" {
+		return nil, errors.New("identity: JWT audience is required")
+	}
 	if logger == nil {
 		logger = slog.Default()
 	}
-	if keyFile == "" {
-		logger.Warn("identity: JWT public key not configured; using noop verifier (dev-only)")
-		return noopVerifier{}, nil
-	}
 	raw, err := os.ReadFile(keyFile)
 	if err != nil {
-		return nil, fmt.Errorf("identity: read public key file: %w", err)
+		return nil, ErrPublicKeyReadFailed
 	}
 	block, _ := pem.Decode(raw)
 	if block == nil {
-		return nil, errors.New("identity: public key file is not valid PEM")
+		return nil, ErrPublicKeyParseFailed
 	}
 	pub, err := x509.ParsePKIXPublicKey(block.Bytes)
 	if err != nil {
-		return nil, fmt.Errorf("identity: parse public key: %w", err)
+		return nil, ErrPublicKeyParseFailed
 	}
 	edPub, ok := pub.(ed25519.PublicKey)
 	if !ok {
-		return nil, errors.New("identity: public key is not Ed25519")
+		return nil, ErrPublicKeyParseFailed
 	}
 	return &jwtVerifier{pub: edPub, issuer: issuer, audience: audience, logger: logger}, nil
 }
@@ -107,6 +121,9 @@ func (v *jwtVerifier) Verify(ctx context.Context, tokenStr string) (Claims, erro
 		jwt.WithAudience(v.audience),
 	}
 	_, err := jwt.ParseWithClaims(tokenStr, claims, func(t *jwt.Token) (any, error) {
+		if _, ok := t.Method.(*jwt.SigningMethodEd25519); !ok {
+			return nil, ErrUnauthenticated
+		}
 		return v.pub, nil
 	}, opts...)
 	if err != nil {

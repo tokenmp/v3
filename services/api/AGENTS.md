@@ -15,8 +15,8 @@ Edge/BFF **不做**：模型路由、协议转换、上游转发（这些在 Exe
 ## 当前实施状态（骨架）
 
 - `cmd/api/main.go`：入口，加载 `API_*` env、组装 deps、graceful shutdown。
-- `internal/config`：env 配置（`API_EXECUTOR_URL`必填、`API_EXECUTOR_TOKEN`必填、`API_BILLING_URL`/`API_LOGGING_URL`可选、`API_JWT_PUBLIC_KEY_FILE`可选、`API_JWT_ISSUER`/`API_JWT_AUDIENCE`默认）。
-- `internal/identity`：JWT 验证中间件（EdDSA/Ed25519，本地验，提取 subject/role 到 context；`API_JWT_PUBLIC_KEY_FILE` 空时 noop verifier dev-only；`NewVerifier` + `Middleware` + `FromContext`）。
+- `internal/config`：env 配置（`API_EXECUTOR_URL`必填、`API_EXECUTOR_TOKEN`必填、`API_BILLING_URL`/`API_LOGGING_URL`可选、`API_JWT_PUBLIC_KEY_FILE`必填；仅本地开发/测试显式设置 `API_ALLOW_NOOP_AUTH=true` 时可省略、`API_JWT_ISSUER`/`API_JWT_AUDIENCE`默认）。
+- `internal/identity`：JWT 验证中间件（EdDSA/Ed25519，本地验，提取 subject/role 到 context；缺少公钥 fail-fast；仅 `NewNoopVerifier` 显式 opt-in 用于本地开发/测试；`NewVerifier` + `Middleware` + `FromContext`）。
 - `internal/quota`：Billing Service 客户端（`Manager` 接口，`Reserve`/`Finalize`/`Release`；`billingURL` 空时 noop；禁 redirect，10s timeout，`ErrQuotaUnavailable` 不泄漏 URL；Billing 429 映射为 `ErrQuotaExceeded`，Edge 返回 429 `quota_exceeded` 而非 503）。
 - `internal/proxy`：反向代理转发到 executor（注入 `Bearer <edge-token>`，`ErrorHandter` 返回 502 JSON）。
 - `internal/logging`：Logging Service HTTP 客户端（读取：`ListLogs`/`GetLog`/`GetStats`；写入：`Ingest` 用于 Edge 收到执行请求时创建 `processing` 日志与 `received` 事件，并仅附带 512-byte、UTF-8/control-char 清洗后的 `User-Agent`，不采集其他客户端头；`loggingURL` 空时 `ErrUnavailable`，404 区分为 `NotFound`，禁 redirect，不泄漏 URL）。
@@ -51,7 +51,7 @@ go test -race ./...
 ```
 
 - config：defaults、missing required、invalid URL、optional URLs
-- identity：JWT valid/expired/wrong-issuer/empty、noop verifier、middleware allow/reject
+- identity：JWT valid/expired/wrong-issuer/empty、缺失公钥 fail-closed、显式 noop verifier、middleware allow/reject
 - quota：noop、reserve→finalize→release、error、unreachable
 - proxy：forward+token、502 on unreachable
 - app：全链路（auth→quota→proxy→finalize）、auth reject 401、release on 502、healthz anonymous、quota unavailable 503
@@ -69,7 +69,7 @@ go test -race ./...
 - **DO NOT** 在 Edge 执行模型调用或协议转换——转发给 Executor。
 - **DO NOT** 让 Edge 直连任何数据库——通过 Billing/Logging Service HTTP API。
 - **DO NOT** 泄漏下游服务 URL 到错误响应。
-- **DO NOT** 跳过身份验证（dev-only noop verifier 仅在 `API_JWT_PUBLIC_KEY_FILE` 空时）。
+- **DO NOT** 跳过身份验证（生产必须配置 `API_JWT_PUBLIC_KEY_FILE`；仅本地开发/测试可显式设置 `API_ALLOW_NOOP_AUTH=true` 使用 noop verifier）。
 - Executor token 是服务级密钥——不得提交到仓库。
 
 ## 文档维护

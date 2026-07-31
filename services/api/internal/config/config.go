@@ -54,9 +54,13 @@ type Config struct {
 	ConfigServiceURL string
 
 	// JWTPublicKeyFile is the path to the Ed25519 public key PEM file used
-	// to verify client JWTs. Optional; when empty, JWT verification is
-	// disabled (dev-only; production must set this).
+	// to verify client JWTs. It is required unless AllowNoopAuth is explicitly
+	// enabled for local development or tests.
 	JWTPublicKeyFile string
+
+	// AllowNoopAuth permits the development-only verifier that accepts any
+	// non-empty Bearer token. It must be explicitly set with API_ALLOW_NOOP_AUTH=true.
+	AllowNoopAuth bool
 
 	// JWTIssuer is the expected JWT issuer. Defaults to "tokenmp-auth".
 	JWTIssuer string
@@ -155,6 +159,16 @@ func Load() (*Config, error) {
 	}
 
 	cfg.JWTPublicKeyFile = strings.TrimSpace(os.Getenv("API_JWT_PUBLIC_KEY_FILE"))
+	if v, ok := os.LookupEnv("API_ALLOW_NOOP_AUTH"); ok {
+		allowNoopAuth, err := parseStrictBool("API_ALLOW_NOOP_AUTH", v)
+		if err != nil {
+			return nil, err
+		}
+		cfg.AllowNoopAuth = allowNoopAuth
+	}
+	if cfg.JWTPublicKeyFile == "" && !cfg.AllowNoopAuth {
+		return nil, errors.New("API_JWT_PUBLIC_KEY_FILE is required unless API_ALLOW_NOOP_AUTH=true")
+	}
 
 	if v := strings.TrimSpace(os.Getenv("API_JWT_ISSUER")); v != "" {
 		cfg.JWTIssuer = v
@@ -167,6 +181,18 @@ func Load() (*Config, error) {
 	// ExecutorToken is optional (JWT passthrough mode when empty).
 
 	return cfg, nil
+}
+
+// parseStrictBool accepts only explicit true or false values.
+func parseStrictBool(name, raw string) (bool, error) {
+	switch strings.TrimSpace(raw) {
+	case "true":
+		return true, nil
+	case "false":
+		return false, nil
+	default:
+		return false, fmt.Errorf("%s must be true or false", name)
+	}
 }
 
 // validHTTPBaseURL checks that raw is an http(s) URL with no query or

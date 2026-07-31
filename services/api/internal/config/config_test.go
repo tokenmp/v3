@@ -11,6 +11,7 @@ func TestLoadDefaults(t *testing.T) {
 	t.Setenv("API_BILLING_URL", "")
 	t.Setenv("API_LOGGING_URL", "")
 	t.Setenv("API_JWT_PUBLIC_KEY_FILE", "")
+	t.Setenv("API_ALLOW_NOOP_AUTH", "true")
 
 	cfg, err := Load()
 	if err != nil {
@@ -28,8 +29,29 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.JWTAudience != "tokenmp-web" {
 		t.Errorf("JWTAudience = %q", cfg.JWTAudience)
 	}
+	if !cfg.AllowNoopAuth {
+		t.Error("AllowNoopAuth = false, want true")
+	}
 	if cfg.BillingURL != "" || cfg.LoggingURL != "" || cfg.AuthURL != "" {
 		t.Errorf("optional URLs should be empty: billing=%q logging=%q auth=%q", cfg.BillingURL, cfg.LoggingURL, cfg.AuthURL)
+	}
+}
+
+func TestLoadRejectsMissingPublicKeyWithoutNoopOptIn(t *testing.T) {
+	t.Setenv("API_EXECUTOR_URL", "http://127.0.0.1:8081")
+	t.Setenv("API_JWT_PUBLIC_KEY_FILE", "")
+	t.Setenv("API_ALLOW_NOOP_AUTH", "false")
+	if _, err := Load(); err == nil {
+		t.Fatal("Load() expected error for missing API_JWT_PUBLIC_KEY_FILE")
+	}
+}
+
+func TestLoadRejectsInvalidAllowNoopAuth(t *testing.T) {
+	t.Setenv("API_EXECUTOR_URL", "http://127.0.0.1:8081")
+	t.Setenv("API_JWT_PUBLIC_KEY_FILE", "")
+	t.Setenv("API_ALLOW_NOOP_AUTH", "1")
+	if _, err := Load(); err == nil {
+		t.Fatal("Load() expected error for invalid API_ALLOW_NOOP_AUTH")
 	}
 }
 
@@ -44,6 +66,7 @@ func TestLoadMissingExecutorURL(t *testing.T) {
 func TestLoadExecutorTokenOptional(t *testing.T) {
 	t.Setenv("API_EXECUTOR_URL", "http://x")
 	t.Setenv("API_EXECUTOR_TOKEN", "")
+	t.Setenv("API_ALLOW_NOOP_AUTH", "true")
 	cfg, err := Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v, want nil (token is optional)", err)
