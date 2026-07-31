@@ -16,22 +16,13 @@ import {
   RefreshCw,
   Sparkles,
   MoreHorizontal,
-  type LucideIcon,
 } from 'lucide-react';
 
-export interface AdminNavItem {
-  label: string;
-  href: string;
-  icon: LucideIcon;
-}
-
-export interface AdminNavGroup {
-  label?: string;
-  items: AdminNavItem[];
-}
+export type { NavItem, NavGroup } from '@/lib/nav';
+import type { NavItem, NavGroup } from '@/lib/nav';
 
 /** Admin sidebar navigation. Matches docs/plans/admin-app.md section 3. */
-export const adminNavGroups: AdminNavGroup[] = [
+export const adminNavGroups: NavGroup[] = [
   {
     items: [{ label: '控制台', href: '/admin', icon: ShieldCheck }],
   },
@@ -82,7 +73,7 @@ export const adminNavGroups: AdminNavGroup[] = [
  *   概览 / 用户 / 日志 / 执行 / 更多
  *
  * The desktop sidebar still lists every section; this only affects mobile. */
-export const adminMobileTabs: AdminNavItem[] = [
+export const adminMobileTabs: NavItem[] = [
   { label: '概览', href: '/admin', icon: ShieldCheck },
   { label: '用户', href: '/admin/users', icon: Users },
   { label: '日志', href: '/admin/request-logs', icon: ScrollText },
@@ -94,7 +85,7 @@ export const adminMobileTabs: AdminNavItem[] = [
  * card of link rows (same Section/LinkRow pattern as /panel/settings). The
  * items already surfaced as bottom tabs are intentionally omitted here so
  * the hub stays deduplicated. */
-export const adminMobileMoreGroups: { label: string; items: AdminNavItem[] }[] = [
+export const adminMobileMoreGroups: { label: string; items: NavItem[] }[] = [
   {
     label: '用户域',
     items: [
