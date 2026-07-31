@@ -303,12 +303,12 @@ export default function AdminPlansPage() {
                       <p>模型：{p.allowedModels.length > 0 ? `${p.allowedModels.length} 个` : '—'}</p>
                     </div>
                     <div className="flex justify-end gap-1">
-                      <Button variant="ghost" size="icon" onClick={() => openEdit(p)}>
+                      <Button variant="ghost" size="iconSm" onClick={() => openEdit(p)}>
                         <Pencil className="h-4 w-4" />
                       </Button>
                       <Button
                         variant="ghost"
-                        size="icon"
+                        size="iconSm"
                         className="text-destructive"
                         onClick={() => openDelete(p.id)}
                       >

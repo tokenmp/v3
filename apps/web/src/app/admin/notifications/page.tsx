@@ -317,7 +317,7 @@ export default function AdminNotificationsPage() {
                 <span className="text-muted-foreground">{formatTime(n.createdAt)}</span>
                 <Button
                   variant="ghost"
-                  size="icon"
+                  size="iconSm"
                   className="h-8 w-8 text-destructive hover:text-destructive"
                   onClick={() => handleDelete(n.id)}
                   disabled={deleteMutation.isPending}

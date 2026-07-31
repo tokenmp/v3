@@ -14,7 +14,7 @@ const sizeClasses: Record<TableSize, string> = {
 };
 
 const Table = React.forwardRef<HTMLTableElement, TableProps>(
-  ({ className, size = 'compact', ...props }, ref) => (
+  ({ className, size = 'default', ...props }, ref) => (
     <div className="relative w-full overflow-auto">
       <table
         ref={ref}
