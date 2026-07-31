@@ -8,9 +8,16 @@ import type { NotificationAction } from '@/types';
  *  - action.type === 'link' → render a Link styled as outline button
  *  - unknown type → render nothing (graceful ignore)
  */
+function isSafeInternalHref(href: string): boolean {
+  return href.startsWith('/')
+    && !href.startsWith('//')
+    && !href.includes('\\')
+    && !/[\u0000-\u001F\u007F]/.test(href);
+}
+
 export function NotificationAction({ action }: { action: NotificationAction | null }) {
   if (!action) return null;
-  if (action.type !== 'link') return null;
+  if (action.type !== 'link' || !isSafeInternalHref(action.href)) return null;
 
   return (
     <Link

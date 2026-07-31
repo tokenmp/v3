@@ -409,7 +409,8 @@ components:
         client renders it from its fields; it must not hardcode any specific
         target. A null action means the notification is purely informational.
       nullable: true
-      required: [type, label]
+      required: [type, label, href]
+      additionalProperties: false
       properties:
         type:
           type: string
@@ -420,13 +421,18 @@ components:
             gracefully by the client.
         label:
           type: string
+          minLength: 1
           maxLength: 64
           description: Human-readable action label, e.g. "查看套餐详情".
         href:
           type: string
+          minLength: 1
+          pattern: '^/[^/\\\\\u0000-\u001F\u007F]*$'
           description: |
-            Client-side route to navigate to, e.g.
+            Same-origin absolute client route to navigate to, e.g.
             "/panel/billing/plans/plan_basic". Only present for `link`.
+            It must begin with exactly one `/`; protocol-relative URLs,
+            backslashes, control characters, and all URL schemes are rejected.
     Notification:
       type: object
       required: [id, type, title, body, action, read_at, created_at]

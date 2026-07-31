@@ -1,8 +1,10 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"time"
 
@@ -364,18 +366,102 @@ func (s *Server) handleAdminListNotifications(w http.ResponseWriter, r *http.Req
 }
 
 type adminSendNotificationBody struct {
-	UserID string                     `json:"userId"`
-	Type   string                     `json:"type"`
-	Title  string                     `json:"title"`
-	Body   string                     `json:"body"`
-	Action *models.NotificationAction `json:"action,omitempty"`
+	UserID string          `json:"userId"`
+	Type   string          `json:"type"`
+	Title  string          `json:"title"`
+	Body   string          `json:"body"`
+	Action json.RawMessage `json:"action,omitempty"`
+}
+
+// decodeStrictAdminJSON rejects malformed, oversized, duplicate-key, unknown,
+// and trailing JSON before decoding the request DTO.
+func decodeStrictAdminJSON(w http.ResponseWriter, r *http.Request, dst any) error {
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxAdminBodyBytes))
+	if err != nil {
+		return err
+	}
+	if err := rejectDuplicateJSONKeys(body); err != nil {
+		return err
+	}
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(dst); err != nil {
+		return err
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		return errors.New("trailing JSON")
+	}
+	return nil
+}
+
+// rejectDuplicateJSONKeys walks the whole document so duplicate keys cannot
+// alter the semantics of either the request envelope or nested action object.
+func rejectDuplicateJSONKeys(raw []byte) error {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	if err := scanJSONValue(decoder); err != nil {
+		return err
+	}
+	if _, err := decoder.Token(); err != io.EOF {
+		return errors.New("trailing JSON")
+	}
+	return nil
+}
+
+func scanJSONValue(decoder *json.Decoder) error {
+	token, err := decoder.Token()
+	if err != nil {
+		return err
+	}
+	delimiter, ok := token.(json.Delim)
+	if !ok {
+		return nil
+	}
+	switch delimiter {
+	case '{':
+		seen := make(map[string]struct{})
+		for decoder.More() {
+			token, err := decoder.Token()
+			key, ok := token.(string)
+			if err != nil || !ok {
+				return errors.New("invalid JSON object")
+			}
+			if _, exists := seen[key]; exists {
+				return errors.New("duplicate JSON key")
+			}
+			seen[key] = struct{}{}
+			if err := scanJSONValue(decoder); err != nil {
+				return err
+			}
+		}
+	case '[':
+		for decoder.More() {
+			if err := scanJSONValue(decoder); err != nil {
+				return err
+			}
+		}
+	default:
+		return errors.New("invalid JSON delimiter")
+	}
+	if token, err := decoder.Token(); err != nil || token != json.Delim(map[json.Delim]json.Delim{'{': '}', '[': ']'}[delimiter]) {
+		return errors.New("unterminated JSON")
+	}
+	return nil
 }
 
 func (s *Server) handleAdminSendNotification(w http.ResponseWriter, r *http.Request) {
 	var body adminSendNotificationBody
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxAdminBodyBytes)).Decode(&body); err != nil {
+	if err := decodeStrictAdminJSON(w, r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid JSON body.")
 		return
+	}
+	var action *models.NotificationAction
+	if len(body.Action) != 0 && !bytes.Equal(bytes.TrimSpace(body.Action), []byte("null")) {
+		var err error
+		action, err = models.ParseNotificationAction(body.Action)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "bad_request", "Invalid notification action.")
+			return
+		}
 	}
 	if body.Title == "" || body.Body == "" {
 		writeError(w, http.StatusBadRequest, "bad_request", "Title and body are required.")
@@ -401,7 +487,7 @@ func (s *Server) handleAdminSendNotification(w http.ResponseWriter, r *http.Requ
 		Type:   body.Type,
 		Title:  body.Title,
 		Body:   body.Body,
-		Action: models.NotificationActionPtr{Action: body.Action},
+		Action: models.NotificationActionPtr{Action: action},
 	}
 	if err := s.store.CreateNotification(r.Context(), n); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Internal error.")
