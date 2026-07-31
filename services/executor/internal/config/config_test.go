@@ -351,6 +351,46 @@ func TestLoadJWTConfiguration(t *testing.T) {
 	})
 }
 
+func TestLoadDelegatedEdgeSubject(t *testing.T) {
+	t.Parallel()
+	base := map[string]string{
+		EnvConfigFile:           "/tmp/executor.json",
+		EnvCredentialRefMapJSON: "{}",
+		EnvIdentityMapJSON:      "{}",
+		EnvDelegatedEdgeSubject: "edge-service",
+	}
+
+	got, err := Load(func(key string) (string, bool) { v, ok := base[key]; return v, ok })
+	if err != nil {
+		t.Fatalf("Load(): %v", err)
+	}
+	if got.DelegatedEdgeSubject != "edge-service" {
+		t.Errorf("DelegatedEdgeSubject = %q, want edge-service", got.DelegatedEdgeSubject)
+	}
+
+	for _, value := range []string{strings.Repeat("x", 257), "edge\nservice"} {
+		env := make(map[string]string, len(base))
+		for k, v := range base {
+			env[k] = v
+		}
+		env[EnvDelegatedEdgeSubject] = value
+		_, err := Load(func(key string) (string, bool) { v, ok := env[key]; return v, ok })
+		if err == nil || !strings.Contains(err.Error(), EnvDelegatedEdgeSubject) {
+			t.Fatalf("value %q: error = %v, want %s validation error", value, err, EnvDelegatedEdgeSubject)
+		}
+	}
+
+	jwtEnv := make(map[string]string, len(base)+1)
+	for k, v := range base {
+		jwtEnv[k] = v
+	}
+	jwtEnv[EnvJWTPublicKeyFile] = "/tmp/jwt.pem"
+	_, err = Load(func(key string) (string, bool) { v, ok := jwtEnv[key]; return v, ok })
+	if err == nil || !strings.Contains(err.Error(), EnvDelegatedEdgeSubject) {
+		t.Fatalf("JWT delegation error = %v, want %s validation error", err, EnvDelegatedEdgeSubject)
+	}
+}
+
 func TestLoadConfigReloadInterval(t *testing.T) {
 	t.Parallel()
 

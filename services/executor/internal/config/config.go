@@ -61,6 +61,10 @@ const (
 	// Service ingest endpoint. When unset or empty, only the local
 	// in-memory log is used and no remote forwarding occurs.
 	EnvLoggingServiceURL = "EXECUTOR_LOGGING_SERVICE_URL"
+	// EnvDelegatedEdgeSubject names the identityenv service subject permitted
+	// to assert X-User-ID. When unset, authenticated JWT/API-key passthrough
+	// remains authoritative and X-User-ID is ignored.
+	EnvDelegatedEdgeSubject = "EXECUTOR_DELEGATED_EDGE_SUBJECT"
 )
 
 // Config is the validated runtime configuration for Executor.
@@ -106,6 +110,11 @@ type Config struct {
 	// lifecycle events to the Logging Service /v1/logs/ingest endpoint. When
 	// empty, only the local in-memory execution log is used.
 	LoggingServiceURL string
+	// DelegatedEdgeSubject opts into delegated-edge authentication. The
+	// authenticated identityenv service token must resolve to exactly this
+	// subject before its X-User-ID assertion is accepted. Empty is the safe
+	// default passthrough mode.
+	DelegatedEdgeSubject string
 }
 
 // Load reads Executor configuration from lookupEnv. An unset value uses its
@@ -187,6 +196,20 @@ func Load(lookupEnv func(string) (string, bool)) (Config, error) {
 		}
 	}
 
+	config.DelegatedEdgeSubject, _ = lookupEnv(EnvDelegatedEdgeSubject)
+	config.DelegatedEdgeSubject = strings.TrimSpace(config.DelegatedEdgeSubject)
+	if config.DelegatedEdgeSubject != "" {
+		// Delegation relies on a distinct identityenv service token. JWT
+		// passthrough has no separate authenticated Edge channel, so it must
+		// never enable header assertions.
+		if config.JWTPublicKeyFile != "" {
+			return Config{}, fmt.Errorf("%s requires identityenv authentication", EnvDelegatedEdgeSubject)
+		}
+		if !validIdentitySubject(config.DelegatedEdgeSubject) {
+			return Config{}, fmt.Errorf("%s must be a valid identity subject", EnvDelegatedEdgeSubject)
+		}
+	}
+
 	// EXECUTOR_CONFIG_RELOAD_INTERVAL is optional. Zero (default) disables
 	// stat-based polling; only SIGHUP triggers reloads. A positive duration
 	// enables mtime+size polling.
@@ -262,6 +285,18 @@ func loadPositiveDuration(lookupEnv func(string) (string, bool), key string, def
 
 // validConfigServiceURL accepts only absolute HTTP(S) endpoints without URL
 // components that could carry credentials or alter the requested resource.
+func validIdentitySubject(value string) bool {
+	if len(value) == 0 || len(value) > 256 {
+		return false
+	}
+	for _, r := range value {
+		if r < 0x21 || r > 0x7e {
+			return false
+		}
+	}
+	return true
+}
+
 func validConfigServiceURL(raw string) bool {
 	u, err := url.Parse(raw)
 	if err != nil || u == nil {

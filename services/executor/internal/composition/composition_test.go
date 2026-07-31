@@ -646,6 +646,22 @@ func TestBuildWithJWTSource(t *testing.T) {
 	})
 }
 
+func TestBuildRejectsJWTDelegationConfiguration(t *testing.T) {
+	t.Parallel()
+
+	_, pub := generateEd25519KeyPair(t)
+	configPath := writeConfig(t, minimalEmptyConfig)
+	cfg := testConfigWithJWT(configPath, "{}", writeEd25519PublicKeyPEM(t, pub), "tokenmp-auth", "tokenmp-web")
+	cfg.DelegatedEdgeSubject = "edge-service"
+	_, err := Build(context.Background(), cfg, envLookup(map[string]string{
+		"EXECUTOR_CONFIG_FILE":             configPath,
+		"EXECUTOR_CREDENTIAL_REF_MAP_JSON": "{}",
+	}))
+	if !errors.Is(err, ErrIdentityResolver) {
+		t.Fatalf("Build() error = %v, want ErrIdentityResolver", err)
+	}
+}
+
 func TestBuildJWTSourceRejectsMissingPublicKeyFile(t *testing.T) {
 	t.Parallel()
 

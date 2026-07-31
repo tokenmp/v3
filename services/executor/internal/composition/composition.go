@@ -130,6 +130,13 @@ var supportedSDKPairs = map[execution.SDKClientKey]struct{}{
 //
 // Build performs Config Service fetch I/O only when ConfigServiceURL is configured. All errors are fail-closed and non-leaking.
 func Build(ctx context.Context, cfg config.Config, lookupEnv func(string) (string, bool)) (*App, error) {
+	// Config.Load rejects this combination. Keep the composition root
+	// fail-closed as well because tests and embedders may construct Config
+	// directly rather than loading environment variables first.
+	if cfg.DelegatedEdgeSubject != "" && cfg.JWTPublicKeyFile != "" {
+		return nil, ErrIdentityResolver
+	}
+
 	// ── Snapshot store + initial bootstrap from the selected config source ──
 	store := &snapshot.Store{}
 	var bootstrapErr error
@@ -249,7 +256,9 @@ func Build(ctx context.Context, cfg config.Config, lookupEnv func(string) (strin
 	// including unknown paths that will become 404, and keeps /healthz
 	// anonymous. CaptureRawBody sits inside it so rejected requests never
 	// read or parse their body.
-	authed := executorv1api.AuthMiddleware(identitySource)(executorv1api.CaptureRawBody(generated))
+	authed := executorv1api.AuthMiddlewareWithOptions(identitySource, executorv1api.AuthOptions{
+		DelegatedEdgeSubject: cfg.DelegatedEdgeSubject,
+	})(executorv1api.CaptureRawBody(generated))
 
 	// EdgeRequestIDMiddleware reads the X-Request-ID header set by the
 	// trusted Edge so Edge and executor log under the same request ID.

@@ -114,6 +114,38 @@ func TestProxyInjectsAutoModelIDsHeader(t *testing.T) {
 	}
 }
 
+// TestProxyForwardsUserIDOnlyWithServiceToken verifies that only the
+// service-token proxy path emits a delegated X-User-ID assertion.
+func TestProxyForwardsUserIDOnlyWithServiceToken(t *testing.T) {
+	for _, tc := range []struct {
+		name, serviceToken, wantUserID string
+	}{
+		{"delegated edge", "edge-service-token", "user-1"},
+		{"JWT passthrough", "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var got string
+			backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				got = r.Header.Get("X-User-ID")
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer backend.Close()
+
+			prx, err := New(backend.URL, tc.serviceToken, nil)
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+			req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader("{}"))
+			req.Header.Set("X-User-ID", "spoofed")
+			req = req.WithContext(identity.WithClaims(context.Background(), identity.Claims{Subject: "user-1"}))
+			prx.ServeHTTP(httptest.NewRecorder(), req)
+			if got != tc.wantUserID {
+				t.Fatalf("X-User-ID = %q, want %q", got, tc.wantUserID)
+			}
+		})
+	}
+}
+
 // TestProxyStripsClientSuppliedAutoModelIDs verifies a client-supplied
 // X-Auto-Model-IDs header is stripped (no spoofing in passthrough mode).
 func TestProxyStripsClientSuppliedAutoModelIDs(t *testing.T) {
