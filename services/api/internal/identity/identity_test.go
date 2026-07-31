@@ -6,9 +6,11 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -108,17 +110,30 @@ func TestJWTVerifierRejectsEmptyToken(t *testing.T) {
 	}
 }
 
-func TestNoopVerifierWhenNoKeyFile(t *testing.T) {
-	v, err := NewVerifier("", "iss", "aud", nil)
-	if err != nil {
-		t.Fatalf("NewVerifier: %v", err)
+func TestNewVerifierRequiresPublicKeyFile(t *testing.T) {
+	_, err := NewVerifier("", "iss", "aud", nil)
+	if !errors.Is(err, ErrPublicKeyFileRequired) {
+		t.Fatalf("NewVerifier() error = %v, want ErrPublicKeyFileRequired", err)
 	}
-	claims, err := v.Verify(context.Background(), "some-token")
+}
+
+func TestNewNoopVerifierRequiresExplicitOptIn(t *testing.T) {
+	claims, err := NewNoopVerifier().Verify(context.Background(), "some-token")
 	if err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
 	if claims.Subject != "some-token" {
 		t.Errorf("Subject = %q", claims.Subject)
+	}
+}
+
+func TestNewVerifierDoesNotLeakPublicKeyPath(t *testing.T) {
+	_, err := NewVerifier("/missing/sensitive-public-key.pem", "iss", "aud", nil)
+	if !errors.Is(err, ErrPublicKeyReadFailed) {
+		t.Fatalf("NewVerifier() error = %v, want ErrPublicKeyReadFailed", err)
+	}
+	if strings.Contains(err.Error(), "sensitive-public-key") {
+		t.Errorf("NewVerifier() error leaked key path: %v", err)
 	}
 }
 

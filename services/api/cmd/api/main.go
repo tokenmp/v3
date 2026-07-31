@@ -40,9 +40,15 @@ func run() error {
 
 	logger := slog.Default()
 
-	verifier, err := identity.NewVerifier(cfg.JWTPublicKeyFile, cfg.JWTIssuer, cfg.JWTAudience, logger)
-	if err != nil {
-		return fmt.Errorf("identity verifier: %w", err)
+	var verifier identity.Verifier
+	if cfg.JWTPublicKeyFile == "" {
+		logger.Warn("identity: using noop verifier because API_ALLOW_NOOP_AUTH=true")
+		verifier = identity.NewNoopVerifier()
+	} else {
+		verifier, err = identity.NewVerifier(cfg.JWTPublicKeyFile, cfg.JWTIssuer, cfg.JWTAudience, logger)
+		if err != nil {
+			return fmt.Errorf("identity verifier: %w", err)
+		}
 	}
 
 	// When Auth URL is configured, the edge also accepts API keys (sk- prefix)

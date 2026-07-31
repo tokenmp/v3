@@ -87,10 +87,7 @@ func (b *stubBackend) close() { b.srv.Close() }
 // token（noop verifier 直接把 token 当 subject，role="user"）。
 func newTestRouter(t *testing.T, loggingURL, billingURL string, st *settings.Store) (http.Handler, *panel.Handlers) {
 	t.Helper()
-	verifier, err := identity.NewVerifier("", "iss", "aud", nil)
-	if err != nil {
-		t.Fatalf("NewVerifier: %v", err)
-	}
+	verifier := identity.NewNoopVerifier()
 	h := panel.New(logging.NewClient(loggingURL), billing.NewClient(billingURL), st, nil)
 	r := chi.NewRouter()
 	r.Get("/api/v1/plans", h.ListPlans)
