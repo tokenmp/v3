@@ -273,7 +273,7 @@ export default function AdminNotificationsPage() {
                   <TableCell>
                     <Button
                       variant="ghost"
-                      size="icon"
+                      size="iconSm"
                       className="text-destructive hover:text-destructive"
                       onClick={() => handleDelete(n.id)}
                       disabled={deleteMutation.isPending}

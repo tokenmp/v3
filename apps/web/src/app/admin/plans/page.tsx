@@ -261,12 +261,12 @@ export default function AdminPlansPage() {
                         </Badge>
                       </TableCell>
                       <TableCell className="text-right">
-                        <Button variant="ghost" size="icon" onClick={() => openEdit(p)}>
+                        <Button variant="ghost" size="iconSm" onClick={() => openEdit(p)}>
                           <Pencil className="h-4 w-4" />
                         </Button>
                         <Button
                           variant="ghost"
-                          size="icon"
+                          size="iconSm"
                           className="text-destructive"
                           onClick={() => openDelete(p.id)}
                         >

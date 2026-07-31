@@ -196,12 +196,12 @@ export default function AdminAnnouncementsPage() {
                       </TableCell>
                       <TableCell>{a.publishedAt ? formatTime(a.publishedAt) : '—'}</TableCell>
                       <TableCell className="text-right">
-                        <Button variant="ghost" size="icon" onClick={() => openEdit(a)}>
+                        <Button variant="ghost" size="iconSm" onClick={() => openEdit(a)}>
                           <Pencil className="h-4 w-4" />
                         </Button>
                         <Button
                           variant="ghost"
-                          size="icon"
+                          size="iconSm"
                           className="text-destructive"
                           onClick={() => openDelete(a.id)}
                         >

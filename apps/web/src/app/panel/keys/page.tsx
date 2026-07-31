@@ -125,7 +125,7 @@ export default function KeysPage() {
                     <div className="flex items-center gap-1">
                       <Button
                         variant="ghost"
-                        size="icon"
+                        size="iconSm"
                         onClick={() => copyToClipboard(`${k.keyPrefix}…${k.keySuffix}`, '密钥')}
                         title="复制密钥"
                       >
@@ -133,7 +133,7 @@ export default function KeysPage() {
                       </Button>
                       <Button
                         variant="ghost"
-                        size="icon"
+                        size="iconSm"
                         onClick={() => setRotateTarget(k)}
                         title="轮换密钥"
                       >
@@ -141,7 +141,7 @@ export default function KeysPage() {
                       </Button>
                       <Button
                         variant="ghost"
-                        size="icon"
+                        size="iconSm"
                         onClick={() => setRevokeTarget(k)}
                         title="撤销密钥"
                       >
