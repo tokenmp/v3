@@ -70,9 +70,10 @@ export default function PanelModelsPage() {
       ) : (
         <>
           {/* Desktop table */}
-          <div className="hidden md:block rounded-lg border">
+          <div className="hidden md:block">
+          <div className="overflow-hidden rounded-lg border border-border bg-card">
             <Table>
-              <TableHeader>
+              <TableHeader className="bg-muted/30">
                 <TableRow>
                   <TableHead>模型 ID</TableHead>
                   <TableHead>能力</TableHead>
@@ -103,6 +104,7 @@ export default function PanelModelsPage() {
                 ))}
               </TableBody>
             </Table>
+          </div>
           </div>
 
           {/* Mobile card list */}

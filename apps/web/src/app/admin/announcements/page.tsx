@@ -167,8 +167,9 @@ export default function AdminAnnouncementsPage() {
         <>
           {/* Desktop table */}
           <div className="hidden md:block">
+            <div className="overflow-hidden rounded-lg border border-border bg-card">
             <Table>
-              <TableHeader>
+              <TableHeader className="bg-muted/30">
                 <TableRow>
                   <TableHead>标题</TableHead>
                   <TableHead>级别</TableHead>
@@ -212,6 +213,7 @@ export default function AdminAnnouncementsPage() {
                 })}
               </TableBody>
             </Table>
+          </div>
           </div>
 
           {/* Mobile cards */}

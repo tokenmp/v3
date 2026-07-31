@@ -179,11 +179,11 @@ export default function AdminProvidersPage() {
       </div>
 
       {/* Table */}
-      <div className="hidden md:block rounded-md border border-border bg-card">
-        <div className="overflow-x-auto">
+      <div className="hidden md:block">
+        <div className="overflow-hidden rounded-lg border border-border bg-card">
           <Table>
-            <TableHeader>
-              <TableRow className="bg-muted/30">
+            <TableHeader className="bg-muted/30">
+              <TableRow>
                 <TableHead>名称</TableHead>
                 <TableHead>显示名</TableHead>
                 <TableHead>Base URL</TableHead>
@@ -743,11 +743,10 @@ function EndpointsModal({
           ) : endpoints.length === 0 ? (
             <p className="py-8 text-center text-sm text-muted-foreground">暂无端点，点击「新建端点」添加</p>
           ) : (
-            <div className="rounded-md border border-border">
-              <div className="overflow-x-auto">
+            <div className="overflow-hidden rounded-lg border border-border bg-card">
                 <Table>
-                  <TableHeader>
-                    <TableRow className="bg-muted/30">
+                  <TableHeader className="bg-muted/30">
+                    <TableRow>
                       <TableHead className="text-xs">协议</TableHead>
                       <TableHead className="text-xs">路径</TableHead>
                       <TableHead className="text-xs">鉴权</TableHead>
@@ -798,7 +797,6 @@ function EndpointsModal({
                     ))}
                   </TableBody>
                 </Table>
-              </div>
             </div>
           )}
           <div>

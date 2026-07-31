@@ -470,8 +470,9 @@ function RouteRetryCard() {
 
         {/* Desktop table */}
         <div className="hidden md:block">
+          <div className="overflow-hidden rounded-lg border border-border bg-card">
           <Table>
-            <TableHeader>
+            <TableHeader className="bg-muted/30">
               <TableRow>
                 <TableHead>路由 ID</TableHead>
                 <TableHead>模型</TableHead>
@@ -510,6 +511,7 @@ function RouteRetryCard() {
               ))}
             </TableBody>
           </Table>
+        </div>
         </div>
 
         {/* Mobile card list */}

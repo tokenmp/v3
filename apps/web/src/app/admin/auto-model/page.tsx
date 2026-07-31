@@ -125,9 +125,10 @@ export default function AdminAutoModelPage() {
         <div className="rounded-lg border p-8 text-center text-sm text-muted-foreground">加载中…</div>
       ) : (
         <>
-        <div className="hidden md:block rounded-lg border">
+        <div className="hidden md:block">
+        <div className="overflow-hidden rounded-lg border border-border bg-card">
           <Table>
-            <TableHeader>
+            <TableHeader className="bg-muted/30">
               <TableRow>
                 <TableHead className="w-10">序</TableHead>
                 <TableHead>模型 ID</TableHead>
@@ -188,6 +189,7 @@ export default function AdminAutoModelPage() {
               })}
             </TableBody>
           </Table>
+        </div>
         </div>
 
         <div className="md:hidden space-y-3">

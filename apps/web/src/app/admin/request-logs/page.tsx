@@ -111,11 +111,11 @@ export default function AdminRequestLogsPage() {
       </div>
 
       {/* Desktop table */}
-      <div className="hidden md:block rounded-md border border-border bg-card">
-        <div className="overflow-x-auto">
+      <div className="hidden md:block">
+        <div className="overflow-hidden rounded-lg border border-border bg-card">
           <Table>
-            <TableHeader>
-              <TableRow className="bg-muted/30">
+            <TableHeader className="bg-muted/30">
+              <TableRow>
                 <TableHead className="text-xs whitespace-nowrap">请求ID</TableHead>
                 <TableHead className="text-xs whitespace-nowrap">用户</TableHead>
                 <TableHead className="text-xs whitespace-nowrap">模型</TableHead>

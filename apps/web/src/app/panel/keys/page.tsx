@@ -99,9 +99,9 @@ export default function KeysPage() {
 
       {/* Desktop table */}
       <div className="hidden md:block">
-        <Card>
+        <div className="overflow-hidden rounded-lg border border-border bg-card">
           <Table>
-            <TableHeader>
+            <TableHeader className="bg-muted/30">
               <TableRow>
                 <TableHead>名称</TableHead>
                 <TableHead>密钥</TableHead>
@@ -160,7 +160,7 @@ export default function KeysPage() {
               )}
             </TableBody>
           </Table>
-        </Card>
+        </div>
       </div>
 
       {/* Mobile card list */}

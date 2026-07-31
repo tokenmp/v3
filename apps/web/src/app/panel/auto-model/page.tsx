@@ -130,9 +130,9 @@ export default function PanelAutoModelPage() {
       {loading ? (
         <div className="rounded-lg border p-8 text-center text-sm text-muted-foreground">加载中…</div>
       ) : (
-        <div className="rounded-lg border">
+        <div className="overflow-hidden rounded-lg border border-border bg-card">
           <Table>
-            <TableHeader>
+            <TableHeader className="bg-muted/30">
               <TableRow>
                 <TableHead className="w-10">序</TableHead>
                 <TableHead>模型 ID</TableHead>

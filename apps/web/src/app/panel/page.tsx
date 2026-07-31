@@ -293,8 +293,9 @@ export default function OverviewPage() {
         </CardHeader>
         <CardContent>
           <div className="hidden md:block">
+            <div className="overflow-hidden rounded-lg border border-border bg-card">
             <Table>
-              <TableHeader>
+              <TableHeader className="bg-muted/30">
                 <TableRow>
                   <TableHead>时间</TableHead>
                   <TableHead>模型</TableHead>
@@ -335,6 +336,7 @@ export default function OverviewPage() {
                 )}
               </TableBody>
             </Table>
+          </div>
           </div>
 
           <div className="md:hidden space-y-3">

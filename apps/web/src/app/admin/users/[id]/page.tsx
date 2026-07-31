@@ -379,8 +379,9 @@ export default function AdminUserDetailPage() {
           {user.userPlans.length === 0 ? (
             <p className="text-sm text-muted-foreground py-4">暂无套餐</p>
           ) : (
+            <div className="overflow-hidden rounded-lg border border-border bg-card">
             <Table>
-              <TableHeader>
+              <TableHeader className="bg-muted/30">
                 <TableRow>
                   <TableHead>套餐</TableHead>
                   <TableHead>类型</TableHead>
@@ -426,6 +427,7 @@ export default function AdminUserDetailPage() {
                 ))}
               </TableBody>
             </Table>
+          </div>
           )}
         </CardContent>
       </Card>
@@ -439,8 +441,9 @@ export default function AdminUserDetailPage() {
           {user.apiKeys.length === 0 ? (
             <p className="text-sm text-muted-foreground py-4">暂无 API 密钥</p>
           ) : (
+            <div className="overflow-hidden rounded-lg border border-border bg-card">
             <Table>
-              <TableHeader>
+              <TableHeader className="bg-muted/30">
                 <TableRow>
                   <TableHead>名称</TableHead>
                   <TableHead>密钥</TableHead>
@@ -467,6 +470,7 @@ export default function AdminUserDetailPage() {
                 ))}
               </TableBody>
             </Table>
+          </div>
           )}
         </CardContent>
       </Card>
@@ -480,8 +484,9 @@ export default function AdminUserDetailPage() {
           {user.recentRequests.length === 0 ? (
             <p className="text-sm text-muted-foreground py-4">暂无请求记录</p>
           ) : (
+            <div className="overflow-hidden rounded-lg border border-border bg-card">
             <Table>
-              <TableHeader>
+              <TableHeader className="bg-muted/30">
                 <TableRow>
                   <TableHead>模型</TableHead>
                   <TableHead>状态</TableHead>
@@ -508,6 +513,7 @@ export default function AdminUserDetailPage() {
                 ))}
               </TableBody>
             </Table>
+          </div>
           )}
         </CardContent>
       </Card>
@@ -696,9 +702,9 @@ export default function AdminUserDetailPage() {
           ) : overrideHistory.length === 0 ? (
             <div className="py-8 text-center text-sm text-muted-foreground">暂无覆盖记录</div>
           ) : (
-            <div className="max-h-[420px] overflow-auto rounded-md border">
+            <div className="max-h-[420px] overflow-hidden rounded-lg border border-border bg-card">
               <Table>
-                <TableHeader>
+                <TableHeader className="bg-muted/30">
                   <TableRow>
                     <TableHead>类型</TableHead>
                     <TableHead>窗口</TableHead>

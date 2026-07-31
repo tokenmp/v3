@@ -153,9 +153,10 @@ export default function AdminModelsPage() {
       </div>
 
       {/* Table */}
-      <div className="hidden md:block overflow-x-auto rounded-md border border-border">
+      <div className="hidden md:block">
+      <div className="overflow-hidden rounded-lg border border-border bg-card">
         <Table>
-          <TableHeader>
+          <TableHeader className="bg-muted/30">
             <TableRow>
               <TableHead>ID</TableHead>
               <TableHead>显示名</TableHead>
@@ -231,6 +232,7 @@ export default function AdminModelsPage() {
             )}
           </TableBody>
         </Table>
+      </div>
       </div>
 
       {/* Mobile card list */}

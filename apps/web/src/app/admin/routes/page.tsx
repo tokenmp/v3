@@ -12,6 +12,14 @@ import {
 } from '@/components/ui/field';
 import { PublishStatusHint } from '@/components/publish-status-hint';
 import { PageHeader } from '@/components/page-header';
+import {
+  Table,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableHead,
+  TableCell,
+} from '@/components/ui/table';
 import type { AdminRouteConfig, AdminRouteCredential } from '@/types/admin';
 
 type StatusFilter = 'all' | 'active' | 'disabled';
@@ -176,19 +184,20 @@ export default function AdminRoutesPage() {
       ) : providerGroups.length === 0 ? (
         <div className="py-12 text-center text-sm text-muted-foreground">暂无路由配置</div>
       ) : (
-        <div className="overflow-x-auto rounded-lg border bg-card">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/50 text-xs text-muted-foreground">
-              <tr>
-                <th className="px-3 py-2 text-left font-medium">Provider</th>
-                <th className="px-3 py-2 text-left font-medium">范围</th>
-                <th className="px-3 py-2 text-left font-medium">账号</th>
-                <th className="px-3 py-2 text-left font-medium">能力</th>
-                <th className="px-3 py-2 text-left font-medium">上游 / 路由</th>
-                <th className="px-3 py-2 text-right font-medium">操作</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
+        <div className="hidden md:block">
+          <div className="overflow-hidden rounded-lg border border-border bg-card">
+            <Table>
+              <TableHeader className="bg-muted/30">
+                <TableRow>
+                  <TableHead>Provider</TableHead>
+                  <TableHead>范围</TableHead>
+                  <TableHead>账号</TableHead>
+                  <TableHead>能力</TableHead>
+                  <TableHead>上游 / 路由</TableHead>
+                  <TableHead className="text-right">操作</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
               {providerGroups.map((group) => (
                 <ProviderRouteRow
                   key={group.key}
@@ -201,8 +210,9 @@ export default function AdminRoutesPage() {
                   onConfigureStrategy={() => setStrategyGroup(group)}
                 />
               ))}
-            </tbody>
-          </table>
+              </TableBody>
+            </Table>
+          </div>
         </div>
       )}
 
@@ -249,15 +259,15 @@ function ProviderRouteRow({
 
   return (
     <>
-      <tr className="align-top hover:bg-muted/20">
-        <td className="px-3 py-2">
+      <TableRow className="align-top">
+        <TableCell>
           <button type="button" onClick={onToggle} className="font-mono text-sm font-medium text-primary hover:underline">
             {group.providerId}
           </button>
-        </td>
-        <td className="px-3 py-2 text-xs text-muted-foreground">{summary}</td>
-        <td className="px-3 py-2 text-xs text-muted-foreground">{credentialCount ? `${credentialCount.active} / ${credentialCount.total}` : '—'}</td>
-        <td className="px-3 py-2">
+        </TableCell>
+        <TableCell className="text-xs text-muted-foreground">{summary}</TableCell>
+        <TableCell className="text-xs text-muted-foreground">{credentialCount ? `${credentialCount.active} / ${credentialCount.total}` : '—'}</TableCell>
+        <TableCell>
           <div className="flex flex-wrap gap-1">
             {enabledProtocols.length > 0 ? enabledProtocols.map((protocol) => (
               <span key={protocol} className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
@@ -265,11 +275,11 @@ function ProviderRouteRow({
               </span>
             )) : <span className="text-xs text-muted-foreground">暂无</span>}
           </div>
-        </td>
-        <td className="max-w-[320px] px-3 py-2 text-xs text-muted-foreground">
+        </TableCell>
+        <TableCell className="max-w-[320px] text-xs text-muted-foreground">
           <span className="line-clamp-2">{upstreamSummary}</span>
-        </td>
-        <td className="px-3 py-2 text-right">
+        </TableCell>
+        <TableCell className="text-right">
           <div className="inline-flex items-center gap-2">
             <button type="button" onClick={onToggle} className="rounded-sm border px-2 py-1 text-xs hover:bg-accent">
               {expanded ? '收起' : '查看'}
@@ -281,19 +291,19 @@ function ProviderRouteRow({
               </>
             )}
           </div>
-        </td>
-      </tr>
+        </TableCell>
+      </TableRow>
       {expanded ? (
-        <tr className="bg-muted/10">
-          <td colSpan={6} className="px-3 py-3 text-xs text-muted-foreground">
+        <TableRow className="bg-muted/10 hover:bg-muted/10">
+          <TableCell colSpan={6} className="py-3 text-xs text-muted-foreground">
             <div className="grid gap-2 sm:grid-cols-3">
               <div><span className="text-foreground">覆盖模型：</span>{coveredModels.slice(0, 10).join(' · ')}{coveredModels.length > 10 ? ` 等 ${coveredModels.length} 个` : ''}</div>
               <div><span className="text-foreground">能力：</span>{enabledProtocols.length > 0 ? enabledProtocols.map(protocolLabel).join(' · ') : '暂无'}</div>
               <div><span className="text-foreground">路由：</span>{group.routes.length} 条</div>
               {!isAllModels ? <div className="sm:col-span-3"><span className="text-foreground">上游模型：</span>{upstreamModels.length > 0 ? upstreamModels.join(' · ') : '未配置'}</div> : null}
             </div>
-          </td>
-        </tr>
+          </TableCell>
+        </TableRow>
       ) : null}
     </>
   );
@@ -478,68 +488,69 @@ function GroupAccountsModal({ group, onClose }: { group: RouteProviderGroup; onC
             当前 Provider 暂无账号，请先在“账号管理”中为 {group.providerId} 添加账号。
           </div>
         ) : (
-          <div className="overflow-x-auto rounded-lg border">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/40 text-xs text-muted-foreground">
-                <tr>
-                  <th className="w-16 px-3 py-2 text-left font-medium">启用</th>
-                  <th className="px-3 py-2 text-left font-medium">账号</th>
-                  <th className="w-24 px-3 py-2 text-left font-medium">优先级</th>
-                  <th className="w-24 px-3 py-2 text-left font-medium">RPM</th>
-                  <th className="w-24 px-3 py-2 text-left font-medium">TPM</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
+          <div className="overflow-hidden rounded-lg border border-border bg-card">
+            <Table>
+              <TableHeader className="bg-muted/30">
+                <TableRow>
+                  <TableHead className="w-16">启用</TableHead>
+                  <TableHead>账号</TableHead>
+                  <TableHead className="w-24">优先级</TableHead>
+                  <TableHead className="w-24">RPM</TableHead>
+                  <TableHead className="w-24">TPM</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {rows.map((row) => (
-                  <tr key={row.logicalId} className="hover:bg-muted/20">
-                    <td className="px-3 py-2 align-middle">
+                  <TableRow key={row.logicalId}>
+                    <TableCell className="align-middle">
                       <input
                         type="checkbox"
                         checked={row.selected}
                         onChange={(e) => patchRow(row.logicalId, { enabled: e.target.checked })}
                         aria-label={`启用账号 ${row.logicalId}`}
                       />
-                    </td>
-                    <td className="min-w-[280px] px-3 py-2 align-middle">
+                    </TableCell>
+                    <TableCell className="min-w-[280px] align-middle">
                       <div className="flex min-w-0 items-center gap-2">
                         <span className="font-mono text-xs font-medium" title={row.logicalId}>
                           {shortCredentialLabel(row.logicalId, group.providerId)}
                         </span>
-                        {row.selected ? <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">已选</span> : null}
+                        {row.selected ? <span className="rounded bg-primary/10 px-1 px-1.5 py-0.5 text-[10px] text-primary">已选</span> : null}
                       </div>
                       <div className="mt-0.5 text-xs text-muted-foreground">
                         {row.credential.keyPrefix || '****'}…{row.credential.keySuffix || '****'}
                         {row.credentialIds.length > 1 ? ` · ${row.credentialIds.length} 条能力合并` : ''}
                       </div>
-                    </td>
-                    <td className="px-3 py-2 align-middle">
+                    </TableCell>
+                    <TableCell className="align-middle">
                       <CompactNumberInput
                         value={row.priority}
                         onChange={(v) => patchRow(row.logicalId, { priority: v ?? 0 })}
                         min={0}
                       />
-                    </td>
-                    <td className="px-3 py-2 align-middle">
+                    </TableCell>
+                    <TableCell className="align-middle">
                       <CompactNumberInput
                         value={row.rpm}
                         onChange={(v) => patchRow(row.logicalId, { rpm: v })}
                         min={1}
                         placeholder="继承"
                       />
-                    </td>
-                    <td className="px-3 py-2 align-middle">
+                    </TableCell>
+                    <TableCell className="align-middle">
                       <CompactNumberInput
                         value={row.tpm}
                         onChange={(v) => patchRow(row.logicalId, { tpm: v })}
                         min={1}
                         placeholder="继承"
                       />
-                    </td>
-                  </tr>
+                    </TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
-          </div>        )}
+              </TableBody>
+            </Table>
+          </div>
+        )}
       </div>
     </Modal>
   );

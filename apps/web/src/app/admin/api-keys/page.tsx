@@ -85,11 +85,11 @@ export default function AdminApiKeysPage() {
       </div>
 
       {/* 表格 */}
-      <div className="hidden md:block rounded-md border border-border bg-card">
-        <div className="overflow-x-auto">
+      <div className="hidden md:block">
+        <div className="overflow-hidden rounded-lg border border-border bg-card">
           <Table>
-            <TableHeader>
-              <TableRow className="bg-muted/30">
+            <TableHeader className="bg-muted/30">
+              <TableRow>
                 <TableHead className="text-xs">用户</TableHead>
                 <TableHead className="text-xs">名称</TableHead>
                 <TableHead className="text-xs">密钥</TableHead>

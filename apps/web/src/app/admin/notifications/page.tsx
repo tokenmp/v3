@@ -230,9 +230,9 @@ export default function AdminNotificationsPage() {
 
       {/* Desktop table */}
       <div className="hidden md:block">
-        <Card>
+        <div className="overflow-hidden rounded-lg border border-border bg-card">
           <Table>
-            <TableHeader>
+            <TableHeader className="bg-muted/30">
               <TableRow>
                 <TableHead>接收者</TableHead>
                 <TableHead>类型</TableHead>
@@ -292,7 +292,7 @@ export default function AdminNotificationsPage() {
               )}
             </TableBody>
           </Table>
-        </Card>
+        </div>
       </div>
 
       {/* Mobile card list */}

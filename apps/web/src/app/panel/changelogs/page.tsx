@@ -110,9 +110,9 @@ export default function ChangelogsPage() {
         <>
           {/* Desktop table */}
           <div className="hidden md:block">
-            <Card>
+            <div className="overflow-hidden rounded-lg border border-border bg-card">
               <Table>
-                <TableHeader>
+                <TableHeader className="bg-muted/30">
                   <TableRow>
                     <TableHead>版本</TableHead>
                     <TableHead>标题</TableHead>
@@ -126,7 +126,7 @@ export default function ChangelogsPage() {
                   ))}
                 </TableBody>
               </Table>
-            </Card>
+            </div>
           </div>
 
           {/* Mobile card list */}

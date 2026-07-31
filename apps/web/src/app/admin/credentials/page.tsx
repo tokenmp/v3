@@ -165,11 +165,11 @@ export default function AdminCredentialsPage() {
       </div>
 
       {/* Table */}
-      <div className="hidden md:block rounded-md border border-border bg-card">
-        <div className="overflow-x-auto">
+      <div className="hidden md:block">
+        <div className="overflow-hidden rounded-lg border border-border bg-card">
           <Table>
-            <TableHeader>
-              <TableRow className="bg-muted/30">
+            <TableHeader className="bg-muted/30">
+              <TableRow>
                 <TableHead className="text-xs">ID</TableHead>
                 <TableHead className="text-xs">Provider</TableHead>
                 <TableHead className="text-xs">密钥前缀/后缀</TableHead>

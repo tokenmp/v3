@@ -192,11 +192,11 @@ export default function AdminUsersPage() {
       </div>
 
       {/* 表格 */}
-      <div className="hidden md:block rounded-md border border-border bg-card">
-        <div className="overflow-x-auto">
+      <div className="hidden md:block">
+        <div className="overflow-hidden rounded-lg border border-border bg-card">
           <Table>
-            <TableHeader>
-              <TableRow className="bg-muted/30">
+            <TableHeader className="bg-muted/30">
+              <TableRow>
                 <TableHead className="text-xs">邮箱</TableHead>
                 <TableHead className="text-xs">角色</TableHead>
                 <TableHead className="text-xs">状态</TableHead>
