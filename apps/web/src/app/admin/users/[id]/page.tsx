@@ -30,6 +30,7 @@ import { ArrowLeft, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import type { ApiKey, UserPlan, RequestLog } from '@/types';
 import type { AdminLimitOverride, AdminUserPlanInput, LimitOverrideScope } from '@/types/admin';
+import { PageHeader } from '@/components/page-header';
 
 function formatTime(iso: string | null) {
   if (!iso) return '—';
@@ -320,11 +321,12 @@ export default function AdminUserDetailPage() {
 
   return (
     <div className="space-y-6">
-      {/* Back link */}
-      <Link href="/admin/users" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-        <ArrowLeft className="h-4 w-4" />
-        返回用户列表
-      </Link>
+      <PageHeader title="用户详情" actions={
+        <Link href="/admin/users" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+          <ArrowLeft className="h-4 w-4" />
+          返回用户列表
+        </Link>
+      } />
 
       {/* User info card */}
       <Card>

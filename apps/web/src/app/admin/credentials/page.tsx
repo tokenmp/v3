@@ -18,6 +18,8 @@ import {
   TextField,
 } from '@/components/ui/field';
 import { StatusBadge } from '@/lib/status-badge';
+import { Button } from '@/components/ui/button';
+import { PageHeader } from '@/components/page-header';
 import { PublishStatusHint } from '@/components/publish-status-hint';
 import {
   Table,
@@ -136,12 +138,7 @@ export default function AdminCredentialsPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-2">
-        <h1 className="text-lg font-semibold">上游账号</h1>
-        <div className="ml-auto">
-          <PublishStatusHint />
-        </div>
-      </div>
+      <PageHeader title="上游账号" actions={<PublishStatusHint />} />
 
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-2">
@@ -157,14 +154,14 @@ export default function AdminCredentialsPage() {
           <FilterChip label="启用" active={statusF === 'active'} onClick={() => setStatusF('active')} />
           <FilterChip label="停用" active={statusF === 'disabled'} onClick={() => setStatusF('disabled')} />
         </div>
-        <button
+        <Button
           type="button"
+          size="sm"
           onClick={() => setCreateOpen(true)}
-          className="inline-flex h-[var(--control-height-sm)] items-center gap-1.5 rounded-sm bg-primary px-3 text-xs font-medium text-primary-foreground hover:opacity-90"
         >
           <Plus className="size-3.5" />
           新建账号
-        </button>
+        </Button>
       </div>
 
       {/* Table */}

@@ -11,6 +11,7 @@ import {
   inputCls,
 } from '@/components/ui/field';
 import { PublishStatusHint } from '@/components/publish-status-hint';
+import { PageHeader } from '@/components/page-header';
 import type { AdminRouteConfig, AdminRouteCredential } from '@/types/admin';
 
 type StatusFilter = 'all' | 'active' | 'disabled';
@@ -129,12 +130,7 @@ export default function AdminRoutesPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-2">
-        <h1 className="text-lg font-semibold">路由管理</h1>
-        <div className="ml-auto">
-          <PublishStatusHint />
-        </div>
-      </div>
+      <PageHeader title="路由管理" actions={<PublishStatusHint />} />
 
       {/* 工具栏：模型过滤 + 搜索 + 状态筛选 */}
       <div className="flex flex-wrap items-center gap-2">

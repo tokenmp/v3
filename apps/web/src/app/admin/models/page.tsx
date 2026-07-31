@@ -22,6 +22,9 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { Button } from '@/components/ui/button';
+import { Switch } from '@/components/ui/switch';
+import { PageHeader } from '@/components/page-header';
 import { cn } from '@/lib/utils';
 import type { AdminModelConfig } from '@/types/admin';
 
@@ -118,12 +121,7 @@ export default function AdminModelsPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <h1 className="text-lg font-semibold">模型配置</h1>
-        <div className="ml-auto">
-          <PublishStatusHint />
-        </div>
-      </div>
+      <PageHeader title="模型配置" actions={<PublishStatusHint />} />
 
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-2">
@@ -144,14 +142,14 @@ export default function AdminModelsPage() {
             />
           ))}
         </div>
-        <button
+        <Button
           type="button"
+          size="sm"
           onClick={() => setCreating(true)}
-          className="inline-flex h-[var(--control-height-sm)] items-center gap-1.5 rounded-sm bg-primary px-3 text-xs font-medium text-primary-foreground hover:opacity-90"
         >
           <Plus className="size-3.5" />
           新建模型
-        </button>
+        </Button>
       </div>
 
       {/* Table */}
@@ -533,21 +531,11 @@ function ModelFormModal({
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <span className="text-sm">启用 Thinking</span>
-            <button
-              type="button"
-              onClick={() => setThinkingSupported(!thinkingSupported)}
-              className={cn(
-                'relative inline-flex h-6 w-11 items-center rounded-full transition-colors',
-                thinkingSupported ? 'bg-primary' : 'bg-muted',
-              )}
-            >
-              <span
-                className={cn(
-                  'inline-block h-4 w-4 transform rounded-full bg-white transition-transform',
-                  thinkingSupported ? 'translate-x-6' : 'translate-x-1',
-                )}
-              />
-            </button>
+            <Switch
+              checked={thinkingSupported}
+              onChange={setThinkingSupported}
+              label="启用 Thinking"
+            />
           </div>
 
           {thinkingSupported && (

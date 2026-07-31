@@ -7,6 +7,7 @@ import { adminMobileMoreGroups } from '@/lib/admin-nav';
 import { useAuthStore } from '@/lib/auth';
 import { Card, CardContent } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
+import { PageHeader } from '@/components/page-header';
 
 const SERVICES = [
   { name: 'Edge/BFF', url: '/healthz' },
@@ -72,7 +73,7 @@ export default function AdminMorePage() {
 
   return (
     <div className="space-y-5 md:hidden">
-      <h1 className="text-lg font-semibold px-1">更多</h1>
+      <PageHeader title="更多" />
 
       {/* Account info card */}
       <Card>

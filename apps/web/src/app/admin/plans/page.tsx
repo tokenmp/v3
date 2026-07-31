@@ -28,6 +28,7 @@ import { ConfirmDialog } from '@/components/confirm-dialog';
 import { Plus, Pencil, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { AdminPlan, AdminPlanInput } from '@/types/admin';
+import { PageHeader } from '@/components/page-header';
 
 const PLAN_TYPE_OPTIONS: { value: AdminPlanInput['planType']; label: string }[] = [
   { value: 'coding', label: '编程' },
@@ -212,13 +213,12 @@ export default function AdminPlansPage() {
 
   return (
     <div className="space-y-6">
-      {/* Top bar */}
-      <div className="flex justify-end">
+      <PageHeader title="套餐管理" description="管理计费套餐" actions={
         <Button onClick={openCreate}>
           <Plus />
           新建套餐
         </Button>
-      </div>
+      } />
 
       {plans.length === 0 ? (
         <div className="py-12 text-center text-muted-foreground">暂无套餐</div>

@@ -29,6 +29,7 @@ import { ConfirmDialog } from '@/components/confirm-dialog';
 import { Plus, Pencil, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { AdminAnnouncement, AdminAnnouncementInput } from '@/types/admin';
+import { PageHeader } from '@/components/page-header';
 
 function formatTime(iso: string) {
   return new Date(iso).toLocaleString('zh-CN');
@@ -153,13 +154,12 @@ export default function AdminAnnouncementsPage() {
 
   return (
     <div className="space-y-6">
-      {/* Top bar */}
-      <div className="flex justify-end">
+      <PageHeader title="公告管理" description="发布与管理公告" actions={
         <Button onClick={openCreate}>
           <Plus />
           新建公告
         </Button>
-      </div>
+      } />
 
       {announcements.length === 0 ? (
         <div className="py-12 text-center text-muted-foreground">暂无公告</div>

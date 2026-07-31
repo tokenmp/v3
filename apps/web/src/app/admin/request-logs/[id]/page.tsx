@@ -41,6 +41,7 @@ import {
   Gauge,
   Globe,
 } from 'lucide-react';
+import { PageHeader } from '@/components/page-header';
 
 /* -------------------------------------------------------------------------- */
 /* Helpers                                                                     */
@@ -425,10 +426,7 @@ export default function RequestLogDetailPage() {
         <CardContent className="flex flex-col gap-4 p-4 sm:p-6">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="space-y-1.5 min-w-0">
-              <div className="flex items-center gap-2.5">
-                <h1 className="text-lg font-semibold">请求详情</h1>
-                <Badge variant={st.tone}>{st.label}</Badge>
-              </div>
+              <PageHeader title="请求详情" actions={<Badge variant={st.tone}>{st.label}</Badge>} />
               <div className="flex items-center gap-1.5">
                 <span className="font-mono text-sm text-muted-foreground break-all">{log.requestId}</span>
                 <CopyButton text={log.requestId} />

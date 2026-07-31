@@ -15,6 +15,7 @@ import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { toast } from 'sonner';
 import type { AdminApiKey } from '@/types/admin';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
+import { PageHeader } from '@/components/page-header';
 
 function formatTime(iso: string | null) {
   return iso ? new Date(iso).toLocaleString('zh-CN') : '—';
@@ -63,7 +64,7 @@ export default function AdminApiKeysPage() {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-lg font-semibold">API 密钥</h1>
+      <PageHeader title="API 密钥" description="管理用户 API 密钥" />
 
       {/* 工具栏：搜索框左 + 筛选 chip 右 */}
       <div className="flex flex-wrap items-center gap-2">

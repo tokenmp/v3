@@ -30,6 +30,7 @@ import { Markdown } from '@/components/markdown';
 import { Plus, Pencil, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { AdminChangelog, AdminChangelogInput } from '@/types/admin';
+import { PageHeader } from '@/components/page-header';
 
 function formatTime(iso: string) {
   return new Date(iso).toLocaleString('zh-CN');
@@ -144,13 +145,12 @@ export default function AdminChangelogsPage() {
 
   return (
     <div className="space-y-6">
-      {/* Top bar */}
-      <div className="flex justify-end">
+      <PageHeader title="版本日志" description="发布与管理版本日志" actions={
         <Button onClick={openCreate}>
           <Plus className="mr-2 h-4 w-4" />
           新建版本
         </Button>
-      </div>
+      } />
 
       {/* Loading */}
       {isLoading && (

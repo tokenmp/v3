@@ -22,6 +22,7 @@ import {
   truncateUA,
   thinkingLabel,
 } from '@/lib/request-log-metrics';
+import { PageHeader } from '@/components/page-header';
 
 function formatTime(iso: string) {
   if (!iso) return '-';
@@ -84,7 +85,7 @@ export default function AdminRequestLogsPage() {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-lg font-semibold">请求日志</h1>
+      <PageHeader title="请求日志" description="查看 API 请求记录" />
 
       {/* 工具栏：搜索框左 + 筛选 chip 右 */}
       <div className="flex flex-wrap items-center gap-2">

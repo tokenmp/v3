@@ -21,6 +21,7 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
+import { PageHeader } from '@/components/page-header';
 
 function formatTime(iso: string | null) {
   return iso ? new Date(iso).toLocaleString('zh-CN') : '—';
@@ -167,6 +168,8 @@ export default function AdminUsersPage() {
 
   return (
     <div className="space-y-4">
+      <PageHeader title="用户管理" description="管理平台用户" />
+
       {/* 工具栏：搜索框左 + 筛选 chip 右 */}
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex flex-1 items-center gap-2">

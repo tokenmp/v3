@@ -6,6 +6,7 @@ import { ArrowDown, ArrowUp, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { adminConfigApi } from '@/lib/api/admin';
 import { PublishStatusHint } from '@/components/publish-status-hint';
+import { PageHeader } from '@/components/page-header';
 import {
   Table,
   TableBody,
@@ -100,12 +101,7 @@ export default function AdminAutoModelPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-2">
-        <h1 className="text-lg font-semibold">Auto 模型</h1>
-        <div className="ml-auto">
-          <PublishStatusHint />
-        </div>
-      </div>
+      <PageHeader title="Auto 模型" actions={<PublishStatusHint />} />
 
       <p className="text-sm text-muted-foreground">
         客户端请求 <code className="rounded bg-muted px-1">model=auto</code> 时，executor 从下方已选模型池中按顺序选第一个可用的。拖动顺序或勾选模型，保存后到系统设置统一发布生效。

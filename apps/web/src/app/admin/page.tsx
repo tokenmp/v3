@@ -22,6 +22,7 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from 'recharts';
+import { PageHeader } from '@/components/page-header';
 
 /* -------------------------------------------------------------------------- */
 /* Helpers                                                                     */
@@ -212,6 +213,8 @@ export default function AdminDashboardPage() {
 
   return (
     <div className="space-y-6">
+      <PageHeader title="管理面板" description="平台运营概览" />
+
       {/* ── Today snapshot ── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard

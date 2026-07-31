@@ -10,10 +10,7 @@ import {
 } from '@/components/ui/card';
 import { CompileButton } from '@/components/compile-button';
 import { Checkbox } from '@/components/ui/checkbox';
-import {
-  TableCell,
-  TableRow,
-} from '@/components/ui/table';
+import { PageHeader } from '@/components/page-header';
 import { cn } from '@/lib/utils';
 
 function InfoRow({ label, value }: { label: string; value: string }) {
@@ -52,30 +49,30 @@ function ServiceStatusRow({ name, url, port, via }: { name: string; url: string;
 
   return (
     <>
-      <TableRow className="hidden md:table-row">
-        <TableCell className="font-medium text-sm">{name}</TableCell>
-        <TableCell className="text-xs text-muted-foreground tabular-nums">:{port ?? '—'}{via ? ` (${via})` : ''}</TableCell>
-        <TableCell>
+      <div className="hidden md:flex items-center justify-between rounded-lg border bg-card p-3">
+        <div className="min-w-0">
+          <p className="font-medium text-sm">{name}</p>
+          <p className="text-xs text-muted-foreground tabular-nums">:{port ?? '—'}{via ? ` (${via})` : ''}</p>
+        </div>
+        <span
+          className={cn(
+            'inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-medium',
+            isLoading
+              ? 'bg-muted text-muted-foreground'
+              : isUp
+                ? 'bg-success/15 text-success'
+                : 'bg-destructive/15 text-destructive',
+          )}
+        >
           <span
             className={cn(
-              'inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-medium',
-              isLoading
-                ? 'bg-muted text-muted-foreground'
-                : isUp
-                  ? 'bg-success/15 text-success'
-                  : 'bg-destructive/15 text-destructive',
+              'size-1.5 rounded-full',
+              isLoading ? 'bg-muted-foreground' : isUp ? 'bg-success' : 'bg-destructive',
             )}
-          >
-            <span
-              className={cn(
-                'size-1.5 rounded-full',
-                isLoading ? 'bg-muted-foreground' : isUp ? 'bg-success' : 'bg-destructive',
-              )}
-            />
-            {isLoading ? '检查中…' : isUp ? '运行中' : '不可用'}
-          </span>
-        </TableCell>
-      </TableRow>
+          />
+          {isLoading ? '检查中…' : isUp ? '运行中' : '不可用'}
+        </span>
+      </div>
       <div className="md:hidden flex items-center justify-between rounded-lg border bg-card p-3">
         <div className="min-w-0">
           <p className="text-sm font-medium truncate">{name}</p>
@@ -110,6 +107,8 @@ export default function AdminSettingsPage() {
 
   return (
     <div className="grid gap-6">
+      <PageHeader title="系统设置" description="平台信息与配置" />
+
       {/* 平台信息 */}
       <Card>
         <CardHeader>

@@ -27,6 +27,7 @@ import {
   ResponsiveContainer,
   Legend,
 } from 'recharts';
+import { PageHeader } from '@/components/page-header';
 
 /* -------------------------------------------------------------------------- */
 /* Helpers                                                                     */
@@ -221,22 +222,24 @@ export default function AdminBillingUsagePage() {
 
   return (
     <div className="space-y-6">
-      {/* ── Header row ── */}
-      <div className="flex items-center justify-between">
-        <span className="text-lg font-semibold">用量统计</span>
-        <div className="flex gap-1">
-          {DAY_OPTIONS.map((d) => (
-            <Button
-              key={d}
-              variant={days === d ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => setDays(d)}
-            >
-              {d}天
-            </Button>
-          ))}
-        </div>
-      </div>
+      <PageHeader
+        title="用量统计"
+        description="查看平台用量趋势"
+        actions={
+          <div className="flex gap-1">
+            {DAY_OPTIONS.map((d) => (
+              <Button
+                key={d}
+                variant={days === d ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setDays(d)}
+              >
+                {d}天
+              </Button>
+            ))}
+          </div>
+        }
+      />
 
       {/* ── Overview cards ── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

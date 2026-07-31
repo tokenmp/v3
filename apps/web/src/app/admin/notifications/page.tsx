@@ -28,6 +28,7 @@ import { ConfirmDialog } from '@/components/confirm-dialog';
 import { Plus, Trash2, UserRound, X } from 'lucide-react';
 import { toast } from 'sonner';
 import type { AdminNotificationInput, AdminUser } from '@/types/admin';
+import { PageHeader } from '@/components/page-header';
 
 const BROADCAST_USER_ID = '00000000-0000-0000-0000-000000000000';
 
@@ -220,13 +221,12 @@ export default function AdminNotificationsPage() {
 
   return (
     <div className="space-y-6">
-      {/* Top bar */}
-      <div className="flex justify-between">
+      <PageHeader title="通知管理" description="发送与管理通知" actions={
         <Button onClick={() => setSendOpen(true)}>
           <Plus className="mr-1 h-4 w-4" />
           发送通知
         </Button>
-      </div>
+      } />
 
       {/* Desktop table */}
       <div className="hidden md:block">
