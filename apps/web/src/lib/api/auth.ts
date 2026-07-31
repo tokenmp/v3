@@ -1,5 +1,6 @@
+import { parseApiError } from '@/lib/api-error';
 import { request } from '@/lib/api/core';
-import type { TokenResponse, User } from '@/types';
+import type { AccessTokenResponse, User } from '@/types';
 
 export interface RegisterInput {
   email: string;
@@ -18,28 +19,38 @@ export interface ChangePasswordInput {
 
 export const authApi = {
   register: (input: RegisterInput) =>
-    request<TokenResponse>('/api/v1/auth/register', {
+    request<User>('/api/v1/auth/register', {
       method: 'POST',
       body: input,
       auth: false,
     }),
 
-  login: (input: LoginInput) =>
-    request<TokenResponse>('/api/v1/auth/login', {
+  login: async (input: LoginInput): Promise<AccessTokenResponse> => {
+    const res = await fetch('/api/auth/session/login', {
       method: 'POST',
-      body: input,
-      auth: false,
-    }),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+      credentials: 'same-origin',
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw parseApiError(res, body);
+    }
+    return res.json() as Promise<AccessTokenResponse>;
+  },
 
-  logout: (refreshToken: string) =>
-    request<void>('/api/v1/auth/logout', {
+  logout: () =>
+    request<void>('/api/auth/session/logout', {
       method: 'POST',
-      body: { refresh_token: refreshToken },
+      auth: false,
       noContent: true,
+      baseUrl: '',
     }),
 
-  logoutAll: () =>
-    request<void>('/api/v1/auth/logout-all', { method: 'POST', noContent: true }),
+  logoutAll: async () => {
+    await request<void>('/api/v1/auth/logout-all', { method: 'POST', noContent: true });
+    await authApi.logout();
+  },
 
   me: () => request<User>('/api/v1/auth/me'),
 

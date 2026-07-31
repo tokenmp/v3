@@ -39,7 +39,6 @@ export default function PanelSettingsPage() {
   const router = useRouter();
   const qc = useQueryClient();
   const user = useAuthStore((s) => s.user);
-  const refreshToken = useAuthStore((s) => s.refreshToken);
   const logout = useAuthStore((s) => s.logout);
 
   const { data: settings } = useQuery({
@@ -65,7 +64,7 @@ export default function PanelSettingsPage() {
   });
 
   const logoutMutation = useMutation({
-    mutationFn: () => (refreshToken ? authApi.logout(refreshToken) : Promise.resolve()),
+    mutationFn: authApi.logout,
     onSuccess: () => { logout(); router.push('/login'); },
     onError: () => { logout(); router.push('/login'); },
   });

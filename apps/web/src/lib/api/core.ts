@@ -1,6 +1,6 @@
 import { useAuthStore } from '@/lib/auth';
 import { networkError, parseApiError } from '@/lib/api-error';
-import type { ApiErrorBody, TokenResponse } from '@/types';
+import type { AccessTokenResponse, ApiErrorBody } from '@/types';
 
 /** Envelope error response: {code: number, data: null, message: string}. */
 interface EnvelopeError {
@@ -17,18 +17,17 @@ export const NOTICE_BASE = process.env.NEXT_PUBLIC_NOTICE_API_BASE ?? '';
 
 let refreshing: Promise<boolean> | null = null;
 
-async function refreshTokens(): Promise<boolean> {
-  const { refreshToken, setTokens, logout } = useAuthStore.getState();
-  if (!refreshToken) return false;
+export async function refreshTokens(): Promise<boolean> {
+  const { setTokens, logout } = useAuthStore.getState();
 
   if (refreshing) return refreshing;
 
   refreshing = (async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/v1/auth/refresh`, {
+      const res = await fetch('/api/auth/session/refresh', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refresh_token: refreshToken }),
+        credentials: 'same-origin',
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => null));
@@ -36,7 +35,7 @@ async function refreshTokens(): Promise<boolean> {
       }
       const json = await res.json();
       // Unwrap {code, data, message} envelope.
-      const tokens = (json?.code === 0 ? json.data : json) as TokenResponse;
+      const tokens = (json?.code === 0 ? json.data : json) as AccessTokenResponse;
       setTokens(tokens);
       return true;
     } catch {

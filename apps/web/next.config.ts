@@ -1,10 +1,51 @@
 import type { NextConfig } from 'next';
 import { resolve } from 'node:path';
 
+const connectSrc = [
+  "'self'",
+  ...[process.env.NEXT_PUBLIC_API_BASE, process.env.NEXT_PUBLIC_BIZ_API_BASE, process.env.NEXT_PUBLIC_NOTICE_API_BASE]
+    .flatMap((value) => {
+      if (!value) return [];
+      try {
+        const url = new URL(value);
+        return [url.origin, `${url.protocol === 'https:' ? 'wss:' : 'ws:'}//${url.host}`];
+      } catch {
+        return [];
+      }
+    }),
+].join(' ');
+
+const fallbackCsp = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self'",
+  // Required by existing React style attributes; scripts remain nonce-only at runtime.
+  "style-src-attr 'unsafe-inline'",
+  "img-src 'self' blob: data:",
+  "font-src 'self' data:",
+  `connect-src ${connectSrc}`,
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "frame-ancestors 'none'",
+].join('; ');
+
 const config: NextConfig = {
   reactStrictMode: true,
   transpilePackages: ['@tokenmp/ui-tokens'],
   output: 'standalone',
+  async headers() {
+    return [
+      {
+        source: '/:path*',
+        headers: [
+          { key: 'Content-Security-Policy', value: fallbackCsp },
+          { key: 'X-Content-Type-Options', value: 'nosniff' },
+          { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+        ],
+      },
+    ];
+  },
   turbopack: {
     root: resolve(__dirname, '../..'),
   },

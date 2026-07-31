@@ -1,57 +1,36 @@
 import { create } from 'zustand';
-import { persist, createJSONStorage } from 'zustand/middleware';
-import type { TokenResponse, User } from '@/types';
+import type { AccessTokenResponse, User } from '@/types';
 
 interface AuthState {
+  /** Short-lived access token. Deliberately kept in memory only. */
   accessToken: string | null;
-  refreshToken: string | null;
   user: User | null;
   isHydrated: boolean;
 
-  login: (tokens: TokenResponse, user: User) => void;
-  setTokens: (tokens: TokenResponse) => void;
+  login: (tokens: AccessTokenResponse, user: User) => void;
+  setTokens: (tokens: AccessTokenResponse) => void;
   updateUser: (user: User) => void;
   logout: () => void;
   setHydrated: () => void;
 }
 
-export const useAuthStore = create<AuthState>()(
-  persist(
-    (set) => ({
-      accessToken: null,
-      refreshToken: null,
-      user: null,
-      isHydrated: false,
+/**
+ * Browser auth state is intentionally non-persistent. The refresh token is
+ * held by the same-origin session BFF in an HttpOnly cookie, never by JS.
+ */
+export const useAuthStore = create<AuthState>()((set) => ({
+  accessToken: null,
+  user: null,
+  isHydrated: false,
 
-      login: (tokens, user) =>
-        set({
-          accessToken: tokens.access_token,
-          refreshToken: tokens.refresh_token,
-          user,
-          isHydrated: true,
-        }),
+  login: (tokens, user) =>
+    set({ accessToken: tokens.access_token, user, isHydrated: true }),
 
-      setTokens: (tokens) =>
-        set({ accessToken: tokens.access_token, refreshToken: tokens.refresh_token }),
+  setTokens: (tokens) => set({ accessToken: tokens.access_token }),
 
-      updateUser: (user) => set({ user }),
+  updateUser: (user) => set({ user }),
 
-      logout: () =>
-        set({ accessToken: null, refreshToken: null, user: null }),
+  logout: () => set({ accessToken: null, user: null, isHydrated: true }),
 
-      setHydrated: () => set({ isHydrated: true }),
-    }),
-    {
-      name: 'tokenmp-auth',
-      storage: createJSONStorage(() => localStorage),
-      partialize: (s) => ({
-        accessToken: s.accessToken,
-        refreshToken: s.refreshToken,
-        user: s.user,
-      }),
-      onRehydrateStorage: () => (state) => {
-        state?.setHydrated();
-      },
-    },
-  ),
-);
+  setHydrated: () => set({ isHydrated: true }),
+}));
