@@ -18,6 +18,9 @@ import {
   TabField,
   TextField,
 } from '@/components/ui/field';
+import { StatusBadge } from '@/lib/status-badge';
+import { Button } from '@/components/ui/button';
+import { PageHeader } from '@/components/page-header';
 import { PublishStatusHint } from '@/components/publish-status-hint';
 import {
   Table,
@@ -27,7 +30,6 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { cn } from '@/lib/utils';
 
 const PROTOCOL_OPTIONS = [
   { value: 'openai_chat', label: 'openai_chat' },
@@ -142,12 +144,7 @@ export default function AdminProvidersPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-2">
-        <h1 className="text-lg font-semibold">Provider 管理</h1>
-        <div className="ml-auto">
-          <PublishStatusHint />
-        </div>
-      </div>
+      <PageHeader title="Provider 管理" actions={<PublishStatusHint />} />
 
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-2">
@@ -171,22 +168,22 @@ export default function AdminProvidersPage() {
             onClick={() => setStatusF('disabled')}
           />
         </div>
-        <button
+        <Button
           type="button"
+          size="sm"
           onClick={() => setCreateOpen(true)}
-          className="inline-flex h-[var(--control-height-sm)] items-center gap-1.5 rounded-sm bg-primary px-3 text-xs font-medium text-primary-foreground hover:opacity-90"
         >
           <Plus className="size-3.5" />
           新建 Provider
-        </button>
+        </Button>
       </div>
 
       {/* Table */}
-      <div className="hidden md:block rounded-md border border-border bg-card">
-        <div className="overflow-x-auto">
+      <div className="hidden md:block">
+        <div className="overflow-hidden rounded-lg border border-border bg-card">
           <Table>
-            <TableHeader>
-              <TableRow className="bg-muted/30">
+            <TableHeader className="bg-muted/30">
+              <TableRow>
                 <TableHead>名称</TableHead>
                 <TableHead>显示名</TableHead>
                 <TableHead>Base URL</TableHead>
@@ -212,16 +209,16 @@ export default function AdminProvidersPage() {
               ) : (
                 filtered.map((p) => (
                   <TableRow key={p.id}>
-                    <TableCell className="font-mono text-xs">{p.name}</TableCell>
-                    <TableCell className="text-sm">{p.displayLabel || '-'}</TableCell>
+                    <TableCell className="font-mono">{p.name}</TableCell>
+                    <TableCell >{p.displayLabel || '-'}</TableCell>
                     <TableCell
                       className="max-w-[220px] truncate font-mono text-[10px] text-muted-foreground"
                       title={p.baseURL}
                     >
                       {p.baseURL}
                     </TableCell>
-                    <TableCell className="text-xs">{p.sdkKind}</TableCell>
-                    <TableCell className="text-right font-mono text-xs">{p.tpm != null ? p.tpm.toLocaleString() : '∞'}</TableCell>
+                    <TableCell >{p.sdkKind}</TableCell>
+                    <TableCell className="text-right font-mono">{p.tpm != null ? p.tpm.toLocaleString() : '∞'}</TableCell>
                     <TableCell>
                       <StatusBadge status={p.status} />
                     </TableCell>
@@ -318,20 +315,6 @@ export default function AdminProvidersPage() {
         />
       ) : null}
     </div>
-  );
-}
-
-function StatusBadge({ status }: { status: AdminProvider['status'] }) {
-  const isActive = status === 'active';
-  return (
-    <span
-      className={cn(
-        'inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium',
-        isActive ? 'bg-green-100 text-green-700' : 'bg-muted text-muted-foreground',
-      )}
-    >
-      {isActive ? '启用' : status === 'disabled' ? '停用' : status}
-    </span>
   );
 }
 
@@ -760,41 +743,33 @@ function EndpointsModal({
           ) : endpoints.length === 0 ? (
             <p className="py-8 text-center text-sm text-muted-foreground">暂无端点，点击「新建端点」添加</p>
           ) : (
-            <div className="rounded-md border border-border">
-              <div className="overflow-x-auto">
+            <div className="overflow-hidden rounded-lg border border-border bg-card">
                 <Table>
-                  <TableHeader>
-                    <TableRow className="bg-muted/30">
-                      <TableHead className="text-xs">协议</TableHead>
-                      <TableHead className="text-xs">路径</TableHead>
-                      <TableHead className="text-xs">鉴权</TableHead>
-                      <TableHead className="text-xs">状态</TableHead>
-                      <TableHead className="text-right text-xs">操作</TableHead>
+                  <TableHeader className="bg-muted/30">
+                    <TableRow>
+                      <TableHead>协议</TableHead>
+                      <TableHead>路径</TableHead>
+                      <TableHead>鉴权</TableHead>
+                      <TableHead>状态</TableHead>
+                      <TableHead className="text-right">操作</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {endpoints.map((e) => (
                       <TableRow key={e.id}>
-                        <TableCell className="text-xs">
+                        <TableCell >
                           <span className="rounded-sm bg-muted px-1.5 py-0.5 font-mono text-[10px]">
                             {PROTOCOL_LABELS[e.protocol] ?? e.protocol}
                           </span>
                         </TableCell>
-                        <TableCell className="font-mono text-xs">{e.path}</TableCell>
+                        <TableCell className="font-mono">{e.path}</TableCell>
                         <TableCell className="font-mono text-[10px] text-muted-foreground">
                           {e.authKind === 'api_key_query'
                             ? `?${e.authQuery ?? ''}=`
                             : `${e.authHeader ?? ''}${e.authPrefix ? ` (${e.authPrefix.trim()})` : ''}`}
                         </TableCell>
                         <TableCell>
-                          <span
-                            className={cn(
-                              'inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium',
-                              e.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-muted text-muted-foreground',
-                            )}
-                          >
-                            {e.status === 'active' ? '启用' : '停用'}
-                          </span>
+                          <StatusBadge status={e.status} />
                         </TableCell>
                         <TableCell className="text-right">
                           <div className="flex justify-end gap-1">
@@ -822,18 +797,17 @@ function EndpointsModal({
                     ))}
                   </TableBody>
                 </Table>
-              </div>
             </div>
           )}
           <div>
-            <button
+            <Button
               type="button"
+              size="sm"
               onClick={() => setEditing(emptyEndpointDraft())}
-              className="inline-flex h-[var(--control-height-sm)] items-center gap-1.5 rounded-sm bg-primary px-3 text-xs font-medium text-primary-foreground hover:opacity-90"
             >
               <Plus className="size-3.5" />
               新建端点
-            </button>
+            </Button>
           </div>
         </div>
       )}

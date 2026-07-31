@@ -199,7 +199,7 @@ function PlanCard({ plan }: { plan: UserPlan }) {
               <span className="text-muted-foreground">{percent.toFixed(percent < 1 && percent > 0 ? 2 : 0)}%</span>
             </div>
             <ProgressBar value={percent} />
-            <div className="text-xs text-muted-foreground">剩余 {formatInt(plan.remainingQuota)} {unit}</div>
+            <div className="text-muted-foreground">剩余 {formatInt(plan.remainingQuota)} {unit}</div>
           </div>
         )}
 
@@ -273,7 +273,7 @@ export default function OverviewPage() {
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="text-base font-semibold">当前套餐</h2>
-          <span className="text-xs text-muted-foreground">{activePlans.length} 个生效套餐</span>
+          <span className="text-muted-foreground">{activePlans.length} 个生效套餐</span>
         </div>
         {activePlans.length > 0 ? (
           <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
@@ -293,8 +293,9 @@ export default function OverviewPage() {
         </CardHeader>
         <CardContent>
           <div className="hidden md:block">
+            <div className="overflow-hidden rounded-lg border border-border bg-card">
             <Table>
-              <TableHeader>
+              <TableHeader className="bg-muted/30">
                 <TableRow>
                   <TableHead>时间</TableHead>
                   <TableHead>模型</TableHead>
@@ -309,15 +310,15 @@ export default function OverviewPage() {
               <TableBody>
                 {(recentRequests ?? []).map((r: RequestLog) => (
                   <TableRow key={r.requestId}>
-                    <TableCell className="text-xs text-muted-foreground">{formatTime(r.createdAt)}</TableCell>
-                    <TableCell className="text-sm">{r.model || '—'}</TableCell>
-                    <TableCell className="text-sm whitespace-nowrap">
+                    <TableCell className="text-muted-foreground">{formatTime(r.createdAt)}</TableCell>
+                    <TableCell>{r.model || '—'}</TableCell>
+                    <TableCell className="whitespace-nowrap">
                       <span className="inline-flex items-center gap-1.5">
                         <span>{protocolLabel(r.protocol)}</span>
                         {r.stream != null && (
-                          <span className={`rounded px-1 py-px text-[10px] font-medium ${r.stream ? 'bg-blue-100 text-blue-700' : 'bg-muted text-muted-foreground'}`}>
+                          <Badge variant={r.stream ? 'info' : 'secondary'} className="rounded px-1 py-px text-[10px]">
                             {streamLabel(r.stream)}
-                          </span>
+                          </Badge>
                         )}
                       </span>
                     </TableCell>
@@ -335,6 +336,7 @@ export default function OverviewPage() {
                 )}
               </TableBody>
             </Table>
+          </div>
           </div>
 
           <div className="md:hidden space-y-3">

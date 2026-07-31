@@ -22,6 +22,7 @@ import type {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { PublishStatusHint } from '@/components/publish-status-hint';
+import { PageHeader } from '@/components/page-header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
@@ -469,8 +470,9 @@ function RouteRetryCard() {
 
         {/* Desktop table */}
         <div className="hidden md:block">
+          <div className="overflow-hidden rounded-lg border border-border bg-card">
           <Table>
-            <TableHeader>
+            <TableHeader className="bg-muted/30">
               <TableRow>
                 <TableHead>路由 ID</TableHead>
                 <TableHead>模型</TableHead>
@@ -482,12 +484,12 @@ function RouteRetryCard() {
             <TableBody>
               {(routes ?? []).map((r) => (
                 <TableRow key={r.id}>
-                  <TableCell className="font-mono text-xs">{r.id}</TableCell>
+                  <TableCell className="font-mono">{r.id}</TableCell>
                   <TableCell>{r.modelId}</TableCell>
                   <TableCell>{r.providerId}</TableCell>
                   <TableCell>
                     {editing?.id === r.id ? (
-                      <span className="text-xs text-amber-600">编辑中…</span>
+                      <span className="text-xs text-warning">编辑中…</span>
                     ) : r.retryPolicy?.rules?.length ? (
                       <div className="flex flex-wrap gap-1">
                         {r.retryPolicy.rules.map((rule) => (
@@ -509,6 +511,7 @@ function RouteRetryCard() {
               ))}
             </TableBody>
           </Table>
+        </div>
         </div>
 
         {/* Mobile card list */}
@@ -588,15 +591,11 @@ function RouteRetryCard() {
 export default function RetryPolicyPage() {
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div>
-          <h1 className="text-lg font-semibold">重试策略</h1>
-          <p className="text-sm text-muted-foreground">
-            配置上游错误（429/503/5xx）的重试行为。
-          </p>
-        </div>
-        <PublishStatusHint className="w-full justify-center sm:w-auto" />
-      </div>
+      <PageHeader
+        title="重试策略"
+        description="配置上游错误重试行为"
+        actions={<PublishStatusHint className="w-full justify-center sm:w-auto" />}
+      />
 
       <RoutingPolicyCard />
       <GlobalRetryCard />

@@ -17,6 +17,9 @@ import {
   SwitchField,
   TextField,
 } from '@/components/ui/field';
+import { StatusBadge } from '@/lib/status-badge';
+import { Button } from '@/components/ui/button';
+import { PageHeader } from '@/components/page-header';
 import { PublishStatusHint } from '@/components/publish-status-hint';
 import {
   Table,
@@ -26,7 +29,6 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { cn } from '@/lib/utils';
 
 type StatusFilter = 'all' | 'active' | 'disabled';
 
@@ -136,12 +138,7 @@ export default function AdminCredentialsPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-2">
-        <h1 className="text-lg font-semibold">上游账号</h1>
-        <div className="ml-auto">
-          <PublishStatusHint />
-        </div>
-      </div>
+      <PageHeader title="上游账号" actions={<PublishStatusHint />} />
 
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-2">
@@ -157,30 +154,30 @@ export default function AdminCredentialsPage() {
           <FilterChip label="启用" active={statusF === 'active'} onClick={() => setStatusF('active')} />
           <FilterChip label="停用" active={statusF === 'disabled'} onClick={() => setStatusF('disabled')} />
         </div>
-        <button
+        <Button
           type="button"
+          size="sm"
           onClick={() => setCreateOpen(true)}
-          className="inline-flex h-[var(--control-height-sm)] items-center gap-1.5 rounded-sm bg-primary px-3 text-xs font-medium text-primary-foreground hover:opacity-90"
         >
           <Plus className="size-3.5" />
           新建账号
-        </button>
+        </Button>
       </div>
 
       {/* Table */}
-      <div className="hidden md:block rounded-md border border-border bg-card">
-        <div className="overflow-x-auto">
+      <div className="hidden md:block">
+        <div className="overflow-hidden rounded-lg border border-border bg-card">
           <Table>
-            <TableHeader>
-              <TableRow className="bg-muted/30">
-                <TableHead className="text-xs">ID</TableHead>
-                <TableHead className="text-xs">Provider</TableHead>
-                <TableHead className="text-xs">密钥前缀/后缀</TableHead>
-                <TableHead className="text-right text-xs">优先级</TableHead>
-                <TableHead className="text-right text-xs">并发</TableHead>
-                <TableHead className="text-right text-xs">TPM</TableHead>
-                <TableHead className="text-xs">状态</TableHead>
-                <TableHead className="text-right text-xs">操作</TableHead>
+            <TableHeader className="bg-muted/30">
+              <TableRow>
+                <TableHead>ID</TableHead>
+                <TableHead>Provider</TableHead>
+                <TableHead>密钥前缀/后缀</TableHead>
+                <TableHead className="text-right">优先级</TableHead>
+                <TableHead className="text-right">并发</TableHead>
+                <TableHead className="text-right">TPM</TableHead>
+                <TableHead>状态</TableHead>
+                <TableHead className="text-right">操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -205,14 +202,14 @@ export default function AdminCredentialsPage() {
                     : '-';
                   return (
                     <TableRow key={c.id}>
-                      <TableCell className="font-mono text-xs">{c.id}</TableCell>
-                      <TableCell className="text-sm">{providerLabel}</TableCell>
-                      <TableCell className="font-mono text-xs">{prefixSuffix}</TableCell>
-                      <TableCell className="text-right font-mono text-xs">{c.priority}</TableCell>
-                      <TableCell className="text-right font-mono text-xs">
+                      <TableCell className="font-mono">{c.id}</TableCell>
+                      <TableCell>{providerLabel}</TableCell>
+                      <TableCell className="font-mono">{prefixSuffix}</TableCell>
+                      <TableCell className="text-right font-mono">{c.priority}</TableCell>
+                      <TableCell className="text-right font-mono">
                         {c.maxConcurrency != null ? c.maxConcurrency : '∞'}
                       </TableCell>
-                      <TableCell className="text-right font-mono text-xs">
+                      <TableCell className="text-right font-mono">
                         {c.tpm != null ? c.tpm.toLocaleString() : '继承'}
                       </TableCell>
                       <TableCell>
@@ -232,7 +229,7 @@ export default function AdminCredentialsPage() {
                           <button
                             type="button"
                             onClick={() => handleDelete(c)}
-                            className="rounded-sm p-1.5 text-muted-foreground hover:bg-red-100 hover:text-red-700"
+                            className="rounded-sm p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
                             aria-label="删除"
                             title="删除"
                           >
@@ -296,20 +293,6 @@ export default function AdminCredentialsPage() {
         />
       ) : null}
     </div>
-  );
-}
-
-function StatusBadge({ status }: { status: AdminUpstreamCredential['status'] }) {
-  const isActive = status === 'active';
-  return (
-    <span
-      className={cn(
-        'inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium',
-        isActive ? 'bg-green-100 text-green-700' : 'bg-muted text-muted-foreground',
-      )}
-    >
-      {isActive ? '启用' : status === 'disabled' ? '停用' : status}
-    </span>
   );
 }
 

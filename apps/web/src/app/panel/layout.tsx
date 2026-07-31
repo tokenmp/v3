@@ -1,42 +1,114 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { ShieldCheck } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import { useAuthGuard } from '@/hooks/use-auth-guard';
-import { useSidebarStore } from '@/lib/sidebar-store';
-import { Sidebar } from '@/components/sidebar';
-import { Header } from '@/components/header';
-import { BottomNav } from '@/components/bottom-nav';
+import { AppLayout } from '@/components/app-layout';
+import { AppHeader } from '@/components/app-header';
+import { AppSidebar } from '@/components/app-sidebar';
+import { AppBottomNav } from '@/components/app-bottom-nav';
+import { navGroups, mobileTabs } from '@/lib/nav';
+import { useAuthStore } from '@/lib/auth';
+import { NotificationCenter } from '@/components/notification-center';
+import { DropdownMenuItem } from '@/components/ui/dropdown-menu';
+import { noticeApi } from '@/lib/api/notice';
+import { useQuery } from '@tanstack/react-query';
+import Link from 'next/link';
+
+/** Resolve the current page label from the panel nav config based on the pathname. */
+function findPanelLabel(pathname: string): string {
+  for (const group of navGroups) {
+    for (const item of group.items) {
+      if (item.href === pathname) return item.label;
+      if (item.href !== '/panel' && pathname.startsWith(item.href + '/')) return item.label;
+    }
+  }
+  return '';
+}
+
+function panelIsActive(href: string, pathname: string) {
+  if (href === '/panel') return pathname === '/panel';
+  if (href === '/panel/settings') {
+    return (
+      pathname.startsWith('/panel/settings') ||
+      pathname.startsWith('/panel/announcements') ||
+      pathname.startsWith('/panel/notifications') ||
+      pathname.startsWith('/panel/changelogs') ||
+      pathname.startsWith('/panel/auto-model')
+    );
+  }
+  return pathname.startsWith(href);
+}
+
+function PanelSidebarLogo() {
+  const { data: changelogs } = useQuery({
+    queryKey: ['notice', 'changelogs', 'version'] as const,
+    queryFn: () => noticeApi.listChangelogs(1, 0),
+    staleTime: 5 * 60_000,
+  });
+  const latestVersion = changelogs?.items?.[0]?.version;
+
+  return (
+    <div className="flex flex-col leading-none">
+      <span className="font-semibold text-lg">TokenMP</span>
+      {latestVersion && (
+        <Link
+          href="/panel/changelogs"
+          className="text-[10px] font-normal text-muted-foreground hover:text-foreground transition-colors"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {latestVersion}
+        </Link>
+      )}
+    </div>
+  );
+}
+
+function PanelHeader() {
+  const router = useRouter();
+  const user = useAuthStore((s) => s.user);
+
+  return (
+    <AppHeader
+      breadcrumbRoot="TokenMP"
+      findLabel={findPanelLabel}
+      extraActions={
+        <div className="hidden md:block">
+          <NotificationCenter />
+        </div>
+      }
+      extraMenuItems={
+        user?.role === 'admin' ? (
+          <DropdownMenuItem onClick={() => router.push('/admin')}>
+            <ShieldCheck className="h-4 w-4" />
+            管理后台
+          </DropdownMenuItem>
+        ) : null
+      }
+    />
+  );
+}
 
 export default function PanelLayout({ children }: { children: React.ReactNode }) {
   const { isHydrated, isAuthenticated } = useAuthGuard();
-  const collapsed = useSidebarStore((s) => s.collapsed);
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
-  const isCollapsed = mounted && collapsed;
-
-  if (!isHydrated) {
-    return (
-      <div className="flex min-h-dvh items-center justify-center">
-        <div className="flex flex-col items-center gap-3">
-          <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
-          <span className="text-sm text-muted-foreground">加载中…</span>
-        </div>
-      </div>
-    );
-  }
-
-  if (!isAuthenticated) {
-    return null;
-  }
 
   return (
-    <div className="min-h-dvh">
-      <Sidebar />
-      <div className={isCollapsed ? 'md:pl-[3.75rem]' : 'md:pl-60'}>
-        <Header />
-        <main className="p-4 sm:p-6 pb-24 md:pb-6">{children}</main>
-      </div>
-      <BottomNav />
-    </div>
+    <AppLayout
+      isHydrated={isHydrated}
+      isAuthorized={isAuthenticated}
+      sidebar={
+        <AppSidebar
+          navGroups={navGroups}
+          logoHref="/panel"
+          logoAriaLabel="TokenMP"
+          variant="panel"
+          logoContent={<PanelSidebarLogo />}
+        />
+      }
+      header={<PanelHeader />}
+      bottomNav={<AppBottomNav items={mobileTabs} isActive={panelIsActive} />}
+    >
+      {children}
+    </AppLayout>
   );
 }

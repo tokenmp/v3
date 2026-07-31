@@ -99,9 +99,9 @@ export default function KeysPage() {
 
       {/* Desktop table */}
       <div className="hidden md:block">
-        <Card>
+        <div className="overflow-hidden rounded-lg border border-border bg-card">
           <Table>
-            <TableHeader>
+            <TableHeader className="bg-muted/30">
               <TableRow>
                 <TableHead>名称</TableHead>
                 <TableHead>密钥</TableHead>
@@ -114,18 +114,18 @@ export default function KeysPage() {
               {(keys ?? []).map((k: ApiKey) => (
                 <TableRow key={k.id}>
                   <TableCell className="font-medium">{k.name}</TableCell>
-                  <TableCell className="font-mono text-xs">{k.keyPrefix}…{k.keySuffix}</TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
+                  <TableCell className="font-mono">{k.keyPrefix}…{k.keySuffix}</TableCell>
+                  <TableCell className="text-muted-foreground">
                     {formatTime(k.createdAt)}
                   </TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
+                  <TableCell className="text-muted-foreground">
                     {k.lastUsedAt ? formatTime(k.lastUsedAt) : '—'}
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-1">
                       <Button
                         variant="ghost"
-                        size="icon"
+                        size="iconSm"
                         onClick={() => copyToClipboard(`${k.keyPrefix}…${k.keySuffix}`, '密钥')}
                         title="复制密钥"
                       >
@@ -133,7 +133,7 @@ export default function KeysPage() {
                       </Button>
                       <Button
                         variant="ghost"
-                        size="icon"
+                        size="iconSm"
                         onClick={() => setRotateTarget(k)}
                         title="轮换密钥"
                       >
@@ -141,7 +141,7 @@ export default function KeysPage() {
                       </Button>
                       <Button
                         variant="ghost"
-                        size="icon"
+                        size="iconSm"
                         onClick={() => setRevokeTarget(k)}
                         title="撤销密钥"
                       >
@@ -160,7 +160,7 @@ export default function KeysPage() {
               )}
             </TableBody>
           </Table>
-        </Card>
+        </div>
       </div>
 
       {/* Mobile card list */}

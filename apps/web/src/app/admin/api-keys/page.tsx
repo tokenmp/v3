@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { adminApi } from '@/lib/api/admin';
 import { userApi } from '@/lib/api/user';
+import { StatusBadge } from '@/lib/status-badge';
 import { Button } from '@/components/ui/button';
 import {
   Table, TableHeader, TableRow, TableHead, TableBody, TableCell,
@@ -14,6 +15,7 @@ import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { toast } from 'sonner';
 import type { AdminApiKey } from '@/types/admin';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
+import { PageHeader } from '@/components/page-header';
 
 function formatTime(iso: string | null) {
   return iso ? new Date(iso).toLocaleString('zh-CN') : '—';
@@ -62,7 +64,7 @@ export default function AdminApiKeysPage() {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-lg font-semibold">API 密钥</h1>
+      <PageHeader title="API 密钥" description="管理用户 API 密钥" />
 
       {/* 工具栏：搜索框左 + 筛选 chip 右 */}
       <div className="flex flex-wrap items-center gap-2">
@@ -83,33 +85,31 @@ export default function AdminApiKeysPage() {
       </div>
 
       {/* 表格 */}
-      <div className="hidden md:block rounded-md border border-border bg-card">
-        <div className="overflow-x-auto">
+      <div className="hidden md:block">
+        <div className="overflow-hidden rounded-lg border border-border bg-card">
           <Table>
-            <TableHeader>
-              <TableRow className="bg-muted/30">
-                <TableHead className="text-xs">用户</TableHead>
-                <TableHead className="text-xs">名称</TableHead>
-                <TableHead className="text-xs">密钥</TableHead>
-                <TableHead className="text-xs">状态</TableHead>
-                <TableHead className="text-xs">创建时间</TableHead>
-                <TableHead className="text-xs">最近使用</TableHead>
-                <TableHead className="text-xs">操作</TableHead>
+            <TableHeader className="bg-muted/30">
+              <TableRow>
+                <TableHead>用户</TableHead>
+                <TableHead>名称</TableHead>
+                <TableHead>密钥</TableHead>
+                <TableHead>状态</TableHead>
+                <TableHead>创建时间</TableHead>
+                <TableHead>最近使用</TableHead>
+                <TableHead>操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {filtered.map((k: AdminApiKey) => (
                 <TableRow key={k.id}>
-                  <TableCell className="text-sm">{k.userEmail}</TableCell>
-                  <TableCell className="text-sm font-medium">{k.name}</TableCell>
-                  <TableCell className="font-mono text-xs">{k.keyPrefix}…{k.keySuffix}</TableCell>
+                  <TableCell >{k.userEmail}</TableCell>
+                  <TableCell className="font-medium">{k.name}</TableCell>
+                  <TableCell className="font-mono">{k.keyPrefix}…{k.keySuffix}</TableCell>
                   <TableCell>
-                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${k.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-muted text-muted-foreground'}`}>
-                      {k.status === 'active' ? '活跃' : '已禁用'}
-                    </span>
+                    <StatusBadge status={k.status === 'active' ? 'active' : 'disabled'} />
                   </TableCell>
-                  <TableCell className="text-xs text-muted-foreground">{formatTime(k.createdAt)}</TableCell>
-                  <TableCell className="text-xs text-muted-foreground">{formatTime(k.lastUsedAt)}</TableCell>
+                  <TableCell className="text-muted-foreground">{formatTime(k.createdAt)}</TableCell>
+                  <TableCell className="text-muted-foreground">{formatTime(k.lastUsedAt)}</TableCell>
                   <TableCell>
                     {k.status === 'active' && (
                       <Button
@@ -147,9 +147,7 @@ export default function AdminApiKeysPage() {
           >
             <div className="flex items-center justify-between gap-2">
               <span className="text-sm font-medium truncate">{k.name}</span>
-              <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${k.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-muted text-muted-foreground'}`}>
-                {k.status === 'active' ? '活跃' : '已禁用'}
-              </span>
+              <StatusBadge status={k.status === 'active' ? 'active' : 'disabled'} />
             </div>
             <p className="text-xs text-muted-foreground truncate">{k.userEmail}</p>
             <p className="font-mono text-xs text-muted-foreground">{k.keyPrefix}…{k.keySuffix}</p>
@@ -180,21 +178,19 @@ export default function AdminApiKeysPage() {
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-muted-foreground">密钥</span>
-                  <span className="font-mono text-xs">{actionKey.keyPrefix}…{actionKey.keySuffix}</span>
+                  <span className="font-mono">{actionKey.keyPrefix}…{actionKey.keySuffix}</span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-muted-foreground">状态</span>
-                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${actionKey.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-muted text-muted-foreground'}`}>
-                    {actionKey.status === 'active' ? '活跃' : '已禁用'}
-                  </span>
+                  <StatusBadge status={actionKey.status === 'active' ? 'active' : 'disabled'} />
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-muted-foreground">创建时间</span>
-                  <span className="text-sm">{formatTime(actionKey.createdAt)}</span>
+                  <span >{formatTime(actionKey.createdAt)}</span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-muted-foreground">最近使用</span>
-                  <span className="text-sm">{formatTime(actionKey.lastUsedAt)}</span>
+                  <span >{formatTime(actionKey.lastUsedAt)}</span>
                 </div>
               </div>
 
@@ -216,7 +212,7 @@ export default function AdminApiKeysPage() {
 
       {/* 分页 */}
       <div className="flex items-center justify-between gap-4 px-1 py-1 text-sm">
-        <p className="text-xs text-muted-foreground">共 {total} 条</p>
+        <p className="text-muted-foreground">共 {total} 条</p>
         <div className="flex items-center gap-1">
           <button
             onClick={() => setPage((p) => Math.max(1, p - 1))}

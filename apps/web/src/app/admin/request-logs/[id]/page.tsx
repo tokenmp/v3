@@ -41,6 +41,7 @@ import {
   Gauge,
   Globe,
 } from 'lucide-react';
+import { PageHeader } from '@/components/page-header';
 
 /* -------------------------------------------------------------------------- */
 /* Helpers                                                                     */
@@ -112,13 +113,13 @@ function stageLabel(stage: string): string {
 function eventStatusIcon(status: string): { icon: React.ComponentType<{ className?: string }>; color: string } {
   switch (status) {
     case 'success':
-      return { icon: CheckCircle2, color: 'text-emerald-500' };
+      return { icon: CheckCircle2, color: 'text-success' };
     case 'failed':
       return { icon: XCircle, color: 'text-destructive' };
     case 'skipped':
       return { icon: CheckCircle2, color: 'text-muted-foreground' };
     default:
-      return { icon: Activity, color: 'text-blue-500' };
+      return { icon: Activity, color: 'text-info' };
   }
 }
 
@@ -140,10 +141,10 @@ function StatTile({
   tone: 'blue' | 'green' | 'orange' | 'purple';
 }) {
   const tones = {
-    blue: 'bg-blue-500/10 text-blue-600 dark:text-blue-400',
-    green: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
-    orange: 'bg-amber-500/10 text-amber-600 dark:text-amber-400',
-    purple: 'bg-violet-500/10 text-violet-600 dark:text-violet-400',
+    blue: 'bg-info/10 text-info',
+    green: 'bg-success/10 text-success',
+    orange: 'bg-warning/10 text-warning',
+    purple: 'bg-primary/10 text-primary',
   } as const;
   return (
     <Card>
@@ -226,7 +227,7 @@ function AttemptNode({ a, isLast }: { a: RequestLogAttempt; isLast: boolean }) {
       )}
       <span
         className={`absolute left-1.5 top-1.5 flex h-4 w-4 items-center justify-center rounded-full ring-4 ring-background ${
-          ok === 'success' ? 'bg-emerald-500' : 'bg-destructive'
+          ok === 'success' ? 'bg-success' : 'bg-destructive'
         }`}
         aria-hidden
       />
@@ -279,7 +280,7 @@ function AttemptNode({ a, isLast }: { a: RequestLogAttempt; isLast: boolean }) {
       <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
         {httpStatus != null && Number(httpStatus) > 0 && <span>HTTP {String(httpStatus)}</span>}
         {upstreamHttpStatus != null && Number(upstreamHttpStatus) > 0 && (
-          <span className="font-medium text-amber-600 dark:text-amber-500">上游 {String(upstreamHttpStatus)}</span>
+          <span className="font-medium text-warning">上游 {String(upstreamHttpStatus)}</span>
         )}
         {errorCode ? <span className="text-destructive">err: {String(errorCode)}</span> : null}
         {errorType && errorType !== errorCode ? <span>type: {String(errorType)}</span> : null}
@@ -425,10 +426,7 @@ export default function RequestLogDetailPage() {
         <CardContent className="flex flex-col gap-4 p-4 sm:p-6">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="space-y-1.5 min-w-0">
-              <div className="flex items-center gap-2.5">
-                <h1 className="text-lg font-semibold">请求详情</h1>
-                <Badge variant={st.tone}>{st.label}</Badge>
-              </div>
+              <PageHeader title="请求详情" actions={<Badge variant={st.tone}>{st.label}</Badge>} />
               <div className="flex items-center gap-1.5">
                 <span className="font-mono text-sm text-muted-foreground break-all">{log.requestId}</span>
                 <CopyButton text={log.requestId} />

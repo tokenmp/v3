@@ -22,6 +22,7 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from 'recharts';
+import { PageHeader } from '@/components/page-header';
 
 /* -------------------------------------------------------------------------- */
 /* Helpers                                                                     */
@@ -81,8 +82,9 @@ function ModelUsageSection({ rows }: { rows: ModelUsageRow[] }) {
       <CardContent>
         {/* Desktop table */}
         <div className="hidden md:block">
+          <div className="overflow-hidden rounded-lg border border-border bg-card">
           <Table>
-            <TableHeader>
+            <TableHeader className="bg-muted/30">
               <TableRow>
                 <TableHead>模型</TableHead>
                 <TableHead className="text-right">请求数</TableHead>
@@ -108,6 +110,7 @@ function ModelUsageSection({ rows }: { rows: ModelUsageRow[] }) {
               )}
             </TableBody>
           </Table>
+        </div>
         </div>
 
         {/* Mobile card list */}
@@ -145,8 +148,9 @@ function TopUsersSection({ rows }: { rows: TopUserRow[] }) {
       <CardContent>
         {/* Desktop table */}
         <div className="hidden md:block">
+          <div className="overflow-hidden rounded-lg border border-border bg-card">
           <Table>
-            <TableHeader>
+            <TableHeader className="bg-muted/30">
               <TableRow>
                 <TableHead>邮箱</TableHead>
                 <TableHead className="text-right">请求数</TableHead>
@@ -174,6 +178,7 @@ function TopUsersSection({ rows }: { rows: TopUserRow[] }) {
               )}
             </TableBody>
           </Table>
+        </div>
         </div>
 
         {/* Mobile card list */}
@@ -212,6 +217,8 @@ export default function AdminDashboardPage() {
 
   return (
     <div className="space-y-6">
+      <PageHeader title="管理面板" description="平台运营概览" />
+
       {/* ── Today snapshot ── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard

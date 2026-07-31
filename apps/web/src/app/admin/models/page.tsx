@@ -12,6 +12,7 @@ import {
   FormActions,
   TextField,
 } from '@/components/ui/field';
+import { Badge } from '@/components/ui/badge';
 import { PublishStatusHint } from '@/components/publish-status-hint';
 import {
   Table,
@@ -21,6 +22,9 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { Button } from '@/components/ui/button';
+import { Switch } from '@/components/ui/switch';
+import { PageHeader } from '@/components/page-header';
 import { cn } from '@/lib/utils';
 import type { AdminModelConfig } from '@/types/admin';
 
@@ -28,13 +32,13 @@ type CapabilityKey = 'text' | 'tools' | 'vision' | 'thinking' | 'image';
 
 const CAPABILITY_META: Record<
   CapabilityKey,
-  { label: string; tone: string }
+  { label: string; variant: 'info' | 'default' | 'warning' | 'success' | 'destructive' | 'secondary' | 'outline' }
 > = {
-  text: { label: '文本', tone: 'bg-blue-50 text-blue-600' },
-  tools: { label: '工具', tone: 'bg-violet-50 text-violet-600' },
-  vision: { label: '视觉', tone: 'bg-amber-50 text-amber-600' },
-  thinking: { label: '思考', tone: 'bg-emerald-50 text-emerald-600' },
-  image: { label: '图像', tone: 'bg-pink-50 text-pink-600' },
+  text: { label: '文本', variant: 'info' },
+  tools: { label: '工具', variant: 'default' },
+  vision: { label: '视觉', variant: 'warning' },
+  thinking: { label: '思考', variant: 'success' },
+  image: { label: '图像', variant: 'destructive' },
 };
 
 const CAPABILITY_ORDER: CapabilityKey[] = [
@@ -66,10 +70,8 @@ const FILTER_OPTIONS: { value: CapabilityKey | undefined; label: string }[] = [
 
 const QUERY_KEY = ['admin', 'model-configs'] as const;
 
-function capabilityTone(cap: string): string {
-  return (
-    CAPABILITY_META[cap as CapabilityKey]?.tone ?? 'bg-muted text-muted-foreground'
-  );
+function capabilityVariant(cap: string) {
+  return CAPABILITY_META[cap as CapabilityKey]?.variant ?? 'secondary';
 }
 
 function capabilityLabel(cap: string): string {
@@ -119,12 +121,7 @@ export default function AdminModelsPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <h1 className="text-lg font-semibold">模型配置</h1>
-        <div className="ml-auto">
-          <PublishStatusHint />
-        </div>
-      </div>
+      <PageHeader title="模型配置" actions={<PublishStatusHint />} />
 
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-2">
@@ -145,20 +142,21 @@ export default function AdminModelsPage() {
             />
           ))}
         </div>
-        <button
+        <Button
           type="button"
+          size="sm"
           onClick={() => setCreating(true)}
-          className="inline-flex h-[var(--control-height-sm)] items-center gap-1.5 rounded-sm bg-primary px-3 text-xs font-medium text-primary-foreground hover:opacity-90"
         >
           <Plus className="size-3.5" />
           新建模型
-        </button>
+        </Button>
       </div>
 
       {/* Table */}
-      <div className="hidden md:block overflow-x-auto rounded-md border border-border">
+      <div className="hidden md:block">
+      <div className="overflow-hidden rounded-lg border border-border bg-card">
         <Table>
-          <TableHeader>
+          <TableHeader className="bg-muted/30">
             <TableRow>
               <TableHead>ID</TableHead>
               <TableHead>显示名</TableHead>
@@ -184,32 +182,26 @@ export default function AdminModelsPage() {
             ) : (
               filtered.map((m) => (
                 <TableRow key={m.id}>
-                  <TableCell className="font-mono text-xs">{m.id}</TableCell>
+                  <TableCell className="font-mono">{m.id}</TableCell>
                   <TableCell className="font-medium">{m.displayName}</TableCell>
                   <TableCell>
                     <div className="flex flex-wrap gap-1">
                       {m.capabilities.map((cap) => (
-                        <span
+                        <Badge
                           key={cap}
-                          className={cn(
-                            'rounded-full px-1.5 py-0.5 text-[10px] font-medium',
-                            capabilityTone(cap),
-                          )}
+                          variant={capabilityVariant(cap)}
+                          className="rounded-full px-1.5 py-0.5 text-[10px]"
                         >
                           {capabilityLabel(cap)}
-                        </span>
+                        </Badge>
                       ))}
                     </div>
                   </TableCell>
                   <TableCell>
                     {m.thinkingSupported ? (
-                      <span className="rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-600">
-                        支持
-                      </span>
+                      <Badge variant="success" className="rounded-full px-1.5 py-0.5 text-[10px]">支持</Badge>
                     ) : (
-                      <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-                        不支持
-                      </span>
+                      <Badge variant="secondary" className="rounded-full px-1.5 py-0.5 text-[10px]">不支持</Badge>
                     )}
                   </TableCell>
                   <TableCell className="text-center tabular-nums">{m.routeCount}</TableCell>
@@ -241,6 +233,7 @@ export default function AdminModelsPage() {
           </TableBody>
         </Table>
       </div>
+      </div>
 
       {/* Mobile card list */}
       <div className="md:hidden space-y-3">
@@ -264,14 +257,14 @@ export default function AdminModelsPage() {
             </div>
             <div className="flex flex-wrap gap-1">
               {m.capabilities.map((cap) => (
-                <span key={cap} className={cn('rounded-full px-1.5 py-0.5 text-[10px] font-medium', capabilityTone(cap))}>
+                <Badge key={cap} variant={capabilityVariant(cap)} className="rounded-full px-1.5 py-0.5 text-[10px]">
                   {capabilityLabel(cap)}
-                </span>
+                </Badge>
               ))}
             </div>
-            <span className={cn('rounded-full px-1.5 py-0.5 text-[10px] font-medium', m.thinkingSupported ? 'bg-emerald-50 text-emerald-600' : 'bg-muted text-muted-foreground')}>
+            <Badge variant={m.thinkingSupported ? 'success' : 'secondary'} className="rounded-full px-1.5 py-0.5 text-[10px]">
               {m.thinkingSupported ? '支持思考' : '不支持思考'}
-            </span>
+            </Badge>
           </button>
         ))}
       </div>
@@ -324,14 +317,14 @@ function CapabilityEditor({
             onClick={() =>
               onChange(on ? value.filter((v) => v !== k) : [...value, k])
             }
-            className={cn(
-              'rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors',
-              on
-                ? CAPABILITY_META[k].tone
-                : 'bg-muted text-muted-foreground hover:bg-accent hover:text-foreground',
-            )}
+            className="p-0 leading-none"
           >
-            {CAPABILITY_META[k].label}
+            <Badge
+              variant={on ? CAPABILITY_META[k].variant : 'secondary'}
+              className="rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors hover:opacity-80"
+            >
+              {CAPABILITY_META[k].label}
+            </Badge>
           </button>
         );
       })}
@@ -540,21 +533,11 @@ function ModelFormModal({
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <span className="text-sm">启用 Thinking</span>
-            <button
-              type="button"
-              onClick={() => setThinkingSupported(!thinkingSupported)}
-              className={cn(
-                'relative inline-flex h-6 w-11 items-center rounded-full transition-colors',
-                thinkingSupported ? 'bg-primary' : 'bg-muted',
-              )}
-            >
-              <span
-                className={cn(
-                  'inline-block h-4 w-4 transform rounded-full bg-white transition-transform',
-                  thinkingSupported ? 'translate-x-6' : 'translate-x-1',
-                )}
-              />
-            </button>
+            <Switch
+              checked={thinkingSupported}
+              onChange={setThinkingSupported}
+              label="启用 Thinking"
+            />
           </div>
 
           {thinkingSupported && (

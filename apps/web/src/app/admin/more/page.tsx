@@ -7,6 +7,7 @@ import { adminMobileMoreGroups } from '@/lib/admin-nav';
 import { useAuthStore } from '@/lib/auth';
 import { Card, CardContent } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
+import { PageHeader } from '@/components/page-header';
 
 const SERVICES = [
   { name: 'Edge/BFF', url: '/healthz' },
@@ -40,14 +41,14 @@ function ServiceStatusBadge({ name, url }: { name: string; url: string }) {
           isLoading
             ? 'bg-muted text-muted-foreground'
             : isUp
-              ? 'bg-green-100 text-green-700'
-              : 'bg-red-100 text-red-700',
+              ? 'bg-success/15 text-success'
+              : 'bg-destructive/15 text-destructive',
         )}
       >
         <span
           className={cn(
             'size-1.5 rounded-full',
-            isLoading ? 'bg-muted-foreground' : isUp ? 'bg-green-500' : 'bg-red-500',
+            isLoading ? 'bg-muted-foreground' : isUp ? 'bg-success' : 'bg-destructive',
           )}
         />
         {isLoading ? '检查中…' : isUp ? '运行中' : '不可用'}
@@ -72,7 +73,7 @@ export default function AdminMorePage() {
 
   return (
     <div className="space-y-5 md:hidden">
-      <h1 className="text-lg font-semibold px-1">更多</h1>
+      <PageHeader title="更多" />
 
       {/* Account info card */}
       <Card>

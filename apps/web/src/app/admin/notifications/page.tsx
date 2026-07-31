@@ -28,6 +28,7 @@ import { ConfirmDialog } from '@/components/confirm-dialog';
 import { Plus, Trash2, UserRound, X } from 'lucide-react';
 import { toast } from 'sonner';
 import type { AdminNotificationInput, AdminUser } from '@/types/admin';
+import { PageHeader } from '@/components/page-header';
 
 const BROADCAST_USER_ID = '00000000-0000-0000-0000-000000000000';
 
@@ -220,19 +221,18 @@ export default function AdminNotificationsPage() {
 
   return (
     <div className="space-y-6">
-      {/* Top bar */}
-      <div className="flex justify-between">
+      <PageHeader title="通知管理" description="发送与管理通知" actions={
         <Button onClick={() => setSendOpen(true)}>
           <Plus className="mr-1 h-4 w-4" />
           发送通知
         </Button>
-      </div>
+      } />
 
       {/* Desktop table */}
       <div className="hidden md:block">
-        <Card>
+        <div className="overflow-hidden rounded-lg border border-border bg-card">
           <Table>
-            <TableHeader>
+            <TableHeader className="bg-muted/30">
               <TableRow>
                 <TableHead>接收者</TableHead>
                 <TableHead>类型</TableHead>
@@ -262,18 +262,18 @@ export default function AdminNotificationsPage() {
                   </TableCell>
                   <TableCell>
                     {n.readAt ? (
-                      <span className="text-xs text-muted-foreground">{formatTime(n.readAt)}</span>
+                      <span className="text-muted-foreground">{formatTime(n.readAt)}</span>
                     ) : (
                       <Badge variant="warning">未读</Badge>
                     )}
                   </TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
+                  <TableCell className="text-muted-foreground">
                     {formatTime(n.createdAt)}
                   </TableCell>
                   <TableCell>
                     <Button
                       variant="ghost"
-                      size="icon"
+                      size="iconSm"
                       className="text-destructive hover:text-destructive"
                       onClick={() => handleDelete(n.id)}
                       disabled={deleteMutation.isPending}
@@ -292,7 +292,7 @@ export default function AdminNotificationsPage() {
               )}
             </TableBody>
           </Table>
-        </Card>
+        </div>
       </div>
 
       {/* Mobile card list */}
@@ -314,10 +314,10 @@ export default function AdminNotificationsPage() {
                 )}
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-xs text-muted-foreground">{formatTime(n.createdAt)}</span>
+                <span className="text-muted-foreground">{formatTime(n.createdAt)}</span>
                 <Button
                   variant="ghost"
-                  size="icon"
+                  size="iconSm"
                   className="h-8 w-8 text-destructive hover:text-destructive"
                   onClick={() => handleDelete(n.id)}
                   disabled={deleteMutation.isPending}
@@ -364,7 +364,7 @@ export default function AdminNotificationsPage() {
                     <UserRound className="h-4 w-4 text-muted-foreground" />
                     <div className="min-w-0 flex-1">
                       <div className="truncate font-medium">{selectedUser.email}</div>
-                      <div className="text-xs text-muted-foreground">{selectedUser.role === 'admin' ? '管理员' : '用户'} · {selectedUser.status === 'active' ? '正常' : '已禁用'}</div>
+                      <div className="text-muted-foreground">{selectedUser.role === 'admin' ? '管理员' : '用户'} · {selectedUser.status === 'active' ? '正常' : '已禁用'}</div>
                     </div>
                     <button
                       type="button"
@@ -452,7 +452,7 @@ export default function AdminNotificationsPage() {
           <section className="space-y-3 rounded-lg border p-3">
             <div>
               <div className="text-sm font-medium">Action</div>
-              <p className="text-xs text-muted-foreground">当前仅支持 Link 类型；未知类型客户端会忽略。</p>
+              <p className="text-muted-foreground">当前仅支持 Link 类型；未知类型客户端会忽略。</p>
             </div>
             <select
               value={actionTarget}

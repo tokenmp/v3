@@ -3,6 +3,8 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { userApi } from '@/lib/api/user';
+import { Badge } from '@/components/ui/badge';
+import { StatusBadge } from '@/lib/status-badge';
 import {
   Table, TableHeader, TableRow, TableHead, TableBody, TableCell,
 } from '@/components/ui/table';
@@ -21,13 +23,6 @@ import {
 
 function formatTime(iso: string) {
   return new Date(iso).toLocaleString('zh-CN');
-}
-
-function statusBadge(status: string) {
-  if (status === 'success') return { label: '成功', cls: 'bg-green-100 text-green-700' };
-  if (status === 'processing') return { label: '处理中', cls: 'bg-blue-100 text-blue-700 animate-pulse' };
-  if (status === 'cancelled') return { label: '已取消', cls: 'bg-amber-100 text-amber-700' };
-  return { label: '失败', cls: 'bg-red-100 text-red-700' };
 }
 
 function shortRequestId(id: string | null | undefined): string {
@@ -95,23 +90,23 @@ export default function RequestsPage() {
       </div>
 
       {/* Desktop table */}
-      <div className="hidden md:block rounded-md border border-border bg-card">
-        <div className="overflow-x-auto">
+      <div className="hidden md:block">
+        <div className="overflow-hidden rounded-lg border border-border bg-card">
           <Table>
-            <TableHeader>
-              <TableRow className="bg-muted/30">
-                <TableHead className="text-xs whitespace-nowrap">请求ID</TableHead>
-                <TableHead className="text-xs whitespace-nowrap">模型</TableHead>
-                <TableHead className="text-xs whitespace-nowrap">协议</TableHead>
-                <TableHead className="text-xs whitespace-nowrap">状态</TableHead>
-                <TableHead className="text-xs whitespace-nowrap text-right">输入</TableHead>
-                <TableHead className="text-xs whitespace-nowrap text-right">输出</TableHead>
-                <TableHead className="text-xs whitespace-nowrap text-right">缓存</TableHead>
-                <TableHead className="text-xs whitespace-nowrap text-right">TTFT</TableHead>
-                <TableHead className="text-xs whitespace-nowrap text-right">速度</TableHead>
-                <TableHead className="text-xs whitespace-nowrap text-right">耗时</TableHead>
-                <TableHead className="text-xs whitespace-nowrap">Thinking</TableHead>
-                <TableHead className="text-xs whitespace-nowrap">时间</TableHead>
+            <TableHeader className="bg-muted/30">
+              <TableRow>
+                <TableHead className="whitespace-nowrap">请求ID</TableHead>
+                <TableHead className="whitespace-nowrap">模型</TableHead>
+                <TableHead className="whitespace-nowrap">协议</TableHead>
+                <TableHead className="whitespace-nowrap">状态</TableHead>
+                <TableHead className="whitespace-nowrap text-right">输入</TableHead>
+                <TableHead className="whitespace-nowrap text-right">输出</TableHead>
+                <TableHead className="whitespace-nowrap text-right">缓存</TableHead>
+                <TableHead className="whitespace-nowrap text-right">TTFT</TableHead>
+                <TableHead className="whitespace-nowrap text-right">速度</TableHead>
+                <TableHead className="whitespace-nowrap text-right">耗时</TableHead>
+                <TableHead className="whitespace-nowrap">Thinking</TableHead>
+                <TableHead className="whitespace-nowrap">时间</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -119,31 +114,29 @@ export default function RequestsPage() {
                 const speed = speedFor(r);
                 return (
                   <TableRow key={r.requestId}>
-                    <TableCell className="text-xs font-mono whitespace-nowrap" title={r.requestId}>{shortRequestId(r.requestId)}</TableCell>
-                    <TableCell className="text-sm whitespace-nowrap">{r.model || '—'}</TableCell>
-                    <TableCell className="text-sm whitespace-nowrap">
+                    <TableCell className="font-mono whitespace-nowrap" title={r.requestId}>{shortRequestId(r.requestId)}</TableCell>
+                    <TableCell className="whitespace-nowrap">{r.model || '—'}</TableCell>
+                    <TableCell className="whitespace-nowrap">
                       <span className="flex items-center gap-1.5">
                         <span>{protocolLabel(r.protocol)}</span>
                         {r.stream != null && (
-                          <span className={`rounded px-1 py-px text-[10px] font-medium ${r.stream ? 'bg-blue-100 text-blue-700' : 'bg-muted text-muted-foreground'}`}>
+                          <Badge variant={r.stream ? 'info' : 'secondary'} className="rounded px-1 py-px text-[10px]">
                             {streamLabel(r.stream)}
-                          </span>
+                          </Badge>
                         )}
                       </span>
                     </TableCell>
                     <TableCell>
-                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${statusBadge(r.status).cls}`}>
-                        {statusBadge(r.status).label}
-                      </span>
+                      <StatusBadge status={r.status} className={r.status === 'processing' ? 'animate-pulse' : undefined} />
                     </TableCell>
-                    <TableCell className="text-sm text-right tabular-nums">{formatTokens(r.inputTokens)}</TableCell>
-                    <TableCell className="text-sm text-right tabular-nums">{formatTokens(r.outputTokens)}</TableCell>
-                    <TableCell className="text-sm text-right tabular-nums">{formatTokens(r.cacheTokens)}</TableCell>
-                    <TableCell className="text-sm text-right tabular-nums">{formatDuration(r.ttftMs)}</TableCell>
-                    <TableCell className="text-sm text-right tabular-nums">{formatTokensPerSecond(speed)}</TableCell>
-                    <TableCell className="text-sm text-right tabular-nums">{formatDuration(r.durationMs)}</TableCell>
-                    <TableCell className="text-sm whitespace-nowrap">{thinkingLabel(r.thinkingEffectiveEffort ?? r.thinkingEffort, null, r.thinkingRequestedEffort, r.thinkingEffortDegraded)}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{formatTime(r.createdAt)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{formatTokens(r.inputTokens)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{formatTokens(r.outputTokens)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{formatTokens(r.cacheTokens)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{formatDuration(r.ttftMs)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{formatTokensPerSecond(speed)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{formatDuration(r.durationMs)}</TableCell>
+                    <TableCell className="whitespace-nowrap">{thinkingLabel(r.thinkingEffectiveEffort ?? r.thinkingEffort, null, r.thinkingRequestedEffort, r.thinkingEffortDegraded)}</TableCell>
+                    <TableCell className="text-muted-foreground whitespace-nowrap">{formatTime(r.createdAt)}</TableCell>
                   </TableRow>
                 );
               })}
@@ -174,17 +167,15 @@ export default function RequestsPage() {
             <div key={r.requestId} className="rounded-lg border bg-card p-3 space-y-2">
               <div className="flex items-center justify-between gap-2">
                 <span className="text-sm font-medium truncate">{r.model || '—'}</span>
-                <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${statusBadge(r.status).cls}`}>
-                  {statusBadge(r.status).label}
-                </span>
+                <StatusBadge status={r.status} className={`shrink-0 ${r.status === 'processing' ? 'animate-pulse' : ''}`} />
               </div>
               {/* Request type row */}
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
                 <span>{protocolLabel(r.protocol)}</span>
                 {r.stream != null && (
-                  <span className={`rounded px-1 py-px text-[10px] font-medium ${r.stream ? 'bg-blue-100 text-blue-700' : 'bg-muted text-muted-foreground'}`}>
+                  <Badge variant={r.stream ? 'info' : 'secondary'} className="rounded px-1 py-px text-[10px]">
                     {streamLabel(r.stream)}
-                  </span>
+                  </Badge>
                 )}
               </div>
               {/* Token row */}
@@ -216,7 +207,7 @@ export default function RequestsPage() {
 
       {/* 分页 */}
       <div className="flex items-center justify-between gap-4 px-1 py-1 text-sm">
-        <p className="text-xs text-muted-foreground">共 {total} 条</p>
+        <p className="text-muted-foreground">共 {total} 条</p>
         <div className="flex items-center gap-1">
           <button
             onClick={() => setPage((p) => Math.max(1, p - 1))}

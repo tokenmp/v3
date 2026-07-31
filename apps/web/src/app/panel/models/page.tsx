@@ -70,9 +70,10 @@ export default function PanelModelsPage() {
       ) : (
         <>
           {/* Desktop table */}
-          <div className="hidden md:block rounded-lg border">
+          <div className="hidden md:block">
+          <div className="overflow-hidden rounded-lg border border-border bg-card">
             <Table>
-              <TableHeader>
+              <TableHeader className="bg-muted/30">
                 <TableRow>
                   <TableHead>模型 ID</TableHead>
                   <TableHead>能力</TableHead>
@@ -83,7 +84,7 @@ export default function PanelModelsPage() {
               <TableBody>
                 {models.map((m) => (
                   <TableRow key={m.id}>
-                    <TableCell className="font-mono text-xs">{m.id}</TableCell>
+                    <TableCell className="font-mono">{m.id}</TableCell>
                     <TableCell>
                       <div className="flex flex-wrap gap-1">
                         {(m.capabilities ?? []).map((cap) => (
@@ -93,16 +94,17 @@ export default function PanelModelsPage() {
                         ))}
                       </div>
                     </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
+                    <TableCell className="text-muted-foreground">
                       {m.thinking?.supported
                         ? `支持（${m.thinking.default_effort ?? 'medium'} / ${m.thinking.max_effort ?? 'high'}）`
                         : '不支持'}
                     </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{m.owned_by ?? '—'}</TableCell>
+                    <TableCell className="text-muted-foreground">{m.owned_by ?? '—'}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
+          </div>
           </div>
 
           {/* Mobile card list */}
@@ -120,7 +122,7 @@ export default function PanelModelsPage() {
                     </Badge>
                   ))}
                 </div>
-                <p className="text-xs text-muted-foreground">
+                <p className="text-muted-foreground">
                   {m.thinking?.supported
                     ? `思考：${m.thinking.default_effort ?? 'medium'} / ${m.thinking.max_effort ?? 'high'}`
                     : '不支持思考'}

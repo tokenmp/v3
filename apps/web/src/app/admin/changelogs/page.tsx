@@ -30,6 +30,7 @@ import { Markdown } from '@/components/markdown';
 import { Plus, Pencil, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { AdminChangelog, AdminChangelogInput } from '@/types/admin';
+import { PageHeader } from '@/components/page-header';
 
 function formatTime(iso: string) {
   return new Date(iso).toLocaleString('zh-CN');
@@ -144,13 +145,12 @@ export default function AdminChangelogsPage() {
 
   return (
     <div className="space-y-6">
-      {/* Top bar */}
-      <div className="flex justify-end">
+      <PageHeader title="版本日志" description="发布与管理版本日志" actions={
         <Button onClick={openCreate}>
           <Plus className="mr-2 h-4 w-4" />
           新建版本
         </Button>
-      </div>
+      } />
 
       {/* Loading */}
       {isLoading && (
@@ -165,9 +165,9 @@ export default function AdminChangelogsPage() {
         <>
           {/* Desktop table */}
           <div className="hidden md:block">
-            <Card>
+            <div className="overflow-hidden rounded-lg border border-border bg-card">
               <Table>
-                <TableHeader>
+                <TableHeader className="bg-muted/30">
                   <TableRow>
                     <TableHead>版本号</TableHead>
                     <TableHead>标题</TableHead>
@@ -184,7 +184,7 @@ export default function AdminChangelogsPage() {
                           {c.version}
                         </Badge>
                       </TableCell>
-                      <TableCell className="font-medium text-sm">{c.title}</TableCell>
+                      <TableCell className="font-medium">{c.title}</TableCell>
                       <TableCell>
                         {c.publishedAt !== null ? (
                           <Badge variant="success">已发布</Badge>
@@ -192,7 +192,7 @@ export default function AdminChangelogsPage() {
                           <Badge variant="secondary">草稿</Badge>
                         )}
                       </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">
+                      <TableCell className="text-muted-foreground">
                         {c.publishedAt ? formatTime(c.publishedAt) : '—'}
                       </TableCell>
                       <TableCell>
@@ -214,7 +214,7 @@ export default function AdminChangelogsPage() {
                   ))}
                 </TableBody>
               </Table>
-            </Card>
+            </div>
           </div>
 
           {/* Mobile card list */}
@@ -232,8 +232,8 @@ export default function AdminChangelogsPage() {
                       <Badge variant="secondary">草稿</Badge>
                     )}
                   </div>
-                  <p className="font-medium text-sm">{c.title}</p>
-                  <p className="text-xs text-muted-foreground">
+                  <p className="font-medium">{c.title}</p>
+                  <p className="text-muted-foreground">
                     {c.publishedAt ? formatTime(c.publishedAt) : '—'}
                   </p>
                   <div className="flex items-center gap-1">

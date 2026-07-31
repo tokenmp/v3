@@ -29,6 +29,7 @@ import { ConfirmDialog } from '@/components/confirm-dialog';
 import { Plus, Pencil, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { AdminAnnouncement, AdminAnnouncementInput } from '@/types/admin';
+import { PageHeader } from '@/components/page-header';
 
 function formatTime(iso: string) {
   return new Date(iso).toLocaleString('zh-CN');
@@ -153,13 +154,12 @@ export default function AdminAnnouncementsPage() {
 
   return (
     <div className="space-y-6">
-      {/* Top bar */}
-      <div className="flex justify-end">
+      <PageHeader title="公告管理" description="发布与管理公告" actions={
         <Button onClick={openCreate}>
           <Plus />
           新建公告
         </Button>
-      </div>
+      } />
 
       {announcements.length === 0 ? (
         <div className="py-12 text-center text-muted-foreground">暂无公告</div>
@@ -167,8 +167,9 @@ export default function AdminAnnouncementsPage() {
         <>
           {/* Desktop table */}
           <div className="hidden md:block">
+            <div className="overflow-hidden rounded-lg border border-border bg-card">
             <Table>
-              <TableHeader>
+              <TableHeader className="bg-muted/30">
                 <TableRow>
                   <TableHead>标题</TableHead>
                   <TableHead>级别</TableHead>
@@ -195,12 +196,12 @@ export default function AdminAnnouncementsPage() {
                       </TableCell>
                       <TableCell>{a.publishedAt ? formatTime(a.publishedAt) : '—'}</TableCell>
                       <TableCell className="text-right">
-                        <Button variant="ghost" size="icon" onClick={() => openEdit(a)}>
+                        <Button variant="ghost" size="iconSm" onClick={() => openEdit(a)}>
                           <Pencil className="h-4 w-4" />
                         </Button>
                         <Button
                           variant="ghost"
-                          size="icon"
+                          size="iconSm"
                           className="text-destructive"
                           onClick={() => openDelete(a.id)}
                         >
@@ -212,6 +213,7 @@ export default function AdminAnnouncementsPage() {
                 })}
               </TableBody>
             </Table>
+          </div>
           </div>
 
           {/* Mobile cards */}
@@ -238,12 +240,12 @@ export default function AdminAnnouncementsPage() {
                       </p>
                     )}
                     <div className="flex justify-end gap-1">
-                      <Button variant="ghost" size="icon" onClick={() => openEdit(a)}>
+                      <Button variant="ghost" size="iconSm" onClick={() => openEdit(a)}>
                         <Pencil className="h-4 w-4" />
                       </Button>
                       <Button
                         variant="ghost"
-                        size="icon"
+                        size="iconSm"
                         className="text-destructive"
                         onClick={() => openDelete(a.id)}
                       >

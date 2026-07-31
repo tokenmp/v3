@@ -28,6 +28,7 @@ import { ConfirmDialog } from '@/components/confirm-dialog';
 import { Plus, Pencil, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { AdminPlan, AdminPlanInput } from '@/types/admin';
+import { PageHeader } from '@/components/page-header';
 
 const PLAN_TYPE_OPTIONS: { value: AdminPlanInput['planType']; label: string }[] = [
   { value: 'coding', label: '编程' },
@@ -212,13 +213,12 @@ export default function AdminPlansPage() {
 
   return (
     <div className="space-y-6">
-      {/* Top bar */}
-      <div className="flex justify-end">
+      <PageHeader title="套餐管理" description="管理计费套餐" actions={
         <Button onClick={openCreate}>
           <Plus />
           新建套餐
         </Button>
-      </div>
+      } />
 
       {plans.length === 0 ? (
         <div className="py-12 text-center text-muted-foreground">暂无套餐</div>
@@ -226,8 +226,9 @@ export default function AdminPlansPage() {
         <>
           {/* Desktop table */}
           <div className="hidden md:block">
+            <div className="overflow-hidden rounded-lg border border-border bg-card">
             <Table>
-              <TableHeader>
+              <TableHeader className="bg-muted/30">
                 <TableRow>
                   <TableHead>名称</TableHead>
                   <TableHead>类型</TableHead>
@@ -260,12 +261,12 @@ export default function AdminPlansPage() {
                         </Badge>
                       </TableCell>
                       <TableCell className="text-right">
-                        <Button variant="ghost" size="icon" onClick={() => openEdit(p)}>
+                        <Button variant="ghost" size="iconSm" onClick={() => openEdit(p)}>
                           <Pencil className="h-4 w-4" />
                         </Button>
                         <Button
                           variant="ghost"
-                          size="icon"
+                          size="iconSm"
                           className="text-destructive"
                           onClick={() => openDelete(p.id)}
                         >
@@ -277,6 +278,7 @@ export default function AdminPlansPage() {
                 })}
               </TableBody>
             </Table>
+          </div>
           </div>
 
           {/* Mobile cards */}
@@ -301,12 +303,12 @@ export default function AdminPlansPage() {
                       <p>模型：{p.allowedModels.length > 0 ? `${p.allowedModels.length} 个` : '—'}</p>
                     </div>
                     <div className="flex justify-end gap-1">
-                      <Button variant="ghost" size="icon" onClick={() => openEdit(p)}>
+                      <Button variant="ghost" size="iconSm" onClick={() => openEdit(p)}>
                         <Pencil className="h-4 w-4" />
                       </Button>
                       <Button
                         variant="ghost"
-                        size="icon"
+                        size="iconSm"
                         className="text-destructive"
                         onClick={() => openDelete(p.id)}
                       >
