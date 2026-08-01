@@ -4,6 +4,10 @@
   "private": true,
   "scripts": {
     "test": "playwright test",
+    "pretest:smoke": "pnpm --filter @tokenmp/ui-tokens run build",
+    "test:smoke": "playwright test --project=chromium-smoke",
+    "pretest:smoke:mobile": "pnpm --filter @tokenmp/ui-tokens run build",
+    "test:smoke:mobile": "playwright test --project='Mobile Chrome-smoke'",
     "test:ui": "playwright test --ui",
     "test:codegen": "playwright codegen",
     "test:debug": "playwright test --debug",

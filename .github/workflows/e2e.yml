@@ -37,11 +37,14 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Build UI tokens
+        run: pnpm --filter @tokenmp/ui-tokens run build
+
       - name: Install Chromium
         run: pnpm --filter tokenmp-v3-e2e exec playwright install --with-deps chromium
 
       - name: Run isolated local smoke
-        run: pnpm --filter tokenmp-v3-e2e exec playwright test --project=chromium-smoke
+        run: pnpm --filter tokenmp-v3-e2e run test:smoke
 
       - name: Upload failure artifacts
         if: failure()
