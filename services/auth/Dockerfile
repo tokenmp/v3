@@ -7,6 +7,12 @@
 # builds fast (no QEMU) while still producing images for any target arch.
 FROM --platform=$BUILDPLATFORM golang:1.26.5-alpine AS builder
 
+# Keep the public Go module proxy as the portable default. Deployments may
+# provide GOPROXY at build time without baking an environment-specific proxy
+# into this Dockerfile. ENV also covers downloads triggered by go build.
+ARG GOPROXY=https://proxy.golang.org,direct
+ENV GOPROXY=${GOPROXY}
+
 WORKDIR /workspace
 
 # Cache module layer. go.mod/go.sum are copied before the rest of the source

@@ -3,6 +3,12 @@
 # Builder stage: compile the notice service binary and the healthcheck binary.
 FROM --platform=$BUILDPLATFORM golang:1.26.5-alpine AS builder
 
+# Keep the public Go module proxy as the portable default. Deployments may
+# provide GOPROXY at build time without baking an environment-specific proxy
+# into this Dockerfile. ENV also covers downloads triggered by go build.
+ARG GOPROXY=https://proxy.golang.org,direct
+ENV GOPROXY=${GOPROXY}
+
 WORKDIR /workspace
 
 COPY services/notice/go.mod services/notice/go.sum ./services/notice/

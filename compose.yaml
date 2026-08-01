@@ -28,6 +28,8 @@ services:
     build:
       context: .
       dockerfile: services/auth/Dockerfile
+      args:
+        GOPROXY: ${TOKENMP_V3_GO_PROXY:-https://proxy.golang.org,direct}
     environment:
       AUTH_HTTP_ADDR: :8080
       AUTH_DATABASE_URL: ${AUTH_DATABASE_URL:?required}
@@ -74,6 +76,8 @@ services:
     build:
       context: .
       dockerfile: services/config/Dockerfile
+      args:
+        GOPROXY: ${TOKENMP_V3_GO_PROXY:-https://proxy.golang.org,direct}
     environment:
       CONFIG_HTTP_ADDR: :8082
       CONFIG_DATABASE_URL: ${CONFIG_DATABASE_URL:?required}
@@ -92,6 +96,8 @@ services:
     build:
       context: .
       dockerfile: services/logging/Dockerfile
+      args:
+        GOPROXY: ${TOKENMP_V3_GO_PROXY:-https://proxy.golang.org,direct}
     environment:
       LOGGING_HTTP_ADDR: :8083
       LOGGING_DATABASE_URL: ${LOGGING_DATABASE_URL:?required}
@@ -103,6 +109,8 @@ services:
     build:
       context: .
       dockerfile: services/billing/Dockerfile
+      args:
+        GOPROXY: ${TOKENMP_V3_GO_PROXY:-https://proxy.golang.org,direct}
     environment:
       BILLING_HTTP_ADDR: :8085
       BILLING_DATABASE_URL: ${BILLING_DATABASE_URL:?required}
@@ -133,6 +141,8 @@ services:
     build:
       context: .
       dockerfile: services/notice/Dockerfile
+      args:
+        GOPROXY: ${TOKENMP_V3_GO_PROXY:-https://proxy.golang.org,direct}
     environment:
       NOTICE_HTTP_ADDR: :8081
       NOTICE_DATABASE_URL: ${NOTICE_DATABASE_URL:?required}
@@ -150,6 +160,8 @@ services:
     build:
       context: .
       dockerfile: services/executor/Dockerfile
+      args:
+        GOPROXY: ${TOKENMP_V3_GO_PROXY:-https://proxy.golang.org,direct}
     environment:
       EXECUTOR_HTTP_ADDR: 0.0.0.0:8081
       EXECUTOR_CONFIG_SERVICE_URL: http://config:8082/v1/config/snapshots/latest
@@ -174,6 +186,8 @@ services:
     build:
       context: .
       dockerfile: services/api/Dockerfile
+      args:
+        GOPROXY: ${TOKENMP_V3_GO_PROXY:-https://proxy.golang.org,direct}
     environment:
       API_HTTP_ADDR: 0.0.0.0:3002
       API_EXECUTOR_URL: http://executor:8081
