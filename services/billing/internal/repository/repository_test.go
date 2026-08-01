@@ -5,7 +5,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -16,17 +15,22 @@ import (
 )
 
 // dsn is built from env BILLING_REPO_TEST_DSN (set by the test harness that
-// starts a temp pg). When unset, integration tests are skipped. The DSN must
-// target the billing-only test database (tokenmp_billing) so the destructive
-// schema reset used for test isolation cannot touch any other database.
+// starts a temp pg). When unset, integration tests are skipped. The DSN is
+// parsed with the real libpq-compatible parser (see validateTestDSN) and must
+// target the billing-only test database (tokenmp_billing) — verified from the
+// parsed Database field, not a substring match — so the destructive schema
+// reset used for test isolation cannot touch any other database. A parse
+// failure, missing database, or different database is a hard fatal whose
+// message names only the expected database (never the raw DSN, password,
+// host, or query).
 func dsn(t *testing.T) string {
 	t.Helper()
 	d := os.Getenv("BILLING_REPO_TEST_DSN")
 	if d == "" {
 		t.Skip("BILLING_REPO_TEST_DSN not set; skipping repository integration test")
 	}
-	if !strings.Contains(d, "tokenmp_billing") {
-		t.Fatalf("BILLING_REPO_TEST_DSN must target the tokenmp_billing test database; refusing to run against an arbitrary DSN")
+	if _, err := validateTestDSN(d); err != nil {
+		t.Fatalf("%v", err)
 	}
 	return d
 }
@@ -71,7 +75,16 @@ func migrationsDir() string { return filepath.Join("..", "..", "migrations") }
 // mid-way. The next test's pre-clean down4 then hit `ALTER TABLE usage_ledger
 // ...` on a now-missing table and fatalf'd, cascading into every later test.
 // A schema reset is idempotent, migration-content-independent, and immune to
-// the fail-closed guard. The DSN is constrained by dsn() to tokenmp_billing.
+// the fail-closed guard.
+//
+// DESTRUCTIVE SAFETY: this helper opens an already-connected *pgx.Conn and
+// issues DROP SCHEMA public CASCADE. It MUST only ever be reached via a DSN
+// that passed the parsed-database guard in dsn()/validateTestDSN (which
+// requires Config.Database == "tokenmp_billing"). Every caller obtains that
+// connection by first calling dsn(t) (which fatalfs on any wrong/unparsable
+// target) and only then opening the connection; no destructive helper opens
+// or executes against a raw/unvalidated DSN. See applyMigrations and the
+// setupCleanSchemaForDownTest helper in settlement_test.go.
 func resetSchema(t *testing.T, ctx context.Context, conn *pgx.Conn) {
 	t.Helper()
 	for _, stmt := range []string{
@@ -114,6 +127,9 @@ WHERE table_schema = current_schema()
 // schema. Cleanup resets the schema again so the next test is fully isolated
 // and never inherits another test's settled/pending rows or ledger entries.
 // The fail-closed 000004 down migration is intentionally NOT run for cleanup.
+// The connection is opened with dsn, which every caller obtains from dsn(t)
+// and is therefore already validated by validateTestDSN (parsed database must
+// be tokenmp_billing) before this destructive helper runs.
 func applyMigrations(t *testing.T, dsn string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

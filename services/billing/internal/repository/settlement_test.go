@@ -488,6 +488,11 @@ func assertSchemaIntact000004(t *testing.T, ctx context.Context, conn *pgx.Conn)
 // dropped usage_ledger while down4 had already aborted, leaving a partial
 // schema that broke the next test's pre-clean. These tests still execute
 // down4 in their body to exercise the guard; only setup/cleanup use the reset.
+//
+// DESTRUCTIVE SAFETY: like all schema-resetting helpers, this is only reached
+// via a connection opened from a DSN that already passed the parsed-database
+// guard in dsn()/validateTestDSN (Config.Database == "tokenmp_billing"); every
+// caller does d := dsn(t) before opening the connection passed in here.
 func setupCleanSchemaForDownTest(t *testing.T, conn *pgx.Conn, ctx context.Context) {
 	t.Helper()
 	resetSchema(t, ctx, conn)
