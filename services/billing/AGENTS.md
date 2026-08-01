@@ -146,3 +146,23 @@ SELECT
 ## 文档维护
 
 计费模型、幂等策略、预留结算流程变化时，同步维护本文件、`services/AGENTS.md` 与 `infra/db/AGENTS.md`。
+
+## Container image and Compose
+
+- `Dockerfile` is built with the repository root as context and produces only the static
+  `billing` binary in a non-root Alpine runtime image. Its service-local module download runs
+  with `GOWORK=off`; the shared `packages/go/httpresp` replace target is copied explicitly.
+- The image health check probes `/readyz`, the HTTP and database readiness route.
+- Root `compose.yaml` owns the service definition only; provide required database and key
+  inputs at deploy time, and do not add shared PostgreSQL/Redis/proxy resources or secrets.
+
+The repository-root build context means Dockerfile `COPY` sources are rooted at
+`services/<service>` (with the shared `packages/go/httpresp` copied from the same root), not
+at the Dockerfile directory. `tools/check-dockerfile-copy-sources.sh` statically guards this
+before CI Docker builds.
+
+Compose supplies `BILLING_LOGGING_URL=http://logging:8083`, explicit sweeper defaults,
+and a read-only `BILLING_LOGGING_SERVICE_TOKEN_FILE` Docker secret, consumed by the Billing
+`internal/config` secret-file loader (production source; `BILLING_LOGGING_SERVICE_TOKEN` is a
+dev/test-only direct env alternative and the two are mutually exclusive). Do not pass the path
+as the string token or add a token-reading entrypoint wrapper.

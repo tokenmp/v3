@@ -1,0 +1,266 @@
+# TokenMP v3 application services only. PostgreSQL, Redis, and the public
+# reverse proxy remain externally owned infrastructure and are never created,
+# stopped, or removed by this Compose project.
+#
+# Rate-limit names below match shared-rate-limit exactly. Config/Billing/API
+# *_FILE token paths are merge contracts: see README and the module AGENTS
+# documents for the required file-consuming business changes.
+name: tokenmp-v3
+
+x-service-defaults: &service-defaults
+  restart: unless-stopped
+  read_only: true
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,size=64m
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  networks:
+    - backend
+  labels:
+    com.tokenmp.v3.managed: "true"
+
+services:
+  auth:
+    <<: *service-defaults
+    image: tokenmp-v3-auth:${TOKENMP_V3_IMAGE_TAG:-latest}
+    build:
+      context: .
+      dockerfile: services/auth/Dockerfile
+    environment:
+      AUTH_HTTP_ADDR: :8080
+      AUTH_DATABASE_URL: ${AUTH_DATABASE_URL:?required}
+      AUTH_JWT_PRIVATE_KEY_FILE: /run/tokenmp/auth-jwt-private.pem
+      AUTH_JWT_PUBLIC_KEY_FILE: /run/tokenmp/auth-jwt-public.pem
+      AUTH_RATE_LIMIT_ENABLED: ${AUTH_RATE_LIMIT_ENABLED:-false}
+      AUTH_RATE_LIMIT_REDIS_ADDR: ${TOKENMP_V3_EXTERNAL_REDIS_ADDR:?required}
+      AUTH_RATE_LIMIT_REDIS_DB: ${AUTH_RATE_LIMIT_REDIS_DB:-0}
+      AUTH_RATE_LIMIT_HMAC_SECRET_FILE: /run/secrets/auth_rate_limit_hmac
+      AUTH_RATE_LIMIT_TRUSTED_PROXIES: ${AUTH_RATE_LIMIT_TRUSTED_PROXIES:?required}
+      AUTH_RATE_LIMIT_LOGIN_IP_CAPACITY: ${AUTH_RATE_LIMIT_LOGIN_IP_CAPACITY:-10}
+      AUTH_RATE_LIMIT_LOGIN_IP_REFILL: ${AUTH_RATE_LIMIT_LOGIN_IP_REFILL:-0.5}
+      AUTH_RATE_LIMIT_LOGIN_ACCOUNT_CAPACITY: ${AUTH_RATE_LIMIT_LOGIN_ACCOUNT_CAPACITY:-10}
+      AUTH_RATE_LIMIT_LOGIN_ACCOUNT_REFILL: ${AUTH_RATE_LIMIT_LOGIN_ACCOUNT_REFILL:-0.5}
+      AUTH_RATE_LIMIT_REGISTER_IP_CAPACITY: ${AUTH_RATE_LIMIT_REGISTER_IP_CAPACITY:-5}
+      AUTH_RATE_LIMIT_REGISTER_IP_REFILL: ${AUTH_RATE_LIMIT_REGISTER_IP_REFILL:-0.1}
+      AUTH_RATE_LIMIT_REGISTER_ACCOUNT_CAPACITY: ${AUTH_RATE_LIMIT_REGISTER_ACCOUNT_CAPACITY:-5}
+      AUTH_RATE_LIMIT_REGISTER_ACCOUNT_REFILL: ${AUTH_RATE_LIMIT_REGISTER_ACCOUNT_REFILL:-0.1}
+      AUTH_RATE_LIMIT_REFRESH_IP_CAPACITY: ${AUTH_RATE_LIMIT_REFRESH_IP_CAPACITY:-30}
+      AUTH_RATE_LIMIT_REFRESH_IP_REFILL: ${AUTH_RATE_LIMIT_REFRESH_IP_REFILL:-1}
+      AUTH_RATE_LIMIT_REFRESH_ACCOUNT_CAPACITY: ${AUTH_RATE_LIMIT_REFRESH_ACCOUNT_CAPACITY:-30}
+      AUTH_RATE_LIMIT_REFRESH_ACCOUNT_REFILL: ${AUTH_RATE_LIMIT_REFRESH_ACCOUNT_REFILL:-1}
+      AUTH_RATE_LIMIT_BUCKET_TTL: ${AUTH_RATE_LIMIT_BUCKET_TTL:-10m}
+    volumes:
+      - type: bind
+        source: ${AUTH_JWT_PRIVATE_KEY_FILE:?required}
+        target: /run/tokenmp/auth-jwt-private.pem
+        read_only: true
+      - type: bind
+        source: ${AUTH_JWT_PUBLIC_KEY_FILE:?required}
+        target: /run/tokenmp/auth-jwt-public.pem
+        read_only: true
+    secrets:
+      - source: auth_rate_limit_hmac
+        target: auth_rate_limit_hmac
+        uid: "10001"
+        gid: "10001"
+        mode: 0400
+    expose: ["8080"]
+
+  config:
+    <<: *service-defaults
+    image: tokenmp-v3-config:${TOKENMP_V3_IMAGE_TAG:-latest}
+    build:
+      context: .
+      dockerfile: services/config/Dockerfile
+    environment:
+      CONFIG_HTTP_ADDR: :8082
+      CONFIG_DATABASE_URL: ${CONFIG_DATABASE_URL:?required}
+      CONFIG_ADMIN_TOKEN_FILE: /run/secrets/config_admin_token
+    secrets:
+      - source: config_admin_token
+        target: config_admin_token
+        uid: "10001"
+        gid: "10001"
+        mode: 0400
+    expose: ["8082"]
+
+  logging:
+    <<: *service-defaults
+    image: tokenmp-v3-logging:${TOKENMP_V3_IMAGE_TAG:-latest}
+    build:
+      context: .
+      dockerfile: services/logging/Dockerfile
+    environment:
+      LOGGING_HTTP_ADDR: :8083
+      LOGGING_DATABASE_URL: ${LOGGING_DATABASE_URL:?required}
+    expose: ["8083"]
+
+  billing:
+    <<: *service-defaults
+    image: tokenmp-v3-billing:${TOKENMP_V3_IMAGE_TAG:-latest}
+    build:
+      context: .
+      dockerfile: services/billing/Dockerfile
+    environment:
+      BILLING_HTTP_ADDR: :8085
+      BILLING_DATABASE_URL: ${BILLING_DATABASE_URL:?required}
+      BILLING_LOGGING_URL: http://logging:8083
+      BILLING_LOGGING_SERVICE_TOKEN_FILE: /run/secrets/billing_logging_service_token
+      BILLING_LOGGING_TIMEOUT: ${BILLING_LOGGING_TIMEOUT:-10s}
+      BILLING_SWEEPER_ENABLED: ${BILLING_SWEEPER_ENABLED:-true}
+      BILLING_SWEEPER_INTERVAL: ${BILLING_SWEEPER_INTERVAL:-30s}
+      BILLING_SWEEPER_PENDING_GRACE: ${BILLING_SWEEPER_PENDING_GRACE:-2m}
+      BILLING_SWEEPER_EXPIRY_BATCH: ${BILLING_SWEEPER_EXPIRY_BATCH:-100}
+      BILLING_SWEEPER_PENDING_BATCH: ${BILLING_SWEEPER_PENDING_BATCH:-100}
+      BILLING_SWEEPER_RETENTION_DEADLINE: ${BILLING_SWEEPER_RETENTION_DEADLINE:-30m}
+      BILLING_SWEEPER_UNKNOWN_POLICY: ${BILLING_SWEEPER_UNKNOWN_POLICY:-keep_pending}
+    secrets:
+      - source: billing_logging_service_token
+        target: billing_logging_service_token
+        uid: "10001"
+        gid: "10001"
+        mode: 0400
+    depends_on:
+      logging:
+        condition: service_healthy
+    expose: ["8085"]
+
+  notice:
+    <<: *service-defaults
+    image: tokenmp-v3-notice:${TOKENMP_V3_IMAGE_TAG:-latest}
+    build:
+      context: .
+      dockerfile: services/notice/Dockerfile
+    environment:
+      NOTICE_HTTP_ADDR: :8081
+      NOTICE_DATABASE_URL: ${NOTICE_DATABASE_URL:?required}
+      NOTICE_JWT_PUBLIC_KEY_FILE: /run/tokenmp/notice-jwt-public.pem
+    volumes:
+      - type: bind
+        source: ${NOTICE_JWT_PUBLIC_KEY_FILE:?required}
+        target: /run/tokenmp/notice-jwt-public.pem
+        read_only: true
+    expose: ["8081"]
+
+  executor:
+    <<: *service-defaults
+    image: tokenmp-v3-executor:${TOKENMP_V3_IMAGE_TAG:-latest}
+    build:
+      context: .
+      dockerfile: services/executor/Dockerfile
+    environment:
+      EXECUTOR_HTTP_ADDR: 0.0.0.0:8081
+      EXECUTOR_CONFIG_SERVICE_URL: http://config:8082/v1/config/snapshots/latest
+      EXECUTOR_CREDENTIAL_REF_MAP_JSON: ${EXECUTOR_CREDENTIAL_REF_MAP_JSON:?required}
+      EXECUTOR_JWT_PUBLIC_KEY_FILE: /run/tokenmp/executor-jwt-public.pem
+      EXECUTOR_LOGGING_SERVICE_URL: http://logging:8083
+    volumes:
+      - type: bind
+        source: ${EXECUTOR_JWT_PUBLIC_KEY_FILE:?required}
+        target: /run/tokenmp/executor-jwt-public.pem
+        read_only: true
+    depends_on:
+      config:
+        condition: service_healthy
+      logging:
+        condition: service_healthy
+    expose: ["8081"]
+
+  api:
+    <<: *service-defaults
+    image: tokenmp-v3-api:${TOKENMP_V3_IMAGE_TAG:-latest}
+    build:
+      context: .
+      dockerfile: services/api/Dockerfile
+    environment:
+      API_HTTP_ADDR: 0.0.0.0:3002
+      API_EXECUTOR_URL: http://executor:8081
+      API_EXECUTOR_TOKEN: ${API_EXECUTOR_TOKEN:?required}
+      API_BILLING_URL: http://billing:8085
+      API_LOGGING_URL: http://logging:8083
+      API_AUTH_URL: http://auth:8080
+      API_CONFIG_SERVICE_URL: http://config:8082
+      # Requires the config-publish-hardening follow-up to consume this file.
+      API_CONFIG_ADMIN_PROXY_ENABLED: ${API_CONFIG_ADMIN_PROXY_ENABLED:-true}
+      API_CONFIG_SERVICE_TOKEN_FILE: /run/secrets/api_config_service_token
+      API_JWT_PUBLIC_KEY_FILE: /run/tokenmp/api-jwt-public.pem
+      API_RATE_LIMIT_ENABLED: ${API_RATE_LIMIT_ENABLED:-false}
+      API_RATE_LIMIT_REDIS_ADDR: ${TOKENMP_V3_EXTERNAL_REDIS_ADDR:?required}
+      API_RATE_LIMIT_REDIS_DB: ${API_RATE_LIMIT_REDIS_DB:-0}
+      API_RATE_LIMIT_HMAC_SECRET_FILE: /run/secrets/api_rate_limit_hmac
+      API_RATE_LIMIT_TRUSTED_PROXIES: ${API_RATE_LIMIT_TRUSTED_PROXIES:?required}
+      API_RATE_LIMIT_IP_CAPACITY: ${API_RATE_LIMIT_IP_CAPACITY:-60}
+      API_RATE_LIMIT_IP_REFILL: ${API_RATE_LIMIT_IP_REFILL:-2}
+      API_RATE_LIMIT_SUBJECT_CAPACITY: ${API_RATE_LIMIT_SUBJECT_CAPACITY:-120}
+      API_RATE_LIMIT_SUBJECT_REFILL: ${API_RATE_LIMIT_SUBJECT_REFILL:-4}
+      API_RATE_LIMIT_BUCKET_TTL: ${API_RATE_LIMIT_BUCKET_TTL:-10m}
+    volumes:
+      - type: bind
+        source: ${API_JWT_PUBLIC_KEY_FILE:?required}
+        target: /run/tokenmp/api-jwt-public.pem
+        read_only: true
+    secrets:
+      - source: api_rate_limit_hmac
+        target: api_rate_limit_hmac
+        uid: "10001"
+        gid: "10001"
+        mode: 0400
+      - source: api_config_service_token
+        target: api_config_service_token
+        uid: "10001"
+        gid: "10001"
+        mode: 0400
+    depends_on:
+      auth:
+        condition: service_healthy
+      billing:
+        condition: service_healthy
+      config:
+        condition: service_healthy
+      executor:
+        condition: service_healthy
+      logging:
+        condition: service_healthy
+    ports:
+      - "${TOKENMP_V3_API_HOST_PORT:-3002}:3002"
+
+  web:
+    <<: *service-defaults
+    image: tokenmp-v3-web:${TOKENMP_V3_IMAGE_TAG:-latest}
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    user: "node"
+    environment:
+      PORT: "3100"
+      HOSTNAME: 0.0.0.0
+      NEXT_PUBLIC_USE_MOCK_AUTH: ${NEXT_PUBLIC_USE_MOCK_AUTH:-1}
+      NEXT_PUBLIC_USE_MOCK_NOTICE: ${NEXT_PUBLIC_USE_MOCK_NOTICE:-1}
+    ports:
+      - "${TOKENMP_V3_WEB_HOST_PORT:-3100}:3100"
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:3100/').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 15s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
+
+secrets:
+  # Source files are required deployment inputs and are mounted read-only by
+  # Compose. They contain no repository value and are not copied into images.
+  auth_rate_limit_hmac:
+    file: ${TOKENMP_V3_AUTH_RATE_LIMIT_HMAC_SECRET_FILE:?required}
+  api_rate_limit_hmac:
+    file: ${TOKENMP_V3_API_RATE_LIMIT_HMAC_SECRET_FILE:?required}
+  config_admin_token:
+    file: ${TOKENMP_V3_CONFIG_ADMIN_TOKEN_FILE:?required}
+  api_config_service_token:
+    file: ${TOKENMP_V3_API_CONFIG_SERVICE_TOKEN_FILE:?required}
+  billing_logging_service_token:
+    file: ${TOKENMP_V3_BILLING_LOGGING_SERVICE_TOKEN_FILE:?required}
+
+networks:
+  backend:
+    name: tokenmp-v3-backend

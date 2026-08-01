@@ -267,6 +267,51 @@ jobs:
       # run, not pushed, not published to any registry, and not tagged into
       # a long-lived cache. This step requires no local Docker on developer
       # machines — the Ubuntu runner provides Docker out of the box.
+      - name: Dockerfile COPY source guard
+        run: bash tools/check-dockerfile-copy-sources.sh
+
+      # Render only: create throwaway placeholder inputs for Compose's required
+      # deployment contract. The command intentionally fails if a required
+      # input is omitted; no service is started and no image is pushed.
+      - name: docker compose config (render only)
+        env:
+          AUTH_DATABASE_URL: postgres://placeholder:placeholder@database/tokenmp_auth?sslmode=disable
+          CONFIG_DATABASE_URL: postgres://placeholder:placeholder@database/tokenmp_config?sslmode=disable
+          LOGGING_DATABASE_URL: postgres://placeholder:placeholder@database/tokenmp_logging?sslmode=disable
+          BILLING_DATABASE_URL: postgres://placeholder:placeholder@database/tokenmp_billing?sslmode=disable
+          NOTICE_DATABASE_URL: postgres://placeholder:placeholder@database/tokenmp_biz?sslmode=disable
+          EXECUTOR_CREDENTIAL_REF_MAP_JSON: '{}'
+          API_EXECUTOR_TOKEN: placeholder
+          TOKENMP_V3_EXTERNAL_REDIS_ADDR: redis://cache:6379
+          AUTH_RATE_LIMIT_TRUSTED_PROXIES: 192.0.2.0/24
+          API_RATE_LIMIT_TRUSTED_PROXIES: 192.0.2.0/24
+        run: |
+          set -euo pipefail
+          bash tools/check-compose-env-contract.sh
+          inputs="${RUNNER_TEMP:?}/tokenmp-v3-compose-inputs"
+          mkdir -p "$inputs"
+          trap 'rm -rf "$inputs"' EXIT
+          for file in auth-private.pem auth-public.pem notice-public.pem executor-public.pem api-public.pem; do
+            : > "$inputs/$file"
+          done
+          secret='compose-render-secret-must-not-appear'
+          for file in auth-rate-limit-hmac api-rate-limit-hmac config-admin-token api-config-service-token billing-logging-service-token; do
+            printf '%s' "$secret" > "$inputs/$file"
+          done
+          rendered="$inputs/compose.rendered.yaml"
+          AUTH_JWT_PRIVATE_KEY_FILE="$inputs/auth-private.pem" \
+          AUTH_JWT_PUBLIC_KEY_FILE="$inputs/auth-public.pem" \
+          NOTICE_JWT_PUBLIC_KEY_FILE="$inputs/notice-public.pem" \
+          EXECUTOR_JWT_PUBLIC_KEY_FILE="$inputs/executor-public.pem" \
+          API_JWT_PUBLIC_KEY_FILE="$inputs/api-public.pem" \
+          TOKENMP_V3_AUTH_RATE_LIMIT_HMAC_SECRET_FILE="$inputs/auth-rate-limit-hmac" \
+          TOKENMP_V3_API_RATE_LIMIT_HMAC_SECRET_FILE="$inputs/api-rate-limit-hmac" \
+          TOKENMP_V3_CONFIG_ADMIN_TOKEN_FILE="$inputs/config-admin-token" \
+          TOKENMP_V3_API_CONFIG_SERVICE_TOKEN_FILE="$inputs/api-config-service-token" \
+          TOKENMP_V3_BILLING_LOGGING_SERVICE_TOKEN_FILE="$inputs/billing-logging-service-token" \
+          docker compose -p tokenmp-v3 config > "$rendered"
+          ! grep -F -- "$secret" "$rendered"
+
       - name: docker build (build only, no run/push)
         run: docker build -f services/auth/Dockerfile -t tokenmp-v3-auth:${{ github.sha }} .
 
@@ -277,6 +322,24 @@ jobs:
       # machines — the Ubuntu runner provides Docker out of the box.
       - name: docker build executor (build only, no run/push)
         run: docker build -f services/executor/Dockerfile -t tokenmp-v3-executor:${{ github.sha }} .
+
+      # Each deployable Go service has a separate image. Build these images
+      # only to validate their repo-root build contexts and Dockerfiles; no
+      # image is run, pushed, or published by CI.
+      - name: docker build notice (build only, no run/push)
+        run: docker build -f services/notice/Dockerfile -t tokenmp-v3-notice:${{ github.sha }} .
+
+      - name: docker build api (build only, no run/push)
+        run: docker build -f services/api/Dockerfile -t tokenmp-v3-api:${{ github.sha }} .
+
+      - name: docker build billing (build only, no run/push)
+        run: docker build -f services/billing/Dockerfile -t tokenmp-v3-billing:${{ github.sha }} .
+
+      - name: docker build config (build only, no run/push)
+        run: docker build -f services/config/Dockerfile -t tokenmp-v3-config:${{ github.sha }} .
+
+      - name: docker build logging (build only, no run/push)
+        run: docker build -f services/logging/Dockerfile -t tokenmp-v3-logging:${{ github.sha }} .
 
       # ------------------------------------------------------------------
       # Config service (skeleton): gofmt / vet / build / unit test / migration

@@ -69,3 +69,21 @@ CONFIG_DATABASE_URL=... CONFIG_HTTP_ADDR=127.0.0.1:18082 go run ./cmd/config
 ## 文档维护
 
 读写路径、下发协议、编译边界、secret 边界或服务间授权变化时，同步维护本文件、`services/AGENTS.md`、`infra/db/AGENTS.md` 与 `packages/contracts/AGENTS.md`。
+
+## Container image and Compose
+
+- `Dockerfile` is built with the repository root as context and produces only the static
+  `config` binary in a non-root Alpine runtime image. Its service-local module download runs
+  with `GOWORK=off`; the shared `packages/go/httpresp` replace target is copied explicitly.
+- The image health check probes `/readyz`, the HTTP and database readiness route.
+- Root `compose.yaml` owns the service definition only; provide required database and key
+  inputs at deploy time, and do not add shared PostgreSQL/Redis/proxy resources or secrets.
+
+The repository-root build context means Dockerfile `COPY` sources are rooted at
+`services/<service>` (with the shared `packages/go/httpresp` copied from the same root), not
+at the Dockerfile directory. `tools/check-dockerfile-copy-sources.sh` statically guards this
+before CI Docker builds.
+
+Compose mounts `CONFIG_ADMIN_TOKEN_FILE` as a read-only Compose-secret path, consumed by
+the Config Service `internal/config` loader (regular-file, bounded, strict secret-file
+safety pattern) to source the admin shared secret at startup.
