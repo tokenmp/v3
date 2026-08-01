@@ -215,3 +215,53 @@ Read `AGENTS.md`, then read each nested `AGENTS.md` from the repository root to 
 - [ADR 0005: Auth Identity Flows](docs/adr/0005-auth-identity-flows.md)
 - [ADR 0006: API Contracts Package](docs/adr/0006-api-contracts-package.md)
 - [UI Design System](docs/ui/design-system.md)
+
+### Container Compose
+
+The repository-root [`compose.yaml`](compose.yaml) builds and orchestrates the seven Go
+services and Web app under the fixed `tokenmp-v3` Compose project. It deliberately does
+**not** create or manage PostgreSQL, Redis, OpenResty, or any other shared infrastructure.
+Database DSNs, credential mappings, and JWT key-file paths are required deployment inputs;
+key files are injected read-only and no `.env` file is committed. Containers use the
+internal `tokenmp-v3-backend` network; only Edge/BFF (`3002`, configurable with
+`TOKENMP_V3_API_HOST_PORT`) and Web (`3100`, configurable with
+`TOKENMP_V3_WEB_HOST_PORT`) are published by default.
+
+Use a temporary, environment-owned env file to render the configuration before an
+operator starts it:
+
+```bash
+docker compose --env-file /tmp/tokenmp-v3.compose.env -p tokenmp-v3 config
+docker compose -p tokenmp-v3 build
+```
+
+For portable external-infrastructure access, supply DNS names reachable from both Linux
+Docker Engine and Docker Desktop in the DSN/URL inputs. Do not commit host-gateway,
+private-address, or environment-specific Compose overrides. CI statically verifies the four
+new service Dockerfile `COPY` sources against the repository-root build context, renders
+Compose with disposable placeholder files/values, and builds all seven Go service images
+without running or pushing them.
+
+### Cross-branch runtime contract
+
+`compose.yaml` is prepared for the feature branches but does not claim that this branch's
+binaries already consume their settings. After `shared-rate-limit` merges, Auth and API use
+the exact `AUTH_RATE_LIMIT_*` / `API_RATE_LIMIT_*` names: enabled flag, external Redis
+address/DB, trusted-proxy CIDRs, read-only HMAC-secret file, policy capacity/refill values and
+bucket TTL. Redis remains external; Compose neither creates it nor uses obsolete
+`*_REDIS_URL`/`*_HMAC_SECRET_FILE` aliases.
+
+The Config admin secret is mounted read-only as `CONFIG_ADMIN_TOKEN_FILE`. API and Billing are
+also mounted with read-only `API_CONFIG_SERVICE_TOKEN_FILE` and
+`BILLING_LOGGING_SERVICE_TOKEN_FILE` paths, while Billing is wired to
+`BILLING_LOGGING_URL=http://logging:8083` with explicit strict sweeper defaults. The current
+`config-publish-hardening` API and `billing-settlement` code accepts only the corresponding
+string token variables. Before those Compose paths are runtime-enabled, their business
+branches must add safe `_FILE` consumers; never pass a file path as a token value, use a
+secret-reading entrypoint wrapper, or interpolate a token into Compose environment/rendered
+configuration.
+
+Deployment source files are mounted read-only under `/run/secrets`; neither their contents nor
+external Redis/PostgreSQL resources are committed or created. CI checks this contract with
+`tools/check-compose-env-contract.sh`, renders using temporary sentinel secret files, and fails
+if the sentinel appears in rendered Compose output.

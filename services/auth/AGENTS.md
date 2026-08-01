@@ -123,6 +123,7 @@ go test -tags=integration -race ./test/integration/...
   错误不回显 URL/凭据。JWT 密钥走 `AUTH_JWT_PRIVATE_KEY_FILE`/`AUTH_JWT_PUBLIC_KEY_FILE` 文件路径（不接受 PEM 环境变量），
   启动 fail-fast 解析 Ed25519 PEM，错误不回显 key/path；`AUTH_JWT_ACCESS_TOKEN_TTL`/`AUTH_JWT_REFRESH_TOKEN_TTL` 非法或 refresh <= access 时 fail-fast。
 - Docker 镜像/部署单元：`tokenmp-v3-auth:<sha>`，构建上下文仓库根目录，Dockerfile 位于 `services/auth/Dockerfile`（按模块自治规范放于模块目录，而非根 `Dockerfile.auth`）；最终镜像非 root，不含 migrate CLI，不在启动时执行 migration；运行时镜像**不含 JWT 密钥**，部署必须挂载 key files（见 ADR 0005）。
+- `shared-rate-limit` 合并后，Compose 使用实际的 `AUTH_RATE_LIMIT_*` 配置：enabled、外部 Redis address/DB、trusted-proxy CIDRs、各登录/注册/刷新 policy 和 bucket TTL；HMAC 仅以只读 Compose secret 挂载并通过 `AUTH_RATE_LIMIT_HMAC_SECRET_FILE` 读取。Compose 不创建 Redis，也不使用错误别名 `AUTH_REDIS_URL`/`AUTH_HMAC_SECRET_FILE`。本分支尚未消费这些变量，必须待该功能分支合并后才生效。
 - 健康检查：`/healthz`（liveness，无外部依赖）；`/readyz`（readiness，DB ping，503 不泄露底层错误）；镜像 `HEALTHCHECK` 用内置 `/usr/local/bin/healthcheck` 二进制打 `/healthz`。
 
 ## DO NOT

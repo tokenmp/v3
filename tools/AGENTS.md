@@ -28,6 +28,14 @@
 
 工具必须支持安全的帮助、检查或 dry-run 方式；具有副作用的命令应在执行前展示目标和影响范围。
 
+- `check-dockerfile-copy-sources.sh`：静态验证 API、Billing、Config、Logging 的 Dockerfile
+  在仓库根 build context 下只从其 `services/<service>` 目录及共享
+  `packages/go/httpresp` COPY，且每个源路径存在。它不调用 Docker、无副作用，并由 CI
+  在镜像 build 前执行。
+- `check-compose-env-contract.sh`：静态检查根 `compose.yaml` 的跨分支环境变量 allowlist，
+  拒绝过时别名并要求 token/HMAC 只通过 `/run/secrets` 文件路径传递。它不读取 secret
+  内容、不调用 Docker、无副作用；CI 在 Compose render 前执行。
+
 ## DO NOT
 
 - **DO NOT** 创建会静默覆盖用户改动的脚本——检测冲突并明确失败。

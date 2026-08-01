@@ -75,3 +75,28 @@ go test -race ./...
 ## 文档维护
 
 请求流、中间件链、安全策略变化时，同步维护本文件与 `services/AGENTS.md`。
+
+## Container image and Compose
+
+- `Dockerfile` is built with the repository root as context and produces only the static
+  `api` binary in a non-root Alpine runtime image. Its service-local module download runs
+  with `GOWORK=off`; the shared `packages/go/httpresp` replace target is copied explicitly.
+- The image health check probes `/healthz`, the HTTP liveness route.
+- Root `compose.yaml` owns the service definition only; provide required database and key
+  inputs at deploy time, and do not add shared PostgreSQL/Redis/proxy resources or secrets.
+
+The repository-root build context means Dockerfile `COPY` sources are rooted at
+`services/<service>` (with the shared `packages/go/httpresp` copied from the same root), not
+at the Dockerfile directory. `tools/check-dockerfile-copy-sources.sh` statically guards this
+before CI Docker builds.
+
+After `shared-rate-limit` merges, Compose uses the actual `API_RATE_LIMIT_*` inputs:
+enabled, external Redis address/DB, trusted-proxy CIDRs, read-only HMAC secret file, IP/subject
+policy values and bucket TTL. Compose does not create Redis and has no speculative
+`API_REDIS_URL`, `API_TRUSTED_PROXY_CIDRS`, or `API_HMAC_SECRET_FILE` aliases.
+
+Compose also mounts the Config admin token as a read-only secret and reserves
+`API_CONFIG_SERVICE_TOKEN_FILE`. The `config-publish-hardening` API code currently accepts
+only the string `API_CONFIG_SERVICE_TOKEN`; it must add safe `_FILE` consumption before this
+Compose setting is enabled in a merged runtime. Do not pass a secret-file path as the string
+token, add an entrypoint wrapper, or place token content in environment/Compose render output.
