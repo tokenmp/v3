@@ -178,7 +178,9 @@ WHERE user_plan_id = ? AND kind = 'bonus' AND scope = ?
 // computeWindow computes the effective window for one scope: the adjusted
 // limit (base + active bonus), the effective start (max(baseStart, latest
 // active reset effective_from)), and consumed finalized 'charge' coding
-// requests since that effective start.
+// requests since that effective start, PLUS active reserved/pending holds
+// created since that start so concurrent in-flight requests cannot punch
+// through a hard limit.
 func computeWindow(tx *gorm.DB, userID string, userPlanID int64, scope string, baseStart time.Time, baseLimit int, now time.Time) (windowResult, error) {
 	effStart, bonus, err := overrideEffects(tx, userPlanID, scope, baseStart, now)
 	if err != nil {
@@ -188,5 +190,9 @@ func computeWindow(tx *gorm.DB, userID string, userPlanID int64, scope string, b
 	if err != nil {
 		return windowResult{}, err
 	}
-	return windowResult{EffectiveStart: effStart, AdjustedLimit: baseLimit + bonus, Consumed: consumed}, nil
+	held, err := activeHeldCodingSince(tx, userID, effStart)
+	if err != nil {
+		return windowResult{}, err
+	}
+	return windowResult{EffectiveStart: effStart, AdjustedLimit: baseLimit + bonus, Consumed: consumed + held}, nil
 }

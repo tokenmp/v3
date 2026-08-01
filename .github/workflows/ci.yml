@@ -395,7 +395,7 @@ jobs:
 
       - name: go test -race (billing unit)
         working-directory: services/billing
-        run: go test -race ./internal/config/... ./internal/database/... ./internal/server/...
+        run: go test -race ./internal/config/... ./internal/database/... ./internal/server/... ./internal/sweeper/... ./internal/evidence/...
 
       - name: Billing migration cycle (up/down/up)
         working-directory: services/billing

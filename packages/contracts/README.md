@@ -25,6 +25,7 @@ Auth / Executor conformance tests ──直接加载验证──▶ @tokenmp/con
 | Edge/Panel API | API Service (Edge/BFF) | v1 | `openapi/api/v1.yaml` |
 | Notice API | Notice Service | v1 | `openapi/notice/v1.yaml` |
 | Config API | Config Service | v1 | `openapi/config/v1.yaml` |
+| Billing API | Billing Service | v1 | `openapi/billing/v1.yaml` |
 
 ## 消费者须知
 

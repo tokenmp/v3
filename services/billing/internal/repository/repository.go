@@ -22,8 +22,11 @@ package repository
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"gorm.io/gorm"
@@ -86,20 +89,27 @@ type UserPlanDetail struct {
 
 // QuotaReservation corresponds to the quota_reservations table (配额预留).
 // Its text PK is the reservation ID carried on the V3 request. Nullable
-// final_* / finalized_at / expires_at use pointers.
+// final_* / finalized_at / expires_at use pointers. The settlement columns
+// (usage_known, settlement_status, reconciled_at, idempotency_payload_hash)
+// were added by migration 000004 to make Reserve/Finalize/Release a durable,
+// auditable state machine rather than mechanical ledger writes.
 type QuotaReservation struct {
-	ID               string     `json:"id" gorm:"column:id"`
-	UserID           string     `json:"user_id" gorm:"column:user_id"`
-	RequestID        string     `json:"request_id" gorm:"column:request_id"`
-	BillingPlan      string     `json:"billing_plan" gorm:"column:billing_plan"`
-	Status           string     `json:"status" gorm:"column:status"`
-	ReservedRequests *int       `json:"reserved_requests,omitempty" gorm:"column:reserved_requests"`
-	ReservedTokens   *int64     `json:"reserved_tokens,omitempty" gorm:"column:reserved_tokens"`
-	FinalRequests    *int       `json:"final_requests,omitempty" gorm:"column:final_requests"`
-	FinalTokens      *int64     `json:"final_tokens,omitempty" gorm:"column:final_tokens"`
-	ReservedAt       time.Time  `json:"reserved_at" gorm:"column:reserved_at"`
-	FinalizedAt      *time.Time `json:"finalized_at,omitempty" gorm:"column:finalized_at"`
-	ExpiresAt        *time.Time `json:"expires_at,omitempty" gorm:"column:expires_at"`
+	ID                     string     `json:"id" gorm:"column:id"`
+	UserID                 string     `json:"user_id" gorm:"column:user_id"`
+	RequestID              string     `json:"request_id" gorm:"column:request_id"`
+	BillingPlan            string     `json:"billing_plan" gorm:"column:billing_plan"`
+	Status                 string     `json:"status" gorm:"column:status"`
+	ReservedRequests       *int       `json:"reserved_requests,omitempty" gorm:"column:reserved_requests"`
+	ReservedTokens         *int64     `json:"reserved_tokens,omitempty" gorm:"column:reserved_tokens"`
+	FinalRequests          *int       `json:"final_requests,omitempty" gorm:"column:final_requests"`
+	FinalTokens            *int64     `json:"final_tokens,omitempty" gorm:"column:final_tokens"`
+	UsageKnown             bool       `json:"usage_known" gorm:"column:usage_known"`
+	SettlementStatus       string     `json:"settlement_status,omitempty" gorm:"column:settlement_status"`
+	IdempotencyPayloadHash string     `json:"idempotency_payload_hash,omitempty" gorm:"column:idempotency_payload_hash"`
+	ReservedAt             time.Time  `json:"reserved_at" gorm:"column:reserved_at"`
+	FinalizedAt            *time.Time `json:"finalized_at,omitempty" gorm:"column:finalized_at"`
+	ReconciledAt           *time.Time `json:"reconciled_at,omitempty" gorm:"column:reconciled_at"`
+	ExpiresAt              *time.Time `json:"expires_at,omitempty" gorm:"column:expires_at"`
 }
 
 // UsageLedgerEntry corresponds to the usage_ledger table (用量账本流水).
@@ -141,25 +151,98 @@ type UserPlanReader interface {
 
 // QuotaManager implements the "reserve then finalize" quota lifecycle:
 // Reserve at request start, Finalize at request end (success) or Release on
-// failure/cancel. All three are idempotent.
+// failure/cancel. All three are idempotent. Finalize distinguishes a
+// duplicate payload (idempotent nil) from a conflicting payload/opposite
+// terminal (ErrConflict) so callers can surface a stable 409.
 type QuotaManager interface {
 	// Reserve creates a 'reserved' quota_reservations row and a 'reserve'
 	// usage_ledger entry (token/request deltas = -reserved). Re-calling with
 	// the same reservationID is a no-op (ON CONFLICT DO NOTHING on both the
-	// reservation PK and the ledger idempotency_key).
+	// reservation PK and the ledger idempotency_key). Active reserved holds
+	// count against coding windows so concurrent requests cannot punch
+	// through a limit; a per-user advisory lock serializes the check.
 	Reserve(ctx context.Context, reservationID, userID, requestID, billingPlan string, reservedReqs int, reservedTokens int64, expiresAt *time.Time) error
 	// Finalize settles a reservation: marks it 'finalized' with the final
 	// request/token counts and appends a 'charge' ledger entry
-	// (deltas = -final). Idempotent: re-finalizing a finalized reservation
-	// returns nil without re-charging. A missing reservation returns
-	// ErrNotFound; a released/expired reservation returns ErrConflict.
-	Finalize(ctx context.Context, reservationID string, finalReqs int, finalTokens int64) error
+	// (deltas = -final). usageKnown reports whether final usage is confirmed;
+	// when false the caller should MarkPending instead. Idempotent: re-
+	// finalizing with the SAME payload returns nil without re-charging. A
+	// different payload, or an already-released/expired/pending reservation,
+	// returns ErrConflict. A missing reservation returns ErrNotFound.
+	Finalize(ctx context.Context, reservationID string, finalReqs int, finalTokens int64, usageKnown bool) error
 	// Release cancels a reservation: marks it 'released' and appends a
 	// 'refund' ledger entry that reverses the held amount (+reserved).
 	// Idempotent: re-releasing a released reservation returns nil. A
 	// finalized reservation returns ErrConflict (cannot release a settled
 	// reservation); a missing reservation returns ErrNotFound.
 	Release(ctx context.Context, reservationID string) error
+}
+
+// ReservationStatus is the safe projection of a quota_reservations row
+// returned by GetReservation. It never carries credentials and only exposes
+// the settlement-relevant fields an Edge reconciler needs.
+type ReservationStatus struct {
+	ID               string     `json:"reservation_id"`
+	UserID           string     `json:"user_id"`
+	RequestID        string     `json:"request_id"`
+	BillingPlan      string     `json:"billing_plan"`
+	Status           string     `json:"status"`
+	SettlementStatus string     `json:"settlement_status,omitempty"`
+	ReservedRequests *int       `json:"reserved_requests,omitempty"`
+	ReservedTokens   *int64     `json:"reserved_tokens,omitempty"`
+	FinalRequests    *int       `json:"final_requests,omitempty"`
+	FinalTokens      *int64     `json:"final_tokens,omitempty"`
+	UsageKnown       bool       `json:"usage_known"`
+	ReservedAt       time.Time  `json:"reserved_at"`
+	FinalizedAt      *time.Time `json:"finalized_at,omitempty"`
+	ReconciledAt     *time.Time `json:"reconciled_at,omitempty"`
+	ExpiresAt        *time.Time `json:"expires_at,omitempty"`
+}
+
+// PendingReservation is a pending_reconciliation reservation projected for
+// the reconciler. It carries the request_id/user_id/billing_plan/reserved
+// count so the reconciler can query usage evidence and compute the confirmed
+// counts WITHOUT a second GetReservation round-trip per row.
+type PendingReservation struct {
+	ID               string
+	RequestID        string
+	UserID           string
+	BillingPlan      string
+	ReservedRequests int
+	ReservedAt       time.Time
+}
+
+// SettlementManager exposes the durable settlement state machine beyond the
+// synchronous Reserve/Finalize/Release path: status reads, pending marking,
+// reconciliation and expiry. These methods back the reconciler/sweeper and the
+// Edge terminal-status endpoint. They never leak SQL/DSN.
+type SettlementManager interface {
+	// GetReservation returns the safe settlement projection for a
+	// reservation. Missing → ErrNotFound.
+	GetReservation(ctx context.Context, reservationID string) (ReservationStatus, error)
+	// MarkPending transitions a reserved reservation to
+	// 'pending_reconciliation' when the caller cannot produce confirmed
+	// usage (e.g. stream committed but usage unknown, or Billing was
+	// temporarily unavailable at finalize time). The held amount stays on
+	// the ledger; a reconciler later resolves it via Reconcile. Idempotent:
+	// re-marking a pending reservation is nil; a finalized/released/
+	// expired reservation returns ErrConflict; missing → ErrNotFound.
+	MarkPending(ctx context.Context, reservationID string) error
+	// Reconcile resolves a pending_reconciliation reservation using
+	// confirmed usage evidence. When usageKnown is true it Finalizes the
+	// actual counts (settled); when false it Releases the held amount
+	// (released, unknown usage must never be guessed). Idempotent per
+	// reservation: re-reconciling a settled/released reservation is nil.
+	// A reserved (non-pending) reservation returns ErrConflict; missing →
+	// ErrNotFound.
+	Reconcile(ctx context.Context, reservationID string, finalReqs int, finalTokens int64, usageKnown bool) error
+	// Expire sweeps a reserved reservation whose expires_at is in the past,
+	// marking it 'expired' and appending a 'sweep' refund ledger row. It is
+	// the durable cleanup for orphan holds; it never deletes ledger rows.
+	// Idempotent: expiring an already-expired reservation is nil; a non-
+	// expired reserved reservation returns ErrConflict (not yet due);
+	// finalized/released/pending → ErrConflict; missing → ErrNotFound.
+	Expire(ctx context.Context, reservationID string) error
 }
 
 // LedgerReader reads the usage ledger for a user.
@@ -189,9 +272,12 @@ type BalanceReader interface {
 
 // UsageWindow is one rate-limit window for an active coding plan. Limit is
 // the plan's hourly/weekly/monthly limit (non-nil only when the plan sets
-// it); Consumed is the count of finalized 'charge' coding requests inside
-// [WindowStart, WindowEnd); Remaining = max(0, Limit-Consumed). WindowEnd is
-// nil for the rolling hour5 and open-ended period windows.
+// it); Consumed is the count of confirmed coding requests inside
+// [WindowStart, WindowEnd) — synchronous 'charge' rows plus confirmed
+// 'reconcile' rows (deferred settlement), both carrying a negative
+// request_delta; refund/sweep reversals are excluded. Remaining =
+// max(0, Limit-Consumed). WindowEnd is nil for the rolling hour5 and
+// open-ended period windows.
 type UsageWindow struct {
 	Scope       string     `json:"scope"`
 	Limit       *int       `json:"limit,omitempty"`
@@ -260,6 +346,7 @@ var (
 	_ PlanReader         = (*GormRepository)(nil)
 	_ UserPlanReader     = (*GormRepository)(nil)
 	_ QuotaManager       = (*GormRepository)(nil)
+	_ SettlementManager  = (*GormRepository)(nil)
 	_ LedgerReader       = (*GormRepository)(nil)
 	_ BalanceReader      = (*GormRepository)(nil)
 	_ UsageWindowsReader = (*GormRepository)(nil)
@@ -363,10 +450,10 @@ ORDER BY up.plan_type ASC, up.activated_at DESC, up.id DESC`
 // ----------------------------------------------------------------------------
 
 const insertReservationSQL = `INSERT INTO quota_reservations (
-  id, user_id, request_id, billing_plan, status, reserved_requests,
-  reserved_tokens, reserved_at, expires_at
+  id, user_id, request_id, billing_plan, status, settlement_status,
+  reserved_requests, reserved_tokens, reserved_at, expires_at
 ) VALUES (
-  ?, ?, ?, ?, 'reserved', ?, ?, ?, ?
+  ?, ?, ?, ?, 'reserved', 'held', ?, ?, ?, ?
 )
 ON CONFLICT (id) DO NOTHING`
 
@@ -388,10 +475,13 @@ ON CONFLICT (idempotency_key) DO NOTHING`
 //   - weekly_limit  → Monday 00:00 UTC → next Monday 00:00 UTC
 //   - monthly_limit → active user_plan activated_at → expires_at (plan period)
 //
-// Consumption is counted from finalized 'charge' ledger rows
-// (-SUM(request_delta)). A per-user pg_advisory_xact_lock(hashtext(user_id))
-// is taken inside the transaction so the read-check-insert is atomic per
-// user. Exceeding any applicable window returns a *QuotaExceededError (scope
+// Consumption counts synchronous 'charge' rows PLUS confirmed 'reconcile'
+// rows (deferred settlement with usageKnown=true), both carrying a negative
+// request_delta; refund/unknown-reconcile/sweep reversals are excluded. A
+// per-user pg_advisory_xact_lock(hashtext(user_id)) is taken inside the
+// transaction so the read-check-insert is atomic per user. Active
+// reserved/pending holds also count against the window. Exceeding any
+// applicable window returns a *QuotaExceededError (scope
 // hour5/weekly/period); a user with no active coding plan is rejected
 // fail-closed (period, limit 0).
 func (r *GormRepository) Reserve(ctx context.Context, reservationID, userID, requestID, billingPlan string, reservedReqs int, reservedTokens int64, expiresAt *time.Time) error {
@@ -490,16 +580,46 @@ func getActiveCodingPlan(tx *gorm.DB, userID string, now time.Time) (activeCodin
 	return row, nil
 }
 
-// consumedCodingSince returns finalized 'charge' coding requests (-SUM of
-// negative request_delta) with created_at >= since for the user.
+// consumedCodingSince returns the number of coding requests consumed since
+// `since`: finalized synchronous 'charge' rows PLUS confirmed 'reconcile'
+// rows (deferred settlement of a pending reservation with usageKnown=true).
+// Both carry a NEGATIVE request_delta (consumption). Refund / unknown-reconcile
+// / sweep rows carry a POSITIVE request_delta (reversal) and are excluded by
+// the request_delta < 0 filter, so an under-charge release or a sweep refund
+// is never counted as consumption. This keeps the hard quota windows honest
+// after a deferred confirmed reconcile: a request that was pending then
+// confirmed MUST still count against hour5/weekly/period.
 func consumedCodingSince(tx *gorm.DB, userID string, since time.Time) (int, error) {
 	const q = `SELECT COALESCE(-SUM(request_delta), 0) FROM usage_ledger
-WHERE user_id = ? AND billing_plan = 'coding' AND ledger_type = 'charge' AND created_at >= ?`
+WHERE user_id = ? AND billing_plan = 'coding'
+  AND ledger_type IN ('charge', 'reconcile')
+  AND request_delta < 0
+  AND created_at >= ?`
 	var consumed int
 	if err := tx.Raw(q, userID, since).Scan(&consumed).Error; err != nil {
 		return 0, ErrQueryFailed
 	}
 	return consumed, nil
+}
+
+// activeHeldCodingSince returns the number of coding requests currently held
+// in active 'reserved' reservations created since `since` for the user. These
+// are in-flight holds not yet settled, so they must count against the window
+// to prevent concurrent requests from punching through a hard limit. Only
+// reserved_requests is counted (the request hold); reserved_tokens are not a
+// coding-window unit. Pending_reconciliation rows also remain held until the
+// reconciler resolves them, so they are included.
+func activeHeldCodingSince(tx *gorm.DB, userID string, since time.Time) (int, error) {
+	const q = `SELECT COALESCE(SUM(COALESCE(reserved_requests, 0)), 0)
+FROM quota_reservations
+WHERE user_id = ? AND billing_plan = 'coding'
+  AND status IN ('reserved', 'pending_reconciliation')
+  AND reserved_at >= ?`
+	var held int
+	if err := tx.Raw(q, userID, since).Scan(&held).Error; err != nil {
+		return 0, ErrQueryFailed
+	}
+	return held, nil
 }
 
 // startOfWeekUTC returns the Monday 00:00 UTC that contains t.
@@ -569,11 +689,33 @@ type reservationStatusRow struct {
 	ReservedTokens   *int64 `gorm:"column:reserved_tokens"`
 }
 
-// Finalize settles a reserved reservation. Idempotent: a finalized
-// reservation returns nil without re-charging; a released/expired one returns
-// ErrConflict; a missing one returns ErrNotFound.
-func (r *GormRepository) Finalize(ctx context.Context, reservationID string, finalReqs int, finalTokens int64) error {
+// finalizePayloadHash returns a stable SHA-256 digest of the finalize
+// payload so a repeat Finalize with the same counts/usageKnown is idempotent
+// while a different payload is a stable conflict (ErrConflict → 409). It is
+// not a secret — it only summarizes public settlement counts.
+func finalizePayloadHash(finalReqs int, finalTokens int64, usageKnown bool) string {
+	h := sha256.New()
+	fmt.Fprintf(h, "%d|%d|%t", finalReqs, finalTokens, usageKnown)
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// Finalize settles a reserved reservation. Idempotent: a finalized reservation
+// returns nil without re-charging when the payload matches; a different
+// payload returns ErrConflict (stable 409). A released/expired/pending
+// reservation returns ErrConflict; a missing one returns ErrNotFound.
+// usageKnown=false should normally route through MarkPending; Finalize with
+// usageKnown=false is rejected as ErrConflict to prevent guessing.
+func (r *GormRepository) Finalize(ctx context.Context, reservationID string, finalReqs int, finalTokens int64, usageKnown bool) error {
+	if finalReqs < 0 || finalTokens < 0 {
+		return ErrConflict
+	}
+	if !usageKnown {
+		// Unknown usage must never be guessed at a token count. The caller
+		// must MarkPending so the reconciler can resolve it from evidence.
+		return ErrConflict
+	}
 	now := time.Now().UTC()
+	payloadHash := finalizePayloadHash(finalReqs, finalTokens, usageKnown)
 	tx := r.db.WithContext(ctx).Begin()
 	if tx.Error != nil {
 		return ErrInsertFailed
@@ -585,9 +727,15 @@ func (r *GormRepository) Finalize(ctx context.Context, reservationID string, fin
 		}
 	}()
 
-	const sel = `SELECT status, user_id, request_id, billing_plan
+	const sel = `SELECT status, user_id, request_id, billing_plan, idempotency_payload_hash
 FROM quota_reservations WHERE id = ? LIMIT 1`
-	var row reservationStatusRow
+	var row struct {
+		Status                 string `gorm:"column:status"`
+		UserID                 string `gorm:"column:user_id"`
+		RequestID              string `gorm:"column:request_id"`
+		BillingPlan            string `gorm:"column:billing_plan"`
+		IdempotencyPayloadHash string `gorm:"column:idempotency_payload_hash"`
+	}
 	if err := tx.Raw(sel, reservationID).Scan(&row).Error; err != nil {
 		return ErrQueryFailed
 	}
@@ -596,21 +744,26 @@ FROM quota_reservations WHERE id = ? LIMIT 1`
 	}
 	switch row.Status {
 	case "finalized":
-		// Already settled — idempotent success, no re-charge. Leave the
-		// transaction to the deferred Rollback so the connection is returned
-		// to the pool clean (no open transaction holding locks).
+		// Idempotent only when the payload matches; a different payload is a
+		// stable conflict so a caller cannot retroactively change settled
+		// usage.
+		if row.IdempotencyPayloadHash != "" && row.IdempotencyPayloadHash != payloadHash {
+			return ErrConflict
+		}
 		return nil
 	case "reserved":
 		// proceed
 	default:
-		// released / expired — cannot finalize.
+		// released / expired / pending_reconciliation — cannot finalize.
 		return ErrConflict
 	}
 
 	res := tx.Exec(`UPDATE quota_reservations
-SET status = 'finalized', final_requests = ?, final_tokens = ?, finalized_at = ?
+SET status = 'finalized', settlement_status = 'settled',
+    final_requests = ?, final_tokens = ?, usage_known = true,
+    finalized_at = ?, idempotency_payload_hash = ?
 WHERE id = ? AND status = 'reserved'`,
-		finalReqs, finalTokens, now, reservationID)
+		finalReqs, finalTokens, now, payloadHash, reservationID)
 	if res.Error != nil {
 		return ErrInsertFailed
 	}
@@ -674,7 +827,7 @@ FROM quota_reservations WHERE id = ? LIMIT 1`
 	}
 
 	res := tx.Exec(`UPDATE quota_reservations
-SET status = 'released'
+SET status = 'released', settlement_status = 'released'
 WHERE id = ? AND status = 'reserved'`, reservationID)
 	if res.Error != nil {
 		return ErrInsertFailed
@@ -705,6 +858,306 @@ WHERE id = ? AND status = 'reserved'`, reservationID)
 	}
 	committed = true
 	return nil
+}
+
+// ----------------------------------------------------------------------------
+// SettlementManager (GetReservation / MarkPending / Reconcile / Expire)
+// ----------------------------------------------------------------------------
+
+// reservationStatusCols is the safe projection selected by GetReservation.
+const reservationStatusCols = `id, user_id, request_id, billing_plan, status, settlement_status,
+reserved_requests, reserved_tokens, final_requests, final_tokens, usage_known,
+reserved_at, finalized_at, reconciled_at, expires_at`
+
+// GetReservation returns the safe settlement projection for a reservation.
+func (r *GormRepository) GetReservation(ctx context.Context, reservationID string) (ReservationStatus, error) {
+	const q = `SELECT ` + reservationStatusCols + ` FROM quota_reservations WHERE id = ? LIMIT 1`
+	var row ReservationStatus
+	if err := r.db.WithContext(ctx).Raw(q, reservationID).Scan(&row).Error; err != nil {
+		return ReservationStatus{}, ErrQueryFailed
+	}
+	if row.ID == "" {
+		return ReservationStatus{}, ErrNotFound
+	}
+	return row, nil
+}
+
+// MarkPending transitions a reserved reservation to pending_reconciliation when
+// the caller cannot produce confirmed usage. The held amount stays on the
+// ledger; a reconciler later resolves it. Idempotent for pending; conflict for
+// other terminals; ErrNotFound when missing.
+func (r *GormRepository) MarkPending(ctx context.Context, reservationID string) error {
+	now := time.Now().UTC()
+	tx := r.db.WithContext(ctx).Begin()
+	if tx.Error != nil {
+		return ErrInsertFailed
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback().Error
+		}
+	}()
+
+	var status string
+	if err := tx.Raw(`SELECT status FROM quota_reservations WHERE id = ? LIMIT 1`, reservationID).Scan(&status).Error; err != nil {
+		return ErrQueryFailed
+	}
+	if status == "" {
+		return ErrNotFound
+	}
+	switch status {
+	case "pending_reconciliation":
+		return nil
+	case "reserved":
+		// proceed
+	default:
+		return ErrConflict
+	}
+
+	res := tx.Exec(`UPDATE quota_reservations
+SET status = 'pending_reconciliation', settlement_status = 'pending', reconciled_at = ?
+WHERE id = ? AND status = 'reserved'`, now, reservationID)
+	if res.Error != nil {
+		return ErrInsertFailed
+	}
+	if res.RowsAffected == 0 {
+		return nil
+	}
+	if err := tx.Commit().Error; err != nil {
+		return ErrInsertFailed
+	}
+	committed = true
+	return nil
+}
+
+// Reconcile resolves a pending_reconciliation reservation using confirmed
+// usage evidence. usageKnown=true → Finalize the actual counts (settled);
+// usageKnown=false → Release the held amount (released; unknown usage never
+// guessed). Idempotent per reservation for the resolved terminal; reserved →
+// ErrConflict (must MarkPending first); missing → ErrNotFound.
+func (r *GormRepository) Reconcile(ctx context.Context, reservationID string, finalReqs int, finalTokens int64, usageKnown bool) error {
+	if finalReqs < 0 || finalTokens < 0 {
+		return ErrConflict
+	}
+	now := time.Now().UTC()
+	tx := r.db.WithContext(ctx).Begin()
+	if tx.Error != nil {
+		return ErrInsertFailed
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback().Error
+		}
+	}()
+
+	const sel = `SELECT status, user_id, request_id, billing_plan, reserved_requests, reserved_tokens
+FROM quota_reservations WHERE id = ? LIMIT 1`
+	var row reservationStatusRow
+	if err := tx.Raw(sel, reservationID).Scan(&row).Error; err != nil {
+		return ErrQueryFailed
+	}
+	if row.Status == "" {
+		return ErrNotFound
+	}
+	switch row.Status {
+	case "finalized", "released", "expired":
+		// Already resolved — idempotent success.
+		return nil
+	case "pending_reconciliation":
+		// proceed
+	default:
+		// reserved — must MarkPending first so the lifecycle is explicit.
+		return ErrConflict
+	}
+
+	if usageKnown {
+		// Settle with confirmed counts. A 'reconcile' charge ledger row is
+		// appended (distinct from the synchronous 'charge' path so audits can
+		// tell deferred settlement apart). It carries a NEGATIVE request_delta
+		// (consumption) so it counts against the coding hard quota windows — a
+		// pending-then-confirmed request MUST still count, otherwise a
+		// deferred settlement would punch through the limit. Only the actual
+		// final counts are charged — never a guess.
+		res := tx.Exec(`UPDATE quota_reservations
+SET status = 'finalized', settlement_status = 'settled',
+    final_requests = ?, final_tokens = ?, usage_known = true, finalized_at = ?, reconciled_at = ?
+WHERE id = ? AND status = 'pending_reconciliation'`,
+			finalReqs, finalTokens, now, now, reservationID)
+		if res.Error != nil {
+			return ErrInsertFailed
+		}
+		if res.RowsAffected == 0 {
+			return nil
+		}
+		if err := tx.Exec(insertLedgerSQL,
+			row.UserID, row.RequestID, "reconcile", row.BillingPlan,
+			-finalTokens, -finalReqs, "reconcile",
+			reservationID+":reconcile", now,
+		).Error; err != nil {
+			return ErrInsertFailed
+		}
+	} else {
+		// Unknown usage must never be guessed: release the held amount. The
+		// reservation reaches 'released' with usage_known=false so the
+		// under-charge is auditable, and a 'reconcile' refund row reverses
+		// the hold.
+		reservedReqs := 0
+		if row.ReservedRequests != nil {
+			reservedReqs = *row.ReservedRequests
+		}
+		reservedTokens := int64(0)
+		if row.ReservedTokens != nil {
+			reservedTokens = *row.ReservedTokens
+		}
+		res := tx.Exec(`UPDATE quota_reservations
+SET status = 'released', settlement_status = 'released', usage_known = false, reconciled_at = ?
+WHERE id = ? AND status = 'pending_reconciliation'`, now, reservationID)
+		if res.Error != nil {
+			return ErrInsertFailed
+		}
+		if res.RowsAffected == 0 {
+			return nil
+		}
+		if err := tx.Exec(insertLedgerSQL,
+			row.UserID, row.RequestID, "reconcile", row.BillingPlan,
+			reservedTokens, reservedReqs, "reconcile-unknown",
+			reservationID+":reconcile-release", now,
+		).Error; err != nil {
+			return ErrInsertFailed
+		}
+	}
+	if err := tx.Commit().Error; err != nil {
+		return ErrInsertFailed
+	}
+	committed = true
+	return nil
+}
+
+// Expire sweeps a reserved reservation whose expires_at is in the past. It
+// marks the reservation 'expired' and appends a 'sweep' refund ledger row that
+// reverses the held amount. Never deletes ledger rows. Idempotent for
+// expired; non-due reserved → ErrConflict; other terminals → ErrConflict;
+// missing → ErrNotFound.
+func (r *GormRepository) Expire(ctx context.Context, reservationID string) error {
+	now := time.Now().UTC()
+	tx := r.db.WithContext(ctx).Begin()
+	if tx.Error != nil {
+		return ErrInsertFailed
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback().Error
+		}
+	}()
+
+	const sel = `SELECT status, user_id, request_id, billing_plan, reserved_requests, reserved_tokens, expires_at
+FROM quota_reservations WHERE id = ? LIMIT 1`
+	var row struct {
+		Status           string     `gorm:"column:status"`
+		UserID           string     `gorm:"column:user_id"`
+		RequestID        string     `gorm:"column:request_id"`
+		BillingPlan      string     `gorm:"column:billing_plan"`
+		ReservedRequests *int       `gorm:"column:reserved_requests"`
+		ReservedTokens   *int64     `gorm:"column:reserved_tokens"`
+		ExpiresAt        *time.Time `gorm:"column:expires_at"`
+	}
+	if err := tx.Raw(sel, reservationID).Scan(&row).Error; err != nil {
+		return ErrQueryFailed
+	}
+	if row.Status == "" {
+		return ErrNotFound
+	}
+	switch row.Status {
+	case "expired":
+		return nil
+	case "reserved":
+		// proceed — only reserved rows are expirable.
+	default:
+		return ErrConflict
+	}
+	if row.ExpiresAt == nil || !row.ExpiresAt.Before(now) {
+		// Not due for expiry; the sweeper only acts on past expires_at.
+		return ErrConflict
+	}
+
+	res := tx.Exec(`UPDATE quota_reservations
+SET status = 'expired', settlement_status = 'expired'
+WHERE id = ? AND status = 'reserved'`, reservationID)
+	if res.Error != nil {
+		return ErrInsertFailed
+	}
+	if res.RowsAffected == 0 {
+		return nil
+	}
+	reservedReqs := 0
+	if row.ReservedRequests != nil {
+		reservedReqs = *row.ReservedRequests
+	}
+	reservedTokens := int64(0)
+	if row.ReservedTokens != nil {
+		reservedTokens = *row.ReservedTokens
+	}
+	if err := tx.Exec(insertLedgerSQL,
+		row.UserID, row.RequestID, "sweep", row.BillingPlan,
+		reservedTokens, reservedReqs, "sweep",
+		reservationID+":sweep", now,
+	).Error; err != nil {
+		return ErrInsertFailed
+	}
+	if err := tx.Commit().Error; err != nil {
+		return ErrInsertFailed
+	}
+	committed = true
+	return nil
+}
+
+// ListExpiredReservations returns the IDs of reserved reservations whose
+// expires_at is in the past, limited to batch. It backs the sweeper loop. A nil
+// expires_at means the reservation never expires and is excluded.
+func (r *GormRepository) ListExpiredReservations(ctx context.Context, batch int) ([]string, error) {
+	if batch <= 0 {
+		batch = 100
+	}
+	const q = `SELECT id FROM quota_reservations
+WHERE status = 'reserved' AND expires_at IS NOT NULL AND expires_at < now()
+ORDER BY expires_at ASC LIMIT ?`
+	var ids []string
+	if err := r.db.WithContext(ctx).Raw(q, batch).Scan(&ids).Error; err != nil {
+		return nil, ErrQueryFailed
+	}
+	if ids == nil {
+		ids = []string{}
+	}
+	return ids, nil
+}
+
+// ListPendingReservations returns the pending_reconciliation reservations
+// older than minAge, limited to batch. It backs the reconciler loop so stale
+// pending rows reach a terminal state without a request context. The richer
+// PendingReservation projection carries request_id/user_id/billing_plan/
+// reserved count so the reconciler can query usage evidence without a second
+// GetReservation round-trip per row.
+func (r *GormRepository) ListPendingReservations(ctx context.Context, minAge time.Duration, batch int) ([]PendingReservation, error) {
+	if batch <= 0 {
+		batch = 100
+	}
+	cutoff := time.Now().UTC().Add(-minAge)
+	const q = `SELECT id, request_id, user_id, billing_plan,
+COALESCE(reserved_requests, 0) AS reserved_requests, reserved_at
+FROM quota_reservations
+WHERE status = 'pending_reconciliation' AND reserved_at < ?
+ORDER BY reserved_at ASC LIMIT ?`
+	var rows []PendingReservation
+	if err := r.db.WithContext(ctx).Raw(q, cutoff, batch).Scan(&rows).Error; err != nil {
+		return nil, ErrQueryFailed
+	}
+	if rows == nil {
+		rows = []PendingReservation{}
+	}
+	return rows, nil
 }
 
 // ----------------------------------------------------------------------------
@@ -802,14 +1255,15 @@ WHERE up.user_id = ? AND up.status = 'active' AND p.plan_type = 'token'`
 // GetUsageWindows returns the hourly/weekly/monthly usage windows for the
 // user's most recently activated active coding plan. Only windows whose plan
 // limit is set are returned. A user with no active coding plan returns an
-// empty slice (not an error). Consumption is counted from finalized 'charge'
-// ledger rows, mirroring Reserve enforcement.
+// empty slice (not an error). Consumption counts synchronous 'charge' rows
+// plus confirmed 'reconcile' rows (deferred settlement), mirroring Reserve
+// enforcement.
 //
 // User-plan limit overrides are reflected: the reported Limit is the adjusted
 // limit (base + active bonus), WindowStart is the effective start (max of
-// base start and latest active reset effective_from), Consumed is finalized
-// 'charge' requests since that effective start, and Remaining = max(0,
-// adjusted limit - consumed).
+// base start and latest active reset effective_from), Consumed is confirmed
+// (charge + reconcile) requests since that effective start, and Remaining =
+// max(0, adjusted limit - consumed).
 func (r *GormRepository) GetUsageWindows(ctx context.Context, userID string) ([]UsageWindow, error) {
 	now := time.Now().UTC()
 	row, err := getActiveCodingPlan(r.db.WithContext(ctx), userID, now)

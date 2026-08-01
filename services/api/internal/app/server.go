@@ -217,7 +217,7 @@ func quotaMiddleware(mgr quota.Manager, logClient *logging.Client, settingsStore
 				}()
 			}
 
-			billingPlan, reservedReqs, reservedTokens, finalReqs, finalTokens := billingUsageForUser(settingsStore, claims.Subject)
+			billingPlan, reservedReqs, reservedTokens, finalReqs := billingUsageForUser(settingsStore, claims.Subject)
 
 			// Reserve (best-effort; noop manager skips).
 			_, err := mgr.Reserve(r.Context(), reservationID, claims.Subject, requestID, billingPlan, reservedReqs, reservedTokens)
@@ -241,80 +241,177 @@ func quotaMiddleware(mgr quota.Manager, logClient *logging.Client, settingsStore
 				return
 			}
 
-			// Wrap the response writer to capture the status code.
+			// Wrap the response writer to capture the status code and whether any
+			// bytes/headers were committed (used to distinguish pre-commit failures
+			// from stream-committed responses).
 			ww := &statusWriter{ResponseWriter: w, status: http.StatusOK}
 			next.ServeHTTP(ww, r)
 
 			completedAt := time.Now().UTC()
 			clientCancelled := r.Context().Err() != nil
+			committed := ww.wrote
 
-			// Finalize or release based on status. Use a background context
-			// with a timeout because the request context may be cancelled after
-			// the response is sent (e.g. reverse proxy streaming). If the client
-			// disconnected before the proxy completed, release the reservation and
-			// durably close the early processing log row as client_cancelled.
+			// Settlement must NOT be lost on client cancel: use a bounded detached
+			// context (independent of the request context, which may already be
+			// cancelled after the response is flushed). A missing Billing here is a
+			// real error — it is logged, never silently double-charged. The
+			// background reconciler resolves any pending rows the loop cannot settle.
 			finCtx, finCancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer finCancel()
-			if clientCancelled {
-				if err := mgr.Release(finCtx, reservationID); err != nil {
-					logger.Warn("quota release after client cancel failed", "error", err, "request_id", requestID)
-				}
-				logEdgeClientCancelled(logClient, logger, requestID, claims.Subject, startedAt, completedAt)
-			} else if ww.status >= 200 && ww.status < 400 {
-				if billingPlan == "token" {
-					finalTokens = tokenUsageForRequest(finCtx, logClient, logger, requestID)
-				}
-				if err := mgr.Finalize(finCtx, reservationID, finalReqs, finalTokens); err != nil {
-					logger.Warn("quota finalize failed", "error", err, "request_id", requestID)
-				}
-			} else {
-				if err := mgr.Release(finCtx, reservationID); err != nil {
-					logger.Warn("quota release failed", "error", err, "request_id", requestID)
-				}
-			}
+			settleReservation(finCtx, mgr, logClient, logger, reservationID, requestID, billingPlan, finalReqs, startedAt, completedAt, clientCancelled, committed, ww.status, claims.Subject)
 		})
 	}
 }
 
-func billingUsageForUser(settingsStore *settings.Store, userID string) (billingPlan string, reservedReqs int, reservedTokens int64, finalReqs int, finalTokens int64) {
+// settleReservation decides the durable terminal action for a reservation after
+// the proxy returned. It is stream-aware and never guesses a token count:
+//
+//   - pre-commit failure (no bytes written, status >= 400 or client cancel
+//     before commit) → Release the held amount.
+//   - stream-committed success → fetch confirmed usage evidence once (bounded,
+//     not a polling loop). usage known → Finalize actual counts; unknown →
+//     MarkPending (reconciler resolves, never a fabricated 1-token guess).
+//   - non-stream success (2xx/3xx) → for coding plans Finalize the request
+//     count (1) with zero tokens; for token plans fetch usage once like streams.
+//   - Billing temporarily unavailable at finalize → MarkPending so the
+//     reconciler can settle later; the error is logged, not swallowed, and
+//     never causes a double charge (Reserve already idempotent per id).
+//
+// All settlement calls use the detached finCtx so a cancelled request does not
+// drop settlement.
+func settleReservation(ctx context.Context, mgr quota.Manager, logClient *logging.Client, logger *slog.Logger, reservationID, requestID, billingPlan string, finalReqs int, startedAt, completedAt time.Time, clientCancelled, committed bool, httpStatus int, userID string) {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	// Client disconnected. Whether or not bytes were committed, the
+	// terminal is client-cancelled: never bill a success. Pre-commit cancel
+	// releases the hold; a committed stream cancel marks pending so the
+	// reconciler can settle from evidence (the upstream may or may not have
+	// finished). Either way the early processing log row is closed as
+	// client_cancelled so it is visible in lists.
+	if clientCancelled {
+		if !committed {
+			if err := mgr.Release(ctx, reservationID); err != nil && !errors.Is(err, quota.ErrConflict) {
+				logger.Warn("quota release (client cancel) failed", "error", err, "request_id", requestID)
+			}
+		} else {
+			// Committed-then-cancelled (e.g. mid-stream). Do not guess usage;
+			// park for the reconciler. If that fails, the hold stays active and
+			// the sweeper resolves it; never fabricate a count.
+			if err := mgr.MarkPending(ctx, reservationID); err != nil && !errors.Is(err, quota.ErrConflict) {
+				logger.Warn("quota mark pending (client cancel) failed", "error", err, "request_id", requestID)
+			}
+		}
+		logEdgeClientCancelled(logClient, logger, requestID, userID, startedAt, completedAt)
+		return
+	}
+
+	// Pre-commit failure: nothing was sent to the client, so the upstream call
+	// did not produce billable usage. Release the hold.
+	preCommitFailure := !committed
+	if preCommitFailure {
+		if err := mgr.Release(ctx, reservationID); err != nil && !errors.Is(err, quota.ErrConflict) {
+			logger.Warn("quota release (pre-commit) failed", "error", err, "request_id", requestID)
+		}
+		return
+	}
+
+	// A committed error response (e.g. upstream 502/5xx returned to the
+	// client) means the upstream call failed to produce billable usage even
+	// though bytes were sent. Release the hold rather than finalize a failed
+	// request.
+	if httpStatus >= 400 {
+		if err := mgr.Release(ctx, reservationID); err != nil && !errors.Is(err, quota.ErrConflict) {
+			logger.Warn("quota release (committed error) failed", "error", err, "request_id", requestID)
+		}
+		return
+	}
+
+	// Committed response (stream or non-stream success). Determine confirmed
+	// usage. For coding plans, the unit is one request and tokens are not
+	// metered here. For token plans, fetch usage evidence once from the Logging
+	// Service (a single bounded call, NOT the old 5x polling loop with a 1-token
+	// fallback). If usage is unknown, MarkPending.
+	finalTokens := int64(0)
+	usageKnown := true
+	if billingPlan == "token" {
+		finalTokens, usageKnown = confirmedTokenUsage(ctx, logClient, logger, requestID)
+	}
+
+	if !usageKnown {
+		// Unknown usage must never be guessed at a token count. Park the
+		// reservation for the reconciler. If MarkPending is itself
+		// unavailable, the hold remains active and the sweeper will eventually
+		// expire/reconcile it; we never fabricate a count.
+		if err := mgr.MarkPending(ctx, reservationID); err != nil && !errors.Is(err, quota.ErrConflict) {
+			logger.Warn("quota mark pending failed", "error", err, "request_id", requestID)
+		}
+		return
+	}
+
+	if err := mgr.Finalize(ctx, reservationID, finalReqs, finalTokens, true); err != nil {
+		if errors.Is(err, quota.ErrConflict) {
+			// Already settled with a different/opposite terminal — safe, no
+			// double charge.
+			return
+		}
+		// Billing temporarily unavailable at finalize time: park the
+		// reservation so the reconciler can settle it from evidence. Do not
+		// swallow this as success and never double-charge.
+		logger.Warn("quota finalize failed; marking pending", "error", err, "request_id", requestID)
+		if mpErr := mgr.MarkPending(ctx, reservationID); mpErr != nil && !errors.Is(mpErr, quota.ErrConflict) {
+			logger.Warn("quota mark pending (after finalize failure) failed", "error", mpErr, "request_id", requestID)
+		}
+	}
+}
+
+func billingUsageForUser(settingsStore *settings.Store, userID string) (billingPlan string, reservedReqs int, reservedTokens int64, finalReqs int) {
 	if settingsStore != nil && settingsStore.Get(userID).PreferredBilling == "token" {
 		// Reserve zero to avoid double-counting token balance (Billing token balance
 		// sums all token ledger deltas, including reserves). On success, finalize is
-		// filled from Logging total_tokens by tokenUsageForRequest.
-		return "token", 0, 0, 0, 0
+		// filled from confirmed Logging usage by confirmedTokenUsage.
+		return "token", 0, 0, 0
 	}
-	return "coding", 1, 0, 1, 0
+	return "coding", 1, 0, 1
 }
 
-func tokenUsageForRequest(ctx context.Context, logClient *logging.Client, logger *slog.Logger, requestID string) int64 {
-	const fallback = int64(1)
+// confirmedTokenUsage fetches confirmed token usage evidence ONCE from the
+// Logging Service (a single bounded call, not the old 5x polling loop). It
+// returns the total token count and whether the usage was confirmed. When
+// the Logging Service is unavailable or the usage is not yet known, it
+// returns (0, false) so the caller can MarkPending — it NEVER fabricates a
+// 1-token guess.
+func confirmedTokenUsage(ctx context.Context, logClient *logging.Client, logger *slog.Logger, requestID string) (int64, bool) {
 	if logClient == nil || !logClient.Available() {
-		return fallback
+		return 0, false
 	}
-	for attempt := 0; attempt < 5; attempt++ {
-		if attempt > 0 {
-			select {
-			case <-ctx.Done():
-				return fallback
-			case <-time.After(100 * time.Millisecond):
-			}
+	detail, err := logClient.GetLog(ctx, requestID)
+	if err != nil {
+		if logger != nil {
+			logger.Debug("token usage evidence lookup failed", "error", err, "request_id", requestID)
 		}
-		detail, err := logClient.GetLog(ctx, requestID)
-		if err != nil {
-			if logger != nil {
-				logger.Debug("token usage log lookup failed", "error", err, "request_id", requestID)
-			}
-			continue
-		}
-		if detail.Log.TotalTokens > 0 {
-			return int64(detail.Log.TotalTokens)
-		}
-		if sum := detail.Log.InputTokens + detail.Log.OutputTokens; sum > 0 {
-			return int64(sum)
-		}
+		return 0, false
 	}
-	return fallback
+	// Only the Logging record's usage_status="final" (set by the executor from
+	// a confirmed upstream usage) counts as confirmed evidence.
+	if detail.Log.UsageStatus != "final" {
+		return 0, false
+	}
+	total := int64(detail.Log.TotalTokens)
+	if total <= 0 {
+		total = int64(detail.Log.InputTokens + detail.Log.OutputTokens)
+	}
+	if total <= 0 {
+		return 0, false
+	}
+	return total, true
 }
+
+// isStreamRequest has been removed: settlement is decided by the committed
+// flag and HTTP status, not by whether the request was streaming. The prior
+// stream flag was a dead parameter that implied special-cased stream logic
+// that never existed; the API AGENTS.md no longer claims stream-specific
+// settlement.
 
 func logEdgeClientCancelled(logClient *logging.Client, logger *slog.Logger, requestID, userID string, startedAt, completedAt time.Time) {
 	if logClient == nil || !logClient.Available() {
