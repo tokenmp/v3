@@ -289,6 +289,12 @@ jobs:
           docker compose -p tokenmp-v3 config > "$rendered"
           ! grep -F -- "$secret" "$rendered"
 
+      - name: docker build web from clean checkout (build only, no run/push)
+        # This is intentionally independent of the Node verify job: it proves
+        # the production image can build from a clean repository context with
+        # no host Node/pnpm, prebuilt .next, or apps/web/public directory.
+        run: docker build -f apps/web/Dockerfile.web -t tokenmp-v3-web:${{ github.sha }} .
+
       - name: docker build (build only, no run/push)
         run: docker build -f services/auth/Dockerfile -t tokenmp-v3-auth:${{ github.sha }} .
 
