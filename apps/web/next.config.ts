@@ -31,6 +31,10 @@ const fallbackCsp = [
 ].join('; ');
 
 const config: NextConfig = {
+  // The Playwright local-smoke server needs a distinct dev lock so it never
+  // attaches to a developer's regular `.next` process.
+  ...(process.env.E2E_NEXT_DIST_DIR ? { distDir: process.env.E2E_NEXT_DIST_DIR } : {}),
+  allowedDevOrigins: ['127.0.0.1'],
   reactStrictMode: true,
   transpilePackages: ['@tokenmp/ui-tokens'],
   output: 'standalone',

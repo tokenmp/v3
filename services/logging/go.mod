@@ -4,10 +4,10 @@ go 1.26.5
 
 require (
 	github.com/go-chi/chi/v5 v5.3.1
-	github.com/jackc/pgx/v5 v5.6.0
+	github.com/jackc/pgx/v5 v5.7.4
 	github.com/tokenmp/v3/packages/go/httpresp v0.0.0-00010101000000-000000000000
 	gorm.io/driver/postgres v1.6.0
-	gorm.io/gorm v1.31.0
+	gorm.io/gorm v1.31.2
 )
 
 require (
@@ -16,9 +16,10 @@ require (
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
-	golang.org/x/crypto v0.31.0 // indirect
-	golang.org/x/sync v0.10.0 // indirect
-	golang.org/x/text v0.21.0 // indirect
+	github.com/stretchr/testify v1.11.1 // indirect
+	golang.org/x/crypto v0.53.0 // indirect
+	golang.org/x/sync v0.21.0 // indirect
+	golang.org/x/text v0.38.0 // indirect
 )
 
 replace github.com/tokenmp/v3/packages/go/httpresp => ../../packages/go/httpresp

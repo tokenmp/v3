@@ -19,9 +19,9 @@ executor 不直连 Config DB；Config Service 是唯一读写方。
 - `cmd/config/main.go`：入口，加载 `CONFIG_*` env、连 DB、建 server、graceful shutdown（SIGINT/SIGTERM）。
 - `internal/config`：env 配置加载与严格校验（`CONFIG_DATABASE_URL` 限定 `postgres/postgresql` + 路径 `/tokenmp_config`，支持 host 形式与 Unix socket 形式；连接串从不入日志/错误）。
 - `internal/database`：GORM 连接，AutoMigrate 禁止，schema 由 `migrations/` 版本化 SQL 管理（golang-migrate）。`Open` 返回稳定 classified sentinel 错误，driver 错误（可能含 DSN）绝不经 `Error()`/`Unwrap()` 暴露。
-- `internal/repository`：读 published revision + snapshot。`LatestPublished` 选 `status='published'` 中 `published_at` 最新的一条，返回 raw JSON + revision + sha256。draft/archived 不暴露。失败映射为 `ErrNotFound`/`ErrQueryFailed`。
-- `internal/server`：HTTP（chi）。`GET /healthz`（liveness）、`GET /readyz`（DB ping）、`GET /v1/config/snapshots/latest`（snapshot JSON，含 `X-Config-Revision`/`X-Config-SHA256` 头，`Cache-Control: no-store`）。错误为协议原生 JSON，不泄漏 DSN/SQL/凭据。
-- `migrations/000001_init.{up,down}.sql`：Config DB schema（从 `infra/db/migrations/config/0001_init.sql` 转换为 golang-migrate up/down 格式）。
+- `internal/repository`：读 published revision + snapshot + 原子写状态机 `Writer`。`LatestPublished` 选 `status='published'` 中 `published_at` 最新的一条，返回 raw JSON + revision + sha256。draft/archived 不暴露。失败映射为 `ErrNotFound`/`ErrQueryFailed`。`PublishRevision`/`RollbackAsNew` 先锁 `config_revisions` 行再单独 fetch snapshot（避免 LEFT JOIN `FOR UPDATE`，PostgreSQL ERROR 0A000）；`CreateDraftWithSnapshot`/`RollbackAsNew` 用 `tx.Raw(...).Scan()` 读 `RETURNING id`；`auditRow` 显式 `TableName()="config_audit_log"`。
+- `internal/server`：HTTP（chi）。`GET /healthz`（liveness）、`GET /readyz`（DB ping）、`GET /v1/config/snapshots/latest`（snapshot JSON，含 `X-Config-Revision`/`X-Config-SHA256` 头，`Cache-Control: no-store`）。写路径 `/v1/config/drafts`、`/v1/config/drafts/{id}`、`/v1/config/revisions/{id}/{publish,archive,revert}`、`/v1/config/revisions`、`/v1/config/audit` 由 admin-auth 保护。`/revert` 为契约路径（内部 `RollbackAsNew`）。错误为协议原生 JSON，不泄漏 DSN/SQL/凭据。contract↔router 双向 conformance 测试在 `internal/server/contract_conformance_test.go`。
+- `migrations/000001–000004`：Config DB schema（golang-migrate up/down）。000001 从 `infra/db` 转；000002 明文 api_key（历史）；000003 limits/routing policy；000004 加固写路径（draft `version` CAS、global singleton published partial unique index、rollback 元数据 `source_revision_id`/`rollback_note`、audit 扩展与收紧 action 枚举、secret 边界 `credential_ref` 恢复 NOT NULL+unique）并修正 000001 遗留缺陷：`config_revisions.parent_revision_id` 原为 `bigserial`（NOT NULL+序列默认），改为可选 `bigint`（DROP NOT NULL+DROP DEFAULT+删遗留序列），否则无法创建无父 draft。000004 的 api_key COMMENT 与所有 down ALTER 均用 DO block 守卫表/列存在，使 down 在干净库上幂等。000004 的 **down 为 fail-closed contract 回退**：在所有破坏性 DDL 之前的前置 preflight guard（`config_revisions.parent_revision_id IS NULL`、`version<>1`、非空 `source_revision_id`/`rollback_note`、`config_audit_log.action='rollback_publish'`、非空 `actor_kind`/`request_id`）在旧 schema 无法表达的数据存在时 RAISE EXCEPTION，经 golang-migrate 文件级默认事务整体回滚，绝不静默回填或丢历史；干净库上 down 成功。真实 PG 迁移测试在 `migrations/migrations_test.go`（`CONFIG_REPO_TEST_DSN` 未设时 SKIP）。
 
 ## 待实现（后续）
 
@@ -56,9 +56,34 @@ CONFIG_DATABASE_URL=... CONFIG_HTTP_ADDR=127.0.0.1:18082 go run ./cmd/config
 - **DO NOT** 用 `AutoMigrate`——schema 由 `migrations/` 版本化 SQL 管。
 - **DO NOT** 在 Config Service 编译 snapshot——编译在 executor 端。
 - **DO NOT** 让 driver 错误经 `Error()`/`Unwrap()` 暴露 DSN。
-- **DO NOT** 提交密钥/连接串/生产数据——`upstream_credentials` 只存 `vault://` ref。
+- **DO NOT** 提交密钥/连接串/生产数据——`upstream_credentials` 只存 `vault://` ref；`api_key` 列仅历史遗留，应用层永不写入明文。
+- **DO NOT** 把明文 API key 写入 DB、HTTP 响应、snapshot、audit 或日志；handler 与 repository 共同拒绝明文，错误只报 "plaintext secret rejected"。
+- **DO NOT** 让写/admin 端点默认开放：生产必须配置 `CONFIG_ADMIN_TOKEN_FILE`，缺配置启动 fail-fast；`CONFIG_ALLOW_NO_ADMIN_AUTH=true` 仅供本地/测试。
+- **DO NOT** 修改/复活历史 published/archived revision；rollback 必须创建并发布新 revision。
+- **DO NOT** 在 LEFT JOIN 的可空侧用 `FOR UPDATE`（PostgreSQL ERROR 0A000）：先锁定 `config_revisions` 行，再单独 fetch snapshot。
+- **DO NOT** 用 `gorm.Exec(...).Scan()` 读 `RETURNING`（不会填充目标）；必须用 `tx.Raw(...).Scan()` 或 `Row().Scan()`。
+- **DO NOT** 依赖 GORM 推断的表名：内部 struct 必须显式 `TableName()`（如 `auditRow`→`config_audit_log`），否则会找错表。
 - DB 路径硬限 `/tokenmp_config`，绝不连其他库。
+- 契约路径用 `/v1/config/revisions/{id}/revert`（不是 `/rollback`，见 `packages/contracts/openapi/config/v1.yaml`）；内部 repository 方法名 `RollbackAsNew` 可保留。
 
 ## 文档维护
 
-读写路径、下发协议、编译边界变化时，同步维护本文件、`services/AGENTS.md` 与 `infra/db/AGENTS.md`。
+读写路径、下发协议、编译边界、secret 边界或服务间授权变化时，同步维护本文件、`services/AGENTS.md`、`infra/db/AGENTS.md` 与 `packages/contracts/AGENTS.md`。
+
+## Container image and Compose
+
+- `Dockerfile` is built with the repository root as context and produces only the static
+  `config` binary in a non-root Alpine runtime image. Its service-local module download runs
+  with `GOWORK=off`; the shared `packages/go/httpresp` replace target is copied explicitly.
+- The image health check probes `/readyz`, the HTTP and database readiness route.
+- Root `compose.yaml` owns the service definition only; provide required database and key
+  inputs at deploy time, and do not add shared PostgreSQL/Redis/proxy resources or secrets.
+
+The repository-root build context means Dockerfile `COPY` sources are rooted at
+`services/<service>` (with the shared `packages/go/httpresp` copied from the same root), not
+at the Dockerfile directory. `tools/check-dockerfile-copy-sources.sh` statically guards this
+before CI Docker builds.
+
+Compose mounts `CONFIG_ADMIN_TOKEN_FILE` as a read-only Compose-secret path, consumed by
+the Config Service `internal/config` loader (regular-file, bounded, strict secret-file
+safety pattern) to source the admin shared secret at startup.

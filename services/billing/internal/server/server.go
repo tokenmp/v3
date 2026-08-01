@@ -30,6 +30,7 @@ type Server struct {
 	plans        repository.PlanReader
 	userPlans    repository.UserPlanReader
 	quota        repository.QuotaManager
+	settlement   repository.SettlementManager
 	ledger       repository.LedgerReader
 	balance      repository.BalanceReader
 	usageWindows repository.UsageWindowsReader
@@ -59,11 +60,11 @@ type AdminStore interface {
 // balance/usageWindows may be nil only in tests that do not exercise those
 // routes; production wiring always supplies the GormRepository. When nil,
 // the corresponding endpoint returns 503.
-func New(plans repository.PlanReader, userPlans repository.UserPlanReader, quota repository.QuotaManager, ledger repository.LedgerReader, balance repository.BalanceReader, usageWindows repository.UsageWindowsReader, admin AdminStore, pinger database.Pinger, logger *slog.Logger) *Server {
+func New(plans repository.PlanReader, userPlans repository.UserPlanReader, quota repository.QuotaManager, settlement repository.SettlementManager, ledger repository.LedgerReader, balance repository.BalanceReader, usageWindows repository.UsageWindowsReader, admin AdminStore, pinger database.Pinger, logger *slog.Logger) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Server{plans: plans, userPlans: userPlans, quota: quota, ledger: ledger, balance: balance, usageWindows: usageWindows, admin: admin, pinger: pinger, logger: logger}
+	return &Server{plans: plans, userPlans: userPlans, quota: quota, settlement: settlement, ledger: ledger, balance: balance, usageWindows: usageWindows, admin: admin, pinger: pinger, logger: logger}
 }
 
 // Router returns the configured chi router.
@@ -84,6 +85,9 @@ func (s *Server) Router() http.Handler {
 	r.Post("/v1/billing/quota/reserve", s.handleReserve)
 	r.Post("/v1/billing/quota/finalize", s.handleFinalize)
 	r.Post("/v1/billing/quota/release", s.handleRelease)
+	r.Get("/v1/billing/quota/reservations/{reservation_id}", s.handleGetReservation)
+	r.Post("/v1/billing/quota/mark-pending", s.handleMarkPending)
+	r.Post("/v1/billing/quota/reconcile", s.handleReconcile)
 	r.Get("/v1/billing/users/{user_id}/ledger", s.handleListLedger)
 	// Admin endpoints
 	r.Post("/v1/billing/admin/plans", s.handleAdminCreatePlan)
@@ -246,6 +250,7 @@ type finalizeRequest struct {
 	ReservationID string `json:"reservation_id"`
 	FinalRequests *int   `json:"final_requests"`
 	FinalTokens   *int64 `json:"final_tokens"`
+	UsageKnown    *bool  `json:"usage_known"`
 }
 
 func (s *Server) handleFinalize(w http.ResponseWriter, r *http.Request) {
@@ -253,11 +258,15 @@ func (s *Server) handleFinalize(w http.ResponseWriter, r *http.Request) {
 	if !decodeBoundedJSON(w, r, &req) {
 		return
 	}
-	if req.ReservationID == "" || req.FinalRequests == nil || req.FinalTokens == nil {
+	if req.ReservationID == "" || req.FinalRequests == nil || req.FinalTokens == nil || req.UsageKnown == nil {
 		httpresp.Error(w, httpresp.CodeMissingField, "missing field")
 		return
 	}
-	if err := s.quota.Finalize(r.Context(), req.ReservationID, *req.FinalRequests, *req.FinalTokens); err != nil && !errors.Is(err, repository.ErrConflict) {
+	if err := s.quota.Finalize(r.Context(), req.ReservationID, *req.FinalRequests, *req.FinalTokens, *req.UsageKnown); err != nil {
+		if errors.Is(err, repository.ErrConflict) {
+			httpresp.ErrorWithStatus(w, http.StatusConflict, httpresp.CodeConflict, "conflict")
+			return
+		}
 		if errors.Is(err, repository.ErrNotFound) {
 			httpresp.Error(w, httpresp.CodeNotFound, "not found")
 			return
@@ -282,7 +291,11 @@ func (s *Server) handleRelease(w http.ResponseWriter, r *http.Request) {
 		httpresp.Error(w, httpresp.CodeMissingField, "missing field")
 		return
 	}
-	if err := s.quota.Release(r.Context(), req.ReservationID); err != nil && !errors.Is(err, repository.ErrConflict) {
+	if err := s.quota.Release(r.Context(), req.ReservationID); err != nil {
+		if errors.Is(err, repository.ErrConflict) {
+			httpresp.ErrorWithStatus(w, http.StatusConflict, httpresp.CodeConflict, "conflict")
+			return
+		}
 		if errors.Is(err, repository.ErrNotFound) {
 			httpresp.Error(w, httpresp.CodeNotFound, "not found")
 			return
@@ -292,6 +305,97 @@ func (s *Server) handleRelease(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpresp.OK(w, map[string]string{"status": "released"})
+}
+
+func (s *Server) handleGetReservation(w http.ResponseWriter, r *http.Request) {
+	if s.settlement == nil {
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "settlement unavailable")
+		return
+	}
+	status, err := s.settlement.GetReservation(r.Context(), chi.URLParam(r, "reservation_id"))
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			httpresp.Error(w, httpresp.CodeNotFound, "not found")
+			return
+		}
+		s.logger.Warn("reservation status query failed", "error", err)
+		httpresp.Error(w, httpresp.CodeInternalError, "status unavailable")
+		return
+	}
+	httpresp.OK(w, status)
+}
+
+type markPendingRequest struct {
+	ReservationID string `json:"reservation_id"`
+}
+
+func (s *Server) handleMarkPending(w http.ResponseWriter, r *http.Request) {
+	if s.settlement == nil {
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "settlement unavailable")
+		return
+	}
+	var req markPendingRequest
+	if !decodeBoundedJSON(w, r, &req) {
+		return
+	}
+	if req.ReservationID == "" {
+		httpresp.Error(w, httpresp.CodeMissingField, "missing field")
+		return
+	}
+	if err := s.settlement.MarkPending(r.Context(), req.ReservationID); err != nil {
+		if errors.Is(err, repository.ErrConflict) {
+			httpresp.ErrorWithStatus(w, http.StatusConflict, httpresp.CodeConflict, "conflict")
+			return
+		}
+		if errors.Is(err, repository.ErrNotFound) {
+			httpresp.Error(w, httpresp.CodeNotFound, "not found")
+			return
+		}
+		s.logger.Warn("mark pending failed", "error", err)
+		httpresp.Error(w, httpresp.CodeInternalError, "mark pending failed")
+		return
+	}
+	httpresp.OK(w, map[string]string{"status": "pending_reconciliation"})
+}
+
+type reconcileRequest struct {
+	ReservationID string `json:"reservation_id"`
+	FinalRequests *int   `json:"final_requests"`
+	FinalTokens   *int64 `json:"final_tokens"`
+	UsageKnown    *bool  `json:"usage_known"`
+}
+
+func (s *Server) handleReconcile(w http.ResponseWriter, r *http.Request) {
+	if s.settlement == nil {
+		httpresp.Error(w, httpresp.CodeServiceUnavailable, "settlement unavailable")
+		return
+	}
+	var req reconcileRequest
+	if !decodeBoundedJSON(w, r, &req) {
+		return
+	}
+	if req.ReservationID == "" || req.FinalRequests == nil || req.FinalTokens == nil || req.UsageKnown == nil {
+		httpresp.Error(w, httpresp.CodeMissingField, "missing field")
+		return
+	}
+	if err := s.settlement.Reconcile(r.Context(), req.ReservationID, *req.FinalRequests, *req.FinalTokens, *req.UsageKnown); err != nil {
+		if errors.Is(err, repository.ErrConflict) {
+			httpresp.ErrorWithStatus(w, http.StatusConflict, httpresp.CodeConflict, "conflict")
+			return
+		}
+		if errors.Is(err, repository.ErrNotFound) {
+			httpresp.Error(w, httpresp.CodeNotFound, "not found")
+			return
+		}
+		s.logger.Warn("reconcile failed", "error", err)
+		httpresp.Error(w, httpresp.CodeInternalError, "reconcile failed")
+		return
+	}
+	status := "finalized"
+	if !*req.UsageKnown {
+		status = "released"
+	}
+	httpresp.OK(w, map[string]string{"status": status})
 }
 
 func (s *Server) handleListLedger(w http.ResponseWriter, r *http.Request) {

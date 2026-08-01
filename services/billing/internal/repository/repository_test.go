@@ -15,12 +15,22 @@ import (
 )
 
 // dsn is built from env BILLING_REPO_TEST_DSN (set by the test harness that
-// starts a temp pg). When unset, integration tests are skipped.
+// starts a temp pg). When unset, integration tests are skipped. The DSN is
+// parsed with the real libpq-compatible parser (see validateTestDSN) and must
+// target the billing-only test database (tokenmp_billing) — verified from the
+// parsed Database field, not a substring match — so the destructive schema
+// reset used for test isolation cannot touch any other database. A parse
+// failure, missing database, or different database is a hard fatal whose
+// message names only the expected database (never the raw DSN, password,
+// host, or query).
 func dsn(t *testing.T) string {
 	t.Helper()
 	d := os.Getenv("BILLING_REPO_TEST_DSN")
 	if d == "" {
 		t.Skip("BILLING_REPO_TEST_DSN not set; skipping repository integration test")
+	}
+	if _, err := validateTestDSN(d); err != nil {
+		t.Fatalf("%v", err)
 	}
 	return d
 }
@@ -41,9 +51,85 @@ func openDB(t *testing.T, dsn string) *gorm.DB {
 	return db
 }
 
-// applyMigrations runs down first (idempotent via IF EXISTS) so the test
-// starts from a clean state, then applies up. Down is re-run on cleanup.
-// Migrations are applied in order: 000001 then 000002; down in reverse.
+// upMigrationFiles is the ordered list of up migrations applied by the test
+// harness. Declared once so every test starts from the same complete schema;
+// adding a new migration here is a deliberate, visible act.
+var upMigrationFiles = []string{
+	"000001_init.up.sql",
+	"000002_limit_overrides.up.sql",
+	"000003_plan_daily_weekly_categories.up.sql",
+	"000004_settlement_state_machine.up.sql",
+}
+
+// migrationsDir returns the repo-relative path to the billing migrations.
+func migrationsDir() string { return filepath.Join("..", "..", "migrations") }
+
+// resetSchema drops and recreates the public schema, yielding a fully clean
+// slate regardless of what data a previous test left behind. It deliberately
+// does NOT run the down migrations: migration 000004's down is intentionally
+// fail-closed (it RAISEs whenever settlement data exists), so it MUST NOT be
+// used for test cleanup. The old helper ran down4..down1 in a loop and ignored
+// errors; when down4 RAISEd (after any test that produced a settled/pending
+// reservation or a reconcile/sweep ledger row) the loop kept going, ran
+// down3/down2/down1, and dropped usage_ledger while down4 had already aborted
+// mid-way. The next test's pre-clean down4 then hit `ALTER TABLE usage_ledger
+// ...` on a now-missing table and fatalf'd, cascading into every later test.
+// A schema reset is idempotent, migration-content-independent, and immune to
+// the fail-closed guard.
+//
+// DESTRUCTIVE SAFETY: this helper opens an already-connected *pgx.Conn and
+// issues DROP SCHEMA public CASCADE. It MUST only ever be reached via a DSN
+// that passed the parsed-database guard in dsn()/validateTestDSN (which
+// requires Config.Database == "tokenmp_billing"). Every caller obtains that
+// connection by first calling dsn(t) (which fatalfs on any wrong/unparsable
+// target) and only then opening the connection; no destructive helper opens
+// or executes against a raw/unvalidated DSN. See applyMigrations and the
+// setupCleanSchemaForDownTest helper in settlement_test.go.
+func resetSchema(t *testing.T, ctx context.Context, conn *pgx.Conn) {
+	t.Helper()
+	for _, stmt := range []string{
+		`DROP SCHEMA IF EXISTS public CASCADE`,
+		`CREATE SCHEMA public`,
+	} {
+		if _, err := conn.Exec(ctx, stmt); err != nil {
+			t.Fatalf("reset schema (%s): %v", stmt, err)
+		}
+	}
+}
+
+// applyUpMigrations applies every up migration in order on the caller's
+// connection. It does not reset first; pair with resetSchema for a clean
+// slate. A failure is a hard fatal so a partial/empty schema never cascades
+// into obscure downstream assertion failures. It also verifies the resulting
+// schema has the expected core tables so a silently-incomplete apply is
+// caught here instead of at a confusing later assertion.
+func applyUpMigrations(t *testing.T, ctx context.Context, conn *pgx.Conn) {
+	t.Helper()
+	for _, name := range upMigrationFiles {
+		up := readMigration(t, migrationsDir(), name)
+		if _, err := conn.Exec(ctx, up); err != nil {
+			t.Fatalf("apply up migration %s: %v", name, err)
+		}
+	}
+	var coreTables int
+	if err := conn.QueryRow(ctx, `SELECT count(*) FROM information_schema.tables
+WHERE table_schema = current_schema()
+  AND table_name IN ('users','plans','user_plans','quota_reservations','usage_ledger','user_plan_limit_overrides')`).Scan(&coreTables); err != nil {
+		t.Fatalf("verify schema: query core tables: %v", err)
+	}
+	if coreTables != 6 {
+		t.Fatalf("verify schema: expected 6 core tables, got %d (partial/empty schema)", coreTables)
+	}
+}
+
+// applyMigrations resets the schema (drop+recreate public) and applies every
+// up migration in order so the test starts from a known-clean, complete
+// schema. Cleanup resets the schema again so the next test is fully isolated
+// and never inherits another test's settled/pending rows or ledger entries.
+// The fail-closed 000004 down migration is intentionally NOT run for cleanup.
+// The connection is opened with dsn, which every caller obtains from dsn(t)
+// and is therefore already validated by validateTestDSN (parsed database must
+// be tokenmp_billing) before this destructive helper runs.
 func applyMigrations(t *testing.T, dsn string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -53,28 +139,12 @@ func applyMigrations(t *testing.T, dsn string) {
 		t.Fatalf("pgx connect: %v", err)
 	}
 	t.Cleanup(func() { _ = conn.Close(context.Background()) })
-	migrationsDir := filepath.Join("..", "..", "migrations")
-	up1 := readMigration(t, migrationsDir, "000001_init.up.sql")
-	down1 := readMigration(t, migrationsDir, "000001_init.down.sql")
-	up2 := readMigration(t, migrationsDir, "000002_limit_overrides.up.sql")
-	down2 := readMigration(t, migrationsDir, "000002_limit_overrides.down.sql")
-	// down in reverse order.
-	for _, d := range []string{down2, down1} {
-		if _, err := conn.Exec(ctx, d); err != nil {
-			t.Fatalf("apply down migration: %v", err)
-		}
-	}
-	for _, u := range []string{up1, up2} {
-		if _, err := conn.Exec(ctx, u); err != nil {
-			t.Fatalf("apply up migration: %v", err)
-		}
-	}
+	resetSchema(t, ctx, conn)
+	applyUpMigrations(t, ctx, conn)
 	t.Cleanup(func() {
 		cctx, ccancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer ccancel()
-		for _, d := range []string{down2, down1} {
-			_, _ = conn.Exec(cctx, d)
-		}
+		resetSchema(t, cctx, conn)
 	})
 }
 
@@ -162,6 +232,9 @@ func quotaExceededScope(err error) string {
 	return ""
 }
 
+// intPtr returns a pointer to v (test helper for nullable plan limits).
+func intPtr(v int) *int { return &v }
+
 func ledgerCount(t *testing.T, db *gorm.DB, userID string) int {
 	t.Helper()
 	var n int
@@ -201,7 +274,7 @@ func TestReserve_Finalize_Release(t *testing.T) {
 		t.Fatalf("ledger count after reserve = %d, want 1", n)
 	}
 
-	if err := r.Finalize(ctx, "res1", 8, 800); err != nil {
+	if err := r.Finalize(ctx, "res1", 8, 800, true); err != nil {
 		t.Fatalf("Finalize: %v", err)
 	}
 	if s := reservationStatus(t, db, "res1"); s != "finalized" {
@@ -276,7 +349,7 @@ func TestFinalize_NotFound(t *testing.T) {
 	applyMigrations(t, d)
 	db := openDB(t, d)
 	r := New(db)
-	err := r.Finalize(context.Background(), "does-not-exist", 1, 1)
+	err := r.Finalize(context.Background(), "does-not-exist", 1, 1, true)
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("expected ErrNotFound, got %v", err)
 	}
@@ -294,11 +367,15 @@ func TestFinalize_Idempotent(t *testing.T) {
 	if err := r.Reserve(ctx, "res3", "u3", "req3", "coding", 10, 1000, nil); err != nil {
 		t.Fatalf("Reserve: %v", err)
 	}
-	if err := r.Finalize(ctx, "res3", 8, 800); err != nil {
+	if err := r.Finalize(ctx, "res3", 8, 800, true); err != nil {
 		t.Fatalf("Finalize first: %v", err)
 	}
-	if err := r.Finalize(ctx, "res3", 9, 900); err != nil {
-		t.Fatalf("Finalize second (idempotent): %v", err)
+	if err := r.Finalize(ctx, "res3", 8, 800, true); err != nil {
+		t.Fatalf("Finalize second (idempotent same payload): %v", err)
+	}
+	// A different payload must now be a stable conflict (no retroactive change).
+	if err := r.Finalize(ctx, "res3", 9, 900, true); !errors.Is(err, ErrConflict) {
+		t.Fatalf("Finalize with different payload: expected ErrConflict, got %v", err)
 	}
 	// Only one charge row: reserve + charge = 2 total.
 	if n := ledgerCount(t, db, "u3"); n != 2 {
@@ -490,7 +567,7 @@ func consume(t *testing.T, r *GormRepository, ctx context.Context, userID, tag s
 	if err := r.Reserve(ctx, resID, userID, "req-"+tag, "coding", 1, 1, nil); err != nil {
 		t.Fatalf("Reserve %s: %v", tag, err)
 	}
-	if err := r.Finalize(ctx, resID, 1, 1); err != nil {
+	if err := r.Finalize(ctx, resID, 1, 1, true); err != nil {
 		t.Fatalf("Finalize %s: %v", tag, err)
 	}
 }
@@ -590,21 +667,44 @@ func TestReserve_CodingIdempotentSkipsEnforcement(t *testing.T) {
 	applyMigrations(t, d)
 	db := openDB(t, d)
 	insertUser(t, db, "idem")
-	lim := 1
+	lim := 2
 	planID := insertCodingPlan(t, db, "idemplan", &lim, nil, nil)
 	insertUserPlanActivated(t, db, "idem", planID, "active", time.Now().UTC())
 	r := New(db)
 	ctx := context.Background()
 
+	// First reservation takes one active hold. Under active-hold semantics the
+	// reserved hold counts against the window, so window consumed becomes 1.
 	if err := r.Reserve(ctx, "res-idem", "idem", "req-idem", "coding", 1, 1, nil); err != nil {
 		t.Fatalf("Reserve first: %v", err)
 	}
-	// Fill the window so a fresh reserve would be rejected.
-	consume(t, r, ctx, "idem", "a")
-	// Repeat reserve of the SAME id must stay idempotent (nil), not be
-	// rejected by the now-full window.
+	// A second, independent reservation saturates the hard limit of 2
+	// (window consumed becomes 2); any further fresh reserve is rejected.
+	if err := r.Reserve(ctx, "res-idem2", "idem", "req-idem2", "coding", 1, 1, nil); err != nil {
+		t.Fatalf("Reserve second (fills window): %v", err)
+	}
+	// Repeat reserve of the SAME id must stay idempotent (nil): the
+	// existence check short-circuits before window enforcement, so a retry
+	// of the first reservation succeeds even though the window is now full.
 	if err := r.Reserve(ctx, "res-idem", "idem", "req-idem", "coding", 1, 1, nil); err != nil {
 		t.Fatalf("Reserve repeat (idempotent): %v", err)
+	}
+	// Idempotency is keyed on reservation id alone: Reserve has no payload
+	// conflict path (unlike Finalize/Release, which hash and reject
+	// mismatched payloads), so repeating res-idem with a DIFFERENT request_id
+	// also returns nil and leaves the stored row untouched.
+	if err := r.Reserve(ctx, "res-idem", "idem", "req-other", "coding", 1, 1, nil); err != nil {
+		t.Fatalf("Reserve repeat with different request_id (id-keyed, no conflict): %v", err)
+	}
+	// A third, distinct reservation id is genuinely new and must be rejected
+	// by the now-full window — proving the limit was not merely relaxed to
+	// mask the idempotency behavior: enforcement still bites on a fresh id.
+	err := r.Reserve(ctx, "res-idem3", "idem", "req-idem3", "coding", 1, 1, nil)
+	if !errors.Is(err, ErrQuotaExceeded) {
+		t.Fatalf("expected ErrQuotaExceeded for a fresh reservation when the window is full, got %v", err)
+	}
+	if s := quotaExceededScope(err); s != "hour5" {
+		t.Fatalf("scope = %q, want hour5", s)
 	}
 }
 

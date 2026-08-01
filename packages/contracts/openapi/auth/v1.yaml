@@ -17,9 +17,15 @@ info:
     keys. The full key secret is returned exactly once on create/rotate; only
     a one-way hash of the key is persisted.
 
-    **Rate limiting is NOT implemented.** Consumers and operators must not
-    assume the service is rate-limited. Rate limiting must be provided by a
-    future gateway or shared policy before production deployment.
+    **Rate limiting is enforced on the high-risk identity endpoints**
+    (`/api/v1/auth/login`, `/api/v1/auth/register`, `/api/v1/auth/refresh`)
+    via a shared Redis token bucket evaluated before the expensive password
+    hashing and database work. A denied request returns `429 rate_limited`
+    with a `Retry-After` header (seconds). When the shared limiter backend is
+    unavailable, protected endpoints fail closed with `503
+    service_unavailable`. Forwarded client IP headers are only trusted when
+    the TCP peer belongs to a configured trusted-proxy CIDR; otherwise the
+    peer address is used.
 
     This document is the complete and authoritative HTTP contract for
     consumers. No service implementation context is required to discover
@@ -194,6 +200,30 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+        '429':
+          description: Rate limit exceeded. Retry after the seconds in Retry-After.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Service temporarily unavailable (fail closed).
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /api/v1/auth/login:
     post:
       summary: Log in
@@ -246,6 +276,30 @@ paths:
                 $ref: '#/components/schemas/Error'
         '500':
           description: Internal server error.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: Rate limit exceeded. Retry after the seconds in Retry-After.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Service temporarily unavailable (fail closed).
           headers:
             Cache-Control:
               $ref: '#/components/headers/CacheControlNoStore'
@@ -357,6 +411,30 @@ paths:
                 $ref: '#/components/schemas/Error'
         '500':
           description: Internal server error.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: Rate limit exceeded. Retry after the seconds in Retry-After.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Content-Type:
+              $ref: '#/components/headers/ContentTypeJSON'
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Service temporarily unavailable (fail closed).
           headers:
             Cache-Control:
               $ref: '#/components/headers/CacheControlNoStore'
@@ -1312,6 +1390,14 @@ components:
         type: string
         enum: ['application/json; charset=utf-8']
         example: application/json; charset=utf-8
+    RetryAfter:
+      description: |
+        Seconds the client should wait before retrying, per RFC 9110. Present
+        only on `429 rate_limited` responses from rate-limited endpoints.
+      schema:
+        type: string
+        pattern: '^\d+$'
+        example: '2'
   schemas:
     HealthResponse:
       type: object
@@ -1475,6 +1561,8 @@ components:
                 - not_found
                 - forbidden
                 - internal_error
+                - rate_limited
+                - service_unavailable
             message:
               type: string
     ApiKey:

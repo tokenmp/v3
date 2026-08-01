@@ -22,7 +22,7 @@ go test -race -count=1 ./internal/sdk/...
 go vet ./internal/sdk/...
 ```
 
-现有 `go-auth` CI job 已以 `./internal/sdk/...` 运行该包及 adapter（包括 legacy OpenAI Images）的 race tests；共享 validator `./internal/imagecontract/...` 是独立 package，必须显式加入 CI race package pattern。任何新增 fuzz target 仅本地按需执行，不加入 CI。
+现有 `go-auth` CI job 从 Executor 模块目录运行完整模块 `go test -race ./...`，自动覆盖本 package、adapter（包括 legacy OpenAI Images）及共享 validator `internal/imagecontract`。任何新增 fuzz target 仅本地按需执行，不加入 CI。
 
 ## DO NOT
 

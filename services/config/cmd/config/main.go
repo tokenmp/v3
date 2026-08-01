@@ -20,6 +20,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/tokenmp/v3/services/config/internal/adminauth"
 	"github.com/tokenmp/v3/services/config/internal/config"
 	"github.com/tokenmp/v3/services/config/internal/database"
 	"github.com/tokenmp/v3/services/config/internal/repository"
@@ -56,7 +57,12 @@ func run() error {
 	defer func() { _ = database.Close(db) }()
 
 	repo := repository.New(db)
-	srv := server.New(repo, repo, database.PingerFromDB(db), logger)
+	adminMW, err := adminauth.New(cfg.AdminTokenFile, cfg.AllowNoAdminAuth)
+	if err != nil {
+		logger.Error("admin auth init failed", "error", err)
+		return err
+	}
+	srv := server.NewWithAdminAuth(repo, repo, database.PingerFromDB(db), logger, adminMW)
 	httpSrv := &http.Server{
 		Addr:              cfg.HTTPAddr,
 		Handler:           srv.Router(),

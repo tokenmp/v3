@@ -15,6 +15,8 @@
 - Auth 契约：`openapi/auth/v1.yaml`
 - Executor 契约：`openapi/executor/v1.yaml`
 - Edge/Panel 契约：`openapi/api/v1.yaml`（请求日志公开状态与 TTFT/protocol/stream/token/cache/thinking/timestamps 等摘要字段）
+- Config 契约：`openapi/config/v1.yaml`（Config Service 控制平面：匿名快照下发读 + admin-auth 保护 draft/publish/archive/revert/audit 写路径，CAS `If-Match`/`ETag`，409/412 并发语义，无 secret 字段，无写死 `servers` 部署无关）
+- Billing 契约：`openapi/billing/v1.yaml`（内部 reserve/finalize/release/get-status/mark-pending/reconcile 结算状态机契约，Edge 为唯一直接消费者）
 - Go 生成配置：`go/auth-v1-models.yaml`、`go/auth-v1-server.yaml`、`go/api-v1-models.yaml`、`go/api-v1-server.yaml`、`go/executor-v1-models.yaml`、`go/executor-v1-server.yaml`
 - Go 生成脚本：`go/generate.sh`、`go/generate-executor.sh`
 - Go 新鲜度检查：`go/check-generated.sh`、`go/check-generated-executor.sh`
@@ -25,6 +27,8 @@
 |---|---|---|---|---|
 | `@tokenmp/contracts/openapi/auth/v1.yaml` | YAML 读取能力 | Auth Service v1 OpenAPI 3.0.3 契约；无副作用 | stable | `openapi/auth/v1.yaml` |
 | `@tokenmp/contracts/openapi/api/v1.yaml` | YAML 读取能力 | Edge/Panel API v1 OpenAPI 契约；请求日志摘要含 processing/TTFT/protocol/stream/token/cache/thinking/timestamps | stable | `openapi/api/v1.yaml` |
+| `@tokenmp/contracts/openapi/config/v1.yaml` | YAML 读取能力 | Config Service v1 OpenAPI 契约；匿名快照下发读 + admin-auth 保护 draft/publish/archive/revert/audit 写路径，CAS `If-Match`/`ETag`，409/412 并发语义，无 secret 字段 | stable | `openapi/config/v1.yaml` |
+| `@tokenmp/contracts/openapi/billing/v1.yaml` | YAML 读取能力 | Billing 内部 HTTP v1 OpenAPI 契约；reserve/finalize/release/get-status/mark-pending/reconcile 结算状态机，unknown usage 禁止猜测 | stable | `openapi/billing/v1.yaml` |
 | `@tokenmp/contracts/openapi/executor/v1.yaml` | YAML 读取能力 | Executor Service v1 OpenAPI 3.0.3 契约；无副作用 | stable | `openapi/executor/v1.yaml` |
 | `generate:auth:go` 脚本 | Go 1.26.5+，oapi-codegen v2.8.0（自动下载） | 生成 Auth `models.gen.go` 与 `server.gen.go` | stable | 两份 `go/auth-v1-*.yaml` + `openapi/auth/v1.yaml` |
 | `generate:executor:go` 脚本 | Go 1.26.5+，oapi-codegen v2.8.0（自动下载） | 生成 Executor `models.gen.go` 与 `server.gen.go`，输出到 `services/executor/internal/contract/executorv1/` | experimental | 两份 `go/executor-v1-*.yaml` + `openapi/executor/v1.yaml` |
@@ -95,7 +99,7 @@ pnpm --filter @tokenmp/contracts check:generated:executor # generated models/str
 ```
 
 - 最小验证：`lint`（YAML 基本结构 + 禁止内部术语）、`typecheck`（跨文件 operationId 唯一性 + $ref 解析）、`test`（Node test runner 契约测试）、`build`（复制到 dist）。
-- 契约测试：`tests/openapi-auth-v1.test.mjs`。
+- 契约测试：`tests/openapi-auth-v1.test.mjs`、`tests/openapi-config-v1.test.mjs`、`tests/openapi-billing-v1.test.mjs`。
 - 生成测试：`services/auth/internal/contract/authv1/freshness_test.go` 与 `services/executor/internal/contract/executorv1/freshness_test.go`。Executor generated models/strict server 随变更提交；route conformance 测试见 `services/executor/internal/server/contract_test.go`。
 - 集成测试：首次消费者接入时补充端到端验证。
 

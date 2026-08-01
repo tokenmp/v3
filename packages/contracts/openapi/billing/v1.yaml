@@ -1,0 +1,573 @@
+openapi: 3.0.3
+info:
+  title: TokenMP v3 Billing API
+  version: 0.1.0
+  description: |
+    TokenMP v3 Billing API contract — the single source of truth for the
+    internal HTTP interface of the Billing Service.
+
+    The Billing Service is the **only durable owner** of entitlement and
+    ledger state. It is called by the Edge/BFF service; the Executor does not
+    connect to it. This contract describes the reserve-then-finalize
+    settlement lifecycle:
+
+    1. **Reserve** at request start creates an auditable hold and counts
+       against the user's hard quota windows (so concurrent requests cannot
+       punch through a limit).
+    2. **Finalize** at request end settles the hold with confirmed usage
+       (`usage_known: true`). Unknown usage is **never guessed** — the caller
+       must **MarkPending** instead.
+    3. **Release** cancels a hold on failure / pre-send cancel.
+    4. **MarkPending** parks a resolved-but-unsettled reservation for the
+       background reconciler.
+    5. **Reconcile** resolves a pending reservation from confirmed evidence;
+       with no confirmed usage it releases the hold (under-charge, never a
+       fabricated count).
+    6. **GetReservation** returns the safe settlement status an Edge
+       coordinator needs to decide the terminal action without polling logs.
+
+    Durability claims are bounded to single-write idempotency and unique
+    constraints; the service does **not** claim cross-process exactly-once.
+    All responses set `Cache-Control: no-store` and never leak the backing
+    store error, connection string, or SQL.
+
+    Authentication is internal network-only; the Edge authenticates the end
+    user. Operators must restrict network access to trusted edge nodes.
+servers:
+  - url: http://127.0.0.1:8085
+    description: Local development
+paths:
+  /healthz:
+    get:
+      summary: Liveness probe
+      operationId: getBillingHealthz
+      responses:
+        '200':
+          description: Service is alive.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+          content:
+            text/plain:
+              schema:
+                type: string
+                const: ok
+    head:
+      summary: Liveness probe (HEAD)
+      operationId: headBillingHealthz
+      responses:
+        '200':
+          description: Service is alive.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+  /readyz:
+    get:
+      summary: Readiness probe
+      description: Reports whether the service is ready, including backing store connectivity. A failure returns 503 and never leaks the underlying cause.
+      operationId: getBillingReadyz
+      responses:
+        '200':
+          description: Service is ready.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+          content:
+            text/plain:
+              schema:
+                type: string
+                const: ready
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/billing/quota/reserve:
+    post:
+      summary: Reserve quota
+      description: |
+        Creates an auditable hold and a reserve ledger entry. Active holds
+        count against the user's hard quota windows. Repeating the same
+        reservation id is idempotent (no re-charge). Exceeding a hard limit
+        returns 429 with a scope tag (`hour5`, `weekly`, `period`) and never
+        leaks the backing store error.
+      operationId: reserveQuota
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReserveRequest'
+      responses:
+        '200':
+          description: Reservation created or already existed (idempotent).
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReserveResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '429':
+          description: A hard quota window was exceeded. The body carries the scope only.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Retry-After:
+              description: Suggested backoff in seconds.
+              schema:
+                type: integer
+                minimum: 0
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuotaExceededError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/billing/quota/finalize:
+    post:
+      summary: Finalize a reservation
+      description: |
+        Settles a reservation with confirmed usage. `usage_known` must be
+        `true`; unknown usage must go through MarkPending. Idempotent for the
+        same payload; a different payload or an already-released/expired/
+        pending reservation returns a stable 409.
+      operationId: finalizeQuota
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FinalizeRequest'
+      responses:
+        '200':
+          description: Reservation settled (or already settled with the same payload).
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FinalizeResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/billing/quota/release:
+    post:
+      summary: Release a reservation
+      description: Cancels a hold and reverses the held amount. Idempotent for an already-released reservation; a finalized reservation returns 409.
+      operationId: releaseQuota
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReleaseRequest'
+      responses:
+        '200':
+          description: Reservation released (or already released).
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReleaseResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/billing/quota/reservations/{reservationId}:
+    get:
+      summary: Get reservation status
+      description: Returns the safe settlement projection for a reservation, so an Edge coordinator can decide the terminal action without polling logs.
+      operationId: getReservationStatus
+      parameters:
+        - $ref: '#/components/parameters/ReservationIdPath'
+      responses:
+        '200':
+          description: The reservation settlement status.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReservationStatus'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/billing/quota/mark-pending:
+    post:
+      summary: Mark a reservation pending reconciliation
+      description: Parks a resolved-but-unsettled reservation when usage is unknown or settlement could not complete. The background reconciler resolves it later.
+      operationId: markReservationPending
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MarkPendingRequest'
+      responses:
+        '200':
+          description: Reservation is pending reconciliation.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MarkPendingResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/billing/quota/reconcile:
+    post:
+      summary: Reconcile a pending reservation
+      description: |
+        Resolves a pending reservation from confirmed usage evidence.
+        `usage_known: true` settles the actual counts; `usage_known: false`
+        releases the hold (under-charge, never a fabricated count).
+      operationId: reconcileReservation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReconcileRequest'
+      responses:
+        '200':
+          description: Reservation reconciled to a terminal state.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReconcileResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+components:
+  headers:
+    CacheControlNoStore:
+      description: Responses are never cached.
+      schema:
+        type: string
+        const: no-store
+        example: no-store
+  parameters:
+    ReservationIdPath:
+      name: reservationId
+      in: path
+      description: Reservation identifier.
+      required: true
+      schema:
+        type: string
+        minLength: 1
+  responses:
+    BadRequest:
+      description: Malformed request body or missing required field.
+      headers:
+        Cache-Control:
+          $ref: '#/components/headers/CacheControlNoStore'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorBody'
+    NotFound:
+      description: Reservation does not exist.
+      headers:
+        Cache-Control:
+          $ref: '#/components/headers/CacheControlNoStore'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorBody'
+    Conflict:
+      description: The reservation is in a conflicting terminal state, or the finalize payload differs from the settled one.
+      headers:
+        Cache-Control:
+          $ref: '#/components/headers/CacheControlNoStore'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorBody'
+    ServiceUnavailable:
+      description: The service or its backing store is temporarily unavailable. The body never leaks the underlying cause.
+      headers:
+        Cache-Control:
+          $ref: '#/components/headers/CacheControlNoStore'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorBody'
+  schemas:
+    ErrorBody:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: object
+          required:
+            - code
+            - message
+          properties:
+            code:
+              type: string
+              description: Stable machine-readable error code.
+            message:
+              type: string
+              description: Safe, secret-free human message.
+      additionalProperties: false
+    ReserveRequest:
+      type: object
+      required:
+        - reservation_id
+        - user_id
+        - request_id
+        - billing_plan
+        - reserved_requests
+        - reserved_tokens
+      properties:
+        reservation_id:
+          type: string
+          minLength: 1
+        user_id:
+          type: string
+          minLength: 1
+        request_id:
+          type: string
+          minLength: 1
+        billing_plan:
+          type: string
+          enum:
+            - coding
+            - token
+            - image
+            - free
+        reserved_requests:
+          type: integer
+          minimum: 0
+        reserved_tokens:
+          type: integer
+          format: int64
+          minimum: 0
+        expires_at:
+          type: string
+          format: date-time
+          description: Optional hold expiry; a past value makes the reservation immediately sweepable.
+      additionalProperties: false
+    ReserveResponse:
+      type: object
+      required:
+        - reservation_id
+        - status
+      properties:
+        reservation_id:
+          type: string
+        status:
+          type: string
+          const: reserved
+      additionalProperties: false
+    FinalizeRequest:
+      type: object
+      required:
+        - reservation_id
+        - final_requests
+        - final_tokens
+        - usage_known
+      properties:
+        reservation_id:
+          type: string
+          minLength: 1
+        final_requests:
+          type: integer
+          minimum: 0
+        final_tokens:
+          type: integer
+          format: int64
+          minimum: 0
+        usage_known:
+          type: boolean
+          description: Must be true; unknown usage must use MarkPending.
+      additionalProperties: false
+    FinalizeResponse:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          const: finalized
+      additionalProperties: false
+    ReleaseRequest:
+      type: object
+      required:
+        - reservation_id
+      properties:
+        reservation_id:
+          type: string
+          minLength: 1
+      additionalProperties: false
+    ReleaseResponse:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          const: released
+      additionalProperties: false
+    MarkPendingRequest:
+      type: object
+      required:
+        - reservation_id
+      properties:
+        reservation_id:
+          type: string
+          minLength: 1
+      additionalProperties: false
+    MarkPendingResponse:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          const: pending_reconciliation
+      additionalProperties: false
+    ReconcileRequest:
+      type: object
+      required:
+        - reservation_id
+        - final_requests
+        - final_tokens
+        - usage_known
+      properties:
+        reservation_id:
+          type: string
+          minLength: 1
+        final_requests:
+          type: integer
+          minimum: 0
+        final_tokens:
+          type: integer
+          format: int64
+          minimum: 0
+        usage_known:
+          type: boolean
+      additionalProperties: false
+    ReconcileResponse:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum:
+            - finalized
+            - released
+      additionalProperties: false
+    ReservationStatus:
+      type: object
+      required:
+        - reservation_id
+        - user_id
+        - request_id
+        - billing_plan
+        - status
+        - usage_known
+        - reserved_at
+      properties:
+        reservation_id:
+          type: string
+        user_id:
+          type: string
+        request_id:
+          type: string
+        billing_plan:
+          type: string
+        status:
+          type: string
+          enum:
+            - reserved
+            - finalized
+            - released
+            - expired
+            - pending_reconciliation
+        settlement_status:
+          type: string
+          enum:
+            - held
+            - settled
+            - released
+            - expired
+            - pending
+        reserved_requests:
+          type: integer
+          minimum: 0
+        reserved_tokens:
+          type: integer
+          format: int64
+          minimum: 0
+        final_requests:
+          type: integer
+          minimum: 0
+        final_tokens:
+          type: integer
+          format: int64
+          minimum: 0
+        usage_known:
+          type: boolean
+        reserved_at:
+          type: string
+          format: date-time
+        finalized_at:
+          type: string
+          format: date-time
+        reconciled_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+      additionalProperties: false
+    QuotaExceededError:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: object
+          required:
+            - code
+            - message
+          properties:
+            code:
+              type: string
+              const: quota_exceeded
+            message:
+              type: string
+              description: 'Carries the exceeded scope only, e.g. quota_exceeded: hour5.'
+      additionalProperties: false

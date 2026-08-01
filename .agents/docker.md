@@ -61,3 +61,55 @@ docker compose -p tokenmp-v3 ps
 - working directory 与目标环境一致
 - 镜像名称带 `tokenmp-v3` 标识
 - 端口、网络和挂载没有与其他项目冲突
+
+## Compose 编排
+
+根目录 `compose.yaml` 是全部 7 个 Go 服务与 Web 的公共应用编排；它设置
+`name: tokenmp-v3`，只创建 `tokenmp-v3-backend` 应用网络。PostgreSQL、Redis、
+OpenResty/其他反向代理均为外部共享基础设施，不得加入此 Compose 文件或随项目
+启动、停止、删除。
+
+- 每项服务使用独立 `tokenmp-v3-<service>:${TOKENMP_V3_IMAGE_TAG:-latest}` 镜像；不要设置
+  `container_name`，让 Compose 生成带 project 标识的容器名。
+- 数据库 DSN、私钥、JWT 公钥路径和 Executor credential mapping 都由必填环境变量提供。
+  JWT 文件以只读 bind mount 注入，绝不复制进镜像或提交 `.env`。Compose 未声明业务数据卷。
+- 所有 Go 服务都在内部网络监听；仅 Edge `3002` 与 Web `3100` 默认发布到宿主，且可通过
+  `TOKENMP_V3_API_HOST_PORT`、`TOKENMP_V3_WEB_HOST_PORT` 覆盖。共享反向代理应仅连接这些
+  明确发布的入口，不属于此项目管理范围。
+- Compose 不猜测宿主网关：外部 DB/基础设施端点必须由 DSN/URL 环境变量明确提供。跨 macOS
+  Docker Desktop 与 Linux 的可移植方式是使用两端都可解析且可路由的基础设施 DNS 名称；若必须
+  使用宿主服务，则环境专属的受控 override 文件可明确设置 Linux `host-gateway` 或 Docker Desktop
+  的 `host.docker.internal`，该 override 不提交。先以 `docker compose --env-file /tmp/... config`
+  验证渲染结果，再启动。
+
+建议的非破坏性渲染检查（临时 env 文件不得入库）：
+
+```bash
+docker compose --env-file /tmp/tokenmp-v3.compose.env -p tokenmp-v3 config
+docker compose -p tokenmp-v3 build
+docker compose -p tokenmp-v3 ps
+```
+
+### Feature-branch secure runtime inputs
+
+Compose declares the integration contract used after the named feature branches merge. It
+never creates Redis or PostgreSQL; Redis is externally owned and its address is supplied by
+the target environment. HMAC and service tokens are source files mounted only as read-only
+Compose secrets, never interpolated as environment values.
+
+- After `shared-rate-limit` merges, Auth and API consume their exact
+  `*_RATE_LIMIT_*` variables: enabled flag, external Redis address/DB, trusted-proxy CIDRs,
+  HMAC secret-file path, policy capacities/refills, and bucket TTL. Compose intentionally
+  has no `AUTH_REDIS_URL`, `API_REDIS_URL`, `AUTH_HMAC_SECRET_FILE`, or
+  `API_HMAC_SECRET_FILE` aliases.
+- `CONFIG_ADMIN_TOKEN_FILE` already names the Config secret path in the Config feature
+  branch. API and Billing require their corresponding business changes to consume
+  `API_CONFIG_SERVICE_TOKEN_FILE` and `BILLING_LOGGING_SERVICE_TOKEN_FILE`; their current
+  feature branches only accept string token variables. Do not substitute a secret-file path
+  into those string variables, use an entrypoint wrapper, or put token contents in Compose
+  environment/config output.
+- `BILLING_LOGGING_URL` targets the internal Logging container after
+  `billing-settlement` merges; its sweeper settings are explicit in Compose.
+
+`tools/check-compose-env-contract.sh` is the repository-local allowlist check for this
+cross-branch contract. It is self-contained so CI does not depend on sibling worktrees.

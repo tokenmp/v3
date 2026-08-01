@@ -10,6 +10,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -17,9 +18,14 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/redis/go-redis/v9"
+	ratelimitpkg "github.com/tokenmp/v3/packages/go/ratelimit"
+	"github.com/tokenmp/v3/packages/go/ratelimit/trustedip"
 	"github.com/tokenmp/v3/services/auth/internal/auth"
 	"github.com/tokenmp/v3/services/auth/internal/config"
+	"github.com/tokenmp/v3/services/auth/internal/contract/authv1"
 	"github.com/tokenmp/v3/services/auth/internal/database"
+	internalratelimit "github.com/tokenmp/v3/services/auth/internal/ratelimit"
 	"github.com/tokenmp/v3/services/auth/internal/repository"
 	"github.com/tokenmp/v3/services/auth/internal/security/jwt"
 	"github.com/tokenmp/v3/services/auth/internal/transport/authv1api"
@@ -101,17 +107,72 @@ func run() error {
 	adminKeyStore := authv1api.NewAdminKeyRepoAdapter(apiKeyRepo)
 
 	pinger := database.PingerFromDB(db)
+
+	var rlMW authv1.StrictMiddlewareFunc
+	var resolver *trustedip.Resolver
+	if cfg.RateLimitEnabled {
+		resolver, err = trustedip.NewResolver(cfg.RateLimitTrustedProxies)
+		if err != nil {
+			logger.Error("trusted proxy config invalid", "error", err)
+			return err
+		}
+		opts, err := redis.ParseURL(cfg.RateLimitRedisAddr)
+		if err != nil {
+			logger.Error("rate limit redis url invalid")
+			return fmt.Errorf("rate limit redis url invalid")
+		}
+		opts.DB = cfg.RateLimitRedisDB
+		rdb := redis.NewClient(opts)
+		defer func() {
+			if cerr := rdb.Close(); cerr != nil {
+				logger.Error("error closing redis", "error", cerr)
+			}
+		}()
+		deriver, err := ratelimitpkg.NewKeyDeriver(cfg.RateLimitHMACSecret)
+		if err != nil {
+			logger.Error("rate limit deriver build failed", "error", err)
+			return err
+		}
+		// Zero the short-lived secret copy in config now that the deriver has
+		// its own internal copy; minimize the lifetime of the secret material.
+		for i := range cfg.RateLimitHMACSecret {
+			cfg.RateLimitHMACSecret[i] = 0
+		}
+		limiter := ratelimitpkg.NewRedisLimiter(rdb, 2*time.Second)
+		rlMW = internalratelimit.NewStrictMiddleware(internalratelimit.Deps{
+			Limiter: limiter,
+			Deriver: deriver,
+			Policies: internalratelimit.Policies{
+				LoginIPCapacity:         cfg.RateLimitLoginIPCapacity,
+				LoginIPRefill:           cfg.RateLimitLoginIPRefill,
+				LoginAccountCapacity:    cfg.RateLimitLoginAcctCapacity,
+				LoginAccountRefill:      cfg.RateLimitLoginAcctRefill,
+				RegisterIPCapacity:      cfg.RateLimitRegisterIPCapacity,
+				RegisterIPRefill:        cfg.RateLimitRegisterIPRefill,
+				RegisterAccountCapacity: cfg.RateLimitRegisterAcctCapacity,
+				RegisterAccountRefill:   cfg.RateLimitRegisterAcctRefill,
+				RefreshIPCapacity:       cfg.RateLimitRefreshIPCapacity,
+				RefreshIPRefill:         cfg.RateLimitRefreshIPRefill,
+				RefreshAccountCapacity:  cfg.RateLimitRefreshAcctCapacity,
+				RefreshAccountRefill:    cfg.RateLimitRefreshAcctRefill,
+				TTL:                     cfg.RateLimitBucketTTL,
+			},
+		})
+	}
+
 	srv := authv1api.NewServer(authv1api.ServerConfig{
-		Addr:           cfg.HTTPAddr,
-		Pinger:         pinger,
-		JWTVerifier:    verifier,
-		UserStore:      userStore,
-		AuthService:    authService,
-		AccessTTL:      cfg.AccessTokenTTL,
-		APIKeyStore:    apiKeyStore,
-		AdminUserStore: adminUserStore,
-		AdminKeyStore:  adminKeyStore,
-		KeyVerifier:    authv1api.NewKeyVerifierAdapter(apiKeyRepo, userStore),
+		Addr:                cfg.HTTPAddr,
+		Pinger:              pinger,
+		JWTVerifier:         verifier,
+		UserStore:           userStore,
+		AuthService:         authService,
+		AccessTTL:           cfg.AccessTokenTTL,
+		APIKeyStore:         apiKeyStore,
+		AdminUserStore:      adminUserStore,
+		AdminKeyStore:       adminKeyStore,
+		KeyVerifier:         authv1api.NewKeyVerifierAdapter(apiKeyRepo, userStore),
+		RateLimitMiddleware: rlMW,
+		TrustedIPResolver:   resolver,
 	})
 
 	errCh := make(chan error, 1)

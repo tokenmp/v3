@@ -15,7 +15,9 @@ package server
 import (
 	"time"
 
+	"github.com/tokenmp/v3/packages/go/ratelimit/trustedip"
 	"github.com/tokenmp/v3/services/auth/internal/auth"
+	"github.com/tokenmp/v3/services/auth/internal/contract/authv1"
 	"github.com/tokenmp/v3/services/auth/internal/security/jwt"
 	"github.com/tokenmp/v3/services/auth/internal/transport/authv1api"
 )
@@ -33,6 +35,13 @@ type UserStore = authv1api.UserStore
 // APIKeyStore is the persistence port for API key management endpoints.
 type APIKeyStore = authv1api.APIKeyStore
 
+// RateLimitMiddleware is the optional StrictMiddlewareFunc that enforces the
+// shared token-bucket limits on login/register/refresh.
+type RateLimitMiddleware = authv1.StrictMiddlewareFunc
+
+// TrustedIPResolver resolves the client IP from a trusted-proxy allowlist.
+type TrustedIPResolver = trustedip.Resolver
+
 // New builds a Chi router and the configured http.Server. The router exposes
 // the health endpoints plus the auth identity flow routes, all registered by
 // the generated Chi strict handler from the OpenAPI contract.
@@ -48,5 +57,23 @@ func New(addr string, pinger Pinger, jwtVerifier *jwt.Verifier, authService *aut
 		AuthService: authService,
 		AccessTTL:   15 * time.Minute,
 		APIKeyStore: apiKeyStore,
+	})
+}
+
+// NewWithRateLimit builds a server identical to New but additionally wires
+// the optional rate-limit StrictMiddlewareFunc and trusted-IP resolver. When
+// rlMW is nil rate limiting is disabled; when resolver is nil the legacy
+// unconditional chi RealIP middleware is used.
+func NewWithRateLimit(addr string, pinger Pinger, jwtVerifier *jwt.Verifier, authService *auth.Service, userStore UserStore, apiKeyStore APIKeyStore, rlMW RateLimitMiddleware, resolver *TrustedIPResolver) *Server {
+	return authv1api.NewServer(authv1api.ServerConfig{
+		Addr:                addr,
+		Pinger:              pinger,
+		JWTVerifier:         jwtVerifier,
+		UserStore:           userStore,
+		AuthService:         authService,
+		AccessTTL:           15 * time.Minute,
+		APIKeyStore:         apiKeyStore,
+		RateLimitMiddleware: rlMW,
+		TrustedIPResolver:   resolver,
 	})
 }

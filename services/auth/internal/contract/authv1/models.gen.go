@@ -147,6 +147,8 @@ const (
 	InvalidToken        ErrorErrorCode = "invalid_token"
 	NotFound            ErrorErrorCode = "not_found"
 	PasswordTooWeak     ErrorErrorCode = "password_too_weak"
+	RateLimited         ErrorErrorCode = "rate_limited"
+	ServiceUnavailable  ErrorErrorCode = "service_unavailable"
 	Unauthorized        ErrorErrorCode = "unauthorized"
 )
 
@@ -172,6 +174,10 @@ func (e ErrorErrorCode) Valid() bool {
 	case NotFound:
 		return true
 	case PasswordTooWeak:
+		return true
+	case RateLimited:
+		return true
+	case ServiceUnavailable:
 		return true
 	case Unauthorized:
 		return true

@@ -49,9 +49,9 @@ jobs:
         run: pnpm typecheck
 
       - name: Test
-        # tokenmp-v3-e2e is a live dev-server Playwright suite with a large
-        # browser matrix. Keep this fast PR CI job scoped to package/unit
-        # tests; run E2E from its dedicated workflow/manual command.
+        # tokenmp-v3-e2e has a dedicated local mock smoke workflow. Keep this
+        # fast PR CI job scoped to package/unit tests; the full live-target
+        # browser suite remains an explicit, separately managed command.
         run: pnpm turbo run test --filter=!tokenmp-v3-e2e
 
       - name: Build
@@ -118,6 +118,18 @@ jobs:
           --health-interval 5s
           --health-timeout 3s
           --health-retries 20
+      redis:
+        # Redis 7 alpine for the shared rate-limit token-bucket integration
+        # tests in packages/go/ratelimit. The Lua script uses redis.call('TIME')
+        # which requires Redis >= 5 (effects replication default).
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
     env:
       AUTH_DATABASE_URL: postgres://tokenmp:tokenmp@localhost:5432/tokenmp_auth?sslmode=disable
       CONFIG_DATABASE_URL: postgres://tokenmp:tokenmp@localhost:5432/tokenmp_config?sslmode=disable
@@ -128,6 +140,7 @@ jobs:
       BILLING_REPO_TEST_DSN: postgres://tokenmp:tokenmp@localhost:5432/tokenmp_billing?sslmode=disable
       NOTICE_DATABASE_URL: postgres://tokenmp:tokenmp@localhost:5432/tokenmp_notice?sslmode=disable
       NOTICE_REPO_TEST_DSN: postgres://tokenmp:tokenmp@localhost:5432/tokenmp_notice?sslmode=disable
+      RATING_TEST_REDIS_ADDR: redis://127.0.0.1:6379/0
     steps:
       - name: Checkout
         # actions/checkout v5
@@ -146,6 +159,7 @@ jobs:
             services/billing/go.sum
             services/api/go.sum
             services/notice/go.sum
+            packages/go/ratelimit/go.sum
 
       - name: Generated code freshness check (Auth)
         run: |
@@ -163,50 +177,14 @@ jobs:
           cd "$GITHUB_WORKSPACE"
           bash packages/contracts/go/check-generated-executor.sh
 
-      # Executor has no database dependency. Test the generated transport and
-      # its contract handler in this existing Go job without registering its
-      # business routes in the runtime server.
-      - name: go test -race (Executor generated transport)
+      # Full-module race gate: ./... is deliberate rather than a hand-maintained
+      # package allowlist. It covers every Executor package today and makes any
+      # future package with tests part of this CI gate automatically. Executor
+      # tests have no database or live-provider dependency; SDK HTTP tests use
+      # only local TLS httptest servers.
+      - name: go test -race (Executor full module)
         working-directory: services/executor
-        run: go test -race ./internal/server/... ./internal/transport/executorv1api/... ./internal/contract/executorv1/...
-
-      # Keep the pure compiler/snapshot/routing/pipeline/adapter SDK/config
-      # source/credential-env/identity-env/quarantine-bridge boundary race-checked
-      # in this existing job, plus the runtime composition root, the now
-      # composition-aware config/app packages, and the cmd/executor process
-      # tests. It has no database or live-provider access; SDK HTTP tests use
-      # only local TLS httptest servers, and the process/composition tests use
-      # temp empty configs and non-secret test API keys (no map JSON or
-      # credential environment value is committed to CI).
-      # ./internal/configsource/... covers the strict secret-free file loader and
-      # initial generation=1 bootstrap; ./internal/credentialenv/... covers the
-      # secret-free vault-ref map, per-attempt lookup/rotation, and
-      # compiled-snapshot validation; ./internal/identityenv/... covers the
-      # non-secret identity map and per-request API-key rotation.
-      # ./internal/quarantinebridge/... is listed explicitly because it is a
-      # separate package from ./internal/routing/...; the routing race pattern
-      # does not automatically test it, so it must be added to the package list
-      # to be covered. The transport-neutral nonstream boundary, facade, auth
-      # context, request-id, transport-neutral stream boundary/facade, and Phase 8
-      # streaming packages are likewise independent and explicitly race-tested. `./internal/execution/...` includes the Phase
-      # 8.2 internal StreamDriver (AttemptSession/registry/payload adapter/Bridge,
-      # retry/quota/log/result/cleanup); `./internal/sdk/...` covers OpenAI legacy Images (now
-      # registered for completion-only non-stream execution) and Anthropic adapter packages.
-      # `./internal/imagecontract/...` is an independent SDK/transport shared validator package,
-      # so it is explicitly race-tested. Fuzz remains local-only. ./internal/composition/... wires the runtime
-      # composition root (store, config source, credential/identity resolvers,
-      # in-memory runtime/quarantine/quota/log, SDK registry, completion Runner + StreamDriver, non-stream + stream facades,
-      # generated hybrid plain/strict handler, AuthMiddleware+CaptureRawBody) and rejects
-      # unsupported enabled routes; ./internal/config/... now requires
-      # EXECUTOR_CONFIG_FILE/EXECUTOR_CREDENTIAL_REF_MAP_JSON/
-      # EXECUTOR_IDENTITY_MAP_JSON with redacted errors; ./internal/app/...
-      # takes an injected handler (fail-closed on nil); ./cmd/executor/...
-      # runs the real binary against a temp empty config and asserts health,
-      # 401 on anonymous /v1, JSON 404 before SSE commit for authenticated stream requests
-      # with a missing model, and fail-before-listen on invalid composition/config.
-      - name: go test -race (Executor compiler/snapshot/routing/pipeline/adapter SDK/config source/credential env/identity env/quarantine bridge/stream driver/response contract/composition/config/app/process)
-        working-directory: services/executor
-        run: go test -race -count=1 ./internal/adapter/... ./internal/snapshot/... ./internal/routing/... ./internal/execution/... ./internal/requestlog/... ./internal/quota/... ./internal/sdk/... ./internal/configsource/... ./internal/configreload/... ./internal/credentialenv/... ./internal/identityenv/... ./internal/jwtverifier/... ./internal/quarantinebridge/... ./internal/imagecontract/... ./internal/nonstream/... ./internal/nonstreamfacade/... ./internal/authcontext/... ./internal/requestid/... ./internal/stream/... ./internal/streamfacade/... ./internal/streaming/... ./internal/responsecontract/... ./internal/metrics/... ./internal/composition/... ./internal/config/... ./internal/app/... ./cmd/executor/...
+        run: go test -race ./...
 
       - name: Install golang-migrate CLI
         env:
@@ -253,6 +231,64 @@ jobs:
       # run, not pushed, not published to any registry, and not tagged into
       # a long-lived cache. This step requires no local Docker on developer
       # machines — the Ubuntu runner provides Docker out of the box.
+      # Build every deployable Go entrypoint outside go.work with a readonly
+      # module graph. This makes missing direct requirements, go.sum entries,
+      # or local replace targets fail before Docker's separate image builds.
+      - name: Go module autonomy gate (GOWORK=off)
+        run: |
+          set -euo pipefail
+          for service in api auth billing config executor logging notice; do
+            (
+              cd "services/${service}"
+              GOWORK=off go build -mod=readonly "./cmd/${service}"
+            )
+          done
+
+      - name: Dockerfile COPY source guard
+        run: bash tools/check-dockerfile-copy-sources.sh
+
+      # Render only: create throwaway placeholder inputs for Compose's required
+      # deployment contract. The command intentionally fails if a required
+      # input is omitted; no service is started and no image is pushed.
+      - name: docker compose config (render only)
+        env:
+          AUTH_DATABASE_URL: postgres://placeholder:placeholder@database/tokenmp_auth?sslmode=disable
+          CONFIG_DATABASE_URL: postgres://placeholder:placeholder@database/tokenmp_config?sslmode=disable
+          LOGGING_DATABASE_URL: postgres://placeholder:placeholder@database/tokenmp_logging?sslmode=disable
+          BILLING_DATABASE_URL: postgres://placeholder:placeholder@database/tokenmp_billing?sslmode=disable
+          NOTICE_DATABASE_URL: postgres://placeholder:placeholder@database/tokenmp_biz?sslmode=disable
+          EXECUTOR_CREDENTIAL_REF_MAP_JSON: '{}'
+          API_EXECUTOR_TOKEN: placeholder
+          TOKENMP_V3_EXTERNAL_REDIS_ADDR: redis://cache:6379
+          AUTH_RATE_LIMIT_TRUSTED_PROXIES: 192.0.2.0/24
+          API_RATE_LIMIT_TRUSTED_PROXIES: 192.0.2.0/24
+        run: |
+          set -euo pipefail
+          bash tools/check-compose-env-contract.sh
+          inputs="${RUNNER_TEMP:?}/tokenmp-v3-compose-inputs"
+          mkdir -p "$inputs"
+          trap 'rm -rf "$inputs"' EXIT
+          for file in auth-private.pem auth-public.pem notice-public.pem executor-public.pem api-public.pem; do
+            : > "$inputs/$file"
+          done
+          secret='compose-render-secret-must-not-appear'
+          for file in auth-rate-limit-hmac api-rate-limit-hmac config-admin-token api-config-service-token billing-logging-service-token; do
+            printf '%s' "$secret" > "$inputs/$file"
+          done
+          rendered="$inputs/compose.rendered.yaml"
+          AUTH_JWT_PRIVATE_KEY_FILE="$inputs/auth-private.pem" \
+          AUTH_JWT_PUBLIC_KEY_FILE="$inputs/auth-public.pem" \
+          NOTICE_JWT_PUBLIC_KEY_FILE="$inputs/notice-public.pem" \
+          EXECUTOR_JWT_PUBLIC_KEY_FILE="$inputs/executor-public.pem" \
+          API_JWT_PUBLIC_KEY_FILE="$inputs/api-public.pem" \
+          TOKENMP_V3_AUTH_RATE_LIMIT_HMAC_SECRET_FILE="$inputs/auth-rate-limit-hmac" \
+          TOKENMP_V3_API_RATE_LIMIT_HMAC_SECRET_FILE="$inputs/api-rate-limit-hmac" \
+          TOKENMP_V3_CONFIG_ADMIN_TOKEN_FILE="$inputs/config-admin-token" \
+          TOKENMP_V3_API_CONFIG_SERVICE_TOKEN_FILE="$inputs/api-config-service-token" \
+          TOKENMP_V3_BILLING_LOGGING_SERVICE_TOKEN_FILE="$inputs/billing-logging-service-token" \
+          docker compose -p tokenmp-v3 config > "$rendered"
+          ! grep -F -- "$secret" "$rendered"
+
       - name: docker build (build only, no run/push)
         run: docker build -f services/auth/Dockerfile -t tokenmp-v3-auth:${{ github.sha }} .
 
@@ -263,6 +299,24 @@ jobs:
       # machines — the Ubuntu runner provides Docker out of the box.
       - name: docker build executor (build only, no run/push)
         run: docker build -f services/executor/Dockerfile -t tokenmp-v3-executor:${{ github.sha }} .
+
+      # Each deployable Go service has a separate image. Build these images
+      # only to validate their repo-root build contexts and Dockerfiles; no
+      # image is run, pushed, or published by CI.
+      - name: docker build notice (build only, no run/push)
+        run: docker build -f services/notice/Dockerfile -t tokenmp-v3-notice:${{ github.sha }} .
+
+      - name: docker build api (build only, no run/push)
+        run: docker build -f services/api/Dockerfile -t tokenmp-v3-api:${{ github.sha }} .
+
+      - name: docker build billing (build only, no run/push)
+        run: docker build -f services/billing/Dockerfile -t tokenmp-v3-billing:${{ github.sha }} .
+
+      - name: docker build config (build only, no run/push)
+        run: docker build -f services/config/Dockerfile -t tokenmp-v3-config:${{ github.sha }} .
+
+      - name: docker build logging (build only, no run/push)
+        run: docker build -f services/logging/Dockerfile -t tokenmp-v3-logging:${{ github.sha }} .
 
       # ------------------------------------------------------------------
       # Config service (skeleton): gofmt / vet / build / unit test / migration
@@ -395,7 +449,7 @@ jobs:
 
       - name: go test -race (billing unit)
         working-directory: services/billing
-        run: go test -race ./internal/config/... ./internal/database/... ./internal/server/...
+        run: go test -race ./internal/config/... ./internal/database/... ./internal/server/... ./internal/sweeper/... ./internal/evidence/...
 
       - name: Billing migration cycle (up/down/up)
         working-directory: services/billing
@@ -501,3 +555,45 @@ jobs:
       - name: Integration tests
         working-directory: services/auth
         run: go test -tags=integration -race ./test/integration/...
+
+      # ------------------------------------------------------------------
+      # Shared rate-limit package (packages/go/ratelimit): gofmt / vet /
+      # build / unit race tests / real-Redis integration race tests. The
+      # Redis 7 service container above backs the build-tagged integration
+      # suite (token bucket burst/refill, two-instance sharing, TTL,
+      # concurrency, Redis-down 503, HMAC key non-leak).
+      # ------------------------------------------------------------------
+      - name: gofmt (ratelimit package)
+        working-directory: packages/go/ratelimit
+        run: |
+          out="$(gofmt -l .)"
+          if [ -n "$out" ]; then
+            echo "gofmt found unformatted files:" >&2
+            echo "$out" >&2
+            exit 1
+          fi
+
+      - name: go vet (ratelimit package)
+        working-directory: packages/go/ratelimit
+        run: |
+          go vet ./...
+          go vet -tags=integration ./...
+
+      - name: go build (ratelimit package)
+        working-directory: packages/go/ratelimit
+        run: go build ./...
+
+      - name: go test -race (ratelimit package unit)
+        working-directory: packages/go/ratelimit
+        run: go test -race ./...
+
+      - name: go test -race (ratelimit package Redis integration)
+        working-directory: packages/go/ratelimit
+        env:
+          RATING_TEST_REDIS_ADDR: redis://127.0.0.1:6379/0
+          RATELIMIT_REQUIRE_REDIS_TESTS: "true"
+        run: |
+          # GitHub Actions waits for the Redis service health check before job
+          # steps. This required suite then PINGs Redis itself and fatals on any
+          # parse, ping, or Lua failure, so it cannot silently skip.
+          go test -tags=integration -race ./...

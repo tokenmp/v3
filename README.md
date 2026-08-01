@@ -57,9 +57,11 @@ Implemented checks:
 
 - **lint / typecheck / test / build** — installs dependencies with `pnpm install --frozen-lockfile` on Node.js 26.4.0, then runs the root `lint`, `typecheck`, `test`, and `build` scripts in order. The pinned pnpm 11.15.0 is installed via `pnpm/action-setup` before `actions/setup-node`, which then caches the pnpm store without any secret.
 - **gitleaks** — scans the full history with the open-source Gitleaks CLI at a fixed version (v8.28.0). The runner downloads the official release tarball and its checksums file, verifies the tarball with `sha256sum`, installs the binary under `RUNNER_TEMP` (no system directories, no `sudo`), then runs `gitleaks git --redact --verbose --exit-code 1 .`. The workflow references no repository secret and no `GITHUB_TOKEN`, so pull requests from forks are scanned without any extra secret. The `gitleaks/gitleaks-action` wrapper is intentionally not used because it may require a `GITLEAKS_LICENSE` secret for organization repositories, which would break the baseline's no-extra-secret commitment.
-- **go auth / format / vet / test / build** — the dedicated Go job for `services/auth`. It pins Go 1.26.5 via `actions/setup-go` and `checkout` at immutable SHAs, first runs Auth and Executor generated-code freshness gates (`check-generated.sh` and `check-generated-executor.sh`), then runs Executor generated transport/route conformance race tests and `go test -race -count=1 ./internal/adapter/... ./internal/snapshot/... ./internal/routing/... ./internal/execution/... ./internal/requestlog/... ./internal/quota/... ./internal/sdk/... ./internal/configsource/... ./internal/credentialenv/... ./internal/identityenv/... ./internal/quarantinebridge/... ./internal/nonstream/... ./internal/nonstreamfacade/... ./internal/authcontext/... ./internal/requestid/... ./internal/streaming/... ./internal/composition/... ./internal/config/... ./internal/app/... ./cmd/executor/...` from `services/executor`. The command is limited to module packages: it does not run a database, live provider, or remote request pipeline, but it now also covers runtime composition wiring — `./internal/composition/...` runs the contract-enumerated wrapped-handler route conformance (asserts anonymous/authenticated status for every OpenAPI operation through the full `AuthMiddleware(CaptureRawBody(...))` handler) and `./cmd/executor/...` runs the process binary test (actual process startup: health, unauthenticated chat 401, authenticated empty-config chat 404 and 501 routes, invalid config proving no listener bind) — alongside the internal non-stream Runner with Mock/InMemory/fake tests and the strict secret-free config file loader, while SDK HTTP tests use only local TLS `httptest` servers. `./internal/quarantinebridge/...` is listed explicitly because it is a separate package from `./internal/routing/...`; the routing race pattern does not automatically test it, so it must appear in the package list to be covered. The job then runs Auth `gofmt -l`, `go vet`, `go test -race`, and `go build`. It builds the auth Docker image on the GitHub Runner via `docker build -f services/auth/Dockerfile -t tokenmp-v3-auth:<sha> .` (build only — the image is neither run nor pushed nor published; the Ubuntu runner provides Docker, so no local Docker is required on developer machines), then runs the migration up/down/up cycle and the `integration`-tagged integration test against a PostgreSQL 17 service container (`postgres:17-alpine`). The `golang-migrate` CLI is installed at `v4.18.3` under `RUNNER_TEMP` (no `sudo`, no system directories). The job references no repository secret, so fork pull requests are covered. There is no independent Executor CI job in this job; runtime business routes are now registered and exercised by the composition route conformance and process binary tests, but the OpenAI Chat and Anthropic Messages non-stream SDK adapters still call only local TLS `httptest` servers (no live provider). Phase 8 `internal/streaming` foundation is race-tested but remains unwired: no SDK/provider stream, transport/composition integration, or real `stream:true` runtime behavior. The job is independent of the Node.js task graph and does not alter the existing verify/secrets-scan jobs.
+- **go auth / format / vet / test / build** — the dedicated Go job for `services/auth`. It pins Go 1.26.5 via `actions/setup-go` and `checkout` at immutable SHAs, first runs Auth and Executor generated-code freshness gates (`check-generated.sh` and `check-generated-executor.sh`), then runs the complete-module `go test -race ./...` from `services/executor`. This deliberate module pattern replaces a hand-maintained package allowlist, so future Executor packages are automatically race-covered. The command is limited to module packages: it does not run a database, live provider, or remote request pipeline, but it now also covers runtime composition wiring — `./internal/composition/...` runs the contract-enumerated wrapped-handler route conformance (asserts anonymous/authenticated status for every OpenAPI operation through the full `AuthMiddleware(CaptureRawBody(...))` handler) and `./cmd/executor/...` runs the process binary test (actual process startup: health, unauthenticated chat 401, authenticated empty-config chat 404 and 501 routes, invalid config proving no listener bind) — alongside the internal non-stream Runner with Mock/InMemory/fake tests and the strict secret-free config file loader, while SDK HTTP tests use only local TLS `httptest` servers. The complete-module pattern includes independent packages such as `internal/quarantinebridge` without a separate allowlist entry. The job then runs Auth `gofmt -l`, `go vet`, `go test -race`, and `go build`. It builds the auth Docker image on the GitHub Runner via `docker build -f services/auth/Dockerfile -t tokenmp-v3-auth:<sha> .` (build only — the image is neither run nor pushed nor published; the Ubuntu runner provides Docker, so no local Docker is required on developer machines), then runs the migration up/down/up cycle and the `integration`-tagged integration test against a PostgreSQL 17 service container (`postgres:17-alpine`). The `golang-migrate` CLI is installed at `v4.18.3` under `RUNNER_TEMP` (no `sudo`, no system directories). The job references no repository secret, so fork pull requests are covered. There is no independent Executor CI job in this job; runtime business routes are now registered and exercised by the composition route conformance and process binary tests, but the OpenAI Chat and Anthropic Messages non-stream SDK adapters still call only local TLS `httptest` servers (no live provider). Phase 8 `internal/streaming` foundation is race-tested but remains unwired: no SDK/provider stream, transport/composition integration, or real `stream:true` runtime behavior. The job is independent of the Node.js task graph and does not alter the existing verify/secrets-scan jobs.
 
 The workflow requests the minimum permission `contents: read` and cancels superseded runs on the same ref. CI checks are the only implemented automation; continuous delivery and deployment are not implemented.
+
+A dedicated [E2E smoke workflow](.github/workflows/e2e.yml) runs on pull requests and manual dispatch. It installs only Chromium and runs the credential-free local mock smoke project on an isolated loopback Next server; it does not accept a target URL, credentials, or API keys and never runs the live E2E suite. The normal `verify` job continues to exclude `tokenmp-v3-e2e`. See [`e2e/README.md`](e2e/README.md) for the explicit-`BASE_URL` live-suite procedure.
 
 ## Services & Ports
 
@@ -215,3 +217,50 @@ Read `AGENTS.md`, then read each nested `AGENTS.md` from the repository root to 
 - [ADR 0005: Auth Identity Flows](docs/adr/0005-auth-identity-flows.md)
 - [ADR 0006: API Contracts Package](docs/adr/0006-api-contracts-package.md)
 - [UI Design System](docs/ui/design-system.md)
+
+### Container Compose
+
+The repository-root [`compose.yaml`](compose.yaml) builds and orchestrates the seven Go
+services and Web app under the fixed `tokenmp-v3` Compose project. It deliberately does
+**not** create or manage PostgreSQL, Redis, OpenResty, or any other shared infrastructure.
+Database DSNs, credential mappings, and JWT key-file paths are required deployment inputs;
+key files are injected read-only and no `.env` file is committed. Containers use the
+internal `tokenmp-v3-backend` network; only Edge/BFF (`3002`, configurable with
+`TOKENMP_V3_API_HOST_PORT`) and Web (`3100`, configurable with
+`TOKENMP_V3_WEB_HOST_PORT`) are published by default.
+
+Use a temporary, environment-owned env file to render the configuration before an
+operator starts it:
+
+```bash
+docker compose --env-file /tmp/tokenmp-v3.compose.env -p tokenmp-v3 config
+docker compose -p tokenmp-v3 build
+```
+
+For portable external-infrastructure access, supply DNS names reachable from both Linux
+Docker Engine and Docker Desktop in the DSN/URL inputs. Do not commit host-gateway,
+private-address, or environment-specific Compose overrides. CI statically verifies the four
+new service Dockerfile `COPY` sources against the repository-root build context, renders
+Compose with disposable placeholder files/values, and builds all seven Go service images
+without running or pushing them.
+
+### Runtime contract
+
+Auth and API use the exact `AUTH_RATE_LIMIT_*` / `API_RATE_LIMIT_*` names when rate
+limiting is enabled: enabled flag, external Redis address/DB, trusted-proxy CIDRs,
+read-only HMAC-secret file, policy capacity/refill values and bucket TTL. Redis remains
+external; Compose neither creates it nor uses obsolete `*_REDIS_URL`/`*_HMAC_SECRET_FILE`
+aliases.
+
+The Config admin secret is mounted read-only as `CONFIG_ADMIN_TOKEN_FILE` (consumed by the
+Config Service loader). API and Billing are also mounted with read-only
+`API_CONFIG_SERVICE_TOKEN_FILE` and `BILLING_LOGGING_SERVICE_TOKEN_FILE` paths, consumed by
+the API and Billing `internal/config` secret-file loaders respectively, while Billing is
+wired to `BILLING_LOGGING_URL=http://logging:8083` with explicit strict sweeper defaults.
+Never pass a file path as a token value, use a secret-reading entrypoint wrapper, or
+interpolate a token into Compose environment/rendered configuration.
+
+Deployment source files are mounted read-only under `/run/secrets`; neither their contents nor
+external Redis/PostgreSQL resources are committed or created. CI checks this contract with
+`tools/check-compose-env-contract.sh`, renders using temporary sentinel secret files, and fails
+if the sentinel appears in rendered Compose output.

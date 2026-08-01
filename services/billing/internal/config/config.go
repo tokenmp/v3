@@ -16,11 +16,13 @@ package config
 import (
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Config is the validated billing service runtime configuration.
@@ -33,6 +35,36 @@ type Config struct {
 	DBMaxOpenConns    int
 	DBMaxIdleConns    int
 	DBConnMaxLifetime time.Duration
+
+	SweeperEnabled      bool
+	SweeperInterval     time.Duration
+	SweeperPendingGrace time.Duration
+	SweeperExpiryBatch  int
+	SweeperPendingBatch int
+	// RetentionDeadline is how long a pending reservation is retried (via the
+	// evidence port) before the unknown-policy applies. Must be >
+	// PendingGrace. Default 30m.
+	RetentionDeadline time.Duration
+	// UnknownPolicy is applied to pending rows older than RetentionDeadline.
+	// Default "keep_pending" (never blind-release). Only "release_unknown" /
+	// "keep_pending" are accepted.
+	UnknownPolicy string
+	// LoggingURL is the Logging Service endpoint the reconciler queries for
+	// confirmed terminal usage evidence. Empty disables evidence resolution
+	// (pending reservations are kept per UnknownPolicy). Never logged in
+	// errors; no URL/body leakage.
+	LoggingURL string
+	// LoggingServiceToken is an optional bearer token for the Billing→Logging
+	// evidence request. Empty means no Authorization header. It is a secret:
+	// never logged, never echoed in errors, never committed. It is resolved
+	// from at most one source: BILLING_LOGGING_SERVICE_TOKEN_FILE (production,
+	// read-only Docker secret mount) or BILLING_LOGGING_SERVICE_TOKEN (dev/test
+	// inline value). Both set at once is a hard error. A token without a
+	// configured BILLING_LOGGING_URL is rejected so a stale token cannot be
+	// silently carried into a no-evidence deployment.
+	LoggingServiceToken string
+	// LoggingTimeout bounds each evidence lookup. Default 10s. Must be > 0.
+	LoggingTimeout time.Duration
 }
 
 const (
@@ -49,11 +81,30 @@ const (
 	requiredDatabaseName = "tokenmp_billing"
 )
 
-// Sentinel validation errors. None of them embed the URL or credentials.
+// Sentinel validation errors. None of them embed the URL, credentials, file
+// path, or file content.
 var (
 	ErrMissingDatabaseURL = errors.New("BILLING_DATABASE_URL is required")
 	ErrInvalidDatabaseURL = errors.New("BILLING_DATABASE_URL is not a valid postgres URL")
+
+	// Logging service token-file sentinels. Each is a non-wrapping value so
+	// errors.Unwrap returns nil and no caller can surface the path or content.
+	ErrLoggingTokenFileBlank      = errors.New("BILLING_LOGGING_SERVICE_TOKEN_FILE path is blank")
+	ErrLoggingTokenFileNotFound   = errors.New("BILLING_LOGGING_SERVICE_TOKEN_FILE not found or inaccessible")
+	ErrLoggingTokenFileNotRegular = errors.New("BILLING_LOGGING_SERVICE_TOKEN_FILE is not a regular file")
+	ErrLoggingTokenFileTooLarge   = errors.New("BILLING_LOGGING_SERVICE_TOKEN_FILE exceeds maximum size")
+	ErrLoggingTokenFileEmpty      = errors.New("BILLING_LOGGING_SERVICE_TOKEN_FILE is empty")
+	ErrLoggingTokenFileUnreadable = errors.New("BILLING_LOGGING_SERVICE_TOKEN_FILE could not be read")
+	ErrLoggingTokenFileInvalid    = errors.New("BILLING_LOGGING_SERVICE_TOKEN_FILE is not valid UTF-8 or contains forbidden bytes")
+	ErrLoggingTokenInvalid        = errors.New("BILLING_LOGGING_SERVICE_TOKEN is not valid UTF-8 or contains forbidden bytes")
+	ErrLoggingTokenConflict       = errors.New("BILLING_LOGGING_SERVICE_TOKEN and BILLING_LOGGING_SERVICE_TOKEN_FILE are mutually exclusive")
+	ErrLoggingTokenWithoutURL     = errors.New("a Logging service token is configured but BILLING_LOGGING_URL is empty")
 )
+
+// maxLoggingTokenBytes bounds a Logging service token file. A bearer token
+// longer than this is rejected; 8 KiB is far above any legitimate token and
+// keeps the read bounded.
+const maxLoggingTokenBytes int64 = 8 << 10 // 8 KiB
 
 // Load reads and validates configuration from the environment.
 func Load() (Config, error) {
@@ -82,15 +133,60 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
+	sweeperEnabled, err := getbool("BILLING_SWEEPER_ENABLED", true)
+	if err != nil {
+		return Config{}, err
+	}
+	sweeperInterval, err := getduration("BILLING_SWEEPER_INTERVAL", 30*time.Second)
+	if err != nil {
+		return Config{}, err
+	}
+	sweeperGrace, err := getduration("BILLING_SWEEPER_PENDING_GRACE", 2*time.Minute)
+	if err != nil {
+		return Config{}, err
+	}
+	expiryBatch, err := getint("BILLING_SWEEPER_EXPIRY_BATCH", 100)
+	if err != nil {
+		return Config{}, err
+	}
+	pendingBatch, err := getint("BILLING_SWEEPER_PENDING_BATCH", 100)
+	if err != nil {
+		return Config{}, err
+	}
+	retention, err := getduration("BILLING_SWEEPER_RETENTION_DEADLINE", 30*time.Minute)
+	if err != nil {
+		return Config{}, err
+	}
+	unknownPolicy := getenv("BILLING_SWEEPER_UNKNOWN_POLICY", "keep_pending")
+	loggingURL := getenv("BILLING_LOGGING_URL", "")
+	loggingToken, err := resolveLoggingToken(loggingURL)
+	if err != nil {
+		return Config{}, err
+	}
+	loggingTimeout, err := getduration("BILLING_LOGGING_TIMEOUT", 10*time.Second)
+	if err != nil {
+		return Config{}, err
+	}
+
 	cfg := Config{
-		HTTPAddr:          getenv("BILLING_HTTP_ADDR", defaultHTTPAddr),
-		DatabaseURL:       rawURL,
-		LogLevel:          strings.ToLower(getenv("BILLING_LOG_LEVEL", defaultLogLevel)),
-		LogFormat:         strings.ToLower(getenv("BILLING_LOG_FORMAT", defaultLogFormat)),
-		ShutdownTimeout:   shutdownTimeout,
-		DBMaxOpenConns:    maxOpen,
-		DBMaxIdleConns:    maxIdle,
-		DBConnMaxLifetime: connMaxLifetime,
+		HTTPAddr:            getenv("BILLING_HTTP_ADDR", defaultHTTPAddr),
+		DatabaseURL:         rawURL,
+		LogLevel:            strings.ToLower(getenv("BILLING_LOG_LEVEL", defaultLogLevel)),
+		LogFormat:           strings.ToLower(getenv("BILLING_LOG_FORMAT", defaultLogFormat)),
+		ShutdownTimeout:     shutdownTimeout,
+		DBMaxOpenConns:      maxOpen,
+		DBMaxIdleConns:      maxIdle,
+		DBConnMaxLifetime:   connMaxLifetime,
+		SweeperEnabled:      sweeperEnabled,
+		SweeperInterval:     sweeperInterval,
+		SweeperPendingGrace: sweeperGrace,
+		SweeperExpiryBatch:  expiryBatch,
+		SweeperPendingBatch: pendingBatch,
+		RetentionDeadline:   retention,
+		UnknownPolicy:       unknownPolicy,
+		LoggingURL:          loggingURL,
+		LoggingServiceToken: loggingToken,
+		LoggingTimeout:      loggingTimeout,
 	}
 
 	if err := validateLogLevel(cfg.LogLevel); err != nil {
@@ -110,6 +206,33 @@ func Load() (Config, error) {
 	}
 	if cfg.DBConnMaxLifetime < 0 {
 		return Config{}, fmt.Errorf("BILLING_DB_CONN_MAX_LIFETIME must be >= 0, got %s", cfg.DBConnMaxLifetime)
+	}
+	if cfg.SweeperInterval < 0 {
+		return Config{}, fmt.Errorf("BILLING_SWEEPER_INTERVAL must be >= 0, got %s", cfg.SweeperInterval)
+	}
+	if cfg.SweeperPendingGrace < 0 {
+		return Config{}, fmt.Errorf("BILLING_SWEEPER_PENDING_GRACE must be >= 0, got %s", cfg.SweeperPendingGrace)
+	}
+	if cfg.SweeperExpiryBatch <= 0 {
+		return Config{}, fmt.Errorf("BILLING_SWEEPER_EXPIRY_BATCH must be > 0, got %d", cfg.SweeperExpiryBatch)
+	}
+	if cfg.SweeperPendingBatch <= 0 {
+		return Config{}, fmt.Errorf("BILLING_SWEEPER_PENDING_BATCH must be > 0, got %d", cfg.SweeperPendingBatch)
+	}
+	if cfg.RetentionDeadline <= 0 {
+		return Config{}, fmt.Errorf("BILLING_SWEEPER_RETENTION_DEADLINE must be > 0, got %s", cfg.RetentionDeadline)
+	}
+	if cfg.RetentionDeadline <= cfg.SweeperPendingGrace {
+		return Config{}, fmt.Errorf("BILLING_SWEEPER_RETENTION_DEADLINE (%s) must be > BILLING_SWEEPER_PENDING_GRACE (%s)", cfg.RetentionDeadline, cfg.SweeperPendingGrace)
+	}
+	switch cfg.UnknownPolicy {
+	case "keep_pending", "release_unknown":
+		// valid
+	default:
+		return Config{}, fmt.Errorf("BILLING_SWEEPER_UNKNOWN_POLICY must be keep_pending or release_unknown, got %q", cfg.UnknownPolicy)
+	}
+	if cfg.LoggingTimeout <= 0 {
+		return Config{}, fmt.Errorf("BILLING_LOGGING_TIMEOUT must be > 0, got %s", cfg.LoggingTimeout)
 	}
 	return cfg, nil
 }
@@ -186,6 +309,20 @@ func getduration(key string, fallback time.Duration) (time.Duration, error) {
 	return d, nil
 }
 
+// getbool parses a boolean env var. Missing/blank falls back; a present but
+// non-boolean value is a hard error so misconfiguration cannot be masked.
+func getbool(key string, fallback bool) (bool, error) {
+	v, ok := os.LookupEnv(key)
+	if !ok || strings.TrimSpace(v) == "" {
+		return fallback, nil
+	}
+	b, err := strconv.ParseBool(strings.TrimSpace(v))
+	if err != nil {
+		return false, fmt.Errorf("%s must be a boolean", key)
+	}
+	return b, nil
+}
+
 func validateLogLevel(level string) error {
 	switch level {
 	case "debug", "info", "warn", "error":
@@ -202,4 +339,162 @@ func validateLogFormat(format string) error {
 	default:
 		return fmt.Errorf("BILLING_LOG_FORMAT %q must be json or text", format)
 	}
+}
+
+// resolveLoggingToken resolves the optional Billing→Logging bearer token from
+// at most one source and enforces the URL-gated policy. It accepts either:
+//
+//   - BILLING_LOGGING_SERVICE_TOKEN_FILE: a read-only Docker secret mount path
+//     whose content is read with the same strict, fail-closed secret-file
+//     discipline used elsewhere in the project (Lstat rejects symlinks and
+//     non-regular files; a post-open SameFile check closes the Lstat→Open
+//     TOCTOU; an 8 KiB LimitReader bounds the read; strict UTF-8; NUL and
+//     CR/LF rejected; surrounding whitespace trimmed). Production deployments
+//     use this source exclusively.
+//   - BILLING_LOGGING_SERVICE_TOKEN: an inline token value, intended only for
+//     dev/test. The same content validation (UTF-8, no NUL/CR/LF, trim) applies.
+//
+// Setting both is a hard error (ErrLoggingTokenConflict) so an operator cannot
+// accidentally carry two divergent credentials. A non-empty token resolved from
+// either source while BILLING_LOGGING_URL is empty is rejected
+// (ErrLoggingTokenWithoutURL): a token without an endpoint is a stale
+// configuration that must not be silently retained, and an endpoint without a
+// token is valid (Logging may run unauthenticated).
+//
+// No path or content is ever embedded in the returned error.
+func resolveLoggingToken(loggingURL string) (string, error) {
+	fileVal := strings.TrimSpace(os.Getenv("BILLING_LOGGING_SERVICE_TOKEN_FILE"))
+	inlineVal, inlineSet := os.LookupEnv("BILLING_LOGGING_SERVICE_TOKEN")
+
+	hasFile := fileVal != ""
+	hasInline := inlineSet && strings.TrimSpace(inlineVal) != ""
+
+	if hasFile && hasInline {
+		return "", ErrLoggingTokenConflict
+	}
+
+	var token string
+	switch {
+	case hasFile:
+		raw, err := readTokenFile(fileVal)
+		if err != nil {
+			return "", err
+		}
+		token = raw
+	case hasInline:
+		clean, err := validateTokenBytes([]byte(inlineVal))
+		if err != nil {
+			return "", ErrLoggingTokenInvalid
+		}
+		token = clean
+	default:
+		// No token configured. Valid whether or not a URL is set: an
+		// unauthenticated Logging endpoint needs no token, and a missing
+		// endpoint with no token is the default no-evidence deployment.
+		return "", nil
+	}
+
+	// A token without a URL is a stale/erroneous configuration. Reject it so
+	// the deployment fails fast instead of silently carrying a secret that is
+	// never used (and never validated against a live endpoint).
+	if strings.TrimSpace(loggingURL) == "" {
+		return "", ErrLoggingTokenWithoutURL
+	}
+	return token, nil
+}
+
+// readTokenFile reads and validates a Logging service token file with the
+// project's strict secret-file discipline. It never leaks the path or content:
+// every failure is a stable non-wrapping sentinel.
+//
+//   - Lstat rejects symlinks and non-regular files without following links.
+//   - After opening, a post-open Stat + os.SameFile check confirms the open
+//     descriptor is still a regular file with the same identity as the prior
+//     Lstat, closing the Lstat→Open TOCTOU (a path swapped to a symlink or a
+//     different file between the two calls fails closed).
+//   - The read is bounded by maxLoggingTokenBytes via a LimitReader so a file
+//     that lies about its size or grows mid-read cannot exhaust memory.
+//   - Content must be strict UTF-8 and free of NUL/CR/LF; surrounding
+//     whitespace is trimmed.
+func readTokenFile(path string) (string, error) {
+	if path == "" {
+		return "", ErrLoggingTokenFileBlank
+	}
+
+	info, err := os.Lstat(path)
+	if err != nil {
+		return "", ErrLoggingTokenFileNotFound
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return "", ErrLoggingTokenFileNotRegular
+	}
+	if !info.Mode().IsRegular() {
+		return "", ErrLoggingTokenFileNotRegular
+	}
+	if info.Size() > maxLoggingTokenBytes {
+		return "", ErrLoggingTokenFileTooLarge
+	}
+	if info.Size() == 0 {
+		return "", ErrLoggingTokenFileEmpty
+	}
+
+	f, err := os.Open(path)
+	if err != nil {
+		return "", ErrLoggingTokenFileUnreadable
+	}
+	defer f.Close()
+
+	// Fail-closed post-open verification: the open descriptor must be a regular
+	// file and must refer to the same file identity as the prior Lstat. This
+	// rejects a path swapped to a symlink (or otherwise replaced) between Lstat
+	// and Open.
+	fi, err := f.Stat()
+	if err != nil {
+		return "", ErrLoggingTokenFileUnreadable
+	}
+	if !fi.Mode().IsRegular() || !os.SameFile(info, fi) {
+		return "", ErrLoggingTokenFileNotRegular
+	}
+
+	// LimitReader bounds the read at maxLoggingTokenBytes+1 so an oversize file
+	// that grew since the stat is detected rather than truncated.
+	raw, err := io.ReadAll(io.LimitReader(f, maxLoggingTokenBytes+1))
+	if err != nil {
+		return "", ErrLoggingTokenFileUnreadable
+	}
+	if int64(len(raw)) > maxLoggingTokenBytes {
+		return "", ErrLoggingTokenFileTooLarge
+	}
+	if len(raw) == 0 {
+		return "", ErrLoggingTokenFileEmpty
+	}
+
+	clean, err := validateTokenBytes(raw)
+	if err != nil {
+		return "", ErrLoggingTokenFileInvalid
+	}
+	return clean, nil
+}
+
+// validateTokenBytes enforces the content contract for a Logging service
+// token regardless of source: strict UTF-8, no NUL/CR/LF bytes within the
+// token, and trimmed of surrounding whitespace. It returns the trimmed token.
+// Surrounding whitespace (including the trailing newline that Docker secret
+// mounts commonly append) is trimmed first; any remaining NUL/CR/LF inside the
+// token body is rejected, as is non-UTF-8 content.
+func validateTokenBytes(raw []byte) (string, error) {
+	if !utf8.Valid(raw) {
+		return "", fmt.Errorf("invalid utf-8")
+	}
+	token := strings.TrimSpace(string(raw))
+	if token == "" {
+		return "", fmt.Errorf("blank after trim")
+	}
+	if strings.ContainsRune(token, 0) {
+		return "", fmt.Errorf("nul byte")
+	}
+	if strings.ContainsAny(token, "\r\n") {
+		return "", fmt.Errorf("carriage return or newline")
+	}
+	return token, nil
 }

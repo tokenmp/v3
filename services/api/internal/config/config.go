@@ -6,9 +6,14 @@ package config
 import (
 	"errors"
 	"fmt"
+	"io"
+	"net"
+	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Config holds the resolved runtime configuration for the API Service.
@@ -53,6 +58,32 @@ type Config struct {
 	// management routes to the Config Service.
 	ConfigServiceURL string
 
+	// ConfigServiceToken is the opaque shared secret forwarded to the Config
+	// Service as X-Admin-Token for service-to-service admin authorization.
+	// Required when ConfigAdminProxyEnabled is true (fail-fast at startup so the
+	// admin proxy never runs half-secured). Optional for the read-only client
+	// (anonymous snapshot/model reads). Never logged.
+	//
+	// Resolution order at Load time:
+	//   1. API_CONFIG_SERVICE_TOKEN_FILE (production): read from a regular file
+	//      via the strict secret-file loader (Lstat rejects symlink/non-regular,
+	//      post-open SameFile TOCTOU guard, size cap, strict UTF-8, no NUL/newline,
+	//      trimmed). This is the only source compatible with a Compose
+	//      read-only secret mount.
+	//   2. API_CONFIG_SERVICE_TOKEN (dev/test only): the literal token value is
+	//      read directly from the environment. This exists solely for local
+	//      development and the no-database unit test suite; it MUST NOT be used
+	//      in production (the value would land in the process environment / a
+	//      Compose env file). Providing BOTH sources is a hard startup error.
+	ConfigServiceToken string
+
+	// ConfigAdminProxyEnabled gates registration of the admin config CRUD proxy
+	// routes (/api/v1/admin/config/*). When true, ConfigServiceToken is
+	// required at startup (fail-fast). When false (default), no admin proxy is
+	// registered; the read-only Config Service client (model catalog) can still
+	// be used without a token. Explicit opt-in avoids a default-open write path.
+	ConfigAdminProxyEnabled bool
+
 	// JWTPublicKeyFile is the path to the Ed25519 public key PEM file used
 	// to verify client JWTs. It is required unless AllowNoopAuth is explicitly
 	// enabled for local development or tests.
@@ -74,6 +105,25 @@ type Config struct {
 	// header as-is (JWT passthrough mode, both edge and executor verify the
 	// same JWT with the Auth service public key).
 	ExecutorToken string
+
+	// Rate limiting (Redis shared token bucket). Disabled by default; when
+	// RateLimitEnabled is true, RedisAddr / HMACSecretFile / TrustedProxies
+	// must all be valid and non-empty. The HMAC secret is read from a file
+	// path (never an env var) into the short-lived RateLimitHMACSecret []byte;
+	// main consumes the bytes and zeroes them. Protected metered execution
+	// endpoints fail closed (503) when Redis is unreachable; denied requests
+	// get 429 + Retry-After. Health and read-only endpoints are not limited.
+	RateLimitEnabled        bool
+	RateLimitRedisAddr      string
+	RateLimitRedisDB        int
+	RateLimitHMACSecretFile string
+	RateLimitHMACSecret     []byte
+	RateLimitTrustedProxies []string
+	RateLimitIPCapacity     float64
+	RateLimitIPRefill       float64
+	RateLimitSubjCapacity   float64
+	RateLimitSubjRefill     float64
+	RateLimitBucketTTL      time.Duration
 }
 
 // Load reads configuration from environment variables and returns a validated
@@ -157,6 +207,22 @@ func Load() (*Config, error) {
 	if cfg.ConfigServiceURL != "" && !validHTTPBaseURL(cfg.ConfigServiceURL) {
 		return nil, errors.New("API_CONFIG_SERVICE_URL must be an http(s) base URL without query or fragment")
 	}
+	if err := loadConfigServiceToken(cfg); err != nil {
+		return nil, err
+	}
+	if v, ok := os.LookupEnv("API_CONFIG_ADMIN_PROXY_ENABLED"); ok {
+		enabled, err := parseStrictBool("API_CONFIG_ADMIN_PROXY_ENABLED", v)
+		if err != nil {
+			return nil, err
+		}
+		cfg.ConfigAdminProxyEnabled = enabled
+	}
+	// Fail-fast: the admin proxy must never start half-secured. When the proxy
+	// is enabled, the shared secret is mandatory (read-only use does not set
+	// this flag, so it is unaffected).
+	if cfg.ConfigAdminProxyEnabled && strings.TrimSpace(cfg.ConfigServiceToken) == "" {
+		return nil, errors.New("API_CONFIG_SERVICE_TOKEN_FILE (or API_CONFIG_SERVICE_TOKEN in dev/test) is required when API_CONFIG_ADMIN_PROXY_ENABLED=true")
+	}
 
 	cfg.JWTPublicKeyFile = strings.TrimSpace(os.Getenv("API_JWT_PUBLIC_KEY_FILE"))
 	if v, ok := os.LookupEnv("API_ALLOW_NOOP_AUTH"); ok {
@@ -180,6 +246,9 @@ func Load() (*Config, error) {
 	cfg.ExecutorToken = os.Getenv("API_EXECUTOR_TOKEN")
 	// ExecutorToken is optional (JWT passthrough mode when empty).
 
+	if err := loadRateLimit(cfg); err != nil {
+		return nil, err
+	}
 	return cfg, nil
 }
 
@@ -195,6 +264,197 @@ func parseStrictBool(name, raw string) (bool, error) {
 	}
 }
 
+const (
+	rlDefaultIPCapacity   = 60.0
+	rlDefaultIPRefill     = 2.0 // ~120 req/min steady per IP
+	rlDefaultSubjCapacity = 120.0
+	rlDefaultSubjRefill   = 4.0 // ~240 req/min steady per subject
+	rlDefaultBucketTTL    = 10 * time.Minute
+)
+
+// loadRateLimit reads and validates the optional Edge rate-limiting config.
+// When API_RATE_LIMIT_ENABLED is not "true", rate limiting is disabled. When
+// enabled, the Redis address, HMAC secret file and trusted-proxy CIDRs are
+// all required and fail fast. Errors never echo the secret, Redis URL, or
+// proxy topology.
+func loadRateLimit(cfg *Config) error {
+	enabledRaw := strings.TrimSpace(os.Getenv("API_RATE_LIMIT_ENABLED"))
+	if enabledRaw == "" {
+		cfg.RateLimitEnabled = false
+		return nil
+	}
+	enabled, err := parseStrictBool("API_RATE_LIMIT_ENABLED", enabledRaw)
+	if err != nil {
+		return err
+	}
+	cfg.RateLimitEnabled = enabled
+	if !enabled {
+		return nil
+	}
+
+	rawRedis := strings.TrimSpace(os.Getenv("API_RATE_LIMIT_REDIS_ADDR"))
+	if rawRedis == "" {
+		return ErrRLRedisAddrRequired
+	}
+	if err := validateRedisURL(rawRedis); err != nil {
+		return err
+	}
+	cfg.RateLimitRedisAddr = rawRedis
+
+	db, err := parseIntDefault("API_RATE_LIMIT_REDIS_DB", 0)
+	if err != nil {
+		return err
+	}
+	if db < 0 {
+		return fmt.Errorf("API_RATE_LIMIT_REDIS_DB must be >= 0, got %d", db)
+	}
+	cfg.RateLimitRedisDB = db
+
+	secretPath := strings.TrimSpace(os.Getenv("API_RATE_LIMIT_HMAC_SECRET_FILE"))
+	if secretPath == "" {
+		return ErrRLSecretFileRequired
+	}
+	secret, err := os.ReadFile(secretPath)
+	if err != nil {
+		return ErrRLSecretReadFailed
+	}
+	if len(secret) < 32 {
+		return ErrRLSecretTooShort
+	}
+	cfg.RateLimitHMACSecretFile = secretPath
+	cfg.RateLimitHMACSecret = secret
+
+	trusted := parseCSV(os.Getenv("API_RATE_LIMIT_TRUSTED_PROXIES"))
+	if len(trusted) == 0 {
+		return ErrRLTrustedProxiesReqd
+	}
+	for _, c := range trusted {
+		if _, _, err := net.ParseCIDR(c); err != nil {
+			return ErrRLInvalidTrustedProxy
+		}
+	}
+	cfg.RateLimitTrustedProxies = trusted
+
+	cfg.RateLimitIPCapacity, err = parseFloatDefault("API_RATE_LIMIT_IP_CAPACITY", rlDefaultIPCapacity)
+	if err != nil {
+		return err
+	}
+	cfg.RateLimitIPRefill, err = parseFloatDefault("API_RATE_LIMIT_IP_REFILL", rlDefaultIPRefill)
+	if err != nil {
+		return err
+	}
+	cfg.RateLimitSubjCapacity, err = parseFloatDefault("API_RATE_LIMIT_SUBJECT_CAPACITY", rlDefaultSubjCapacity)
+	if err != nil {
+		return err
+	}
+	cfg.RateLimitSubjRefill, err = parseFloatDefault("API_RATE_LIMIT_SUBJECT_REFILL", rlDefaultSubjRefill)
+	if err != nil {
+		return err
+	}
+	for _, c := range []struct {
+		name      string
+		v         float64
+		allowZero bool
+	}{
+		{"API_RATE_LIMIT_IP_CAPACITY", cfg.RateLimitIPCapacity, false},
+		{"API_RATE_LIMIT_IP_REFILL", cfg.RateLimitIPRefill, true},
+		{"API_RATE_LIMIT_SUBJECT_CAPACITY", cfg.RateLimitSubjCapacity, false},
+		{"API_RATE_LIMIT_SUBJECT_REFILL", cfg.RateLimitSubjRefill, true},
+	} {
+		if c.v < 0 || (!c.allowZero && c.v <= 0) {
+			if c.allowZero {
+				return fmt.Errorf("%s must be >= 0", c.name)
+			}
+			return fmt.Errorf("%s must be > 0", c.name)
+		}
+	}
+
+	ttl, err := parseDurationDefault("API_RATE_LIMIT_BUCKET_TTL", rlDefaultBucketTTL)
+	if err != nil {
+		return err
+	}
+	if ttl <= 0 {
+		return fmt.Errorf("API_RATE_LIMIT_BUCKET_TTL must be > 0")
+	}
+	cfg.RateLimitBucketTTL = ttl
+	return nil
+}
+
+// validateRedisURL accepts redis://, rediss://, or a bare host:port with a
+// numeric port. It never echoes the URL in the error.
+func validateRedisURL(raw string) error {
+	if strings.HasPrefix(raw, "redis://") || strings.HasPrefix(raw, "rediss://") {
+		u, err := url.Parse(raw)
+		if err != nil || u.Host == "" {
+			return ErrRLInvalidRedisURL
+		}
+		return nil
+	}
+	if strings.Contains(raw, "://") {
+		return ErrRLInvalidRedisURL
+	}
+	host, port, err := net.SplitHostPort(raw)
+	if err != nil || host == "" || port == "" {
+		return ErrRLInvalidRedisURL
+	}
+	for _, c := range port {
+		if c < '0' || c > '9' {
+			return ErrRLInvalidRedisURL
+		}
+	}
+	return nil
+}
+
+func parseCSV(v string) []string {
+	if v == "" {
+		return nil
+	}
+	parts := strings.Split(v, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if t := strings.TrimSpace(p); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+func parseIntDefault(key string, fallback int) (int, error) {
+	v, ok := os.LookupEnv(key)
+	if !ok || strings.TrimSpace(v) == "" {
+		return fallback, nil
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(v))
+	if err != nil {
+		return 0, fmt.Errorf("%s must be an integer", key)
+	}
+	return n, nil
+}
+
+func parseFloatDefault(key string, fallback float64) (float64, error) {
+	v, ok := os.LookupEnv(key)
+	if !ok || strings.TrimSpace(v) == "" {
+		return fallback, nil
+	}
+	f, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
+	if err != nil {
+		return 0, fmt.Errorf("%s must be a number", key)
+	}
+	return f, nil
+}
+
+func parseDurationDefault(key string, fallback time.Duration) (time.Duration, error) {
+	v, ok := os.LookupEnv(key)
+	if !ok || strings.TrimSpace(v) == "" {
+		return fallback, nil
+	}
+	d, err := time.ParseDuration(strings.TrimSpace(v))
+	if err != nil {
+		return 0, fmt.Errorf("%s: %w", key, err)
+	}
+	return d, nil
+}
+
 // validHTTPBaseURL checks that raw is an http(s) URL with no query or
 // fragment.
 func validHTTPBaseURL(raw string) bool {
@@ -207,3 +467,137 @@ func validHTTPBaseURL(raw string) bool {
 	}
 	return true
 }
+
+// maxConfigTokenBytes bounds the size of a Config Service admin token file so
+// a hostile or accidentally huge file cannot exhaust memory. A shared secret
+// is far smaller than this cap; anything larger is rejected.
+const maxConfigTokenBytes int64 = 8 << 10 // 8 KiB
+
+// loadConfigServiceToken resolves the Config Service admin shared secret into
+// cfg.ConfigServiceToken. The production source is
+// API_CONFIG_SERVICE_TOKEN_FILE, read via loadTokenFile (Lstat rejects
+// symlink/non-regular, post-open SameFile TOCTOU guard, size cap, strict
+// UTF-8, no NUL/newline, trimmed). The legacy direct
+// API_CONFIG_SERVICE_TOKEN is retained solely for local dev/test so the
+// no-database unit test suite can inject a literal value without touching the
+// filesystem; it MUST NOT be used in production. Providing BOTH sources is a
+// hard startup error. All failures are stable sentinel errors that never
+// echo the file path, OS error text, or token content.
+func loadConfigServiceToken(cfg *Config) error {
+	tokenFile := strings.TrimSpace(os.Getenv("API_CONFIG_SERVICE_TOKEN_FILE"))
+	directToken := os.Getenv("API_CONFIG_SERVICE_TOKEN")
+
+	if tokenFile != "" && directToken != "" {
+		return errors.New("API_CONFIG_SERVICE_TOKEN_FILE and API_CONFIG_SERVICE_TOKEN are mutually exclusive; set only one")
+	}
+
+	if tokenFile != "" {
+		t, err := loadTokenFile(tokenFile)
+		if err != nil {
+			return err
+		}
+		cfg.ConfigServiceToken = t
+		return nil
+	}
+
+	// Direct env (dev/test only). Trim exactly as the file path would so the
+	// two sources are interchangeable for callers.
+	cfg.ConfigServiceToken = strings.TrimSpace(directToken)
+	return nil
+}
+
+// loadTokenFile reads the shared secret from a regular file using the project's
+// established secret-file safety pattern (mirroring the Executor configsource
+// and Auth key-file loaders). It is fail-closed: every non-happy path returns
+// a stable sentinel error that never leaks the path, OS error text, or token
+// content.
+//
+// Safety properties:
+//   - The path is trimmed and rejected as blank before any filesystem access.
+//   - Lstat rejects symlinks and non-regular files without following links.
+//   - After opening, a post-open f.Stat verifies the descriptor is still a
+//     regular file referring to the same identity (os.SameFile) as the prior
+//     Lstat. This closes the Lstat-then-Open TOCTOU window in which the path
+//     is swapped (e.g. to a symlink) between the two calls.
+//   - The file size is bounded by maxConfigTokenBytes via both the stat and a
+//     LimitReader so a file that lies about its size or grows mid-read cannot
+//     exhaust memory.
+//   - The content is validated for strict UTF-8 and must not contain NUL bytes
+//     or newline characters (a single-line shared secret has none), then is
+//     trimmed of surrounding whitespace.
+//   - An empty result (blank after trim) is rejected.
+func loadTokenFile(path string) (string, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "", errTokenFileRequired
+	}
+
+	info, err := os.Lstat(path)
+	if err != nil {
+		return "", errTokenLoadFailed
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return "", errTokenLoadFailed
+	}
+	if info.Size() > maxConfigTokenBytes {
+		return "", errTokenLoadFailed
+	}
+
+	f, err := os.Open(path)
+	if err != nil {
+		return "", errTokenLoadFailed
+	}
+	defer f.Close()
+
+	// Fail-closed post-open verification: the open descriptor must be a regular
+	// file and refer to the same file identity as the prior Lstat. f.Stat
+	// follows symlinks, so a path swapped to a symlink between Lstat and Open
+	// is caught here.
+	fi, err := f.Stat()
+	if err != nil {
+		return "", errTokenLoadFailed
+	}
+	if !fi.Mode().IsRegular() || !os.SameFile(info, fi) {
+		return "", errTokenLoadFailed
+	}
+
+	raw, err := io.ReadAll(io.LimitReader(f, maxConfigTokenBytes+1))
+	if err != nil {
+		return "", errTokenLoadFailed
+	}
+	if int64(len(raw)) > maxConfigTokenBytes {
+		return "", errTokenLoadFailed
+	}
+
+	t := strings.TrimSpace(string(raw))
+	if t == "" {
+		return "", errTokenLoadFailed
+	}
+	if !utf8.ValidString(t) {
+		return "", errTokenLoadFailed
+	}
+	if strings.ContainsRune(t, '\x00') || strings.ContainsAny(t, "\r\n") {
+		return "", errTokenLoadFailed
+	}
+	return t, nil
+}
+
+// Sentinel errors for the Config Service admin token file loader. They never
+// echo the file path, OS error text, or token content; callers classify with
+// errors.Is. They are non-wrapping (errors.Unwrap returns nil).
+var (
+	errTokenFileRequired = errors.New("config: API_CONFIG_SERVICE_TOKEN_FILE is required but not configured")
+	errTokenLoadFailed   = errors.New("config: API_CONFIG_SERVICE_TOKEN_FILE could not be loaded")
+)
+
+// Rate-limit configuration sentinel errors. They reference the env name only,
+// never the secret value, Redis URL, or proxy topology.
+var (
+	ErrRLRedisAddrRequired   = errors.New("API_RATE_LIMIT_REDIS_ADDR is required when rate limiting is enabled")
+	ErrRLSecretFileRequired  = errors.New("API_RATE_LIMIT_HMAC_SECRET_FILE is required when rate limiting is enabled")
+	ErrRLSecretReadFailed    = errors.New("API_RATE_LIMIT_HMAC_SECRET_FILE could not be read")
+	ErrRLSecretTooShort      = errors.New("API_RATE_LIMIT_HMAC_SECRET_FILE must be at least 32 bytes")
+	ErrRLTrustedProxiesReqd  = errors.New("API_RATE_LIMIT_TRUSTED_PROXIES must be configured when rate limiting is enabled")
+	ErrRLInvalidTrustedProxy = errors.New("API_RATE_LIMIT_TRUSTED_PROXIES contains an invalid CIDR")
+	ErrRLInvalidRedisURL     = errors.New("API_RATE_LIMIT_REDIS_ADDR is not a valid redis URL")
+)

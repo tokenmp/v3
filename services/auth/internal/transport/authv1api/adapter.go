@@ -23,6 +23,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/tokenmp/v3/packages/go/httpresp/envelope"
+	"github.com/tokenmp/v3/packages/go/ratelimit/trustedip"
 	"github.com/tokenmp/v3/services/auth/internal/auth"
 	"github.com/tokenmp/v3/services/auth/internal/contract/authv1"
 	"github.com/tokenmp/v3/services/auth/internal/database/models"
@@ -933,6 +934,11 @@ type ServerConfig struct {
 	AdminUserStore AdminUserStore
 	AdminKeyStore  AdminKeyStore
 	KeyVerifier    KeyVerifier
+	// RateLimit middleware (nil when rate limiting is disabled).
+	RateLimitMiddleware authv1.StrictMiddlewareFunc
+	// TrustedIPResolver resolves the client IP from a trusted-proxy allowlist.
+	// When nil, the unconditional chi RealIP middleware is used (legacy/dev).
+	TrustedIPResolver *trustedip.Resolver
 }
 
 // NewServer builds a Chi HTTP server with generated routes, strict handler,
@@ -959,6 +965,9 @@ func NewServer(cfg ServerConfig) *Server {
 	if cfg.JWTVerifier != nil && cfg.UserStore != nil {
 		middlewares = append(middlewares, bearerMiddleware(cfg.JWTVerifier, cfg.UserStore))
 	}
+	if cfg.RateLimitMiddleware != nil {
+		middlewares = append(middlewares, cfg.RateLimitMiddleware)
+	}
 
 	strictHandler := authv1.NewStrictHandlerWithOptions(adapter, middlewares, authv1.StrictHTTPServerOptions{
 		RequestErrorHandlerFunc:  strictRequestErrorHandler,
@@ -968,7 +977,11 @@ func NewServer(cfg ServerConfig) *Server {
 	r := chi.NewRouter()
 	r.Use(envelope.Wrap)
 	r.Use(middleware.RequestID)
-	r.Use(middleware.RealIP)
+	if cfg.TrustedIPResolver != nil {
+		r.Use(cfg.TrustedIPResolver.Middleware)
+	} else {
+		r.Use(middleware.RealIP)
+	}
 	r.Use(middleware.Recoverer)
 	r.Use(cacheControlNoStoreMiddleware())
 	r.Use(bodyPreDecodeMiddleware())

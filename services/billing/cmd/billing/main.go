@@ -17,8 +17,10 @@ import (
 
 	"github.com/tokenmp/v3/services/billing/internal/config"
 	"github.com/tokenmp/v3/services/billing/internal/database"
+	"github.com/tokenmp/v3/services/billing/internal/evidence"
 	"github.com/tokenmp/v3/services/billing/internal/repository"
 	"github.com/tokenmp/v3/services/billing/internal/server"
+	"github.com/tokenmp/v3/services/billing/internal/sweeper"
 )
 
 func main() {
@@ -47,7 +49,7 @@ func run() error {
 	defer func() { _ = database.Close(db) }()
 
 	repo := repository.New(db)
-	srv := server.New(repo, repo, repo, repo, repo, repo, repo, database.PingerFromDB(db), logger)
+	srv := server.New(repo, repo, repo, repo, repo, repo, repo, repo, database.PingerFromDB(db), logger)
 	httpSrv := &http.Server{
 		Addr: cfg.HTTPAddr, Handler: srv.Router(), ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 120 * time.Second,
@@ -58,6 +60,29 @@ func run() error {
 			logger.Error("http server error", "error", err)
 		}
 	}()
+
+	// Background settlement sweeper/reconciler. It uses a detached context
+	// (not bound to any request) and is bounded by the process shutdown ctx.
+	// The reconciler resolves pending reservations from confirmed terminal
+	// usage evidence (Billing → Logging HTTP, never the DB); an unconfigured
+	// Logging endpoint degrades to the default-safe "keep pending" policy.
+	if cfg.SweeperEnabled {
+		ev := evidence.NewClient(cfg.LoggingURL, cfg.LoggingServiceToken, cfg.LoggingTimeout)
+		sweep := sweeper.New(repo, sweeper.Config{
+			Interval:          cfg.SweeperInterval,
+			PendingGrace:      cfg.SweeperPendingGrace,
+			ExpiryBatch:       cfg.SweeperExpiryBatch,
+			PendingBatch:      cfg.SweeperPendingBatch,
+			RetentionDeadline: cfg.RetentionDeadline,
+			UnknownPolicy:     sweeper.UnknownPolicy(cfg.UnknownPolicy),
+		}, ev, logger)
+		go func() {
+			logger.Info("billing sweeper started", "interval", cfg.SweeperInterval, "retention", cfg.RetentionDeadline, "unknown_policy", cfg.UnknownPolicy, "logging_configured", cfg.LoggingURL != "")
+			if err := sweep.Run(ctx); err != nil {
+				logger.Warn("billing sweeper exited", "error", err)
+			}
+		}()
+	}
 
 	<-ctx.Done()
 	logger.Info("billing service shutting down")

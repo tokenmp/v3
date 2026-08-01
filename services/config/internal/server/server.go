@@ -22,6 +22,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/tokenmp/v3/packages/go/httpresp"
+	"github.com/tokenmp/v3/services/config/internal/adminauth"
 	"github.com/tokenmp/v3/services/config/internal/database"
 	"github.com/tokenmp/v3/services/config/internal/repository"
 )
@@ -34,23 +35,32 @@ type Server struct {
 	adminWriter repository.AdminWriter
 	pinger      database.Pinger
 	logger      *slog.Logger
+	adminAuth   *adminauth.Middleware
 }
 
 // New returns a Server wired with the given reader (snapshot source), writer
 // (draft/publish lifecycle) and pinger (DB readiness). logger must be non-nil.
-// adminReader/adminWriter can be the same *GormRepository.
+// adminReader/adminWriter can be the same *GormRepository. adminAuth may be
+// nil (write/admin routes then fail 503 via the middleware's fail-closed
+// path unless dev no-auth is enabled).
 func New(reader repository.Reader, writer repository.Writer, pinger database.Pinger, logger *slog.Logger) *Server {
+	return NewWithAdminAuth(reader, writer, pinger, logger, nil)
+}
+
+// NewWithAdminAuth is like New but wires the service-to-service admin/write
+// authorization middleware. When mw is non-nil and configured, write/admin
+// routes require the shared secret; reads remain anonymous.
+func NewWithAdminAuth(reader repository.Reader, writer repository.Writer, pinger database.Pinger, logger *slog.Logger, mw *adminauth.Middleware) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	s := &Server{reader: reader, writer: writer, pinger: pinger, logger: logger}
+	s := &Server{reader: reader, writer: writer, pinger: pinger, logger: logger, adminAuth: mw}
 	if ar, ok := writer.(repository.AdminReader); ok {
 		s.adminReader = ar
 	}
 	if aw, ok := writer.(repository.AdminWriter); ok {
 		s.adminWriter = aw
 	}
-	// Also try reader for admin interfaces (GormRepository implements all).
 	if s.adminReader == nil {
 		if ar, ok := reader.(repository.AdminReader); ok {
 			s.adminReader = ar
@@ -73,18 +83,46 @@ func (s *Server) Router() http.Handler {
 	r.Get("/healthz", s.handleHealthz)
 	r.Get("/readyz", s.handleReadyz)
 	r.Get("/v1/config/snapshots/latest", s.handleLatestSnapshot)
-	// Write path (draft/publish)
-	r.Post("/v1/config/drafts", s.handleCreateDraft)
-	r.Get("/v1/config/drafts/{id}", s.handleGetDraft)
-	r.Patch("/v1/config/drafts/{id}", s.handleUpdateDraft)
-	r.Post("/v1/config/revisions/{id}/publish", s.handlePublishRevision)
-	r.Post("/v1/config/revisions/{id}/rollback", s.handleRollbackRevision)
-	r.Get("/v1/config/revisions", s.handleListRevisions)
-	// Admin CRUD for config tables (providers/models/routes/...)
+	// Write path (draft/publish/archive/revert/audit) — protected by
+	// service-to-service admin auth. Reads (/snapshots/latest, models catalog)
+	// stay anonymous.
+	s.registerWriteRoutes(r)
+	// Admin CRUD for config tables (providers/models/routes/...) — admin auth.
 	s.registerAdminRoutes(r)
-	// Models catalog (model IDs for plan allowedModels selector)
+	// Models catalog (model IDs for plan allowedModels selector) — anonymous read.
 	r.Get("/v1/config/models/catalog", s.handleModelsCatalog)
 	return r
+}
+
+// registerWriteRoutes wires the draft/publish/archive/revert/audit routes,
+// each wrapped with the admin-auth middleware (fail-closed 401 when unset in
+// production; dev no-auth passes through). The contract path is /revert
+// (see packages/contracts/openapi/config/v1.yaml); the internal repository
+// method retains the name RollbackAsNew.
+func (s *Server) registerWriteRoutes(r chi.Router) {
+	mw := s.adminAuthWrap()
+	r.With(mw).Post("/v1/config/drafts", s.handleCreateDraft)
+	r.With(mw).Get("/v1/config/drafts/{id}", s.handleGetDraft)
+	r.With(mw).Patch("/v1/config/drafts/{id}", s.handleUpdateDraft)
+	r.With(mw).Post("/v1/config/revisions/{id}/publish", s.handlePublishRevision)
+	r.With(mw).Post("/v1/config/revisions/{id}/archive", s.handleArchiveRevision)
+	r.With(mw).Post("/v1/config/revisions/{id}/revert", s.handleRevertRevision)
+	r.With(mw).Get("/v1/config/revisions", s.handleListRevisions)
+	r.With(mw).Get("/v1/config/audit", s.handleListAudit)
+}
+
+// adminAuthWrap returns a chi-compatible middleware. When adminAuth is nil
+// (not configured) and not in dev no-auth mode, write/admin routes return 503
+// fail-closed rather than exposing a default-open half-secure path.
+func (s *Server) adminAuthWrap() func(http.Handler) http.Handler {
+	if s.adminAuth != nil {
+		return s.adminAuth.Wrap
+	}
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			httpresp.Error(w, httpresp.CodeServiceUnavailable, "admin not configured")
+		})
+	}
 }
 
 func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {

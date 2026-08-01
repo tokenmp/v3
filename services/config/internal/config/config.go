@@ -33,6 +33,17 @@ type Config struct {
 	DBMaxOpenConns    int
 	DBMaxIdleConns    int
 	DBConnMaxLifetime time.Duration
+
+	// AdminTokenFile is the path to a file containing the shared secret used
+	// to authorize admin/write service-to-service requests. Required for the
+	// write path to be enabled in production; when empty, write/admin endpoints
+	// are disabled (fail-closed) unless explicitly allowed in dev.
+	AdminTokenFile string
+
+	// AllowNoAdminAuth permits the development-only mode where admin endpoints
+	// accept requests without the shared secret. Must be explicitly set with
+	// CONFIG_ALLOW_NO_ADMIN_AUTH=true. Production must never set this.
+	AllowNoAdminAuth bool
 }
 
 const (
@@ -110,6 +121,15 @@ func Load() (Config, error) {
 	}
 	if cfg.DBConnMaxLifetime < 0 {
 		return Config{}, fmt.Errorf("CONFIG_DB_CONN_MAX_LIFETIME must be >= 0, got %s", cfg.DBConnMaxLifetime)
+	}
+
+	cfg.AdminTokenFile = strings.TrimSpace(os.Getenv("CONFIG_ADMIN_TOKEN_FILE"))
+	if v, ok := os.LookupEnv("CONFIG_ALLOW_NO_ADMIN_AUTH"); ok {
+		allow, err := parseStrictBool("CONFIG_ALLOW_NO_ADMIN_AUTH", v)
+		if err != nil {
+			return Config{}, err
+		}
+		cfg.AllowNoAdminAuth = allow
 	}
 	return cfg, nil
 }
@@ -201,5 +221,17 @@ func validateLogFormat(format string) error {
 		return nil
 	default:
 		return fmt.Errorf("CONFIG_LOG_FORMAT %q must be json or text", format)
+	}
+}
+
+// parseStrictBool accepts only explicit true or false values.
+func parseStrictBool(name, raw string) (bool, error) {
+	switch strings.TrimSpace(raw) {
+	case "true":
+		return true, nil
+	case "false":
+		return false, nil
+	default:
+		return false, fmt.Errorf("%s must be true or false", name)
 	}
 }
