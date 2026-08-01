@@ -6,7 +6,10 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -74,6 +77,25 @@ type Config struct {
 	// header as-is (JWT passthrough mode, both edge and executor verify the
 	// same JWT with the Auth service public key).
 	ExecutorToken string
+
+	// Rate limiting (Redis shared token bucket). Disabled by default; when
+	// RateLimitEnabled is true, RedisAddr / HMACSecretFile / TrustedProxies
+	// must all be valid and non-empty. The HMAC secret is read from a file
+	// path (never an env var) into the short-lived RateLimitHMACSecret []byte;
+	// main consumes the bytes and zeroes them. Protected metered execution
+	// endpoints fail closed (503) when Redis is unreachable; denied requests
+	// get 429 + Retry-After. Health and read-only endpoints are not limited.
+	RateLimitEnabled        bool
+	RateLimitRedisAddr      string
+	RateLimitRedisDB        int
+	RateLimitHMACSecretFile string
+	RateLimitHMACSecret     []byte
+	RateLimitTrustedProxies []string
+	RateLimitIPCapacity     float64
+	RateLimitIPRefill       float64
+	RateLimitSubjCapacity   float64
+	RateLimitSubjRefill     float64
+	RateLimitBucketTTL      time.Duration
 }
 
 // Load reads configuration from environment variables and returns a validated
@@ -180,6 +202,9 @@ func Load() (*Config, error) {
 	cfg.ExecutorToken = os.Getenv("API_EXECUTOR_TOKEN")
 	// ExecutorToken is optional (JWT passthrough mode when empty).
 
+	if err := loadRateLimit(cfg); err != nil {
+		return nil, err
+	}
 	return cfg, nil
 }
 
@@ -195,6 +220,197 @@ func parseStrictBool(name, raw string) (bool, error) {
 	}
 }
 
+const (
+	rlDefaultIPCapacity   = 60.0
+	rlDefaultIPRefill     = 2.0 // ~120 req/min steady per IP
+	rlDefaultSubjCapacity = 120.0
+	rlDefaultSubjRefill   = 4.0 // ~240 req/min steady per subject
+	rlDefaultBucketTTL    = 10 * time.Minute
+)
+
+// loadRateLimit reads and validates the optional Edge rate-limiting config.
+// When API_RATE_LIMIT_ENABLED is not "true", rate limiting is disabled. When
+// enabled, the Redis address, HMAC secret file and trusted-proxy CIDRs are
+// all required and fail fast. Errors never echo the secret, Redis URL, or
+// proxy topology.
+func loadRateLimit(cfg *Config) error {
+	enabledRaw := strings.TrimSpace(os.Getenv("API_RATE_LIMIT_ENABLED"))
+	if enabledRaw == "" {
+		cfg.RateLimitEnabled = false
+		return nil
+	}
+	enabled, err := parseStrictBool("API_RATE_LIMIT_ENABLED", enabledRaw)
+	if err != nil {
+		return err
+	}
+	cfg.RateLimitEnabled = enabled
+	if !enabled {
+		return nil
+	}
+
+	rawRedis := strings.TrimSpace(os.Getenv("API_RATE_LIMIT_REDIS_ADDR"))
+	if rawRedis == "" {
+		return ErrRLRedisAddrRequired
+	}
+	if err := validateRedisURL(rawRedis); err != nil {
+		return err
+	}
+	cfg.RateLimitRedisAddr = rawRedis
+
+	db, err := parseIntDefault("API_RATE_LIMIT_REDIS_DB", 0)
+	if err != nil {
+		return err
+	}
+	if db < 0 {
+		return fmt.Errorf("API_RATE_LIMIT_REDIS_DB must be >= 0, got %d", db)
+	}
+	cfg.RateLimitRedisDB = db
+
+	secretPath := strings.TrimSpace(os.Getenv("API_RATE_LIMIT_HMAC_SECRET_FILE"))
+	if secretPath == "" {
+		return ErrRLSecretFileRequired
+	}
+	secret, err := os.ReadFile(secretPath)
+	if err != nil {
+		return ErrRLSecretReadFailed
+	}
+	if len(secret) < 32 {
+		return ErrRLSecretTooShort
+	}
+	cfg.RateLimitHMACSecretFile = secretPath
+	cfg.RateLimitHMACSecret = secret
+
+	trusted := parseCSV(os.Getenv("API_RATE_LIMIT_TRUSTED_PROXIES"))
+	if len(trusted) == 0 {
+		return ErrRLTrustedProxiesReqd
+	}
+	for _, c := range trusted {
+		if _, _, err := net.ParseCIDR(c); err != nil {
+			return ErrRLInvalidTrustedProxy
+		}
+	}
+	cfg.RateLimitTrustedProxies = trusted
+
+	cfg.RateLimitIPCapacity, err = parseFloatDefault("API_RATE_LIMIT_IP_CAPACITY", rlDefaultIPCapacity)
+	if err != nil {
+		return err
+	}
+	cfg.RateLimitIPRefill, err = parseFloatDefault("API_RATE_LIMIT_IP_REFILL", rlDefaultIPRefill)
+	if err != nil {
+		return err
+	}
+	cfg.RateLimitSubjCapacity, err = parseFloatDefault("API_RATE_LIMIT_SUBJECT_CAPACITY", rlDefaultSubjCapacity)
+	if err != nil {
+		return err
+	}
+	cfg.RateLimitSubjRefill, err = parseFloatDefault("API_RATE_LIMIT_SUBJECT_REFILL", rlDefaultSubjRefill)
+	if err != nil {
+		return err
+	}
+	for _, c := range []struct {
+		name      string
+		v         float64
+		allowZero bool
+	}{
+		{"API_RATE_LIMIT_IP_CAPACITY", cfg.RateLimitIPCapacity, false},
+		{"API_RATE_LIMIT_IP_REFILL", cfg.RateLimitIPRefill, true},
+		{"API_RATE_LIMIT_SUBJECT_CAPACITY", cfg.RateLimitSubjCapacity, false},
+		{"API_RATE_LIMIT_SUBJECT_REFILL", cfg.RateLimitSubjRefill, true},
+	} {
+		if c.v < 0 || (!c.allowZero && c.v <= 0) {
+			if c.allowZero {
+				return fmt.Errorf("%s must be >= 0", c.name)
+			}
+			return fmt.Errorf("%s must be > 0", c.name)
+		}
+	}
+
+	ttl, err := parseDurationDefault("API_RATE_LIMIT_BUCKET_TTL", rlDefaultBucketTTL)
+	if err != nil {
+		return err
+	}
+	if ttl <= 0 {
+		return fmt.Errorf("API_RATE_LIMIT_BUCKET_TTL must be > 0")
+	}
+	cfg.RateLimitBucketTTL = ttl
+	return nil
+}
+
+// validateRedisURL accepts redis://, rediss://, or a bare host:port with a
+// numeric port. It never echoes the URL in the error.
+func validateRedisURL(raw string) error {
+	if strings.HasPrefix(raw, "redis://") || strings.HasPrefix(raw, "rediss://") {
+		u, err := url.Parse(raw)
+		if err != nil || u.Host == "" {
+			return ErrRLInvalidRedisURL
+		}
+		return nil
+	}
+	if strings.Contains(raw, "://") {
+		return ErrRLInvalidRedisURL
+	}
+	host, port, err := net.SplitHostPort(raw)
+	if err != nil || host == "" || port == "" {
+		return ErrRLInvalidRedisURL
+	}
+	for _, c := range port {
+		if c < '0' || c > '9' {
+			return ErrRLInvalidRedisURL
+		}
+	}
+	return nil
+}
+
+func parseCSV(v string) []string {
+	if v == "" {
+		return nil
+	}
+	parts := strings.Split(v, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if t := strings.TrimSpace(p); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+func parseIntDefault(key string, fallback int) (int, error) {
+	v, ok := os.LookupEnv(key)
+	if !ok || strings.TrimSpace(v) == "" {
+		return fallback, nil
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(v))
+	if err != nil {
+		return 0, fmt.Errorf("%s must be an integer", key)
+	}
+	return n, nil
+}
+
+func parseFloatDefault(key string, fallback float64) (float64, error) {
+	v, ok := os.LookupEnv(key)
+	if !ok || strings.TrimSpace(v) == "" {
+		return fallback, nil
+	}
+	f, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
+	if err != nil {
+		return 0, fmt.Errorf("%s must be a number", key)
+	}
+	return f, nil
+}
+
+func parseDurationDefault(key string, fallback time.Duration) (time.Duration, error) {
+	v, ok := os.LookupEnv(key)
+	if !ok || strings.TrimSpace(v) == "" {
+		return fallback, nil
+	}
+	d, err := time.ParseDuration(strings.TrimSpace(v))
+	if err != nil {
+		return 0, fmt.Errorf("%s: %w", key, err)
+	}
+	return d, nil
+}
+
 // validHTTPBaseURL checks that raw is an http(s) URL with no query or
 // fragment.
 func validHTTPBaseURL(raw string) bool {
@@ -207,3 +423,15 @@ func validHTTPBaseURL(raw string) bool {
 	}
 	return true
 }
+
+// Rate-limit configuration sentinel errors. They reference the env name only,
+// never the secret value, Redis URL, or proxy topology.
+var (
+	ErrRLRedisAddrRequired   = errors.New("API_RATE_LIMIT_REDIS_ADDR is required when rate limiting is enabled")
+	ErrRLSecretFileRequired  = errors.New("API_RATE_LIMIT_HMAC_SECRET_FILE is required when rate limiting is enabled")
+	ErrRLSecretReadFailed    = errors.New("API_RATE_LIMIT_HMAC_SECRET_FILE could not be read")
+	ErrRLSecretTooShort      = errors.New("API_RATE_LIMIT_HMAC_SECRET_FILE must be at least 32 bytes")
+	ErrRLTrustedProxiesReqd  = errors.New("API_RATE_LIMIT_TRUSTED_PROXIES must be configured when rate limiting is enabled")
+	ErrRLInvalidTrustedProxy = errors.New("API_RATE_LIMIT_TRUSTED_PROXIES contains an invalid CIDR")
+	ErrRLInvalidRedisURL     = errors.New("API_RATE_LIMIT_REDIS_ADDR is not a valid redis URL")
+)

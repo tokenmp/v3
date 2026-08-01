@@ -118,6 +118,18 @@ jobs:
           --health-interval 5s
           --health-timeout 3s
           --health-retries 20
+      redis:
+        # Redis 7 alpine for the shared rate-limit token-bucket integration
+        # tests in packages/go/ratelimit. The Lua script uses redis.call('TIME')
+        # which requires Redis >= 5 (effects replication default).
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
     env:
       AUTH_DATABASE_URL: postgres://tokenmp:tokenmp@localhost:5432/tokenmp_auth?sslmode=disable
       CONFIG_DATABASE_URL: postgres://tokenmp:tokenmp@localhost:5432/tokenmp_config?sslmode=disable
@@ -128,6 +140,7 @@ jobs:
       BILLING_REPO_TEST_DSN: postgres://tokenmp:tokenmp@localhost:5432/tokenmp_billing?sslmode=disable
       NOTICE_DATABASE_URL: postgres://tokenmp:tokenmp@localhost:5432/tokenmp_notice?sslmode=disable
       NOTICE_REPO_TEST_DSN: postgres://tokenmp:tokenmp@localhost:5432/tokenmp_notice?sslmode=disable
+      RATING_TEST_REDIS_ADDR: redis://127.0.0.1:6379/0
     steps:
       - name: Checkout
         # actions/checkout v5
@@ -146,6 +159,7 @@ jobs:
             services/billing/go.sum
             services/api/go.sum
             services/notice/go.sum
+            packages/go/ratelimit/go.sum
 
       - name: Generated code freshness check (Auth)
         run: |
@@ -501,3 +515,59 @@ jobs:
       - name: Integration tests
         working-directory: services/auth
         run: go test -tags=integration -race ./test/integration/...
+
+      # ------------------------------------------------------------------
+      # Shared rate-limit package (packages/go/ratelimit): gofmt / vet /
+      # build / unit race tests / real-Redis integration race tests. The
+      # Redis 7 service container above backs the build-tagged integration
+      # suite (token bucket burst/refill, two-instance sharing, TTL,
+      # concurrency, Redis-down 503, HMAC key non-leak).
+      # ------------------------------------------------------------------
+      - name: gofmt (ratelimit package)
+        working-directory: packages/go/ratelimit
+        run: |
+          out="$(gofmt -l .)"
+          if [ -n "$out" ]; then
+            echo "gofmt found unformatted files:" >&2
+            echo "$out" >&2
+            exit 1
+          fi
+
+      - name: go vet (ratelimit package)
+        working-directory: packages/go/ratelimit
+        run: |
+          go vet ./...
+          go vet -tags=integration ./...
+
+      - name: go build (ratelimit package)
+        working-directory: packages/go/ratelimit
+        run: go build ./...
+
+      - name: go test -race (ratelimit package unit)
+        working-directory: packages/go/ratelimit
+        run: go test -race ./...
+
+      - name: go test -race (ratelimit package Redis integration)
+        working-directory: packages/go/ratelimit
+        env:
+          RATING_TEST_REDIS_ADDR: redis://127.0.0.1:6379/0
+          RATELIMIT_REQUIRE_REDIS_TESTS: "true"
+        run: |
+          # Explicitly wait for the Redis service container to be ready before
+          # running the required integration suite, so a slow container startup
+          # can never cause a false skip (required mode fatals on ping failure).
+          timeout=60
+          while [ "$timeout" -gt 0 ]; do
+            if redis-cli -h 127.0.0.1 -p 6379 ping >/dev/null 2>&1; then
+              echo "redis ready"
+              break
+            fi
+            echo "waiting for redis..."
+            sleep 1
+            timeout=$((timeout-1))
+          done
+          if [ "$timeout" -le 0 ]; then
+            echo "redis did not become ready in time" >&2
+            exit 1
+          fi
+          go test -tags=integration -race ./...

@@ -23,6 +23,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/tokenmp/v3/packages/go/httpresp/envelope"
+	"github.com/tokenmp/v3/packages/go/ratelimit/trustedip"
 	"github.com/tokenmp/v3/services/api/internal/admin"
 	"github.com/tokenmp/v3/services/api/internal/billing"
 	"github.com/tokenmp/v3/services/api/internal/config"
@@ -32,6 +33,7 @@ import (
 	"github.com/tokenmp/v3/services/api/internal/panel"
 	"github.com/tokenmp/v3/services/api/internal/proxy"
 	"github.com/tokenmp/v3/services/api/internal/quota"
+	"github.com/tokenmp/v3/services/api/internal/ratelimit"
 	"github.com/tokenmp/v3/services/api/internal/settings"
 	"github.com/tokenmp/v3/services/api/internal/transport/healthz"
 )
@@ -49,6 +51,12 @@ type Deps struct {
 	// KeysHandler 注册 /api/v1/keys* 路由（鉴权但不走配额）；nil 时不注册。
 	KeysHandler *keys.Handler
 	Logger      *slog.Logger
+	// TrustedIPResolver resolves the client IP from a trusted-proxy allowlist.
+	// When nil, the legacy unconditional chi RealIP middleware is used.
+	TrustedIPResolver *trustedip.Resolver
+	// RateLimitDeps wires the shared limiter + deriver + policy. When
+	// RateLimitDeps.Limiter is nil, rate limiting is disabled.
+	RateLimitDeps ratelimit.Deps
 }
 
 // NewServer creates the API Service HTTP server with the full middleware
@@ -67,7 +75,11 @@ func NewServer(deps Deps, readHeaderTimeout, idleTimeout time.Duration) *http.Se
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
-	r.Use(middleware.RealIP)
+	if deps.TrustedIPResolver != nil {
+		r.Use(deps.TrustedIPResolver.Middleware)
+	} else {
+		r.Use(middleware.RealIP)
+	}
 	r.Use(middleware.Recoverer)
 	r.Use(logMiddleware(deps.Logger))
 
@@ -106,9 +118,14 @@ func NewServer(deps Deps, readHeaderTimeout, idleTimeout time.Duration) *http.Se
 		configHandlers.Routes(r)
 	})
 
-	// Authenticated executor proxy routes (identity → quota → proxy).
+	// Authenticated executor proxy routes (identity → quota → proxy). The IP
+	// rate-limit bucket runs before identity (bounds unauthenticated floods);
+	// the subject bucket runs after identity, before quota/proxy. Health and
+	// read-only endpoints (e.g. GET /v1/models) are not rate-limited.
 	r.Group(func(r chi.Router) {
+		r.Use(ratelimit.IPMiddleware(deps.RateLimitDeps))
 		r.Use(identity.Middleware(deps.Verifier, deps.Logger))
+		r.Use(ratelimit.SubjectMiddleware(deps.RateLimitDeps))
 		r.Use(quotaMiddleware(deps.Quota, deps.Logging, deps.Settings, deps.Logger))
 		// Catch-all forward to executor.
 		r.HandleFunc("/v1/*", deps.Proxy.ServeHTTP)

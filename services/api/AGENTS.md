@@ -18,6 +18,7 @@ Edge/BFF **不做**：模型路由、协议转换、上游转发（这些在 Exe
 - `internal/config`：env 配置（`API_EXECUTOR_URL`必填、`API_EXECUTOR_TOKEN`必填、`API_BILLING_URL`/`API_LOGGING_URL`可选、`API_JWT_PUBLIC_KEY_FILE`必填；仅本地开发/测试显式设置 `API_ALLOW_NOOP_AUTH=true` 时可省略、`API_JWT_ISSUER`/`API_JWT_AUDIENCE`默认）。
 - `internal/identity`：JWT 验证中间件（EdDSA/Ed25519，本地验，提取 subject/role 到 context；缺少公钥 fail-fast；仅 `NewNoopVerifier` 显式 opt-in 用于本地开发/测试；`NewVerifier` + `Middleware` + `FromContext`）。
 - `internal/quota`：Billing Service 客户端（`Manager` 接口，`Reserve`/`Finalize`/`Release`；`billingURL` 空时 noop；禁 redirect，10s timeout，`ErrQuotaUnavailable` 不泄漏 URL；Billing 429 映射为 `ErrQuotaExceeded`，Edge 返回 429 `quota_exceeded` 而非 503）。
+- `internal/ratelimit`：共享 Redis token-bucket 限流中间件（IP bucket + subject bucket），复用 `packages/go/ratelimit`。仅在计量执行 POST（chat/messages/responses/images）前限流；health 与只读端点（如 GET `/v1/models`）不限流。IP bucket 在身份验证前（未认证洪流也按 IP 限流）；subject bucket 在身份验证后、quota/proxy 前。Redis 异常 fail-closed 503；超额 429 `rate_limited` + `Retry-After` + `Cache-Control: no-store`。key 用 HMAC-SHA256，不把 IP/subject 明文放 Redis 或日志。限流严格在 SSE commit 前完成，不得在 commit 后注入 JSON。
 - `internal/proxy`：反向代理转发到 executor（服务 token 模式注入 `Bearer <edge-token>`，JWT passthrough 保留客户端 JWT；仅服务 token 模式注入已验证 subject 的 `X-User-ID` delegated assertion，passthrough 一律剥离该 header；`ErrorHandter` 返回 502 JSON）。
 - `internal/logging`：Logging Service HTTP 客户端（读取：`ListLogs`/`GetLog`/`GetStats`；写入：`Ingest` 用于 Edge 收到执行请求时创建 `processing` 日志与 `received` 事件，并仅附带 512-byte、UTF-8/control-char 清洗后的 `User-Agent`，不采集其他客户端头；`loggingURL` 空时 `ErrUnavailable`，404 区分为 `NotFound`，禁 redirect，不泄漏 URL）。
 - `internal/billing`：Billing Service HTTP 客户端（用户只读 `ListPlans`/`ListUserPlans`/`GetBalance`/`GetUsageWindows`；admin `RenewUserPlan`/`SwitchUserPlan` 透传续费/切换，`CreateLimitOverride`/`ListLimitOverrides`/`RevokeLimitOverride` 透传 reset/bonus 覆盖）。`ListUserPlans` 调 Billing `/v1/billing/users/{user_id}/plans`，返回全部当前 active 套餐及 planName/category/hourly/weekly/monthly/token limit 元数据；`GetUsageWindows` 调 `/v1/billing/users/{user_id}/usage-windows` 获取 active coding plan 的 hour5/weekly/period 用量窗口；与 `internal/quota` 分离，后者负责 reserve/finalize/release 写入路径。下游 `Balance`/`Plan`/`UserPlan`/`UsageWindow`/`LimitOverride` 为 snake_case DTO，Edge facade 映射为契约 camelCase。
@@ -59,7 +60,6 @@ go test -race ./...
 
 ## 待实现
 
-- 客户端速率限制
 - 流式响应的 quota finalize（当前在 response 完成时 finalize，流式可能需要 stream-aware）
 - API Key 验证：V3 与 legacy prod key 均为 `sk-` 前缀，走 Auth Service `/api/v1/auth/verify-key`（`internal/identity/apikey_verifier.go`，`NewCompositeVerifier` 按前缀分发）。Legacy key 兼容需要 Auth 侧注入 `AUTH_LEGACY_API_KEY_PEPPER`（见 `services/auth/AGENTS.md`）。
 - cancel-risk 评估

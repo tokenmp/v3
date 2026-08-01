@@ -4,8 +4,8 @@
 
 ## 模块职责
 
-- 负责：TokenMP v3 认证服务的运行时与身份流——HTTP server、配置、PostgreSQL 连接、版本化 SQL migration、`/healthz` 与 `/readyz`、优雅关闭、Dockerfile、单元/集成测试、Go CI job；以及 Auth Identity Flows：注册、登录、Ed25519/EdDSA Access Token 签发、opaque Refresh Token 轮换与 reuse 检测、logout/logout-all、`/me`、Argon2id 密码哈希与 bcrypt 兼容升级。
-- 不负责（本 PR 不实现）：`preferred_billing`/`fallback_enabled` 等业务字段；内存级速率限制（部署阻塞项，必须由未来 Gateway/Redis 共享策略落地）；浏览器 cookie 模式（另行设计）。
+- 负责：TokenMP v3 认证服务的运行时与身份流——HTTP server、配置、PostgreSQL 连接、版本化 SQL migration、`/healthz` 与 `/readyz`、优雅关闭、Dockerfile、单元/集成测试、Go CI job；以及 Auth Identity Flows：注册、登录、Ed25519/EdDSA Access Token 签发、opaque Refresh Token 轮换与 reuse 检测、logout/logout-all、`/me`、Argon2id 密码哈希与 bcrypt 兼容升级。此外负责高风险身份端点的**共享速率限制**（Redis 原子 token bucket）。
+- 不负责（本 PR 不实现）：`preferred_billing`/`fallback_enabled` 等业务字段；浏览器 cookie 模式（另行设计）。
 - 所有者：TokenMP 后端基础设施。
 
 ## 必读文档
@@ -39,7 +39,7 @@ Refresh 为 32-byte `crypto/rand` base64url；DB 只存 SHA-256 BYTEA；默认 3
 
 公共错误统一 `{error:{code,message}}`，不泄露 PG/密码/token。`internal/repository` 返回稳定分类 sentinel（`ErrDuplicateEmail`/`ErrNotFound`/`ErrConstraint`/`ErrInternal`），不 wrap 驱动原始 error。
 
-速率限制**未实现**：多副本不一致、RealIP 信任边界未定义。部署前必须由未来 Gateway/Redis 共享策略落地；不得描述为已保护。
+速率限制**已实现**：`/api/v1/auth/login`、`/register`、`/refresh` 经共享 Redis 原子 token bucket 限流，在 Argon2id/DB 操作前评估。key 用 HMAC-SHA256 派生，绝不把 IP/email/token 明文放 Redis key 或日志。**每个操作由两个独立 key 的 bucket 门控**：纯 IP bucket（先检查）+ account/token bucket（后检查；login/register 用归一化 email，refresh 用 opaque refresh token）。两个 bucket 可共享速率但 key 始终独立，轮换 email/token 不能绕过纯 IP 防洪，单账号跨 IP 仍受 account bucket 约束；多 bucket 非全局事务但 fail-closed。受保护端点 Redis 异常时 fail-closed 返回稳定无泄漏 503；超过额度返回 429 `rate_limited` + `Retry-After`（秒）+ `Cache-Control: no-store`。可信客户端 IP 边界：仅当 TCP peer 属显式 `AUTH_RATE_LIMIT_TRUSTED_PROXIES` CIDR 时才接受规范 `X-Forwarded-For` chain，否则忽略所有转发头、使用 peer IP（已取代无条件 chi RealIP）；`X-Real-IP` **绝不使用**（单值头无 chain provenance）。默认禁用；`AUTH_RATE_LIMIT_ENABLED=true` 时 Redis URL/HMAC secret 文件/CIDR 缺失或非法即 fail-fast，secret 以短生命周期 `[]byte` 读入 main 后置零，内容不进错误/日志。实现于 `internal/ratelimit`（StrictMiddlewareFunc，复用 `packages/go/ratelimit`）。
 
 ## 依赖关系与消费者
 
@@ -149,7 +149,7 @@ go test -tags=integration -race ./test/integration/...
   正确做法：只输出验证错误，不带值。
 - **DO NOT** 在容器启动时跑 migration 或把 `migrate` 二进制塞进运行时镜像 ——
   部署期 migration 由 CI/ops 在发布前执行；镜像不应隐式改库。
-- **DO NOT** 在本 PR 实现内存级速率限制——多副本不一致、RealIP 信任边界未定义；速率限制必须由未来 Gateway/Redis 共享策略落地，部署前是阻塞项。不要把服务描述为已保护。
+- **DO NOT** 在本 PR 实现内存级速率限制——多副本不一致；速率限制必须由共享 Redis token bucket 落地（已实施于 `internal/ratelimit` + `packages/go/ratelimit`），Redis 异常必须 fail-closed 503，不得内存 fallback。不要把服务描述为“未保护”。
 - **DO NOT** 通过环境变量传入 JWT PEM 密钥内容——只用 `AUTH_JWT_PRIVATE_KEY_FILE`/`AUTH_JWT_PUBLIC_KEY_FILE` 文件路径，避免多行 secret 与日志泄露。启动 fail-fast 解析 Ed25519 PEM，错误不回显 key/path。
 - **DO NOT** 在仓库或镜像中提交/打包 JWT 私钥——测试进程内生成 key，运行时镜像不含 key，部署必须挂载 key files。
 - **DO NOT** 把密码 trim 或 NFKC 归一——按原始 UTF-8 字节处理，按 rune 计数 12..128，拒绝无效 UTF8/NUL/控制字符。
@@ -158,6 +158,7 @@ go test -tags=integration -race ./test/integration/...
   不属于 Auth 数据所有权。
 - **DO NOT** 手动编辑 `internal/contract/authv1/{models,server}.gen.go`——通过 `packages/contracts/go/generate.sh` 重生成。
 - **DO NOT** 保留两套活跃 API handler 路由——旧 `internal/handler` 包已删除，活跃路由由生成代码注册，所有测试与 helper 已迁入 `internal/transport/authv1api`。
+- **DO NOT** 无条件信任转发头——仅当 TCP peer 属 `AUTH_RATE_LIMIT_TRUSTED_PROXIES` CIDR 时才接受规范 `X-Forwarded-For` chain；否则用 peer IP。`X-Real-IP` 绝不使用（无 chain provenance，任意 hop 可伪造）。已用 `packages/go/ratelimit/trustedip` 取代 chi `middleware.RealIP`。
 - **DO NOT** 在部署 legacy `sk-` API key 兼容时忘记注入 `AUTH_LEGACY_API_KEY_PEPPER`——从 prod 迁移过来的旧 key hash 为 `sha256(pepper + rawKey)`，未注入 pepper 会让这些 key 全部 401。正确做法：用私有 env 文件（600，路径记在 `.agents/local.md`）注入该 pepper，明文不得提交仓库；新 V3 `sk-` key 不受影响（无 pepper 时只走 unpeppered 候选）。
 
 ## 已知陷阱与历史教训
