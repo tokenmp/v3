@@ -200,21 +200,19 @@ func LoadFile(ctx context.Context, path string) (snapshot.ConfigSnapshot, error)
 	return parseConfig(raw)
 }
 
-// configServiceResponse mirrors the Config Service /v1/config/snapshots/latest
-// response. Only Revision and Snapshot are consumed; SHA256 and CreatedAt are
-// retained as response metadata for future verification/logging.
-type configServiceResponse struct {
-	Revision     string          `json:"revision"`
-	Snapshot     json.RawMessage `json:"snapshot"`
-	SHA256       string          `json:"sha256"`
-	CompiledMeta json.RawMessage `json:"compiled_meta"`
-	CreatedAt    time.Time       `json:"created_at"`
-}
-
 // LoadFromConfigService fetches the latest raw configuration snapshot over HTTP
-// and passes its snapshot field through the same strict parseConfig pipeline as
-// LoadFile. Transport, status, and decode failures are stable non-leaking
-// sentinels; the response URL and body are never surfaced.
+// and passes the response BODY through the same strict parseConfig pipeline as
+// LoadFile. The Config Service /v1/config/snapshots/latest endpoint serves the
+// RAW ConfigSnapshot JSON as the body (per the OpenAPI contract
+// getConfigSnapshotLatest); the revision identifier is authoritative and
+// travels in the X-Config-Revision response header, and the content digest in
+// X-Config-SHA256. No wrapper envelope (revision/snapshot/sha256/...) is
+// accepted: the body is decoded directly and strictly, so a wrapper object
+// would be rejected by the ConfigSnapshot schema decoder with
+// DisallowUnknownFields.
+//
+// Transport, status, and decode failures are stable non-leaking sentinels;
+// the response URL and body are never surfaced.
 func LoadFromConfigService(ctx context.Context, url string) (snapshot.ConfigSnapshot, error) {
 	if err := ctx.Err(); err != nil {
 		return snapshot.ConfigSnapshot{}, err
@@ -259,25 +257,23 @@ func LoadFromConfigService(ctx context.Context, url string) (snapshot.ConfigSnap
 		return snapshot.ConfigSnapshot{}, err
 	}
 
-	var serviceResp configServiceResponse
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&serviceResp); err != nil {
-		return snapshot.ConfigSnapshot{}, ErrConfigMalformed
-	}
-	if hasTrailingData(raw[dec.InputOffset():]) {
-		return snapshot.ConfigSnapshot{}, ErrConfigMalformed
-	}
-	if len(serviceResp.Snapshot) == 0 || bytes.Equal(bytes.TrimSpace(serviceResp.Snapshot), []byte("null")) {
-		return snapshot.ConfigSnapshot{}, ErrConfigServiceEmpty
-	}
-	cfg, err := parseConfig(serviceResp.Snapshot)
+	// The response body IS the raw ConfigSnapshot JSON. Decode it directly
+	// through the strict pipeline (structural walk + DisallowUnknownFields +
+	// trailing-data rejection + secret scan) shared with LoadFile. A wrapper
+	// envelope object would fail this strict decode because its top-level
+	// fields (revision/snapshot/sha256/...) are not ConfigSnapshot fields.
+	cfg, err := parseConfig(raw)
 	if err != nil {
 		return snapshot.ConfigSnapshot{}, err
 	}
-	// Config Service's outer revision is authoritative. Apply the same trim
-	// semantics used before compilation so all published revision views agree.
-	cfg.Revision = strings.TrimSpace(serviceResp.Revision)
+	// Config Service's outer revision (X-Config-Revision header) is
+	// authoritative. Apply the same trim semantics used before compilation so
+	// all published revision views agree. A missing/empty header is treated as
+	// no authoritative revision override; the body's own revision (if any)
+	// remains, and compilation requires a non-empty revision.
+	if rev := strings.TrimSpace(resp.Header.Get("X-Config-Revision")); rev != "" {
+		cfg.Revision = rev
+	}
 	return cfg, nil
 }
 

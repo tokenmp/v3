@@ -190,6 +190,68 @@ func TestContractYAMLSpecPathPresent(t *testing.T) {
 	}
 }
 
+// loadFullContract parses the whole OpenAPI YAML into a generic map so tests can
+// assert on response bodies/headers, not just routes.
+func loadFullContract(t *testing.T) map[string]any {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Clean(contractYAMLPath))
+	if err != nil {
+		t.Fatalf("read contract YAML %s: %v", contractYAMLPath, err)
+	}
+	var spec map[string]any
+	if err := yaml.Unmarshal(b, &spec); err != nil {
+		t.Fatalf("parse contract YAML: %v", err)
+	}
+	return spec
+}
+
+// asMap is a typed accessor for nested generic YAML maps.
+func asMap(t *testing.T, v any, ctx string) map[string]any {
+	t.Helper()
+	m, ok := v.(map[string]any)
+	if !ok {
+		t.Fatalf("%s is not a map: %T", ctx, v)
+	}
+	return m
+}
+
+// TestLatestSnapshotContractRawBody locks the authoritative wire contract for
+// GET /v1/config/snapshots/latest: the 200 response body MUST be the raw
+// ConfigSnapshot (free-form), served unwrapped, with revision/sha256 carried in
+// the X-Config-Revision / X-Config-SHA256 headers. This is the contract both
+// the Config handler and the Executor configsource.LoadFromConfigService depend
+// on; a regression that reintroduces a metadata wrapper body would break this
+// assertion at the contract source of truth.
+func TestLatestSnapshotContractRawBody(t *testing.T) {
+	spec := loadFullContract(t)
+	paths := asMap(t, spec["paths"], "paths")
+	latest := asMap(t, paths["/v1/config/snapshots/latest"], "latest path")
+	get := asMap(t, latest["get"], "latest get")
+	responses := asMap(t, get["responses"], "responses")
+	ok := asMap(t, responses["200"], "200 response")
+	headers := asMap(t, ok["headers"], "200 headers")
+	for _, h := range []string{"X-Config-Revision", "X-Config-SHA256", "Cache-Control"} {
+		if _, has := headers[h]; !has {
+			t.Errorf("latest 200 response missing required header %q", h)
+		}
+	}
+	content := asMap(t, ok["content"], "200 content")
+	appJSON := asMap(t, content["application/json"], "application/json")
+	schema := asMap(t, appJSON["schema"], "schema")
+	ref, _ := schema["$ref"].(string)
+	if ref != "#/components/schemas/ConfigSnapshot" {
+		t.Errorf("latest 200 body schema = %q, want $ref #/components/schemas/ConfigSnapshot (raw, unwrapped body)", ref)
+	}
+	// ConfigSnapshot must be free-form (additionalProperties: true) so the raw
+	// snapshot body is opaque and never re-modeled as a wrapper here.
+	components := asMap(t, spec["components"], "components")
+	schemas := asMap(t, components["schemas"], "schemas")
+	cs := asMap(t, schemas["ConfigSnapshot"], "ConfigSnapshot schema")
+	if ap, _ := cs["additionalProperties"].(bool); !ap {
+		t.Errorf("ConfigSnapshot schema must be free-form (additionalProperties: true); got %v", cs["additionalProperties"])
+	}
+}
+
 // newWriteServerWithAdmin builds a dev-auth server with admin reader/writer
 // wired so all routes (write + admin CRUD) register.
 func newWriteServerWithAdmin(t *testing.T, devAuth bool) *Server {

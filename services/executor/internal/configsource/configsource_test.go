@@ -82,7 +82,18 @@ func strictDecodeAndMarshal(t *testing.T, raw []byte, mutate func(*snapshot.Conf
 	return out
 }
 
+// configServiceServer serves a RAW snapshot body (the authoritative Config
+// Service wire contract) with revision/sha256 in the X-Config-* response
+// headers. It deliberately does NOT emit a wrapper envelope so the loader is
+// exercised against the real wire shape.
 func configServiceServer(t *testing.T, revision string, raw []byte) *httptest.Server {
+	t.Helper()
+	return configServiceServerSHA(t, revision, "test-sha", raw)
+}
+
+// configServiceServerSHA is like configServiceServer but lets the test pin the
+// X-Config-SHA256 header value for integrity-header coverage.
+func configServiceServerSHA(t *testing.T, revision, sha string, raw []byte) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -92,11 +103,14 @@ func configServiceServer(t *testing.T, revision string, raw []byte) *httptest.Se
 			t.Errorf("Accept = %q, want application/json", got)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(map[string]any{
-			"revision": revision, "snapshot": json.RawMessage(raw), "sha256": "test-sha",
-			"compiled_meta": nil, "created_at": "2026-07-24T00:00:00Z",
-		}); err != nil {
-			t.Errorf("encode response: %v", err)
+		if revision != "" {
+			w.Header().Set("X-Config-Revision", revision)
+		}
+		if sha != "" {
+			w.Header().Set("X-Config-SHA256", sha)
+		}
+		if _, err := w.Write(raw); err != nil {
+			t.Errorf("write response: %v", err)
 		}
 	}))
 }
@@ -110,6 +124,64 @@ func TestLoadFromConfigService(t *testing.T) {
 	}
 	if cfg.Revision != "authoritative-revision" {
 		t.Errorf("Revision = %q, want authoritative-revision", cfg.Revision)
+	}
+}
+
+func TestLoadFromConfigServiceHeaderRevisionAuthoritative(t *testing.T) {
+	// The X-Config-Revision header is authoritative: it must override any
+	// revision embedded in the raw snapshot body so all published views agree.
+	raw := readFixture(t, "default")
+	// Pin a distinct body revision, then serve a different header revision.
+	var body map[string]any
+	if err := json.Unmarshal(raw, &body); err != nil {
+		t.Fatalf("unmarshal fixture: %v", err)
+	}
+	body["Revision"] = "body-revision"
+	rawBody, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal body: %v", err)
+	}
+	srv := configServiceServer(t, "header-revision", rawBody)
+	defer srv.Close()
+	cfg, err := LoadFromConfigService(context.Background(), srv.URL+"/v1/config/snapshots/latest")
+	if err != nil {
+		t.Fatalf("LoadFromConfigService: %v", err)
+	}
+	if cfg.Revision != "header-revision" {
+		t.Errorf("Revision = %q, want header-revision (header must override body)", cfg.Revision)
+	}
+}
+
+func TestLoadFromConfigServiceSHA256HeaderObserved(t *testing.T) {
+	// The loader must tolerate and read responses that carry X-Config-SHA256;
+	// it does not verify the digest itself (verification is a producer-side
+	// concern), but the header must not break parsing.
+	srv := configServiceServerSHA(t, "rev-1", "deadbeef", readFixture(t, "default"))
+	defer srv.Close()
+	cfg, err := LoadFromConfigService(context.Background(), srv.URL+"/v1/config/snapshots/latest")
+	if err != nil {
+		t.Fatalf("LoadFromConfigService: %v", err)
+	}
+	if cfg.Revision != "rev-1" {
+		t.Errorf("Revision = %q, want rev-1", cfg.Revision)
+	}
+}
+
+func TestLoadFromConfigServiceRedirectRejected(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(readFixture(t, "default"))
+	}))
+	defer target.Close()
+	// First server redirects to the target; the loader must NOT follow it.
+	redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusFound)
+	}))
+	defer redirector.Close()
+	_, err := LoadFromConfigService(context.Background(), redirector.URL+"/v1/config/snapshots/latest")
+	// A 302 is a non-200 status (redirects are not followed) -> status sentinel.
+	if !errors.Is(err, ErrConfigServiceStatus) {
+		t.Errorf("err = %v, want ErrConfigServiceStatus (redirect must not be followed)", err)
 	}
 }
 
@@ -133,14 +205,43 @@ func TestLoadFromConfigServiceNon200(t *testing.T) {
 	}
 }
 
-func TestLoadFromConfigServiceEmptySnapshot(t *testing.T) {
+func TestLoadFromConfigServiceRejectsWrapperEnvelope(t *testing.T) {
+	// The authoritative wire contract is a RAW snapshot body. A legacy wrapper
+	// envelope ({revision,snapshot,sha256,...}) must be REJECTED by the strict
+	// ConfigSnapshot decoder (DisallowUnknownFields), so a drift back to the
+	// wrapper format fails closed instead of silently mis-parsing.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{"revision":"r","snapshot":null}`))
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Config-Revision", "r")
+		_, _ = w.Write([]byte(`{"revision":"r","snapshot":null,"sha256":"x","compiled_meta":null,"created_at":"2026-07-24T00:00:00Z"}`))
 	}))
 	defer srv.Close()
 	_, err := LoadFromConfigService(context.Background(), srv.URL+"/v1/config/snapshots/latest")
-	if !errors.Is(err, ErrConfigServiceEmpty) {
-		t.Errorf("err = %v, want ErrConfigServiceEmpty", err)
+	if !errors.Is(err, ErrConfigMalformed) {
+		t.Errorf("err = %v, want ErrConfigMalformed (wrapper envelope must be rejected)", err)
+	}
+}
+
+func TestLoadFromConfigServiceMalformedBody(t *testing.T) {
+	// A non-object / empty body is rejected as malformed at the structural
+	// gate before schema decoding.
+	cases := [][]byte{nil, []byte(""), []byte("null"), []byte("[]"), []byte("42"), []byte("not json")}
+	for _, body := range cases {
+		body := body
+		t.Run(fmt.Sprintf("%q", body), func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("X-Config-Revision", "r")
+				if len(body) > 0 {
+					_, _ = w.Write(body)
+				}
+			}))
+			defer srv.Close()
+			_, err := LoadFromConfigService(context.Background(), srv.URL+"/v1/config/snapshots/latest")
+			if !errors.Is(err, ErrConfigMalformed) {
+				t.Errorf("err = %v, want ErrConfigMalformed for body %q", err, body)
+			}
+		})
 	}
 }
 
