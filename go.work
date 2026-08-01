@@ -2,6 +2,7 @@ go 1.26.5
 
 use (
 	./packages/go/httpresp
+	./packages/go/ratelimit
 	./services/api
 	./services/auth
 	./services/billing

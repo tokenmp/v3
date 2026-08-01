@@ -2333,6 +2333,38 @@ func (response Login401JSONResponse) VisitLoginResponse(w http.ResponseWriter) e
 	return err
 }
 
+type Login429ResponseHeaders struct {
+	CacheControl *string
+	ContentType  *string
+	RetryAfter   *string
+}
+
+type Login429JSONResponse struct {
+	Body    Error
+	Headers Login429ResponseHeaders
+}
+
+func (response Login429JSONResponse) VisitLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	if response.Headers.ContentType != nil {
+		w.Header().Set("Content-Type", fmt.Sprint(*response.Headers.ContentType))
+	}
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type Login500ResponseHeaders struct {
 	CacheControl *string
 	ContentType  *string
@@ -2357,6 +2389,34 @@ func (response Login500JSONResponse) VisitLoginResponse(w http.ResponseWriter) e
 		w.Header().Set("Content-Type", fmt.Sprint(*response.Headers.ContentType))
 	}
 	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Login503ResponseHeaders struct {
+	CacheControl *string
+	ContentType  *string
+}
+
+type Login503JSONResponse struct {
+	Body    Error
+	Headers Login503ResponseHeaders
+}
+
+func (response Login503JSONResponse) VisitLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	if response.Headers.ContentType != nil {
+		w.Header().Set("Content-Type", fmt.Sprint(*response.Headers.ContentType))
+	}
+	w.WriteHeader(503)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -2727,6 +2787,38 @@ func (response Refresh401JSONResponse) VisitRefreshResponse(w http.ResponseWrite
 	return err
 }
 
+type Refresh429ResponseHeaders struct {
+	CacheControl *string
+	ContentType  *string
+	RetryAfter   *string
+}
+
+type Refresh429JSONResponse struct {
+	Body    Error
+	Headers Refresh429ResponseHeaders
+}
+
+func (response Refresh429JSONResponse) VisitRefreshResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	if response.Headers.ContentType != nil {
+		w.Header().Set("Content-Type", fmt.Sprint(*response.Headers.ContentType))
+	}
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type Refresh500ResponseHeaders struct {
 	CacheControl *string
 	ContentType  *string
@@ -2751,6 +2843,34 @@ func (response Refresh500JSONResponse) VisitRefreshResponse(w http.ResponseWrite
 		w.Header().Set("Content-Type", fmt.Sprint(*response.Headers.ContentType))
 	}
 	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Refresh503ResponseHeaders struct {
+	CacheControl *string
+	ContentType  *string
+}
+
+type Refresh503JSONResponse struct {
+	Body    Error
+	Headers Refresh503ResponseHeaders
+}
+
+func (response Refresh503JSONResponse) VisitRefreshResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	if response.Headers.ContentType != nil {
+		w.Header().Set("Content-Type", fmt.Sprint(*response.Headers.ContentType))
+	}
+	w.WriteHeader(503)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -2847,6 +2967,38 @@ func (response Register409JSONResponse) VisitRegisterResponse(w http.ResponseWri
 	return err
 }
 
+type Register429ResponseHeaders struct {
+	CacheControl *string
+	ContentType  *string
+	RetryAfter   *string
+}
+
+type Register429JSONResponse struct {
+	Body    Error
+	Headers Register429ResponseHeaders
+}
+
+func (response Register429JSONResponse) VisitRegisterResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	if response.Headers.ContentType != nil {
+		w.Header().Set("Content-Type", fmt.Sprint(*response.Headers.ContentType))
+	}
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type Register500ResponseHeaders struct {
 	CacheControl *string
 	ContentType  *string
@@ -2871,6 +3023,34 @@ func (response Register500JSONResponse) VisitRegisterResponse(w http.ResponseWri
 		w.Header().Set("Content-Type", fmt.Sprint(*response.Headers.ContentType))
 	}
 	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Register503ResponseHeaders struct {
+	CacheControl *string
+	ContentType  *string
+}
+
+type Register503JSONResponse struct {
+	Body    Error
+	Headers Register503ResponseHeaders
+}
+
+func (response Register503JSONResponse) VisitRegisterResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	if response.Headers.ContentType != nil {
+		w.Header().Set("Content-Type", fmt.Sprint(*response.Headers.ContentType))
+	}
+	w.WriteHeader(503)
 	_, err := buf.WriteTo(w)
 	return err
 }

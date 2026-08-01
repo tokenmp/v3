@@ -171,6 +171,51 @@ See `.env.example` for the full list and safe defaults. All variables use the
 | `AUTH_DB_CONN_MAX_LIFETIME` | no | `30m` | Connection max lifetime |
 | `AUTH_HEALTHCHECK_ADDR` | no | `http://127.0.0.1:8080/healthz` | Used only by the in-image `healthcheck` binary |
 
+### Rate limiting (optional, default disabled)
+
+Shared Redis token-bucket rate limiting for the high-risk identity endpoints
+(`/api/v1/auth/login`, `/register`, `/refresh`). All fields below are
+required and validated when `AUTH_RATE_LIMIT_ENABLED=true`; missing or invalid
+values fail fast at startup. The HMAC secret is read from a file path (never
+an env var) into a short-lived in-memory buffer and is never echoed in logs or
+errors. The limiter fails closed (503) when Redis is unreachable; over-quota
+requests return 429 + Retry-After + Cache-Control: no-store. Limiting runs
+before the expensive Argon2id/DB work.
+
+Each operation is gated by **two independent buckets** with independent keys:
+
+- a **pure-IP bucket** (checked first); and
+- an **account/token bucket** (checked second, keyed on the normalized email
+  for login/register or the opaque refresh token for refresh).
+
+The two buckets MAY share the same rate, but their keys are always
+independent so that rotating the email/token dimension cannot bypass the
+per-IP flood limit, and a single account crossing IPs is still bounded by the
+account bucket. The multi-bucket check is not a global transaction (a denied
+account check does not roll back the IP token), but fail-closed semantics
+ensure no request proceeds when the backend is unavailable.
+
+| Variable | Required when enabled | Default | Notes |
+|---|---|---|---|
+| `AUTH_RATE_LIMIT_ENABLED` | no | `false` | Must be `true`/`false` |
+| `AUTH_RATE_LIMIT_REDIS_ADDR` | yes | — | `redis://`/`rediss://` or `host:port`; never logged |
+| `AUTH_RATE_LIMIT_REDIS_DB` | no | `0` | Redis DB index |
+| `AUTH_RATE_LIMIT_HMAC_SECRET_FILE` | yes | — | File with >=32-byte HMAC key; never echoed |
+| `AUTH_RATE_LIMIT_TRUSTED_PROXIES` | yes | — | Comma-separated CIDRs; empty = trust nobody |
+| `AUTH_RATE_LIMIT_LOGIN_IP_CAPACITY` | no | `10` | Login per-IP burst |
+| `AUTH_RATE_LIMIT_LOGIN_IP_REFILL` | no | `0.5` | Login per-IP tokens/sec (~30/min) |
+| `AUTH_RATE_LIMIT_LOGIN_ACCOUNT_CAPACITY` | no | `10` | Login per-account burst |
+| `AUTH_RATE_LIMIT_LOGIN_ACCOUNT_REFILL` | no | `0.5` | Login per-account tokens/sec |
+| `AUTH_RATE_LIMIT_REGISTER_IP_CAPACITY` | no | `5` | Register per-IP burst |
+| `AUTH_RATE_LIMIT_REGISTER_IP_REFILL` | no | `0.1` | Register per-IP tokens/sec |
+| `AUTH_RATE_LIMIT_REGISTER_ACCOUNT_CAPACITY` | no | `5` | Register per-account burst |
+| `AUTH_RATE_LIMIT_REGISTER_ACCOUNT_REFILL` | no | `0.1` | Register per-account tokens/sec |
+| `AUTH_RATE_LIMIT_REFRESH_IP_CAPACITY` | no | `30` | Refresh per-IP burst |
+| `AUTH_RATE_LIMIT_REFRESH_IP_REFILL` | no | `1.0` | Refresh per-IP tokens/sec |
+| `AUTH_RATE_LIMIT_REFRESH_ACCOUNT_CAPACITY` | no | `30` | Refresh per-account burst |
+| `AUTH_RATE_LIMIT_REFRESH_ACCOUNT_REFILL` | no | `1.0` | Refresh per-account tokens/sec |
+| `AUTH_RATE_LIMIT_BUCKET_TTL` | no | `10m` | Redis key TTL |
+
 ## Schema
 
 Migrations are the source of truth and are **unchanged** in this change — the

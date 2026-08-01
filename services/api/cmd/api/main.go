@@ -13,7 +13,11 @@ import (
 	"net"
 	"os/signal"
 	"syscall"
+	"time"
 
+	"github.com/redis/go-redis/v9"
+	ratelimitpkg "github.com/tokenmp/v3/packages/go/ratelimit"
+	"github.com/tokenmp/v3/packages/go/ratelimit/trustedip"
 	"github.com/tokenmp/v3/services/api/internal/admin"
 	"github.com/tokenmp/v3/services/api/internal/app"
 	"github.com/tokenmp/v3/services/api/internal/billing"
@@ -23,6 +27,7 @@ import (
 	"github.com/tokenmp/v3/services/api/internal/logging"
 	"github.com/tokenmp/v3/services/api/internal/proxy"
 	"github.com/tokenmp/v3/services/api/internal/quota"
+	"github.com/tokenmp/v3/services/api/internal/ratelimit"
 	"github.com/tokenmp/v3/services/api/internal/settings"
 )
 
@@ -89,6 +94,45 @@ func run() error {
 		Settings:                userSettings,
 		KeysHandler:             keysHandler,
 		Logger:                  logger,
+	}
+
+	if cfg.RateLimitEnabled {
+		resolver, err := trustedip.NewResolver(cfg.RateLimitTrustedProxies)
+		if err != nil {
+			return fmt.Errorf("trusted proxy config: %w", err)
+		}
+		opts, err := redis.ParseURL(cfg.RateLimitRedisAddr)
+		if err != nil {
+			return fmt.Errorf("rate limit redis url invalid")
+		}
+		opts.DB = cfg.RateLimitRedisDB
+		rdb := redis.NewClient(opts)
+		defer func() {
+			if cerr := rdb.Close(); cerr != nil {
+				logger.Error("error closing redis", "error", cerr)
+			}
+		}()
+		deriver, err := ratelimitpkg.NewKeyDeriver(cfg.RateLimitHMACSecret)
+		if err != nil {
+			return fmt.Errorf("rate limit deriver: %w", err)
+		}
+		// Zero the short-lived secret copy; the deriver holds its own copy.
+		for i := range cfg.RateLimitHMACSecret {
+			cfg.RateLimitHMACSecret[i] = 0
+		}
+		limiter := ratelimitpkg.NewRedisLimiter(rdb, 2*time.Second)
+		deps.TrustedIPResolver = resolver
+		deps.RateLimitDeps = ratelimit.Deps{
+			Limiter: limiter,
+			Deriver: deriver,
+			Policies: ratelimit.Policies{
+				IPCapacity:   cfg.RateLimitIPCapacity,
+				IPRefill:     cfg.RateLimitIPRefill,
+				SubjCapacity: cfg.RateLimitSubjCapacity,
+				SubjRefill:   cfg.RateLimitSubjRefill,
+				TTL:          cfg.RateLimitBucketTTL,
+			},
+		}
 	}
 
 	ln, err := net.Listen("tcp", cfg.HTTPAddr)

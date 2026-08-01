@@ -285,7 +285,7 @@ TokenMP v3 是多语言 Monorepo：
 - Executor 保持 Go。
 - 其他服务或应用的语言与框架根据现有代码及后续决策确定。
 - Node.js workspace 工具不得接管 Go 模块边界。
-- Go workspace 使用 `go.work`；已包含 `services/auth` 和 `services/executor` 两个 Go module，模块路径分别为 `github.com/tokenmp/v3/services/auth` 与 `github.com/tokenmp/v3/services/executor`，均使用 Go 1.26.5。后续 Go 服务通过独立变更新增 `go.work` 条目与模块级 `AGENTS.md`。
+- Go workspace 使用 `go.work`；包含全部 Go module：`packages/go/httpresp`、`packages/go/ratelimit` 与 `services/{api,auth,billing,config,executor,logging,notice}`，模块路径为 `github.com/tokenmp/v3/...`，均使用 Go 1.26.5。后续 Go 服务通过独立变更新增 `go.work` 条目与模块级 `AGENTS.md`。
 - 跨语言共享优先使用 OpenAPI、JSON Schema、Protobuf 等语言中立契约及代码生成，不复制手写类型作为唯一事实来源。
 
 ## 10. Workspace 与构建工具选型
@@ -298,7 +298,7 @@ TokenMP v3 是多语言 Monorepo：
 - Node.js：26.4.0，通过 `mise.toml` 固定。
 - TypeScript：6.0.3。
 - Go：1.26.5，通过 `mise.toml` 固定。
-- Go workspace：`go.work` 已创建，包含 `use ./services/auth` 与 `use ./services/executor`。
+- Go workspace：`go.work` 已创建，包含 `packages/go/httpresp`、`packages/go/ratelimit` 与 `services/{api,auth,billing,config,executor,logging,notice}` 的 `use` 条目。
 - 当前模块数量：4（`packages/ui-tokens`、`packages/contracts`、`services/auth`、`services/executor`）；其他顶层分区及其 `AGENTS.md` 仍属于仓库骨架，不代表具体应用、infra 或 tool 已实施。
 - `services/auth/` 已实现 Auth Identity Flows（注册/登录/JWT/Refresh Token 轮换等，见 ADR 0005）。
 - `services/executor/` 是模型请求执行服务：已实现 health、配置、优雅关闭、Mock/InMemory ports、quota reservation 终态状态机、Config compiler、immutable generation-aware snapshot store、三份脱敏 config fixtures、C01–C27 安全校验与真实编译测试、routing selector/resolver/Plan/quarantine、纯 Go Adapter Engine、内部 shared `sdk` port、官方 OpenAI Chat（`github.com/openai/openai-go/v3` v3.44.0）与 Anthropic Messages（`github.com/anthropics/anthropic-sdk-go` v1.58.0）非流式与流式 adapter、内部 non-stream Runner、non-stream HTTP transport 层（`internal/transport/executorv1api`）、transport-neutral facade 前置四包（`internal/nonstream`/`internal/nonstreamfacade`/`internal/authcontext`/`internal/requestid`）、strict secret-free config 文件源 `internal/configsource`、credential env `internal/credentialenv`、identity env `internal/identityenv`、quarantine bridge `internal/quarantinebridge`、Phase 10 HTTP streaming（Chat/Messages `stream:true` SSE runtime）、Phase 11 Images（legacy completion-only non-stream runtime）、Phase 12 typed quota domain、Phase 13 models catalog、Phase 14 Responses（non-stream+stream runtime）、Phase 15/17 inbound+outbound Retry-After、Phase 16 request log lifecycle、Phase 18 Docker（multi-stage non-root tini healthcheck）、Phase 19 JWT 验证（Ed25519/EdDSA 本地验证 + identityenv fallback）、Phase 20 配置热重载（SIGHUP + 可选 stat mtime 轮询）、Phase 21 Prometheus /metrics 端点；上述能力均经 user-authorized runtime composition（`internal/composition`）接入 `main`、app 与公开 runtime server/路由：runtime `main` 在 `net.Listen` 之前组装全部依赖，启动拒绝不受支持的 enabled SDK/protocol route。生成的 7 条路由均为运行时实际路由：匿名 `GET`/`HEAD /healthz`、鉴权 `/v1/models`·`/v1/responses`（non-stream+stream）·`/v1/images/generations`（completion-only non-stream）与鉴权 `/v1/chat/completions`·`/v1/messages`（non-stream+stream）执行。`config.Load` 要求 `EXECUTOR_CONFIG_FILE`/`EXECUTOR_CREDENTIAL_REF_MAP_JSON`/`EXECUTOR_IDENTITY_MAP_JSON`，错误 redacted。runtime 覆盖包含 composition-level route conformance test 与 process binary test。超出单服务部署范围，不实施：durable idempotency/replay、remote quota/credential resolver。`check:generated:executor` 是现有 `go-auth` CI job 中的门禁步骤。
