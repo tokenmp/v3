@@ -74,20 +74,21 @@ func run() error {
 	// Config URL 配置时启用 admin 配置 CRUD 代理。
 	var configClient *config.Client
 	if cfg.ConfigServiceURL != "" {
-		configClient = config.NewClient(cfg.ConfigServiceURL)
+		configClient = config.NewClient(cfg.ConfigServiceURL, cfg.ConfigServiceToken)
 	}
 
 	deps := app.Deps{
-		Verifier:    compositeVerifier,
-		Proxy:       prx,
-		Quota:       quota.NewManager(cfg.BillingURL),
-		Logging:     logging.NewClient(cfg.LoggingURL),
-		Billing:     billing.NewClient(cfg.BillingURL),
-		AdminAuth:   admin.NewAuthClient(cfg.AuthURL),
-		ConfigCfg:   configClient,
-		Settings:    userSettings,
-		KeysHandler: keysHandler,
-		Logger:      logger,
+		Verifier:                compositeVerifier,
+		Proxy:                   prx,
+		Quota:                   quota.NewManager(cfg.BillingURL),
+		Logging:                 logging.NewClient(cfg.LoggingURL),
+		Billing:                 billing.NewClient(cfg.BillingURL),
+		AdminAuth:               admin.NewAuthClient(cfg.AuthURL),
+		ConfigCfg:               configClient,
+		ConfigAdminProxyEnabled: cfg.ConfigAdminProxyEnabled,
+		Settings:                userSettings,
+		KeysHandler:             keysHandler,
+		Logger:                  logger,
 	}
 
 	ln, err := net.Listen("tcp", cfg.HTTPAddr)

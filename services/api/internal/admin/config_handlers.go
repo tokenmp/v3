@@ -12,20 +12,29 @@ import (
 
 // ConfigHandlers proxies admin CRUD routes to the Config Service.
 type ConfigHandlers struct {
-	cfg *config.Client
+	cfg          *config.Client
+	adminProxyOn bool
 }
 
-// NewConfigHandlers returns config admin handlers. cfg may be nil (routes
-// return 503 when not wired).
-func NewConfigHandlers(cfg *config.Client) *ConfigHandlers {
-	return &ConfigHandlers{cfg: cfg}
+// NewConfigHandlers returns config admin handlers. cfg may be nil (admin proxy
+// routes return 503 when not wired; the models catalog falls back to an empty
+// list). When adminProxy is true, the admin CRUD proxy routes are registered;
+// otherwise only the models catalog route is registered (read-only use).
+func NewConfigHandlers(cfg *config.Client, adminProxy bool) *ConfigHandlers {
+	return &ConfigHandlers{cfg: cfg, adminProxyOn: adminProxy}
 }
 
 // Routes registers all config admin proxy routes on the given router.
+// The models catalog route is always registered (read-only). The admin CRUD
+// proxy routes are registered only when the handler was created with the
+// admin proxy explicitly enabled, so a read-only Config Service client never
+// exposes a write path.
 func (h *ConfigHandlers) Routes(r chi.Router) {
 	// Models catalog (for plan allowedModels selector) — issue #89
 	r.Get("/api/v1/admin/models/catalog", h.handleModelsCatalog)
-
+	if !h.adminProxyOn {
+		return
+	}
 	// Config admin CRUD — transparent proxy to Config Service
 	cfgRoutes := []struct {
 		method, edgePath, cfgPath string
@@ -72,6 +81,15 @@ func (h *ConfigHandlers) Routes(r chi.Router) {
 		{http.MethodPut, "/api/v1/admin/global/{key}", "/v1/config/admin/global/{key}"},
 		// Compile
 		{http.MethodPost, "/api/v1/admin/compile", "/v1/config/admin/compile"},
+		// Publish lifecycle (draft/publish/archive/revert/audit)
+		{http.MethodPost, "/api/v1/admin/config/drafts", "/v1/config/drafts"},
+		{http.MethodGet, "/api/v1/admin/config/drafts/{id}", "/v1/config/drafts/{id}"},
+		{http.MethodPatch, "/api/v1/admin/config/drafts/{id}", "/v1/config/drafts/{id}"},
+		{http.MethodPost, "/api/v1/admin/config/revisions/{id}/publish", "/v1/config/revisions/{id}/publish"},
+		{http.MethodPost, "/api/v1/admin/config/revisions/{id}/archive", "/v1/config/revisions/{id}/archive"},
+		{http.MethodPost, "/api/v1/admin/config/revisions/{id}/revert", "/v1/config/revisions/{id}/revert"},
+		{http.MethodGet, "/api/v1/admin/config/revisions", "/v1/config/revisions"},
+		{http.MethodGet, "/api/v1/admin/config/audit", "/v1/config/audit"},
 	}
 
 	for _, rt := range cfgRoutes {
@@ -130,18 +148,25 @@ func (h *ConfigHandlers) proxyToConfig(w http.ResponseWriter, r *http.Request, c
 	if r.Body != nil {
 		body = r.Body
 	}
-	data, status, err := h.cfg.Proxy(r.Context(), r.Method, path, body)
-	if err != nil && status >= 500 {
+	// Only the validated If-Match is forwarded from the inbound request
+	// (RequestMeta). The X-Admin-Token is injected solely by the client from
+	// its configured secret; Authorization/Cookie/X-Admin-Token and every
+	// other client header are never forwarded.
+	res, err := h.cfg.Proxy(r.Context(), r.Method, path, body, config.RequestMeta{IfMatch: r.Header.Get("If-Match")})
+	if err != nil && (res.Status >= 500 || res.Status == 0) {
 		httpresp.Error(w, httpresp.CodeBadGateway, "config service unavailable")
 		return
 	}
-	if err != nil && status == 0 {
-		httpresp.Error(w, httpresp.CodeBadGateway, "config service unavailable")
-		return
+	// Forward only the allowlisted upstream response headers (ETag,
+	// Cache-Control). No other upstream header is surfaced to the edge client.
+	for k, vs := range res.Headers {
+		for _, v := range vs {
+			w.Header().Add(k, v)
+		}
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_, _ = w.Write(data)
+	w.WriteHeader(res.Status)
+	_, _ = w.Write(res.Body)
 }
 
 // handleModelsCatalog returns active model IDs for plan allowedModels (#89).
