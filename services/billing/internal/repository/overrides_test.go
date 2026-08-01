@@ -128,8 +128,22 @@ func TestLimitOverride_ResetMovesWindowStart(t *testing.T) {
 	if h5 == nil {
 		t.Fatalf("no hour5 window")
 	}
-	if h5.Consumed != 0 {
-		t.Fatalf("hour5 consumed after reset = %d, want 0 (prior consumption excluded)", h5.Consumed)
+	// Reset moved the window start forward, so the historical finalized
+	// charge from consume("a") (created before effective_from) is excluded
+	// from consumedCodingSince. Consumed is therefore driven ONLY by the
+	// active hold on res-ors-ok: under the hard-limit semantics an active
+	// reserved hold is folded into the window (activeHeldCodingSince) so a
+	// concurrent in-flight request cannot punch through the limit. Thus
+	// consumed = 1 (the single active hold), limit stays 1 (base, no bonus),
+	// and remaining = limit - consumed = 0.
+	if h5.Consumed != 1 {
+		t.Fatalf("hour5 consumed after reset = %d, want 1 (old charge excluded by reset; new active hold counted)", h5.Consumed)
+	}
+	if h5.Limit == nil || *h5.Limit != 1 {
+		t.Fatalf("hour5 limit after reset = %v, want 1 (base limit, no bonus)", h5.Limit)
+	}
+	if h5.Remaining != 0 {
+		t.Fatalf("hour5 remaining after reset = %d, want 0 (limit 1 - consumed 1)", h5.Remaining)
 	}
 }
 

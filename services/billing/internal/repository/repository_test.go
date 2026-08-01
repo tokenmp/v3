@@ -651,21 +651,44 @@ func TestReserve_CodingIdempotentSkipsEnforcement(t *testing.T) {
 	applyMigrations(t, d)
 	db := openDB(t, d)
 	insertUser(t, db, "idem")
-	lim := 1
+	lim := 2
 	planID := insertCodingPlan(t, db, "idemplan", &lim, nil, nil)
 	insertUserPlanActivated(t, db, "idem", planID, "active", time.Now().UTC())
 	r := New(db)
 	ctx := context.Background()
 
+	// First reservation takes one active hold. Under active-hold semantics the
+	// reserved hold counts against the window, so window consumed becomes 1.
 	if err := r.Reserve(ctx, "res-idem", "idem", "req-idem", "coding", 1, 1, nil); err != nil {
 		t.Fatalf("Reserve first: %v", err)
 	}
-	// Fill the window so a fresh reserve would be rejected.
-	consume(t, r, ctx, "idem", "a")
-	// Repeat reserve of the SAME id must stay idempotent (nil), not be
-	// rejected by the now-full window.
+	// A second, independent reservation saturates the hard limit of 2
+	// (window consumed becomes 2); any further fresh reserve is rejected.
+	if err := r.Reserve(ctx, "res-idem2", "idem", "req-idem2", "coding", 1, 1, nil); err != nil {
+		t.Fatalf("Reserve second (fills window): %v", err)
+	}
+	// Repeat reserve of the SAME id must stay idempotent (nil): the
+	// existence check short-circuits before window enforcement, so a retry
+	// of the first reservation succeeds even though the window is now full.
 	if err := r.Reserve(ctx, "res-idem", "idem", "req-idem", "coding", 1, 1, nil); err != nil {
 		t.Fatalf("Reserve repeat (idempotent): %v", err)
+	}
+	// Idempotency is keyed on reservation id alone: Reserve has no payload
+	// conflict path (unlike Finalize/Release, which hash and reject
+	// mismatched payloads), so repeating res-idem with a DIFFERENT request_id
+	// also returns nil and leaves the stored row untouched.
+	if err := r.Reserve(ctx, "res-idem", "idem", "req-other", "coding", 1, 1, nil); err != nil {
+		t.Fatalf("Reserve repeat with different request_id (id-keyed, no conflict): %v", err)
+	}
+	// A third, distinct reservation id is genuinely new and must be rejected
+	// by the now-full window — proving the limit was not merely relaxed to
+	// mask the idempotency behavior: enforcement still bites on a fresh id.
+	err := r.Reserve(ctx, "res-idem3", "idem", "req-idem3", "coding", 1, 1, nil)
+	if !errors.Is(err, ErrQuotaExceeded) {
+		t.Fatalf("expected ErrQuotaExceeded for a fresh reservation when the window is full, got %v", err)
+	}
+	if s := quotaExceededScope(err); s != "hour5" {
+		t.Fatalf("scope = %q, want hour5", s)
 	}
 }
 
