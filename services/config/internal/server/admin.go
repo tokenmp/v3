@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -16,60 +17,78 @@ import (
 
 const maxAdminJSON = 4 << 20 // 4 MiB
 
-// registerAdminRoutes wires all config admin CRUD routes.
+// registerAdminRoutes wires all config admin CRUD routes. Each route is
+// individually wrapped with the admin-auth middleware (fail-closed 503 when
+// unset in production; dev no-auth passes through) so no admin route is
+// default-open.
 func (s *Server) registerAdminRoutes(r chi.Router) {
 	if s.adminReader == nil || s.adminWriter == nil {
 		return
 	}
+	mw := s.adminAuthChi()
 
 	// Models
-	r.Get("/v1/config/admin/models", s.handleAdminListModels)
-	r.Post("/v1/config/admin/models", s.handleAdminCreateModel)
-	r.Get("/v1/config/admin/models/{id}", s.handleAdminGetModel)
-	r.Patch("/v1/config/admin/models/{id}", s.handleAdminUpdateModel)
-	r.Delete("/v1/config/admin/models/{id}", s.handleAdminDeleteModel)
+	r.With(mw).Get("/v1/config/admin/models", s.handleAdminListModels)
+	r.With(mw).Post("/v1/config/admin/models", s.handleAdminCreateModel)
+	r.With(mw).Get("/v1/config/admin/models/{id}", s.handleAdminGetModel)
+	r.With(mw).Patch("/v1/config/admin/models/{id}", s.handleAdminUpdateModel)
+	r.With(mw).Delete("/v1/config/admin/models/{id}", s.handleAdminDeleteModel)
 
 	// Providers
-	r.Get("/v1/config/admin/providers", s.handleAdminListProviders)
-	r.Post("/v1/config/admin/providers", s.handleAdminCreateProvider)
-	r.Get("/v1/config/admin/providers/{id}", s.handleAdminGetProvider)
-	r.Patch("/v1/config/admin/providers/{id}", s.handleAdminUpdateProvider)
-	r.Delete("/v1/config/admin/providers/{id}", s.handleAdminDeleteProvider)
+	r.With(mw).Get("/v1/config/admin/providers", s.handleAdminListProviders)
+	r.With(mw).Post("/v1/config/admin/providers", s.handleAdminCreateProvider)
+	r.With(mw).Get("/v1/config/admin/providers/{id}", s.handleAdminGetProvider)
+	r.With(mw).Patch("/v1/config/admin/providers/{id}", s.handleAdminUpdateProvider)
+	r.With(mw).Delete("/v1/config/admin/providers/{id}", s.handleAdminDeleteProvider)
 
 	// Adapters
-	r.Get("/v1/config/admin/adapters", s.handleAdminListAdapters)
-	r.Post("/v1/config/admin/adapters", s.handleAdminCreateAdapter)
-	r.Get("/v1/config/admin/adapters/{id}", s.handleAdminGetAdapter)
-	r.Patch("/v1/config/admin/adapters/{id}", s.handleAdminUpdateAdapter)
-	r.Delete("/v1/config/admin/adapters/{id}", s.handleAdminDeleteAdapter)
+	r.With(mw).Get("/v1/config/admin/adapters", s.handleAdminListAdapters)
+	r.With(mw).Post("/v1/config/admin/adapters", s.handleAdminCreateAdapter)
+	r.With(mw).Get("/v1/config/admin/adapters/{id}", s.handleAdminGetAdapter)
+	r.With(mw).Patch("/v1/config/admin/adapters/{id}", s.handleAdminUpdateAdapter)
+	r.With(mw).Delete("/v1/config/admin/adapters/{id}", s.handleAdminDeleteAdapter)
 
 	// Endpoints (provider sub-resource)
-	r.Get("/v1/config/admin/providers/{id}/endpoints", s.handleAdminListEndpoints)
-	r.Post("/v1/config/admin/providers/{id}/endpoints", s.handleAdminCreateEndpoint)
-	r.Patch("/v1/config/admin/endpoints/{eid}", s.handleAdminUpdateEndpoint)
-	r.Delete("/v1/config/admin/endpoints/{eid}", s.handleAdminDeleteEndpoint)
+	r.With(mw).Get("/v1/config/admin/providers/{id}/endpoints", s.handleAdminListEndpoints)
+	r.With(mw).Post("/v1/config/admin/providers/{id}/endpoints", s.handleAdminCreateEndpoint)
+	r.With(mw).Patch("/v1/config/admin/endpoints/{eid}", s.handleAdminUpdateEndpoint)
+	r.With(mw).Delete("/v1/config/admin/endpoints/{eid}", s.handleAdminDeleteEndpoint)
 
 	// Credentials (provider sub-resource)
-	r.Get("/v1/config/admin/providers/{id}/credentials", s.handleAdminListCredentials)
-	r.Post("/v1/config/admin/providers/{id}/credentials", s.handleAdminCreateCredential)
-	r.Patch("/v1/config/admin/credentials/{cid}", s.handleAdminUpdateCredential)
-	r.Delete("/v1/config/admin/credentials/{cid}", s.handleAdminDeleteCredential)
+	r.With(mw).Get("/v1/config/admin/providers/{id}/credentials", s.handleAdminListCredentials)
+	r.With(mw).Post("/v1/config/admin/providers/{id}/credentials", s.handleAdminCreateCredential)
+	r.With(mw).Patch("/v1/config/admin/credentials/{cid}", s.handleAdminUpdateCredential)
+	r.With(mw).Delete("/v1/config/admin/credentials/{cid}", s.handleAdminDeleteCredential)
 
 	// Routes
-	r.Get("/v1/config/admin/routes", s.handleAdminListRoutes)
-	r.Post("/v1/config/admin/routes", s.handleAdminCreateRoute)
-	r.Get("/v1/config/admin/routes/{id}", s.handleAdminGetRoute)
-	r.Patch("/v1/config/admin/routes/{id}", s.handleAdminUpdateRoute)
-	r.Delete("/v1/config/admin/routes/{id}", s.handleAdminDeleteRoute)
-	r.Get("/v1/config/admin/routes/{id}/credentials", s.handleAdminListRouteCredentials)
-	r.Put("/v1/config/admin/routes/{id}/credentials", s.handleAdminSetRouteCredentials)
+	r.With(mw).Get("/v1/config/admin/routes", s.handleAdminListRoutes)
+	r.With(mw).Post("/v1/config/admin/routes", s.handleAdminCreateRoute)
+	r.With(mw).Get("/v1/config/admin/routes/{id}", s.handleAdminGetRoute)
+	r.With(mw).Patch("/v1/config/admin/routes/{id}", s.handleAdminUpdateRoute)
+	r.With(mw).Delete("/v1/config/admin/routes/{id}", s.handleAdminDeleteRoute)
+	r.With(mw).Get("/v1/config/admin/routes/{id}/credentials", s.handleAdminListRouteCredentials)
+	r.With(mw).Put("/v1/config/admin/routes/{id}/credentials", s.handleAdminSetRouteCredentials)
 
 	// Compile
-	r.Post("/v1/config/admin/compile", s.handleAdminCompile)
+	r.With(mw).Post("/v1/config/admin/compile", s.handleAdminCompile)
 
 	// Global policy (retry/timeout/auto_model_ids KV store).
-	r.Get("/v1/config/admin/global", s.handleAdminGetGlobal)
-	r.Put("/v1/config/admin/global/{key}", s.handleAdminSetGlobal)
+	r.With(mw).Get("/v1/config/admin/global", s.handleAdminGetGlobal)
+	r.With(mw).Put("/v1/config/admin/global/{key}", s.handleAdminSetGlobal)
+}
+
+// adminAuthChi returns a chi middleware. When adminAuth is configured it
+// enforces the shared secret; otherwise it fail-closes with 503 (no
+// default-open admin path) unless dev no-auth is active.
+func (s *Server) adminAuthChi() func(http.Handler) http.Handler {
+	if s.adminAuth != nil {
+		return s.adminAuth.Wrap
+	}
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			httpresp.Error(w, httpresp.CodeServiceUnavailable, "admin not configured")
+		})
+	}
 }
 
 // ---- Models ----
@@ -325,40 +344,67 @@ func (s *Server) handleAdminListCredentials(w http.ResponseWriter, r *http.Reque
 }
 
 func (s *Server) handleAdminCreateCredential(w http.ResponseWriter, r *http.Request) {
-	var c repository.UpstreamCredential
-	if err := decodeAdminBody(w, r, &c); err != nil {
+	// Decode into a local struct that captures any submitted api_key so the
+	// secret boundary can reject it. The persisted model never serializes
+	// api_key (json:"-"), so this is the only place it is inspected.
+	var body struct {
+		repository.UpstreamCredential
+		APIKey *string `json:"api_key,omitempty"`
+	}
+	if err := decodeAdminBody(w, r, &body); err != nil {
 		return
 	}
+	c := body.UpstreamCredential
 	c.ProviderID = chi.URLParam(r, "id")
 	if c.ID == "" {
 		httpresp.Error(w, httpresp.CodeBadRequest, "id required")
 		return
 	}
-	// Plaintext API key is required; auto-derive prefix/suffix and credential_ref.
-	if c.APIKey == nil || *c.APIKey == "" {
-		httpresp.Error(w, httpresp.CodeBadRequest, "api_key required")
+	// Secret boundary: plaintext API keys must never enter the DB, snapshots,
+	// audit or logs. Reject any provided api_key. credential_ref must be an
+	// opaque vault:// ref (the only acceptable secret-free reference).
+	if body.APIKey != nil && *body.APIKey != "" {
+		s.logger.Warn("credential create rejected: plaintext api_key provided", "credential_id", c.ID)
+		httpresp.Error(w, httpresp.CodeBadRequest, "plaintext api_key rejected; use a vault:// credential_ref")
 		return
 	}
-	apiKey := *c.APIKey
-	prefix, suffix := deriveKeyParts(apiKey)
-	c.KeyPrefix = &prefix
-	c.KeySuffix = &suffix
+	c.APIKey = nil
 	if c.CredentialRef == "" {
-		ref := "vault://" + c.ProviderID + "/credential/" + c.ID
-		c.CredentialRef = ref
+		c.CredentialRef = "vault://" + c.ProviderID + "/credential/" + c.ID
+	}
+	if !isVaultRef(c.CredentialRef) {
+		httpresp.Error(w, httpresp.CodeBadRequest, "credential_ref must be a vault:// reference")
+		return
+	}
+	// key_prefix/suffix are display-only hints; do not derive from any secret.
+	if c.KeyPrefix != nil {
+		*c.KeyPrefix = sanitizeDisplayHint(*c.KeyPrefix)
+	}
+	if c.KeySuffix != nil {
+		*c.KeySuffix = sanitizeDisplayHint(*c.KeySuffix)
 	}
 	if err := s.adminWriter.CreateCredential(r.Context(), &c); err != nil {
 		writeAdminWriteErr(w, err)
 		return
 	}
-	// Do not return the plaintext api_key in the list response for safety.
-	c.APIKey = nil
+	// Never echo api_key (already nil). Credential ref is secret-free.
 	httpresp.Created(w, c)
 }
 
 func (s *Server) handleAdminUpdateCredential(w http.ResponseWriter, r *http.Request) {
 	fields, err := decodeAdminFields(w, r)
 	if err != nil {
+		return
+	}
+	// Secret boundary: strip any attempted plaintext api_key write. A credential
+	// update may adjust priority/status/hints but must never persist a secret.
+	if _, ok := fields["api_key"]; ok {
+		s.logger.Warn("credential update rejected: plaintext api_key in patch", "credential_id", chi.URLParam(r, "cid"))
+		httpresp.Error(w, httpresp.CodeBadRequest, "plaintext api_key rejected; use a vault:// credential_ref")
+		return
+	}
+	if ref, ok := fields["credential_ref"].(string); ok && ref != "" && !isVaultRef(ref) {
+		httpresp.Error(w, httpresp.CodeBadRequest, "credential_ref must be a vault:// reference")
 		return
 	}
 	if err := s.adminWriter.UpdateCredential(r.Context(), chi.URLParam(r, "cid"), fields); err != nil {
@@ -543,28 +589,29 @@ func (s *Server) handleAdminCompile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create a draft revision, write the snapshot JSON, and publish.
+	// Create a draft with the snapshot and publish atomically. Each call is
+	// its own transaction; PublishRevision archives the previous published and
+	// publishes the new draft in one tx, so a compile never leaves a half-draft.
 	revision := fmt.Sprintf("compile-%d", time.Now().UTC().Unix())
-	draftID, err := s.writer.CreateDraft(ctx, revision, "system", "admin compile", nil)
+	res, err := s.writer.CreateDraftWithSnapshot(ctx, repository.DraftInput{
+		Revision:     revision,
+		CreatedBy:    "system",
+		ChangeLog:    "admin compile",
+		SnapshotJSON: snapshotJSON,
+	}, repository.AuditMeta{Actor: "system", ActorKind: "service", RequestID: r.Header.Get("X-Request-ID")})
 	if err != nil {
 		s.logger.Warn("compile: create draft failed", "error", err)
-		httpresp.Error(w, httpresp.CodeInternalError, "internal error")
+		writeWriteErr(w, err)
 		return
 	}
-
-	if err := s.writer.UpdateDraftJSON(ctx, draftID, snapshotJSON); err != nil {
-		s.logger.Warn("compile: update draft json failed", "error", err)
-		httpresp.Error(w, httpresp.CodeInternalError, "internal error")
-		return
-	}
-
-	if err := s.writer.PublishRevision(ctx, draftID); err != nil {
+	if err := s.writer.PublishRevision(ctx, res.ID, repository.AuditMeta{Actor: "system", ActorKind: "service", RequestID: r.Header.Get("X-Request-ID")}); err != nil {
 		s.logger.Warn("compile: publish failed", "error", err)
-		httpresp.Error(w, httpresp.CodeInternalError, "internal error")
+		writeWriteErr(w, err)
 		return
 	}
 
 	httpresp.OK(w, map[string]any{
+		"id":        res.ID,
 		"revision":  revision,
 		"published": true,
 	})
@@ -728,6 +775,21 @@ func (s *Server) handleModelsCatalog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpresp.OK(w, ids)
+}
+
+// isVaultRef reports whether ref is an opaque vault:// reference. It does
+// not accept other schemes to keep the secret-free boundary uniform.
+func isVaultRef(ref string) bool {
+	return strings.HasPrefix(ref, "vault://") && len(strings.TrimPrefix(ref, "vault://")) > 0
+}
+
+// sanitizeDisplayHint truncates a display-only prefix/suffix hint to a bounded
+// length and strips control chars. It is not derived from any secret.
+func sanitizeDisplayHint(s string) string {
+	if len(s) > 32 {
+		s = s[:32]
+	}
+	return strings.TrimSpace(s)
 }
 
 // deriveKeyParts extracts a safe prefix (first 8 chars) and suffix (last 4 chars)

@@ -6,9 +6,11 @@ package config
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Config holds the resolved runtime configuration for the API Service.
@@ -52,6 +54,32 @@ type Config struct {
 	// CRUD endpoints return 503. When set, the edge proxies admin config
 	// management routes to the Config Service.
 	ConfigServiceURL string
+
+	// ConfigServiceToken is the opaque shared secret forwarded to the Config
+	// Service as X-Admin-Token for service-to-service admin authorization.
+	// Required when ConfigAdminProxyEnabled is true (fail-fast at startup so the
+	// admin proxy never runs half-secured). Optional for the read-only client
+	// (anonymous snapshot/model reads). Never logged.
+	//
+	// Resolution order at Load time:
+	//   1. API_CONFIG_SERVICE_TOKEN_FILE (production): read from a regular file
+	//      via the strict secret-file loader (Lstat rejects symlink/non-regular,
+	//      post-open SameFile TOCTOU guard, size cap, strict UTF-8, no NUL/newline,
+	//      trimmed). This is the only source compatible with a Compose
+	//      read-only secret mount.
+	//   2. API_CONFIG_SERVICE_TOKEN (dev/test only): the literal token value is
+	//      read directly from the environment. This exists solely for local
+	//      development and the no-database unit test suite; it MUST NOT be used
+	//      in production (the value would land in the process environment / a
+	//      Compose env file). Providing BOTH sources is a hard startup error.
+	ConfigServiceToken string
+
+	// ConfigAdminProxyEnabled gates registration of the admin config CRUD proxy
+	// routes (/api/v1/admin/config/*). When true, ConfigServiceToken is
+	// required at startup (fail-fast). When false (default), no admin proxy is
+	// registered; the read-only Config Service client (model catalog) can still
+	// be used without a token. Explicit opt-in avoids a default-open write path.
+	ConfigAdminProxyEnabled bool
 
 	// JWTPublicKeyFile is the path to the Ed25519 public key PEM file used
 	// to verify client JWTs. It is required unless AllowNoopAuth is explicitly
@@ -157,6 +185,22 @@ func Load() (*Config, error) {
 	if cfg.ConfigServiceURL != "" && !validHTTPBaseURL(cfg.ConfigServiceURL) {
 		return nil, errors.New("API_CONFIG_SERVICE_URL must be an http(s) base URL without query or fragment")
 	}
+	if err := loadConfigServiceToken(cfg); err != nil {
+		return nil, err
+	}
+	if v, ok := os.LookupEnv("API_CONFIG_ADMIN_PROXY_ENABLED"); ok {
+		enabled, err := parseStrictBool("API_CONFIG_ADMIN_PROXY_ENABLED", v)
+		if err != nil {
+			return nil, err
+		}
+		cfg.ConfigAdminProxyEnabled = enabled
+	}
+	// Fail-fast: the admin proxy must never start half-secured. When the proxy
+	// is enabled, the shared secret is mandatory (read-only use does not set
+	// this flag, so it is unaffected).
+	if cfg.ConfigAdminProxyEnabled && strings.TrimSpace(cfg.ConfigServiceToken) == "" {
+		return nil, errors.New("API_CONFIG_SERVICE_TOKEN_FILE (or API_CONFIG_SERVICE_TOKEN in dev/test) is required when API_CONFIG_ADMIN_PROXY_ENABLED=true")
+	}
 
 	cfg.JWTPublicKeyFile = strings.TrimSpace(os.Getenv("API_JWT_PUBLIC_KEY_FILE"))
 	if v, ok := os.LookupEnv("API_ALLOW_NOOP_AUTH"); ok {
@@ -207,3 +251,125 @@ func validHTTPBaseURL(raw string) bool {
 	}
 	return true
 }
+
+// maxConfigTokenBytes bounds the size of a Config Service admin token file so
+// a hostile or accidentally huge file cannot exhaust memory. A shared secret
+// is far smaller than this cap; anything larger is rejected.
+const maxConfigTokenBytes int64 = 8 << 10 // 8 KiB
+
+// loadConfigServiceToken resolves the Config Service admin shared secret into
+// cfg.ConfigServiceToken. The production source is
+// API_CONFIG_SERVICE_TOKEN_FILE, read via loadTokenFile (Lstat rejects
+// symlink/non-regular, post-open SameFile TOCTOU guard, size cap, strict
+// UTF-8, no NUL/newline, trimmed). The legacy direct
+// API_CONFIG_SERVICE_TOKEN is retained solely for local dev/test so the
+// no-database unit test suite can inject a literal value without touching the
+// filesystem; it MUST NOT be used in production. Providing BOTH sources is a
+// hard startup error. All failures are stable sentinel errors that never
+// echo the file path, OS error text, or token content.
+func loadConfigServiceToken(cfg *Config) error {
+	tokenFile := strings.TrimSpace(os.Getenv("API_CONFIG_SERVICE_TOKEN_FILE"))
+	directToken := os.Getenv("API_CONFIG_SERVICE_TOKEN")
+
+	if tokenFile != "" && directToken != "" {
+		return errors.New("API_CONFIG_SERVICE_TOKEN_FILE and API_CONFIG_SERVICE_TOKEN are mutually exclusive; set only one")
+	}
+
+	if tokenFile != "" {
+		t, err := loadTokenFile(tokenFile)
+		if err != nil {
+			return err
+		}
+		cfg.ConfigServiceToken = t
+		return nil
+	}
+
+	// Direct env (dev/test only). Trim exactly as the file path would so the
+	// two sources are interchangeable for callers.
+	cfg.ConfigServiceToken = strings.TrimSpace(directToken)
+	return nil
+}
+
+// loadTokenFile reads the shared secret from a regular file using the project's
+// established secret-file safety pattern (mirroring the Executor configsource
+// and Auth key-file loaders). It is fail-closed: every non-happy path returns
+// a stable sentinel error that never leaks the path, OS error text, or token
+// content.
+//
+// Safety properties:
+//   - The path is trimmed and rejected as blank before any filesystem access.
+//   - Lstat rejects symlinks and non-regular files without following links.
+//   - After opening, a post-open f.Stat verifies the descriptor is still a
+//     regular file referring to the same identity (os.SameFile) as the prior
+//     Lstat. This closes the Lstat-then-Open TOCTOU window in which the path
+//     is swapped (e.g. to a symlink) between the two calls.
+//   - The file size is bounded by maxConfigTokenBytes via both the stat and a
+//     LimitReader so a file that lies about its size or grows mid-read cannot
+//     exhaust memory.
+//   - The content is validated for strict UTF-8 and must not contain NUL bytes
+//     or newline characters (a single-line shared secret has none), then is
+//     trimmed of surrounding whitespace.
+//   - An empty result (blank after trim) is rejected.
+func loadTokenFile(path string) (string, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "", errTokenFileRequired
+	}
+
+	info, err := os.Lstat(path)
+	if err != nil {
+		return "", errTokenLoadFailed
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return "", errTokenLoadFailed
+	}
+	if info.Size() > maxConfigTokenBytes {
+		return "", errTokenLoadFailed
+	}
+
+	f, err := os.Open(path)
+	if err != nil {
+		return "", errTokenLoadFailed
+	}
+	defer f.Close()
+
+	// Fail-closed post-open verification: the open descriptor must be a regular
+	// file and refer to the same file identity as the prior Lstat. f.Stat
+	// follows symlinks, so a path swapped to a symlink between Lstat and Open
+	// is caught here.
+	fi, err := f.Stat()
+	if err != nil {
+		return "", errTokenLoadFailed
+	}
+	if !fi.Mode().IsRegular() || !os.SameFile(info, fi) {
+		return "", errTokenLoadFailed
+	}
+
+	raw, err := io.ReadAll(io.LimitReader(f, maxConfigTokenBytes+1))
+	if err != nil {
+		return "", errTokenLoadFailed
+	}
+	if int64(len(raw)) > maxConfigTokenBytes {
+		return "", errTokenLoadFailed
+	}
+
+	t := strings.TrimSpace(string(raw))
+	if t == "" {
+		return "", errTokenLoadFailed
+	}
+	if !utf8.ValidString(t) {
+		return "", errTokenLoadFailed
+	}
+	if strings.ContainsRune(t, '\x00') || strings.ContainsAny(t, "\r\n") {
+		return "", errTokenLoadFailed
+	}
+	return t, nil
+}
+
+// Sentinel errors for the Config Service admin token file loader. They never
+// echo the file path, OS error text, or token content; callers classify with
+// errors.Is. They are non-wrapping (errors.Unwrap returns nil).
+var (
+	errTokenFileRequired = errors.New("config: API_CONFIG_SERVICE_TOKEN_FILE is required but not configured")
+	errTokenLoadFailed   = errors.New("config: API_CONFIG_SERVICE_TOKEN_FILE could not be loaded")
+)

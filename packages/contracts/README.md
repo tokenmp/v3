@@ -22,6 +22,9 @@ Auth / Executor conformance tests ──直接加载验证──▶ @tokenmp/con
 |---|---|---|---|
 | Auth API | Auth Service | v1 | `openapi/auth/v1.yaml` |
 | Executor API | Executor Service | v1 | `openapi/executor/v1.yaml` |
+| Edge/Panel API | API Service (Edge/BFF) | v1 | `openapi/api/v1.yaml` |
+| Notice API | Notice Service | v1 | `openapi/notice/v1.yaml` |
+| Config API | Config Service | v1 | `openapi/config/v1.yaml` |
 
 ## 消费者须知
 

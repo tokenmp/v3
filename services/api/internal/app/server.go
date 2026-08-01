@@ -45,7 +45,10 @@ type Deps struct {
 	Billing   *billing.Client
 	AdminAuth *admin.AuthClient
 	ConfigCfg *config.Client
-	Settings  *settings.Store
+	// ConfigAdminProxyEnabled gates registration of the admin config CRUD
+	// proxy routes. When false, only the read-only models catalog is registered.
+	ConfigAdminProxyEnabled bool
+	Settings                *settings.Store
 	// KeysHandler 注册 /api/v1/keys* 路由（鉴权但不走配额）；nil 时不注册。
 	KeysHandler *keys.Handler
 	Logger      *slog.Logger
@@ -63,7 +66,7 @@ func NewServer(deps Deps, readHeaderTimeout, idleTimeout time.Duration) *http.Se
 	}
 	panelHandlers := panel.New(deps.Logging, deps.Billing, deps.Settings, deps.Logger)
 	adminHandlers := admin.New(deps.Logging, deps.Billing, deps.AdminAuth, deps.Logger)
-	configHandlers := admin.NewConfigHandlers(deps.ConfigCfg)
+	configHandlers := admin.NewConfigHandlers(deps.ConfigCfg, deps.ConfigAdminProxyEnabled)
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)

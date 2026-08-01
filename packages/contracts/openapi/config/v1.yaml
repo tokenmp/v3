@@ -1,0 +1,692 @@
+openapi: 3.0.3
+info:
+  title: TokenMP v3 Config API
+  version: 0.1.0
+  description: |
+    TokenMP v3 Config API — the single source of truth for consumers of the
+    Config Service control-plane HTTP interface.
+
+    The Config Service owns provider/model/route/credential/adapter
+    configuration and publishes versioned, immutable configuration snapshots.
+    The latest published snapshot is served raw to executors via
+    GET /v1/config/snapshots/latest (this read is anonymous; compilation into
+    a runtime snapshot happens executor-side).
+
+    Write endpoints (draft create/list/get/update, publish, archive, revert
+    and audit) are admin-only and require service-to-service authorization
+    (a shared secret). They never accept or return plaintext secrets:
+    credentials are referenced exclusively by opaque `vault://` refs.
+
+    Concurrency control: draft updates use optimistic versioning (If-Match
+    header / ETag). A precondition failure returns 412. Conflicting state
+    transitions return 409. At most one published revision is active at any
+    time.
+
+# No fixed `servers` entry: the contract is deployment-agnostic. Consumers bind
+# the base URL at runtime; hardcoding 127.0.0.1 would leak a local dev host
+# and break non-local deployments.
+security:
+  - AdminTokenAuth: []
+
+paths:
+  /healthz:
+    get:
+      operationId: getConfigHealthz
+      summary: Liveness probe
+      security: []
+      responses:
+        '200':
+          description: Service is alive.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+  /readyz:
+    get:
+      operationId: getConfigReadyz
+      summary: Readiness probe
+      security: []
+      description: Reports whether the service is ready, including store connectivity. A failure never leaks the underlying cause.
+      responses:
+        '200':
+          description: Service is ready.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+        '503':
+          description: Service is not ready. Body omits the underlying cause.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /v1/config/snapshots/latest:
+    get:
+      operationId: getConfigSnapshotLatest
+      summary: Get latest published snapshot
+      security: []
+      description: |
+        Returns the most recently published raw configuration snapshot JSON.
+        This read is anonymous and is the endpoint executors pull. The body is
+        the raw snapshot; it is not wrapped in the error envelope. Headers carry
+        the revision identifier and content digest for integrity checks.
+      responses:
+        '200':
+          description: Latest published snapshot.
+          headers:
+            X-Config-Revision:
+              $ref: '#/components/headers/XConfigRevision'
+            X-Config-SHA256:
+              $ref: '#/components/headers/XConfigSHA256'
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConfigSnapshot'
+        '404':
+          description: No published snapshot exists.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /v1/config/drafts:
+    post:
+      operationId: createConfigDraft
+      summary: Create a draft revision
+      description: |
+        Creates a new mutable draft revision (version 1). An optional initial
+        snapshot may be supplied and is stored atomically with the draft. The
+        revision string must be unique; a duplicate returns 409.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateDraftRequest'
+      responses:
+        '201':
+          description: Draft created.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DraftResult'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /v1/config/drafts/{revisionId}:
+    get:
+      operationId: getConfigDraft
+      summary: Get a draft or revision detail
+      parameters:
+        - $ref: '#/components/parameters/RevisionId'
+      responses:
+        '200':
+          description: Revision detail.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RevisionDetail'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    patch:
+      operationId: updateConfigDraft
+      summary: Update a draft snapshot (optimistic)
+      description: |
+        Performs an optimistic-concurrency update of a draft's snapshot. Supply
+        the expected version via the If-Match header; on success the version is
+        bumped and returned in the ETag response header. A version mismatch
+        returns 412. Only drafts may be updated; updating a published or
+        archived revision returns 409.
+      parameters:
+        - $ref: '#/components/parameters/RevisionId'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfigSnapshot'
+      responses:
+        '200':
+          description: Draft updated.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateDraftResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /v1/config/revisions/{revisionId}/publish:
+    post:
+      operationId: publishConfigRevision
+      summary: Publish a draft revision
+      description: |
+        Atomically publishes a draft: the draft snapshot becomes an immutable
+        published revision, the previously active published revision (if any) is
+        archived, and a secret-free audit entry is recorded. At most one
+        published revision is active at any time. An empty snapshot returns 409.
+      parameters:
+        - $ref: '#/components/parameters/RevisionId'
+      responses:
+        '200':
+          description: Revision published.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublishResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /v1/config/revisions/{revisionId}/archive:
+    post:
+      operationId: archiveConfigRevision
+      summary: Archive a revision
+      description: |
+        Transitions a published or draft revision to archived. It does not copy
+        or revive any revision; it only changes status. After archiving the
+        active published revision, no published revision is active.
+      parameters:
+        - $ref: '#/components/parameters/RevisionId'
+      responses:
+        '200':
+          description: Revision archived.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArchiveResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /v1/config/revisions/{revisionId}/revert:
+    post:
+      operationId: revertConfigRevision
+      summary: Revert to a historical snapshot
+      description: |
+        Creates and publishes a NEW revision that copies the snapshot of an
+        arbitrary historical immutable revision (published or archived). It
+        never modifies or revives the source revision. The previously active
+        published revision is archived. Returns the new published revision id.
+      parameters:
+        - $ref: '#/components/parameters/RevisionId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RevertRequest'
+      responses:
+        '200':
+          description: New revision published from the historical snapshot.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RevertResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /v1/config/revisions:
+    get:
+      operationId: listConfigRevisions
+      summary: List revisions
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Paginated revision list, newest first.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RevisionList'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /v1/config/audit:
+    get:
+      operationId: listConfigAudit
+      summary: List audit entries
+      description: |
+        Returns safe, secret-free audit entries (status transitions, actors and
+        request identifiers). Audit entries never embed a full snapshot body
+        or any secret.
+      parameters:
+        - $ref: '#/components/parameters/AuditRevisionId'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Paginated audit list, newest first.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditList'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+components:
+  securitySchemes:
+    AdminTokenAuth:
+      type: apiKey
+      in: header
+      name: X-Admin-Token
+      description: Opaque shared secret for service-to-service admin authorization.
+  parameters:
+    RevisionId:
+      name: revisionId
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+    IfMatch:
+      name: If-Match
+      in: header
+      required: false
+      description: Expected draft version for optimistic concurrency. Omit to update against the current version.
+      schema:
+        type: integer
+        minimum: 1
+    Limit:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 50
+    Offset:
+      name: offset
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+    AuditRevisionId:
+      name: revision_id
+      in: query
+      required: false
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+  headers:
+    CacheControlNoStore:
+      description: Disables caching of sensitive or mutable responses.
+      schema:
+        type: string
+        enum: [no-store]
+    ETag:
+      description: Current draft version after an optimistic update.
+      schema:
+        type: string
+    XConfigRevision:
+      description: Revision identifier of the served snapshot.
+      schema:
+        type: string
+    XConfigSHA256:
+      description: Content digest of the served snapshot for integrity checks.
+      schema:
+        type: string
+  responses:
+    NotFound:
+      description: Resource not found.
+      headers:
+        Cache-Control:
+          $ref: '#/components/headers/CacheControlNoStore'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Conflict:
+      description: Conflicting state (duplicate, wrong status, or empty snapshot).
+      headers:
+        Cache-Control:
+          $ref: '#/components/headers/CacheControlNoStore'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    PreconditionFailed:
+      description: Optimistic-concurrency version mismatch.
+      headers:
+        Cache-Control:
+          $ref: '#/components/headers/CacheControlNoStore'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    InternalError:
+      description: Internal error; body never leaks the underlying cause.
+      headers:
+        Cache-Control:
+          $ref: '#/components/headers/CacheControlNoStore'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+  schemas:
+    HealthResponse:
+      type: object
+      required: [status]
+      additionalProperties: false
+      properties:
+        status:
+          type: string
+          enum: [ok, ready]
+    Error:
+      type: object
+      required: [error]
+      additionalProperties: false
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          additionalProperties: false
+          properties:
+            code:
+              type: string
+              description: Stable machine-readable error code.
+            message:
+              type: string
+              description: Safe human-readable message; never leaks internals.
+    ConfigSnapshot:
+      type: object
+      description: |
+        Raw configuration snapshot JSON. The schema is intentionally permissive
+        (free-form) so the contract does not duplicate executor-internal
+        parsing details; consumers treat it as opaque JSON. It contains no
+        secrets — credentials appear only as opaque `vault://` references.
+      additionalProperties: true
+    CreateDraftRequest:
+      type: object
+      required: [revision]
+      additionalProperties: false
+      properties:
+        revision:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Unique human-readable revision identifier.
+        created_by:
+          type: string
+          maxLength: 200
+          description: Safe actor identifier; never a secret.
+        change_log:
+          type: string
+          maxLength: 2000
+        snapshot_json:
+          $ref: '#/components/schemas/ConfigSnapshot'
+    DraftResult:
+      type: object
+      required: [id, revision, version, status]
+      additionalProperties: false
+      properties:
+        id:
+          type: integer
+          format: int64
+        revision:
+          type: string
+        version:
+          type: integer
+          minimum: 1
+        status:
+          type: string
+          enum: [draft]
+    UpdateDraftResult:
+      type: object
+      required: [id, version, updated]
+      additionalProperties: false
+      properties:
+        id:
+          type: integer
+          format: int64
+        version:
+          type: integer
+          minimum: 1
+        updated:
+          type: boolean
+    RevisionDetail:
+      type: object
+      required: [id, revision, status, version]
+      additionalProperties: false
+      properties:
+        id:
+          type: integer
+          format: int64
+        revision:
+          type: string
+        status:
+          type: string
+          enum: [draft, published, archived]
+        version:
+          type: integer
+          minimum: 1
+        change_log:
+          type: string
+        created_by:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        published_at:
+          type: string
+          format: date-time
+          nullable: true
+        archived_at:
+          type: string
+          format: date-time
+          nullable: true
+        source_revision_id:
+          type: integer
+          format: int64
+          nullable: true
+          description: For a revert, the immutable revision whose snapshot was copied.
+        revert_note:
+          type: string
+        sha256:
+          type: string
+        snapshot_json:
+          $ref: '#/components/schemas/ConfigSnapshot'
+    RevisionSummary:
+      type: object
+      required: [id, revision, status, version]
+      additionalProperties: false
+      properties:
+        id:
+          type: integer
+          format: int64
+        revision:
+          type: string
+        status:
+          type: string
+          enum: [draft, published, archived]
+        version:
+          type: integer
+          minimum: 1
+        created_by:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        published_at:
+          type: string
+          format: date-time
+          nullable: true
+        archived_at:
+          type: string
+          format: date-time
+          nullable: true
+        change_log:
+          type: string
+        source_revision_id:
+          type: integer
+          format: int64
+          nullable: true
+        revert_note:
+          type: string
+    RevisionList:
+      type: object
+      required: [items, total]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/RevisionSummary'
+        total:
+          type: integer
+          minimum: 0
+    PublishResult:
+      type: object
+      required: [id, published]
+      additionalProperties: false
+      properties:
+        id:
+          type: integer
+          format: int64
+        published:
+          type: boolean
+    ArchiveResult:
+      type: object
+      required: [id, archived]
+      additionalProperties: false
+      properties:
+        id:
+          type: integer
+          format: int64
+        archived:
+          type: boolean
+    RevertRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        note:
+          type: string
+          maxLength: 2000
+        created_by:
+          type: string
+          maxLength: 200
+    RevertResult:
+      type: object
+      required: [id, rolled_back_from, published]
+      additionalProperties: false
+      properties:
+        id:
+          type: integer
+          format: int64
+          description: The newly created and published revision id.
+        rolled_back_from:
+          type: integer
+          format: int64
+          description: The source historical revision id.
+        published:
+          type: boolean
+    AuditEntry:
+      type: object
+      required: [id, action, entity_type, at]
+      additionalProperties: false
+      properties:
+        id:
+          type: integer
+          format: int64
+        revision_id:
+          type: integer
+          format: int64
+          nullable: true
+        actor:
+          type: string
+        actor_kind:
+          type: string
+          enum: [user, service, admin]
+        action:
+          type: string
+          enum: [create, update, publish, archive, revert_publish]
+        entity_type:
+          type: string
+        entity_id:
+          type: string
+        request_id:
+          type: string
+        at:
+          type: string
+          format: date-time
+    AuditList:
+      type: object
+      required: [items, total]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AuditEntry'
+        total:
+          type: integer
+          minimum: 0

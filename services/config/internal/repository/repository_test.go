@@ -51,26 +51,46 @@ func applyMigrations(t *testing.T, dsn string) {
 	}
 	t.Cleanup(func() { _ = conn.Close(ctx) })
 	migrationsDir := filepath.Join("..", "..", "migrations")
-	// Run down first (idempotent via IF EXISTS) so the test starts from a
-	// clean state regardless of prior migration state, then apply up.
-	downPath := filepath.Join(migrationsDir, "000001_init.down.sql")
-	downBytes, err := os.ReadFile(downPath)
-	if err != nil {
-		t.Fatalf("read down migration: %v", err)
+	// Apply down in reverse order (newest first) so the test starts clean, then
+	// apply up in order. Down migrations use IF EXISTS and are idempotent.
+	downFiles := []string{
+		"000004_publish_hardening.down.sql",
+		"000003_limits_and_routing_policy.down.sql",
+		"000002_credential_plaintext.down.sql",
+		"000001_init.down.sql",
 	}
-	if _, err := conn.Exec(ctx, string(downBytes)); err != nil {
-		t.Fatalf("apply down migration: %v", err)
+	upFiles := []string{
+		"000001_init.up.sql",
+		"000002_credential_plaintext.up.sql",
+		"000003_limits_and_routing_policy.up.sql",
+		"000004_publish_hardening.up.sql",
 	}
-	upPath := filepath.Join(migrationsDir, "000001_init.up.sql")
-	upBytes, err := os.ReadFile(upPath)
-	if err != nil {
-		t.Fatalf("read up migration: %v", err)
+	for _, f := range downFiles {
+		p := filepath.Join(migrationsDir, f)
+		b, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatalf("read %s: %v", f, err)
+		}
+		if _, err := conn.Exec(ctx, string(b)); err != nil {
+			t.Fatalf("apply %s: %v", f, err)
+		}
 	}
-	if _, err := conn.Exec(ctx, string(upBytes)); err != nil {
-		t.Fatalf("apply up migration: %v", err)
+	for _, f := range upFiles {
+		p := filepath.Join(migrationsDir, f)
+		b, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatalf("read %s: %v", f, err)
+		}
+		if _, err := conn.Exec(ctx, string(b)); err != nil {
+			t.Fatalf("apply %s: %v", f, err)
+		}
 	}
 	t.Cleanup(func() {
-		_, _ = conn.Exec(ctx, string(downBytes))
+		for _, f := range downFiles {
+			p := filepath.Join(migrationsDir, f)
+			b, _ := os.ReadFile(p)
+			_, _ = conn.Exec(ctx, string(b))
+		}
 	})
 }
 
@@ -111,14 +131,16 @@ func TestLatestPublished_ReturnsLatest(t *testing.T) {
 	applyMigrations(t, d)
 	db := openDB(t, d)
 
+	// The singleton partial unique index guarantees at most one active
+	// published revision. Insert v1 (published), archive it, then publish v2.
 	insertSnapshot(t, db, "2026-07-24-01", "published", true, `{"revision":"v1"}`)
-	// newer published revision
+	db.Exec(`UPDATE config_revisions SET status='archived', archived_at=now() WHERE revision='2026-07-24-01'`)
+	// newer published revision (the only active published)
 	insertSnapshot(t, db, "2026-07-24-02", "published", true, `{"revision":"v2"}`)
 	// draft (must NOT be served)
 	insertSnapshot(t, db, "2026-07-24-03", "draft", false, `{"revision":"v3draft"}`)
-	// archived published (older, must NOT be served over the newer one)
-	insertSnapshot(t, db, "2026-07-23-99", "published", true, `{"revision":"old"}`)
-	// bump the older one to be clearly older
+	// an older archived published revision (must NOT be served)
+	insertSnapshot(t, db, "2026-07-23-99", "archived", true, `{"revision":"old"}`)
 	db.Exec(`UPDATE config_revisions SET published_at = ? WHERE revision = '2026-07-23-99'`,
 		time.Now().Add(-24*time.Hour))
 

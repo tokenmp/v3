@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tokenmp/v3/services/config/internal/adminauth"
 	"github.com/tokenmp/v3/services/config/internal/repository"
 )
 
@@ -140,44 +141,63 @@ func (f *fakeAdminReader) GetGlobalConfigEntry(_ context.Context, _ string) (rep
 
 type fakeWriter struct {
 	draftID   int64
-	drafts    map[int64]repository.DraftRevision
+	drafts    map[int64]repository.RevisionDetail
 	snapshots map[int64]json.RawMessage
+	audit     []repository.AuditEntry
 }
 
 func newFakeWriter() *fakeWriter {
 	return &fakeWriter{
-		drafts:    make(map[int64]repository.DraftRevision),
+		drafts:    make(map[int64]repository.RevisionDetail),
 		snapshots: make(map[int64]json.RawMessage),
 	}
 }
 
-func (w *fakeWriter) CreateDraft(_ context.Context, revision, createdBy, changeLog string, _ *int64) (int64, error) {
+func (w *fakeWriter) CreateDraftWithSnapshot(_ context.Context, in repository.DraftInput, audit repository.AuditMeta) (repository.DraftResult, error) {
 	w.draftID++
 	id := w.draftID
-	w.drafts[id] = repository.DraftRevision{
-		RevisionID: id,
-		Revision:   revision,
-		Status:     "draft",
-		ChangeLog:  changeLog,
-		CreatedAt:  time.Now(),
+	w.drafts[id] = repository.RevisionDetail{
+		ID:        id,
+		Revision:  in.Revision,
+		Status:    "draft",
+		Version:   1,
+		ChangeLog: in.ChangeLog,
+		CreatedAt: time.Now(),
 	}
-	return id, nil
+	if len(in.SnapshotJSON) > 0 {
+		w.snapshots[id] = in.SnapshotJSON
+	}
+	w.audit = append(w.audit, repository.AuditEntry{Action: "create", EntityType: "config_revision", Actor: audit.Actor})
+	return repository.DraftResult{ID: id, Revision: in.Revision, Version: 1, Status: "draft"}, nil
 }
-func (w *fakeWriter) UpdateDraftJSON(_ context.Context, revisionID int64, snapshotJSON json.RawMessage) error {
-	w.snapshots[revisionID] = snapshotJSON
-	return nil
-}
-func (w *fakeWriter) GetDraft(_ context.Context, revisionID int64) (repository.DraftRevision, error) {
+func (w *fakeWriter) GetRevision(_ context.Context, revisionID int64) (repository.RevisionDetail, error) {
 	d, ok := w.drafts[revisionID]
 	if !ok {
-		return repository.DraftRevision{}, repository.ErrNotFound
+		return repository.RevisionDetail{}, repository.ErrNotFound
 	}
 	if snap, ok := w.snapshots[revisionID]; ok {
 		d.SnapshotJSON = snap
 	}
 	return d, nil
 }
-func (w *fakeWriter) PublishRevision(_ context.Context, revisionID int64) error {
+func (w *fakeWriter) UpdateDraftSnapshot(_ context.Context, revisionID int64, expectedVersion int, snapshotJSON json.RawMessage, audit repository.AuditMeta) (int, error) {
+	d, ok := w.drafts[revisionID]
+	if !ok {
+		return 0, repository.ErrNotFound
+	}
+	if d.Status != "draft" {
+		return 0, repository.ErrConflict
+	}
+	if d.Version != expectedVersion {
+		return 0, repository.ErrCASMismatch
+	}
+	d.Version++
+	w.drafts[revisionID] = d
+	w.snapshots[revisionID] = snapshotJSON
+	w.audit = append(w.audit, repository.AuditEntry{Action: "update", EntityType: "config_revision", Actor: audit.Actor})
+	return d.Version, nil
+}
+func (w *fakeWriter) PublishRevision(_ context.Context, revisionID int64, audit repository.AuditMeta) error {
 	d, ok := w.drafts[revisionID]
 	if !ok {
 		return repository.ErrNotFound
@@ -185,15 +205,66 @@ func (w *fakeWriter) PublishRevision(_ context.Context, revisionID int64) error 
 	if d.Status != "draft" {
 		return repository.ErrConflict
 	}
+	if _, ok := w.snapshots[revisionID]; !ok {
+		return repository.ErrEmptySnapshot
+	}
+	// archive previous published
+	for id, dd := range w.drafts {
+		if dd.Status == "published" {
+			dd.Status = "archived"
+			w.drafts[id] = dd
+		}
+	}
 	d.Status = "published"
 	w.drafts[revisionID] = d
+	w.audit = append(w.audit, repository.AuditEntry{Action: "publish", EntityType: "config_revision", Actor: audit.Actor})
 	return nil
+}
+func (w *fakeWriter) ArchiveRevision(_ context.Context, revisionID int64, audit repository.AuditMeta) error {
+	d, ok := w.drafts[revisionID]
+	if !ok {
+		return repository.ErrNotFound
+	}
+	if d.Status == "archived" {
+		return repository.ErrConflict
+	}
+	d.Status = "archived"
+	w.drafts[revisionID] = d
+	w.audit = append(w.audit, repository.AuditEntry{Action: "archive", EntityType: "config_revision", Actor: audit.Actor})
+	return nil
+}
+func (w *fakeWriter) RollbackAsNew(_ context.Context, sourceRevisionID int64, note, createdBy string, audit repository.AuditMeta) (int64, error) {
+	src, ok := w.drafts[sourceRevisionID]
+	if !ok {
+		return 0, repository.ErrNotFound
+	}
+	if src.Status == "draft" {
+		return 0, repository.ErrConflict
+	}
+	snap, ok := w.snapshots[sourceRevisionID]
+	if !ok {
+		return 0, repository.ErrEmptySnapshot
+	}
+	w.draftID++
+	id := w.draftID
+	newRev := src.Revision + "-rollback"
+	srcID := sourceRevisionID
+	w.drafts[id] = repository.RevisionDetail{ID: id, Revision: newRev, Status: "published", Version: 1, ChangeLog: "rollback to " + src.Revision, RollbackNote: note, SourceRevisionID: &srcID}
+	w.snapshots[id] = snap
+	for rid, dd := range w.drafts {
+		if dd.Status == "published" && rid != id {
+			dd.Status = "archived"
+			w.drafts[rid] = dd
+		}
+	}
+	w.audit = append(w.audit, repository.AuditEntry{Action: "rollback_publish", EntityType: "config_revision", Actor: audit.Actor})
+	return id, nil
 }
 func (w *fakeWriter) ListRevisions(_ context.Context, _, _ int) ([]repository.RevisionSummary, int, error) {
 	return nil, 0, nil
 }
-func (w *fakeWriter) RollbackRevision(_ context.Context, _ int64) (int64, error) {
-	return 0, repository.ErrNotFound
+func (w *fakeWriter) ListAudit(_ context.Context, _ *int64, _, _ int) ([]repository.AuditEntry, int, error) {
+	return w.audit, len(w.audit), nil
 }
 
 // CreateProvider/Model/etc. stubs for AdminWriter interface
@@ -980,7 +1051,11 @@ func TestHandleAdminCompile(t *testing.T) {
 	reader.routeCredsByRoute = routeCredsByRoute
 
 	writer := newFakeWriter()
-	s := New(nil, writer, fakePinger{}, nil)
+	devAuth, err := adminauth.New("", true)
+	if err != nil {
+		t.Fatalf("adminauth.New dev: %v", err)
+	}
+	s := NewWithAdminAuth(nil, writer, fakePinger{}, nil, devAuth)
 	s.adminReader = reader
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/config/admin/compile", nil)

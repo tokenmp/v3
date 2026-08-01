@@ -10,7 +10,7 @@
 
 | 库 | 目录 | 职责 |
 |----|------|------|
-| Config DB | `migrations/config/` | provider/model/route/credential/adapter 配置，带版本（draft/published/archived），编译成 `ConfigSnapshot` 下发 executor；`0003_limits_and_routing_policy.sql` 增加 provider/route/credential/route-credential nullable context/max output/RPM/TPM 配置列 |
+| Config DB | `migrations/config/` | provider/model/route/credential/adapter 配置，带版本（draft/published/archived），编译成 `ConfigSnapshot` 下发 executor；`0003_limits_and_routing_policy.sql` 增加 provider/route/credential/route-credential nullable context/max output/RPM/TPM 配置列；`0004_publish_hardening.sql` 加固写路径：draft 乐观并发 `version`、global singleton published（partial unique index）、revert 元数据（`source_revision_id`/`rollback_note`）、audit 扩展与收紧 action 枚举、secret 边界（`credential_ref` 恢复 NOT NULL + unique，`api_key` 列仅历史遗留，迁移不外迁/输出 secret，历史冲突 fail-closed，api_key COMMENT 用 DO block 守卫列存在），并修正 0001 遗留缺陷 `parent_revision_id`（bigserial→可选 bigint）。服务侧 `000004_publish_hardening.down.sql` 为 **fail-closed contract 回退**：在所有破坏性 DDL 之前的前置 preflight guard（`parent_revision_id IS NULL`、`version<>1`、非空 rollback provenance、`action='rollback_publish'`、非空 `actor_kind`/`request_id`）会在旧 schema 无法表达的数据存在时中止并（经 golang-migrate 文件级事务）整体回滚，绝不静默回填或丢历史；干净库上 down 成功回退 schema |
 | Log DB | `migrations/log/` | 请求生命周期事件，不存明文，按天分区 + 自动清理 |
 | Billing DB | `migrations/billing/` | 套餐/配额/记账，executor 不直连，由 Edge/BFF + Billing Service 操作 |
 
