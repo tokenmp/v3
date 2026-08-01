@@ -3,7 +3,6 @@ package repository
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -272,35 +271,8 @@ func TestMigration_Down_FailClosed_OnPending(t *testing.T) {
 		t.Fatalf("pgx connect: %v", err)
 	}
 	t.Cleanup(func() { _ = conn.Close(context.Background()) })
-	migrationsDir := filepath.Join("..", "..", "migrations")
-	ups := []string{
-		readMigration(t, migrationsDir, "000001_init.up.sql"),
-		readMigration(t, migrationsDir, "000002_limit_overrides.up.sql"),
-		readMigration(t, migrationsDir, "000003_plan_daily_weekly_categories.up.sql"),
-		readMigration(t, migrationsDir, "000004_settlement_state_machine.up.sql"),
-	}
-	down4 := readMigration(t, migrationsDir, "000004_settlement_state_machine.down.sql")
-	down3 := readMigration(t, migrationsDir, "000003_plan_daily_weekly_categories.down.sql")
-	down2 := readMigration(t, migrationsDir, "000002_limit_overrides.down.sql")
-	down1 := readMigration(t, migrationsDir, "000001_init.down.sql")
-	// down-all first (idempotent) for a clean slate.
-	for _, d := range []string{down4, down3, down2, down1} {
-		if _, err := conn.Exec(ctx0, d); err != nil {
-			t.Fatalf("pre-clean down: %v", err)
-		}
-	}
-	for _, u := range ups {
-		if _, err := conn.Exec(ctx0, u); err != nil {
-			t.Fatalf("apply up: %v", err)
-		}
-	}
-	t.Cleanup(func() {
-		cctx, cc := context.WithTimeout(context.Background(), 60*time.Second)
-		defer cc()
-		for _, d := range []string{down4, down3, down2, down1} {
-			_, _ = conn.Exec(cctx, d)
-		}
-	})
+	setupCleanSchemaForDownTest(t, conn, ctx0)
+	down4 := readMigration(t, migrationsDir(), "000004_settlement_state_machine.down.sql")
 
 	// Seed a user + reservation in pending_reconciliation directly (no code path
 	// needed; we test the migration guard, not the repository).
@@ -341,10 +313,8 @@ WHERE id = 'mig1'`); err != nil {
 	if _, err := conn.Exec(ctx0, down4); err != nil {
 		t.Fatalf("down 000004 must succeed after resolving pending, got %v", err)
 	}
-	// Re-apply 000004 up so subsequent test cleanup down works.
-	if _, err := conn.Exec(ctx0, ups[3]); err != nil {
-		t.Fatalf("re-apply up 000004: %v", err)
-	}
+	// No re-apply needed: cleanup (setupCleanSchemaForDownTest) resets the
+	// schema wholesale, so the test never depends on a down-based teardown.
 }
 
 // TestMigration_Down_FailClosed_OnReconcileSweepLedger verifies the fail-closed
@@ -362,34 +332,8 @@ func TestMigration_Down_FailClosed_OnReconcileSweepLedger(t *testing.T) {
 		t.Fatalf("pgx connect: %v", err)
 	}
 	t.Cleanup(func() { _ = conn.Close(context.Background()) })
-	migrationsDir := filepath.Join("..", "..", "migrations")
-	ups := []string{
-		readMigration(t, migrationsDir, "000001_init.up.sql"),
-		readMigration(t, migrationsDir, "000002_limit_overrides.up.sql"),
-		readMigration(t, migrationsDir, "000003_plan_daily_weekly_categories.up.sql"),
-		readMigration(t, migrationsDir, "000004_settlement_state_machine.up.sql"),
-	}
-	down4 := readMigration(t, migrationsDir, "000004_settlement_state_machine.down.sql")
-	down3 := readMigration(t, migrationsDir, "000003_plan_daily_weekly_categories.down.sql")
-	down2 := readMigration(t, migrationsDir, "000002_limit_overrides.down.sql")
-	down1 := readMigration(t, migrationsDir, "000001_init.down.sql")
-	for _, d := range []string{down4, down3, down2, down1} {
-		if _, err := conn.Exec(ctx0, d); err != nil {
-			t.Fatalf("pre-clean down: %v", err)
-		}
-	}
-	for _, u := range ups {
-		if _, err := conn.Exec(ctx0, u); err != nil {
-			t.Fatalf("apply up: %v", err)
-		}
-	}
-	t.Cleanup(func() {
-		cctx, cc := context.WithTimeout(context.Background(), 60*time.Second)
-		defer cc()
-		for _, d := range []string{down4, down3, down2, down1} {
-			_, _ = conn.Exec(cctx, d)
-		}
-	})
+	setupCleanSchemaForDownTest(t, conn, ctx0)
+	down4 := readMigration(t, migrationsDir(), "000004_settlement_state_machine.down.sql")
 
 	if _, err := conn.Exec(ctx0, `INSERT INTO users (id, status) VALUES ('migl', 'active')`); err != nil {
 		t.Fatalf("insert user: %v", err)
@@ -436,9 +380,8 @@ VALUES ('migl', 'migrq-s', 'coding', 'sweep', 1, 5, 'sweep', 'ik-sweep')`); err 
 	if _, err := conn.Exec(ctx0, down4); err != nil {
 		t.Fatalf("down 000004 must succeed after removing reconcile/sweep ledger, got %v", err)
 	}
-	if _, err := conn.Exec(ctx0, ups[3]); err != nil {
-		t.Fatalf("re-apply up 000004: %v", err)
-	}
+	// No re-apply needed: cleanup (setupCleanSchemaForDownTest) resets the
+	// schema wholesale, so the test never depends on a down-based teardown.
 }
 
 // TestMigration_Down_FailClosed_OnSettledColumns verifies the fail-closed
@@ -456,34 +399,8 @@ func TestMigration_Down_FailClosed_OnSettledColumns(t *testing.T) {
 		t.Fatalf("pgx connect: %v", err)
 	}
 	t.Cleanup(func() { _ = conn.Close(context.Background()) })
-	migrationsDir := filepath.Join("..", "..", "migrations")
-	ups := []string{
-		readMigration(t, migrationsDir, "000001_init.up.sql"),
-		readMigration(t, migrationsDir, "000002_limit_overrides.up.sql"),
-		readMigration(t, migrationsDir, "000003_plan_daily_weekly_categories.up.sql"),
-		readMigration(t, migrationsDir, "000004_settlement_state_machine.up.sql"),
-	}
-	down4 := readMigration(t, migrationsDir, "000004_settlement_state_machine.down.sql")
-	down3 := readMigration(t, migrationsDir, "000003_plan_daily_weekly_categories.down.sql")
-	down2 := readMigration(t, migrationsDir, "000002_limit_overrides.down.sql")
-	down1 := readMigration(t, migrationsDir, "000001_init.down.sql")
-	for _, d := range []string{down4, down3, down2, down1} {
-		if _, err := conn.Exec(ctx0, d); err != nil {
-			t.Fatalf("pre-clean down: %v", err)
-		}
-	}
-	for _, u := range ups {
-		if _, err := conn.Exec(ctx0, u); err != nil {
-			t.Fatalf("apply up: %v", err)
-		}
-	}
-	t.Cleanup(func() {
-		cctx, cc := context.WithTimeout(context.Background(), 60*time.Second)
-		defer cc()
-		for _, d := range []string{down4, down3, down2, down1} {
-			_, _ = conn.Exec(cctx, d)
-		}
-	})
+	setupCleanSchemaForDownTest(t, conn, ctx0)
+	down4 := readMigration(t, migrationsDir(), "000004_settlement_state_machine.down.sql")
 
 	if _, err := conn.Exec(ctx0, `INSERT INTO users (id, status) VALUES ('migs', 'active')`); err != nil {
 		t.Fatalf("insert user: %v", err)
@@ -517,9 +434,8 @@ WHERE id = 'migs1'`); err != nil {
 	if _, err := conn.Exec(ctx0, down4); err != nil {
 		t.Fatalf("down 000004 must succeed after clearing settled columns, got %v", err)
 	}
-	if _, err := conn.Exec(ctx0, ups[3]); err != nil {
-		t.Fatalf("re-apply up 000004: %v", err)
-	}
+	// No re-apply needed: cleanup (setupCleanSchemaForDownTest) resets the
+	// schema wholesale, so the test never depends on a down-based teardown.
 }
 
 // assertSchemaIntact000004 verifies that a failed downgrade left the 000004
@@ -561,6 +477,26 @@ func assertSchemaIntact000004(t *testing.T, ctx context.Context, conn *pgx.Conn)
 		AND pg_get_constraintdef(oid) LIKE '%reconcile%')`).Scan(&allowsReconcile); err != nil || !allowsReconcile {
 		t.Fatalf("ledger_type CHECK does not allow reconcile after failed down: allows=%v err=%v", allowsReconcile, err)
 	}
+}
+
+// setupCleanSchemaForDownTest resets the schema and applies all up
+// migrations on the caller's connection for the fail-closed down tests. It
+// registers a cleanup that resets the schema again. It does NOT run the down
+// migrations for setup/cleanup: the down4 migration is intentionally
+// fail-closed (RAISEs on settlement data) and is unsuitable for test
+// isolation — running down4..down1 in the old helper and ignoring errors
+// dropped usage_ledger while down4 had already aborted, leaving a partial
+// schema that broke the next test's pre-clean. These tests still execute
+// down4 in their body to exercise the guard; only setup/cleanup use the reset.
+func setupCleanSchemaForDownTest(t *testing.T, conn *pgx.Conn, ctx context.Context) {
+	t.Helper()
+	resetSchema(t, ctx, conn)
+	applyUpMigrations(t, ctx, conn)
+	t.Cleanup(func() {
+		cctx, cc := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cc()
+		resetSchema(t, cctx, conn)
+	})
 }
 
 // TestReconcile_KnownCountsAgainstAllWindows verifies that a confirmed
@@ -695,5 +631,87 @@ func TestRequestLevelUniqueConstraint(t *testing.T) {
 	// index (mapped to ErrInsertFailed).
 	if err := r.Reserve(ctx, "rq-b", "uq", "shared-req", "coding", 1, 1, nil); err == nil {
 		t.Fatalf("expected error for duplicate active request_id, got nil")
+	}
+}
+
+// TestSchemaReset_IsolatesSettledData is the regression test for the
+// inter-test pollution that broke CI (PR #215). The root cause was the old
+// test harness running the down migrations in a loop and IGNORING errors for
+// cleanup. The 000004 down migration is intentionally fail-closed: it RAISEs
+// whenever settlement data exists (pending_reconciliation reservations,
+// reconcile/sweep ledger rows, or any non-default 000004-only column). With
+// the old loop, a down4 RAISE was ignored and the loop continued into
+// down3/down2/down1, dropping tables (including usage_ledger) while the
+// 000004 state was still live. The NEXT test's setup then hit down4 DDL on a
+// now-missing object and fatalf'd, cascading into every later test.
+//
+// The fix is structural: test setup/cleanup now RESET the schema (DROP SCHEMA
+// public CASCADE + CREATE SCHEMA) instead of running down migrations. This
+// test proves the reset isolates a test regardless of what settlement data a
+// previous test left behind. It deliberately leaves the EXACT data that makes
+// down4 fail-closed, then simulates the next test's setup (reset + apply up)
+// and asserts a complete schema with zero leftover business rows. It must not
+// depend on any other test, and no other test may depend on it.
+func TestSchemaReset_IsolatesSettledData(t *testing.T) {
+	d := dsn(t)
+	ctx0, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	conn, err := pgx.Connect(ctx0, d)
+	if err != nil {
+		t.Fatalf("pgx connect: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close(context.Background()) })
+
+	// Build a full clean schema, then pollute it with every kind of data the
+	// 000004 down guard refuses to revert over.
+	resetSchema(t, ctx0, conn)
+	applyUpMigrations(t, ctx0, conn)
+	if _, err := conn.Exec(ctx0, `INSERT INTO users (id, status) VALUES ('poll', 'active')`); err != nil {
+		t.Fatalf("insert user: %v", err)
+	}
+	// (1) a pending_reconciliation reservation,
+	if _, err := conn.Exec(ctx0, `INSERT INTO quota_reservations
+(id, user_id, request_id, billing_plan, status, settlement_status, reserved_requests, reserved_tokens, reserved_at)
+VALUES ('poll-pending', 'poll', 'rq-pending', 'coding', 'pending_reconciliation', 'pending', 1, 0, now())`); err != nil {
+		t.Fatalf("insert pending reservation: %v", err)
+	}
+	// (2) a settled reservation carrying non-default 000004-only columns, and
+	if _, err := conn.Exec(ctx0, `INSERT INTO quota_reservations
+(id, user_id, request_id, billing_plan, status, settlement_status, usage_known, reconciled_at, idempotency_payload_hash, reserved_requests, reserved_tokens, reserved_at)
+VALUES ('poll-settled', 'poll', 'rq-settled', 'coding', 'finalized', 'settled', true, now(), 'hash', 1, 0, now())`); err != nil {
+		t.Fatalf("insert settled reservation: %v", err)
+	}
+	// (3) reconcile/sweep ledger rows.
+	for _, row := range []struct{ tp, ik string }{
+		{"reconcile", "ik-poll-rec"}, {"sweep", "ik-poll-swp"},
+	} {
+		if _, err := conn.Exec(ctx0, `INSERT INTO usage_ledger
+(user_id, request_id, billing_plan, ledger_type, request_delta, token_delta, reason, idempotency_key)
+VALUES ('poll', 'rq-l', 'coding', $1, -1, -10, $1, $2)`, row.tp, row.ik); err != nil {
+			t.Fatalf("insert %s ledger: %v", row.tp, err)
+		}
+	}
+	// Sanity: this state genuinely blocks the fail-closed down migration.
+	down4 := readMigration(t, migrationsDir(), "000004_settlement_state_machine.down.sql")
+	if _, err := conn.Exec(ctx0, down4); err == nil {
+		t.Fatalf("down 000004 must fail on the polluted state; if it succeeds the regression premise is wrong")
+	}
+
+	// Now simulate the NEXT test's setup: reset + apply up. This must succeed
+	// and produce a complete schema even though down4 cannot run here.
+	resetSchema(t, ctx0, conn)
+	applyUpMigrations(t, ctx0, conn) // verifies the 6 core tables internally.
+
+	// No business rows survived the reset — the next test starts clean.
+	for _, q := range []struct{ tbl string }{
+		{"quota_reservations"}, {"usage_ledger"}, {"users"},
+	} {
+		var n int
+		if err := conn.QueryRow(ctx0, `SELECT count(*) FROM `+q.tbl).Scan(&n); err != nil {
+			t.Fatalf("count %s after reset: %v", q.tbl, err)
+		}
+		if n != 0 {
+			t.Fatalf("%s rows survived schema reset: %d (next test is not isolated)", q.tbl, n)
+		}
 	}
 }

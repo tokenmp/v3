@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,12 +16,17 @@ import (
 )
 
 // dsn is built from env BILLING_REPO_TEST_DSN (set by the test harness that
-// starts a temp pg). When unset, integration tests are skipped.
+// starts a temp pg). When unset, integration tests are skipped. The DSN must
+// target the billing-only test database (tokenmp_billing) so the destructive
+// schema reset used for test isolation cannot touch any other database.
 func dsn(t *testing.T) string {
 	t.Helper()
 	d := os.Getenv("BILLING_REPO_TEST_DSN")
 	if d == "" {
 		t.Skip("BILLING_REPO_TEST_DSN not set; skipping repository integration test")
+	}
+	if !strings.Contains(d, "tokenmp_billing") {
+		t.Fatalf("BILLING_REPO_TEST_DSN must target the tokenmp_billing test database; refusing to run against an arbitrary DSN")
 	}
 	return d
 }
@@ -41,9 +47,73 @@ func openDB(t *testing.T, dsn string) *gorm.DB {
 	return db
 }
 
-// applyMigrations runs down first (idempotent via IF EXISTS) so the test
-// starts from a clean state, then applies up. Down is re-run on cleanup.
-// Migrations are applied in order: 000001 then 000002; down in reverse.
+// upMigrationFiles is the ordered list of up migrations applied by the test
+// harness. Declared once so every test starts from the same complete schema;
+// adding a new migration here is a deliberate, visible act.
+var upMigrationFiles = []string{
+	"000001_init.up.sql",
+	"000002_limit_overrides.up.sql",
+	"000003_plan_daily_weekly_categories.up.sql",
+	"000004_settlement_state_machine.up.sql",
+}
+
+// migrationsDir returns the repo-relative path to the billing migrations.
+func migrationsDir() string { return filepath.Join("..", "..", "migrations") }
+
+// resetSchema drops and recreates the public schema, yielding a fully clean
+// slate regardless of what data a previous test left behind. It deliberately
+// does NOT run the down migrations: migration 000004's down is intentionally
+// fail-closed (it RAISEs whenever settlement data exists), so it MUST NOT be
+// used for test cleanup. The old helper ran down4..down1 in a loop and ignored
+// errors; when down4 RAISEd (after any test that produced a settled/pending
+// reservation or a reconcile/sweep ledger row) the loop kept going, ran
+// down3/down2/down1, and dropped usage_ledger while down4 had already aborted
+// mid-way. The next test's pre-clean down4 then hit `ALTER TABLE usage_ledger
+// ...` on a now-missing table and fatalf'd, cascading into every later test.
+// A schema reset is idempotent, migration-content-independent, and immune to
+// the fail-closed guard. The DSN is constrained by dsn() to tokenmp_billing.
+func resetSchema(t *testing.T, ctx context.Context, conn *pgx.Conn) {
+	t.Helper()
+	for _, stmt := range []string{
+		`DROP SCHEMA IF EXISTS public CASCADE`,
+		`CREATE SCHEMA public`,
+	} {
+		if _, err := conn.Exec(ctx, stmt); err != nil {
+			t.Fatalf("reset schema (%s): %v", stmt, err)
+		}
+	}
+}
+
+// applyUpMigrations applies every up migration in order on the caller's
+// connection. It does not reset first; pair with resetSchema for a clean
+// slate. A failure is a hard fatal so a partial/empty schema never cascades
+// into obscure downstream assertion failures. It also verifies the resulting
+// schema has the expected core tables so a silently-incomplete apply is
+// caught here instead of at a confusing later assertion.
+func applyUpMigrations(t *testing.T, ctx context.Context, conn *pgx.Conn) {
+	t.Helper()
+	for _, name := range upMigrationFiles {
+		up := readMigration(t, migrationsDir(), name)
+		if _, err := conn.Exec(ctx, up); err != nil {
+			t.Fatalf("apply up migration %s: %v", name, err)
+		}
+	}
+	var coreTables int
+	if err := conn.QueryRow(ctx, `SELECT count(*) FROM information_schema.tables
+WHERE table_schema = current_schema()
+  AND table_name IN ('users','plans','user_plans','quota_reservations','usage_ledger','user_plan_limit_overrides')`).Scan(&coreTables); err != nil {
+		t.Fatalf("verify schema: query core tables: %v", err)
+	}
+	if coreTables != 6 {
+		t.Fatalf("verify schema: expected 6 core tables, got %d (partial/empty schema)", coreTables)
+	}
+}
+
+// applyMigrations resets the schema (drop+recreate public) and applies every
+// up migration in order so the test starts from a known-clean, complete
+// schema. Cleanup resets the schema again so the next test is fully isolated
+// and never inherits another test's settled/pending rows or ledger entries.
+// The fail-closed 000004 down migration is intentionally NOT run for cleanup.
 func applyMigrations(t *testing.T, dsn string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -53,32 +123,12 @@ func applyMigrations(t *testing.T, dsn string) {
 		t.Fatalf("pgx connect: %v", err)
 	}
 	t.Cleanup(func() { _ = conn.Close(context.Background()) })
-	migrationsDir := filepath.Join("..", "..", "migrations")
-	up1 := readMigration(t, migrationsDir, "000001_init.up.sql")
-	down1 := readMigration(t, migrationsDir, "000001_init.down.sql")
-	up2 := readMigration(t, migrationsDir, "000002_limit_overrides.up.sql")
-	down2 := readMigration(t, migrationsDir, "000002_limit_overrides.down.sql")
-	up3 := readMigration(t, migrationsDir, "000003_plan_daily_weekly_categories.up.sql")
-	down3 := readMigration(t, migrationsDir, "000003_plan_daily_weekly_categories.down.sql")
-	up4 := readMigration(t, migrationsDir, "000004_settlement_state_machine.up.sql")
-	down4 := readMigration(t, migrationsDir, "000004_settlement_state_machine.down.sql")
-	// down in reverse order.
-	for _, d := range []string{down4, down3, down2, down1} {
-		if _, err := conn.Exec(ctx, d); err != nil {
-			t.Fatalf("apply down migration: %v", err)
-		}
-	}
-	for _, u := range []string{up1, up2, up3, up4} {
-		if _, err := conn.Exec(ctx, u); err != nil {
-			t.Fatalf("apply up migration: %v", err)
-		}
-	}
+	resetSchema(t, ctx, conn)
+	applyUpMigrations(t, ctx, conn)
 	t.Cleanup(func() {
 		cctx, ccancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer ccancel()
-		for _, d := range []string{down4, down3, down2, down1} {
-			_, _ = conn.Exec(cctx, d)
-		}
+		resetSchema(t, cctx, conn)
 	})
 }
 

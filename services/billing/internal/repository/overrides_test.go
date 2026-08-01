@@ -57,7 +57,8 @@ func TestLimitOverride_BonusRaisesEnforcementAndWindow(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("CreateLimitOverride bonus: %v", err)
 	}
-	// Now a second reserve within the bonus-adjusted limit succeeds.
+	// Now a second reserve within the bonus-adjusted limit succeeds. This
+	// second reservation stays an ACTIVE hold (reserved, not yet finalized).
 	if err := r.Reserve(ctx, "res-ob-ok", "ob", "req-ob-ok", "coding", 1, 1, nil); err != nil {
 		t.Fatalf("Reserve after bonus: %v", err)
 	}
@@ -71,13 +72,19 @@ func TestLimitOverride_BonusRaisesEnforcementAndWindow(t *testing.T) {
 		t.Fatalf("no hour5 window")
 	}
 	if h5.Limit == nil || *h5.Limit != 2 {
-		t.Fatalf("hour5 adjusted limit = %v, want 2", h5.Limit)
+		t.Fatalf("hour5 adjusted limit = %v, want 2 (base 1 + bonus 1)", h5.Limit)
 	}
-	if h5.Consumed != 1 {
-		t.Fatalf("hour5 consumed = %d, want 1", h5.Consumed)
+	// Consumed counts BOTH the finalized charge (res-ob-a) AND the active
+	// reserved hold (res-ob-ok): active holds are folded into the window via
+	// activeHeldCodingSince so concurrent in-flight requests cannot punch
+	// through a hard limit before settling. So consumed = 1 (charge) + 1
+	// (active hold) = 2, exactly saturating the adjusted limit of 2, leaving
+	// remaining 0 (a third concurrent reserve must be rejected).
+	if h5.Consumed != 2 {
+		t.Fatalf("hour5 consumed = %d, want 2 (1 finalized charge + 1 active held reserve)", h5.Consumed)
 	}
-	if h5.Remaining != 1 {
-		t.Fatalf("hour5 remaining = %d, want 1", h5.Remaining)
+	if h5.Remaining != 0 {
+		t.Fatalf("hour5 remaining = %d, want 0 (window saturated by charge + active hold)", h5.Remaining)
 	}
 }
 
