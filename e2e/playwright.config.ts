@@ -51,7 +51,7 @@ export default defineConfig({
   webServer: hasExplicitBaseURL
     ? undefined
     : {
-        command: `pnpm --dir .. --filter @tokenmp/web exec next dev --port ${localPort}`,
+        command: `exec node ./scripts/run-local-smoke-server.mjs node ./node_modules/next/dist/bin/next dev --webpack --port ${localPort}`,
         url: baseURL,
         reuseExistingServer: false,
         timeout: 120_000,

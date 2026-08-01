@@ -8,6 +8,7 @@
     "test:codegen": "playwright codegen",
     "test:debug": "playwright test --debug",
     "test:report": "playwright show-report",
+    "test:wrapper": "node ./scripts/test-run-local-smoke-server.mjs",
     "install:browsers": "playwright install"
   },
   "devDependencies": {
