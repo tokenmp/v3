@@ -75,6 +75,10 @@ OpenResty/其他反向代理均为外部共享基础设施，不得加入此 Com
   以固定 Node/pnpm 版本从 clean checkout 构建 Contracts、UI Tokens、Next standalone。不得把
   服务器裸机 Node/pnpm、预构建 `.next` 或可选未跟踪 `apps/web/public` 当作部署前提；旧
   artifact-only Dockerfile 不得成为 Compose 默认。
+- 所有 Go 服务的 builder 在首次 `go mod download` 前声明并导出 `GOPROXY`；默认值固定为
+  `https://proxy.golang.org,direct`，使后续 `go build` 按需下载也使用同一值。Compose 将
+  `TOKENMP_V3_GO_PROXY` 作为该 build arg 的环境可覆盖入口；不得把环境特定模块代理写为公共默认。
+  该输入仅用于镜像构建，不会进入运行时服务环境。
 - Next `NEXT_PUBLIC_*` 是 build-time public inputs，必须在 Compose `build.args` 传入，且只可
   包含公开 flags/base URL；它们会固化到 bundle，运行时 environment 无法覆盖。默认同源 base URL
   为空，dev 部署 mock flags 为 `0`。
@@ -121,6 +125,8 @@ Compose secrets, never interpolated as environment values.
 `tools/check-compose-env-contract.sh` is the repository-local allowlist check for this
 cross-branch contract. It is self-contained so CI does not depend on sibling worktrees.
 
-CI additionally performs a build-only clean-context Web image gate with
-`apps/web/Dockerfile.web`; it does not run or push the image. The Dockerfile COPY guard checks
-that its context inputs exist and excludes optional `apps/web/public` and prebuilt `.next`.
+CI additionally performs build-only clean-context image gates; Go image builds explicitly pass
+`GOPROXY=https://proxy.golang.org,direct`, and the Web gate uses `apps/web/Dockerfile.web` without
+a Go proxy argument. No image is run or pushed. The Dockerfile guard checks Go `GOPROXY` declaration/
+export ordering and Compose build-arg coverage, as well as clean-context COPY inputs and exclusion of
+optional `apps/web/public` and prebuilt `.next`.

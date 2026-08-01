@@ -246,10 +246,13 @@ pnpm and does not depend on prebuilt `.next` or optional untracked `apps/web/pub
 remains artifact-only and is not the Compose default. Public `NEXT_PUBLIC_*` values are supplied
 only as Web `build.args` (same-origin base URLs default empty; dev mock flags default `0`) because
 Next permanently embeds them at build time; never use build args for secrets or expect runtime
-environment values to modify the browser bundle. CI statically verifies Go and Web Dockerfile
-`COPY` sources against the repository-root build context, renders Compose with disposable
-placeholder files/values, and builds the Web plus all seven Go service images without running or
-pushing them.
+environment values to modify the browser bundle. Go image builders default to the public module
+proxy `https://proxy.golang.org,direct`; set `TOKENMP_V3_GO_PROXY` only when an environment needs
+to override this build-time input. It is not a runtime service variable, and no environment-specific
+proxy is a public default. CI explicitly builds Go images with the public default, statically verifies
+Go proxy declaration/Compose build-arg coverage and Go/Web Dockerfile `COPY` sources against the
+repository-root build context, renders Compose with disposable placeholder files/values, and builds
+the Web plus all seven Go service images without running or pushing them.
 
 ### Runtime contract
 

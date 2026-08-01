@@ -53,6 +53,14 @@ Phase 22 跨协议转换：`executor/internal/protocolconvert/` 提供 OpenAI Ch
 
 具体语言、框架和命令由每个服务定义。Node.js 服务应接入根 pnpm/Turborepo 任务；Go 服务保持独立 module 边界。仓库已引入 `go.work`（`use ./services/auth`、`./services/executor`）；Go modules 为 `github.com/tokenmp/v3/services/auth` 和 `github.com/tokenmp/v3/services/executor`；后续 Go 服务通过独立变更新增 `go.work` 条目与模块级 `AGENTS.md`。
 
+### Go container build module proxy
+
+所有七个 Go 服务的独立 Docker builder 必须在第一次 `go mod download` 前声明
+`ARG GOPROXY=https://proxy.golang.org,direct` 并以 `ENV GOPROXY=${GOPROXY}` 导出，使
+`go mod download` 和 `go build` 的按需依赖下载使用相同的值。根 `compose.yaml` 为每个 Go
+service 通过 `TOKENMP_V3_GO_PROXY` 传递该 build arg；该环境可覆盖值仅适用于构建，Web 不传。
+不得把环境特定模块代理作为公共默认。`tools/check-dockerfile-copy-sources.sh` 静态验证此约束。
+
 ## DO NOT
 
 - **DO NOT** 为尚未实施的服务建立空目录或虚假接口——通过独立变更渐进添加。

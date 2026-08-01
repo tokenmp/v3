@@ -262,6 +262,7 @@ jobs:
           TOKENMP_V3_EXTERNAL_REDIS_ADDR: redis://cache:6379
           AUTH_RATE_LIMIT_TRUSTED_PROXIES: 192.0.2.0/24
           API_RATE_LIMIT_TRUSTED_PROXIES: 192.0.2.0/24
+          TOKENMP_V3_GO_PROXY: https://proxy.golang.org,direct
         run: |
           set -euo pipefail
           bash tools/check-compose-env-contract.sh
@@ -296,7 +297,7 @@ jobs:
         run: docker build -f apps/web/Dockerfile.web -t tokenmp-v3-web:${{ github.sha }} .
 
       - name: docker build (build only, no run/push)
-        run: docker build -f services/auth/Dockerfile -t tokenmp-v3-auth:${{ github.sha }} .
+        run: docker build --build-arg GOPROXY=https://proxy.golang.org,direct -f services/auth/Dockerfile -t tokenmp-v3-auth:${{ github.sha }} .
 
       # Build the executor Docker image on the GitHub Runner to validate the
       # Dockerfile end-to-end as part of CI. Build only: the image is not
@@ -304,25 +305,25 @@ jobs:
       # a long-lived cache. This step requires no local Docker on developer
       # machines — the Ubuntu runner provides Docker out of the box.
       - name: docker build executor (build only, no run/push)
-        run: docker build -f services/executor/Dockerfile -t tokenmp-v3-executor:${{ github.sha }} .
+        run: docker build --build-arg GOPROXY=https://proxy.golang.org,direct -f services/executor/Dockerfile -t tokenmp-v3-executor:${{ github.sha }} .
 
       # Each deployable Go service has a separate image. Build these images
       # only to validate their repo-root build contexts and Dockerfiles; no
       # image is run, pushed, or published by CI.
       - name: docker build notice (build only, no run/push)
-        run: docker build -f services/notice/Dockerfile -t tokenmp-v3-notice:${{ github.sha }} .
+        run: docker build --build-arg GOPROXY=https://proxy.golang.org,direct -f services/notice/Dockerfile -t tokenmp-v3-notice:${{ github.sha }} .
 
       - name: docker build api (build only, no run/push)
-        run: docker build -f services/api/Dockerfile -t tokenmp-v3-api:${{ github.sha }} .
+        run: docker build --build-arg GOPROXY=https://proxy.golang.org,direct -f services/api/Dockerfile -t tokenmp-v3-api:${{ github.sha }} .
 
       - name: docker build billing (build only, no run/push)
-        run: docker build -f services/billing/Dockerfile -t tokenmp-v3-billing:${{ github.sha }} .
+        run: docker build --build-arg GOPROXY=https://proxy.golang.org,direct -f services/billing/Dockerfile -t tokenmp-v3-billing:${{ github.sha }} .
 
       - name: docker build config (build only, no run/push)
-        run: docker build -f services/config/Dockerfile -t tokenmp-v3-config:${{ github.sha }} .
+        run: docker build --build-arg GOPROXY=https://proxy.golang.org,direct -f services/config/Dockerfile -t tokenmp-v3-config:${{ github.sha }} .
 
       - name: docker build logging (build only, no run/push)
-        run: docker build -f services/logging/Dockerfile -t tokenmp-v3-logging:${{ github.sha }} .
+        run: docker build --build-arg GOPROXY=https://proxy.golang.org,direct -f services/logging/Dockerfile -t tokenmp-v3-logging:${{ github.sha }} .
 
       # ------------------------------------------------------------------
       # Config service (skeleton): gofmt / vet / build / unit test / migration

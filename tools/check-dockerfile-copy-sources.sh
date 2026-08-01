@@ -25,6 +25,19 @@ for service in "${services[@]}"; do
   [[ -f "$dockerfile" ]] || { printf 'missing Dockerfile: %s\n' "$dockerfile" >&2; exit 1; }
   [[ -f "$module/go.mod" ]] || { printf 'missing go.mod: %s\n' "$module/go.mod" >&2; exit 1; }
 
+  # GOPROXY is a builder-only, environment-overridable build input. It must be
+  # declared and exported before the first module download so it also governs
+  # any dependency download Go performs later during `go build`.
+  arg_line="$(grep -nFx 'ARG GOPROXY=https://proxy.golang.org,direct' "$dockerfile" | cut -d: -f1 || true)"
+  env_line="$(grep -nFx 'ENV GOPROXY=${GOPROXY}' "$dockerfile" | cut -d: -f1 || true)"
+  download_line="$(grep -nE 'go mod download([[:space:]]|$)' "$dockerfile" | head -n 1 | cut -d: -f1 || true)"
+  if [[ "$(printf '%s\n' "$arg_line" | sed '/^$/d' | wc -l | tr -d ' ')" != 1 ||
+        "$(printf '%s\n' "$env_line" | sed '/^$/d' | wc -l | tr -d ' ')" != 1 ||
+        -z "$download_line" || "$arg_line" -ge "$download_line" || "$env_line" -ge "$download_line" ]]; then
+    printf '%s: require one ARG GOPROXY and ENV GOPROXY before go mod download\n' "$dockerfile" >&2
+    status=1
+  fi
+
   sources="$(
     awk '
       /^[[:space:]]*COPY[[:space:]]/ {
@@ -72,6 +85,39 @@ for service in "${services[@]}"; do
     fi
   done < <(awk '$1 == "replace" && $3 == "=>" && $4 ~ /^\.\.\// { print $4 }' "$module/go.mod")
 done
+
+# Every deployable Go service must pass the same public default through Compose
+# while allowing an environment-specific module proxy override. Web is not a
+# Go build and must not receive this argument.
+readonly compose="compose.yaml"
+[[ -f "$compose" ]] || { printf 'missing Compose file: %s\n' "$compose" >&2; exit 1; }
+for service in "${services[@]}"; do
+  # Scope the check to this service's `build:` mapping, so a GOPROXY-like
+  # runtime environment entry cannot satisfy the build-argument contract.
+  if ! awk -v service="$service" '
+    $0 == "  " service ":" { service_open=1; next }
+    service_open && /^  [[:alnum:]_-]+:$/ { exit }
+    service_open && /^    build:$/ { build_open=1; next }
+    build_open && /^    [[:alnum:]_-]+:$/ { exit }
+    build_open && $0 == "      dockerfile: services/" service "/Dockerfile" { dockerfile=1 }
+    build_open && /^      args:$/ { args_open=1; next }
+    args_open && /^      [[:alnum:]_-]+:$/ { args_open=0 }
+    args_open && $0 == "        GOPROXY: ${TOKENMP_V3_GO_PROXY:-https://proxy.golang.org,direct}" { proxy=1 }
+    END { exit !(dockerfile && proxy) }
+  ' "$compose"; then
+    printf '%s: require GOPROXY build arg for Go service %s\n' "$compose" "$service" >&2
+    status=1
+  fi
+done
+web_block="$(awk '
+  $0 == "  web:" { inside=1; next }
+  inside && /^  [[:alnum:]_-]+:$/ { exit }
+  inside { print }
+' "$compose")"
+if printf '%s\n' "$web_block" | grep -F 'GOPROXY:' >/dev/null; then
+  printf '%s: web must not receive a GOPROXY build arg\n' "$compose" >&2
+  status=1
+fi
 
 # Compose builds Web with this Dockerfile. Every non-stage COPY source must be
 # a tracked clean-context input, never an ignored prebuilt .next artifact or
