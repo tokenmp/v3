@@ -71,6 +71,13 @@ OpenResty/其他反向代理均为外部共享基础设施，不得加入此 Com
 
 - 每项服务使用独立 `tokenmp-v3-<service>:${TOKENMP_V3_IMAGE_TAG:-latest}` 镜像；不要设置
   `container_name`，让 Compose 生成带 project 标识的容器名。
+- Web 的 Compose 默认 build 必须使用 `apps/web/Dockerfile.web` 和仓库根 context：在镜像内
+  以固定 Node/pnpm 版本从 clean checkout 构建 Contracts、UI Tokens、Next standalone。不得把
+  服务器裸机 Node/pnpm、预构建 `.next` 或可选未跟踪 `apps/web/public` 当作部署前提；旧
+  artifact-only Dockerfile 不得成为 Compose 默认。
+- Next `NEXT_PUBLIC_*` 是 build-time public inputs，必须在 Compose `build.args` 传入，且只可
+  包含公开 flags/base URL；它们会固化到 bundle，运行时 environment 无法覆盖。默认同源 base URL
+  为空，dev 部署 mock flags 为 `0`。
 - 数据库 DSN、私钥、JWT 公钥路径和 Executor credential mapping 都由必填环境变量提供。
   JWT 文件以只读 bind mount 注入，绝不复制进镜像或提交 `.env`。Compose 未声明业务数据卷。
 - 所有 Go 服务都在内部网络监听；仅 Edge `3002` 与 Web `3100` 默认发布到宿主，且可通过
@@ -113,3 +120,7 @@ Compose secrets, never interpolated as environment values.
 
 `tools/check-compose-env-contract.sh` is the repository-local allowlist check for this
 cross-branch contract. It is self-contained so CI does not depend on sibling worktrees.
+
+CI additionally performs a build-only clean-context Web image gate with
+`apps/web/Dockerfile.web`; it does not run or push the image. The Dockerfile COPY guard checks
+that its context inputs exist and excludes optional `apps/web/public` and prebuilt `.next`.

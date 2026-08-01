@@ -1,27 +1,60 @@
 # syntax=docker/dockerfile:1
-# Multi-stage build for the Next.js web app on the dev box.
-# All API calls are same-origin: openresty routes /v1/* and /api/v1/* to the
-# Edge/BFF, /api/v1/auth/* to Auth, /api/v1/notice/* to Notice, and the rest
-# to this web app. No path-prefix base is needed.
-FROM node:22-alpine AS builder
-RUN apk add --no-cache libc6-compat
-RUN corepack enable && corepack prepare pnpm@11.15.0 --activate
+# syntax=docker/dockerfile:1
+# Production image built from a clean repository-root context. The server never
+# needs a host Node.js/pnpm installation or prebuilt .next output.
+FROM node:26.4.0-alpine AS builder
+
 WORKDIR /repo
-COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
-COPY apps/web/package.json ./apps/web/
-COPY packages/contracts/package.json ./packages/contracts/
-COPY packages/ui-tokens/package.json ./packages/ui-tokens/
+RUN apk add --no-cache libc6-compat
+
+# Node 26 no longer bundles Corepack. Install and verify the pinned workspace
+# package manager explicitly instead of depending on the builder host.
+RUN test "$(node --version)" = "v26.4.0" \
+    && npm install --global pnpm@11.15.0 \
+    && test "$(pnpm --version)" = "11.15.0"
+
+# NEXT_PUBLIC_* values are compiled into the browser bundle. They are limited
+# to public flags/base URLs and must be supplied as build args, never secrets.
+ARG NEXT_PUBLIC_API_BASE=""
+ARG NEXT_PUBLIC_BIZ_API_BASE=""
+ARG NEXT_PUBLIC_NOTICE_API_BASE=""
+ARG NEXT_PUBLIC_USE_MOCK_AUTH=0
+ARG NEXT_PUBLIC_USE_MOCK_NOTICE=0
+ENV NEXT_PUBLIC_API_BASE=${NEXT_PUBLIC_API_BASE} \
+    NEXT_PUBLIC_BIZ_API_BASE=${NEXT_PUBLIC_BIZ_API_BASE} \
+    NEXT_PUBLIC_NOTICE_API_BASE=${NEXT_PUBLIC_NOTICE_API_BASE} \
+    NEXT_PUBLIC_USE_MOCK_AUTH=${NEXT_PUBLIC_USE_MOCK_AUTH} \
+    NEXT_PUBLIC_USE_MOCK_NOTICE=${NEXT_PUBLIC_USE_MOCK_NOTICE}
+
+# Install from workspace manifests before copying source so dependency caching
+# is narrow and a clean checkout needs no ignored files (including public/).
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY apps/web/package.json ./apps/web/package.json
+COPY packages/contracts/package.json ./packages/contracts/package.json
+COPY packages/ui-tokens/package.json ./packages/ui-tokens/package.json
 RUN pnpm install --frozen-lockfile
+
 COPY apps/web ./apps/web
 COPY packages/contracts ./packages/contracts
 COPY packages/ui-tokens ./packages/ui-tokens
-WORKDIR /repo/apps/web
-ENV NEXT_PUBLIC_USE_MOCK_AUTH=0 NEXT_PUBLIC_USE_MOCK_NOTICE=0 NEXT_PUBLIC_USE_MOCK_BIZ=0
-RUN pnpm build
-FROM node:22-alpine AS runner
+RUN pnpm --filter @tokenmp/contracts build \
+    && pnpm --filter @tokenmp/ui-tokens build \
+    && pnpm --filter @tokenmp/web build
+
+FROM node:26.4.0-alpine AS runner
+
 WORKDIR /app
-ENV NODE_ENV=production PORT=3100 HOSTNAME=0.0.0.0
-COPY --from=builder /repo/apps/web/.next/standalone ./
-COPY --from=builder /repo/apps/web/.next/static ./apps/web/.next/static
+ENV NODE_ENV=production \
+    PORT=3100 \
+    HOSTNAME=0.0.0.0
+
+RUN test "$(node --version)" = "v26.4.0"
+
+# outputFileTracingRoot is the repository root, so standalone keeps the
+# workspace path and server entrypoint below apps/web.
+COPY --from=builder --chown=node:node /repo/apps/web/.next/standalone ./
+COPY --from=builder --chown=node:node /repo/apps/web/.next/static ./apps/web/.next/static
+
+USER node
 EXPOSE 3100
 CMD ["node", "apps/web/server.js"]

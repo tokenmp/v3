@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # Verify that repo-root-context Dockerfile COPY sources exist and cover every
-# local package replace declared by each deployable Go service. --from copies
-# are stage-local and deliberately skipped.
+# local package replace declared by each deployable Go service. Also validate
+# the clean-checkout Web production Dockerfile. --from copies are stage-local
+# and deliberately skipped.
 set -euo pipefail
 
 readonly services=(api auth billing config executor logging notice)
+readonly web_dockerfile="apps/web/Dockerfile.web"
 status=0
 
 for service in "${services[@]}"; do
@@ -60,5 +62,41 @@ for service in "${services[@]}"; do
     fi
   done < <(awk '$1 == "replace" && $3 == "=>" && $4 ~ /^\.\.\// { print $4 }' "$module/go.mod")
 done
+
+# Compose builds Web with this Dockerfile. Every non-stage COPY source must be
+# a tracked clean-context input, never an ignored prebuilt .next artifact or
+# optional apps/web/public directory.
+[[ -f "$web_dockerfile" ]] || { printf 'missing Dockerfile: %s\n' "$web_dockerfile" >&2; exit 1; }
+web_sources="$(
+  awk '
+    /^[[:space:]]*COPY[[:space:]]/ {
+      line=$0
+      sub(/^[[:space:]]*COPY[[:space:]]+/, "", line)
+      if (line ~ /^--from=/) next
+      n=split(line, fields, /[[:space:]]+/)
+      for (i=1; i<n; i++) print fields[i]
+    }
+  ' "$web_dockerfile"
+)"
+while IFS= read -r source; do
+  [[ -n "$source" ]] || continue
+  case "$source" in
+    package.json|pnpm-lock.yaml|pnpm-workspace.yaml|apps/web|apps/web/*|packages/contracts|packages/contracts/*|packages/ui-tokens|packages/ui-tokens/*) ;;
+    *)
+      printf '%s: unexpected repo-root COPY source: %s\n' "$web_dockerfile" "$source" >&2
+      status=1
+      continue
+      ;;
+  esac
+  if [[ ! -e "$source" ]]; then
+    printf '%s: COPY source does not exist in repo-root context: %s\n' "$web_dockerfile" "$source" >&2
+    status=1
+  fi
+done <<< "$web_sources"
+
+if grep -Eq '^[[:space:]]*COPY([[:space:]]+--[^[:space:]]+)*[[:space:]]+apps/web/(public|\.next)([[:space:]/]|$)' "$web_dockerfile"; then
+  printf '%s: must not COPY optional public or prebuilt .next from the build context\n' "$web_dockerfile" >&2
+  status=1
+fi
 
 exit "$status"

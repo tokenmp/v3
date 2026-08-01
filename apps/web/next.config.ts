@@ -37,7 +37,10 @@ const config: NextConfig = {
   allowedDevOrigins: ['127.0.0.1'],
   reactStrictMode: true,
   transpilePackages: ['@tokenmp/ui-tokens'],
+  // Docker runs a repo-root build context, so tracing must retain the
+  // workspace-relative apps/web server path copied by the standalone runner.
   output: 'standalone',
+  outputFileTracingRoot: resolve(__dirname, '../..'),
   async headers() {
     return [
       {

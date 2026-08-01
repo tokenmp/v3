@@ -231,13 +231,18 @@ services:
     image: tokenmp-v3-web:${TOKENMP_V3_IMAGE_TAG:-latest}
     build:
       context: .
-      dockerfile: apps/web/Dockerfile
-    user: "node"
+      dockerfile: apps/web/Dockerfile.web
+      args:
+        # NEXT_PUBLIC_* values are compiled into the Next browser bundle.
+        # Changing runtime environment does not change an already built image.
+        NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE:-}
+        NEXT_PUBLIC_BIZ_API_BASE: ${NEXT_PUBLIC_BIZ_API_BASE:-}
+        NEXT_PUBLIC_NOTICE_API_BASE: ${NEXT_PUBLIC_NOTICE_API_BASE:-}
+        NEXT_PUBLIC_USE_MOCK_AUTH: ${NEXT_PUBLIC_USE_MOCK_AUTH:-0}
+        NEXT_PUBLIC_USE_MOCK_NOTICE: ${NEXT_PUBLIC_USE_MOCK_NOTICE:-0}
     environment:
       PORT: "3100"
       HOSTNAME: 0.0.0.0
-      NEXT_PUBLIC_USE_MOCK_AUTH: ${NEXT_PUBLIC_USE_MOCK_AUTH:-1}
-      NEXT_PUBLIC_USE_MOCK_NOTICE: ${NEXT_PUBLIC_USE_MOCK_NOTICE:-1}
     ports:
       - "${TOKENMP_V3_WEB_HOST_PORT:-3100}:3100"
     healthcheck:

@@ -65,13 +65,22 @@ pnpm --filter @tokenmp/web build    # output: standalone
 
 ## 部署
 
-`Dockerfile` 基于预构建 standalone 产物打包（不在镜像内 build）。dev 服务器以 Docker 容器运行（`node:22-alpine`），映射端口到宿主。
+公共 Compose 默认使用 `Dockerfile.web`：它以仓库根目录为 context，在固定
+`node:26.4.0-alpine` builder 内安装固定 `pnpm@11.15.0`、依次构建 Contracts、UI
+Tokens 和 Web，再从 Next standalone 产物生成非 root 生产 runner。部署服务器无需
+裸机 Node.js、pnpm、预构建 `.next` 或未跟踪的 `apps/web/public`。旧 `Dockerfile`
+仅是显式 artifact-only 兼容入口，不得作为 Compose 默认。
+
+所有 `NEXT_PUBLIC_*` 都在 `next build` 时写入浏览器 bundle；Compose 的 Web `build.args`
+是其部署输入，修改运行时 `environment` 不会改变已构建镜像。只传公开 flags/base URL，
+不得作为 build arg 传递密钥；同源部署保持公开 base URL 为空，dev 部署默认关闭 auth 和
+notice mock（`0`）。
 
 ## 模块边界
 
 - 允许访问：`packages/*` 公开入口。
 - 禁止访问：service 私有源码、服务数据库。
-- 配置和环境变量：`NEXT_PUBLIC_API_BASE`（浏览器 auth service base，默认空=同源）、`AUTH_API_BASE`（仅服务端 session BFF 的 auth service base；未设置时兼容回退 `NEXT_PUBLIC_API_BASE`）、`NEXT_PUBLIC_NOTICE_API_BASE`（notice service base，默认空=同源）、`NEXT_PUBLIC_USE_MOCK_AUTH`（默认启用 mock）、`NEXT_PUBLIC_USE_MOCK_NOTICE`（默认启用 mock）。真实部署经 nginx 反代同源：`API_BASE=/auth-api`、`NOTICE_API_BASE=/notice-api`。CSP `connect-src` 从公开 API/Biz/Notice base 构建 allowlist，并允许对应 SSE/WebSocket origin。
+- 配置和环境变量：`NEXT_PUBLIC_API_BASE`（浏览器 auth service base，默认空=同源）、`NEXT_PUBLIC_BIZ_API_BASE`（浏览器业务 API base，默认空=同源）、`AUTH_API_BASE`（仅服务端 session BFF 的 auth service base；未设置时兼容回退 `NEXT_PUBLIC_API_BASE`）、`NEXT_PUBLIC_NOTICE_API_BASE`（notice service base，默认空=同源）、`NEXT_PUBLIC_USE_MOCK_AUTH`（默认启用 mock）、`NEXT_PUBLIC_USE_MOCK_NOTICE`（默认启用 mock）。生产镜像必须通过 Docker build args 固化所有 `NEXT_PUBLIC_*`；它们只能是公开 flags/base URL，不能承载 secret。真实部署经 nginx 反代同源时这些公开 base URL 均为空，Compose dev 默认 mock flags 为 `0`。CSP `connect-src` 从公开 API/Biz/Notice base 构建 allowlist，并允许对应 SSE/WebSocket origin。
 - 设计 token：CSS 变量统一来自 `@tokenmp/ui-tokens`，组件内不内联颜色 hex（`--brand-solid: #111827` 除外，与 logo 一致）。
 
 ## 焦点样式体系
