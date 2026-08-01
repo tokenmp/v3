@@ -58,13 +58,17 @@ func applyMigrations(t *testing.T, dsn string) {
 	down1 := readMigration(t, migrationsDir, "000001_init.down.sql")
 	up2 := readMigration(t, migrationsDir, "000002_limit_overrides.up.sql")
 	down2 := readMigration(t, migrationsDir, "000002_limit_overrides.down.sql")
+	up3 := readMigration(t, migrationsDir, "000003_plan_daily_weekly_categories.up.sql")
+	down3 := readMigration(t, migrationsDir, "000003_plan_daily_weekly_categories.down.sql")
+	up4 := readMigration(t, migrationsDir, "000004_settlement_state_machine.up.sql")
+	down4 := readMigration(t, migrationsDir, "000004_settlement_state_machine.down.sql")
 	// down in reverse order.
-	for _, d := range []string{down2, down1} {
+	for _, d := range []string{down4, down3, down2, down1} {
 		if _, err := conn.Exec(ctx, d); err != nil {
 			t.Fatalf("apply down migration: %v", err)
 		}
 	}
-	for _, u := range []string{up1, up2} {
+	for _, u := range []string{up1, up2, up3, up4} {
 		if _, err := conn.Exec(ctx, u); err != nil {
 			t.Fatalf("apply up migration: %v", err)
 		}
@@ -72,7 +76,7 @@ func applyMigrations(t *testing.T, dsn string) {
 	t.Cleanup(func() {
 		cctx, ccancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer ccancel()
-		for _, d := range []string{down2, down1} {
+		for _, d := range []string{down4, down3, down2, down1} {
 			_, _ = conn.Exec(cctx, d)
 		}
 	})
@@ -162,6 +166,9 @@ func quotaExceededScope(err error) string {
 	return ""
 }
 
+// intPtr returns a pointer to v (test helper for nullable plan limits).
+func intPtr(v int) *int { return &v }
+
 func ledgerCount(t *testing.T, db *gorm.DB, userID string) int {
 	t.Helper()
 	var n int
@@ -201,7 +208,7 @@ func TestReserve_Finalize_Release(t *testing.T) {
 		t.Fatalf("ledger count after reserve = %d, want 1", n)
 	}
 
-	if err := r.Finalize(ctx, "res1", 8, 800); err != nil {
+	if err := r.Finalize(ctx, "res1", 8, 800, true); err != nil {
 		t.Fatalf("Finalize: %v", err)
 	}
 	if s := reservationStatus(t, db, "res1"); s != "finalized" {
@@ -276,7 +283,7 @@ func TestFinalize_NotFound(t *testing.T) {
 	applyMigrations(t, d)
 	db := openDB(t, d)
 	r := New(db)
-	err := r.Finalize(context.Background(), "does-not-exist", 1, 1)
+	err := r.Finalize(context.Background(), "does-not-exist", 1, 1, true)
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("expected ErrNotFound, got %v", err)
 	}
@@ -294,11 +301,15 @@ func TestFinalize_Idempotent(t *testing.T) {
 	if err := r.Reserve(ctx, "res3", "u3", "req3", "coding", 10, 1000, nil); err != nil {
 		t.Fatalf("Reserve: %v", err)
 	}
-	if err := r.Finalize(ctx, "res3", 8, 800); err != nil {
+	if err := r.Finalize(ctx, "res3", 8, 800, true); err != nil {
 		t.Fatalf("Finalize first: %v", err)
 	}
-	if err := r.Finalize(ctx, "res3", 9, 900); err != nil {
-		t.Fatalf("Finalize second (idempotent): %v", err)
+	if err := r.Finalize(ctx, "res3", 8, 800, true); err != nil {
+		t.Fatalf("Finalize second (idempotent same payload): %v", err)
+	}
+	// A different payload must now be a stable conflict (no retroactive change).
+	if err := r.Finalize(ctx, "res3", 9, 900, true); !errors.Is(err, ErrConflict) {
+		t.Fatalf("Finalize with different payload: expected ErrConflict, got %v", err)
 	}
 	// Only one charge row: reserve + charge = 2 total.
 	if n := ledgerCount(t, db, "u3"); n != 2 {
@@ -490,7 +501,7 @@ func consume(t *testing.T, r *GormRepository, ctx context.Context, userID, tag s
 	if err := r.Reserve(ctx, resID, userID, "req-"+tag, "coding", 1, 1, nil); err != nil {
 		t.Fatalf("Reserve %s: %v", tag, err)
 	}
-	if err := r.Finalize(ctx, resID, 1, 1); err != nil {
+	if err := r.Finalize(ctx, resID, 1, 1, true); err != nil {
 		t.Fatalf("Finalize %s: %v", tag, err)
 	}
 }

@@ -138,7 +138,7 @@ func (f *fakeQuotaManager) Reserve(_ context.Context, reservationID, _, _, _ str
 	f.reservationID = reservationID
 	return f.reserveErr
 }
-func (f *fakeQuotaManager) Finalize(_ context.Context, reservationID string, _ int, _ int64) error {
+func (f *fakeQuotaManager) Finalize(_ context.Context, reservationID string, _ int, _ int64, _ bool) error {
 	f.finalizeCalls++
 	f.reservationID = reservationID
 	return f.finalizeErr
@@ -182,20 +182,39 @@ func (f *fakeUsageWindowsReader) GetUsageWindows(_ context.Context, userID strin
 	return f.windows, f.err
 }
 
+type fakeSettlementManager struct {
+	status       repository.ReservationStatus
+	err          error
+	pendingErr   error
+	reconcileErr error
+	expireErr    error
+}
+
+func (f *fakeSettlementManager) GetReservation(_ context.Context, _ string) (repository.ReservationStatus, error) {
+	return f.status, f.err
+}
+func (f *fakeSettlementManager) MarkPending(_ context.Context, _ string) error { return f.pendingErr }
+func (f *fakeSettlementManager) Reconcile(_ context.Context, _ string, _ int, _ int64, _ bool) error {
+	return f.reconcileErr
+}
+func (f *fakeSettlementManager) Expire(_ context.Context, _ string) error { return f.expireErr }
+
+func newSettlement() *fakeSettlementManager { return &fakeSettlementManager{} }
+
 func newServer(plans *fakePlanReader, userPlans *fakeUserPlanReader, quota *fakeQuotaManager, ledger *fakeLedgerReader, pinger fakePinger) *Server {
-	return New(plans, userPlans, quota, ledger, &fakeBalanceReader{}, nil, nil, pinger, nil)
+	return New(plans, userPlans, quota, newSettlement(), ledger, &fakeBalanceReader{}, nil, nil, pinger, nil)
 }
 
 func newServerWithBalance(plans *fakePlanReader, userPlans *fakeUserPlanReader, quota *fakeQuotaManager, ledger *fakeLedgerReader, balance *fakeBalanceReader, pinger fakePinger) *Server {
-	return New(plans, userPlans, quota, ledger, balance, nil, nil, pinger, nil)
+	return New(plans, userPlans, quota, newSettlement(), ledger, balance, nil, nil, pinger, nil)
 }
 
 func newServerWithUsageWindows(plans *fakePlanReader, userPlans *fakeUserPlanReader, quota *fakeQuotaManager, ledger *fakeLedgerReader, balance *fakeBalanceReader, uw *fakeUsageWindowsReader, pinger fakePinger) *Server {
-	return New(plans, userPlans, quota, ledger, balance, uw, nil, pinger, nil)
+	return New(plans, userPlans, quota, newSettlement(), ledger, balance, uw, nil, pinger, nil)
 }
 
 func newServerWithAdmin(pinger fakePinger, admin *fakeAdminStore) *Server {
-	return New(&fakePlanReader{}, &fakeUserPlanReader{}, &fakeQuotaManager{}, &fakeLedgerReader{}, &fakeBalanceReader{}, nil, admin, pinger, nil)
+	return New(&fakePlanReader{}, &fakeUserPlanReader{}, &fakeQuotaManager{}, newSettlement(), &fakeLedgerReader{}, &fakeBalanceReader{}, nil, admin, pinger, nil)
 }
 
 func do(t *testing.T, s *Server, method, target string, body string) *httptest.ResponseRecorder {
@@ -367,7 +386,7 @@ func TestReserve_MissingField(t *testing.T) {
 func TestFinalize_OK(t *testing.T) {
 	quota := &fakeQuotaManager{}
 	s := newServer(&fakePlanReader{}, &fakeUserPlanReader{}, quota, &fakeLedgerReader{}, fakePinger{})
-	rec := do(t, s, http.MethodPost, "/v1/billing/quota/finalize", `{"reservation_id":"res-1","final_requests":1,"final_tokens":42}`)
+	rec := do(t, s, http.MethodPost, "/v1/billing/quota/finalize", `{"reservation_id":"res-1","final_requests":1,"final_tokens":42,"usage_known":true}`)
 	if rec.Code != http.StatusOK || quota.finalizeCalls != 1 {
 		t.Fatalf("status/calls = %d/%d", rec.Code, quota.finalizeCalls)
 	}
@@ -375,15 +394,23 @@ func TestFinalize_OK(t *testing.T) {
 
 func TestFinalize_NotFound(t *testing.T) {
 	s := newServer(&fakePlanReader{}, &fakeUserPlanReader{}, &fakeQuotaManager{finalizeErr: repository.ErrNotFound}, &fakeLedgerReader{}, fakePinger{})
-	if rec := do(t, s, http.MethodPost, "/v1/billing/quota/finalize", `{"reservation_id":"res-1","final_requests":1,"final_tokens":42}`); rec.Code != http.StatusNotFound {
+	if rec := do(t, s, http.MethodPost, "/v1/billing/quota/finalize", `{"reservation_id":"res-1","final_requests":1,"final_tokens":42,"usage_known":true}`); rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d", rec.Code)
 	}
 }
 
 func TestFinalize_Idempotent(t *testing.T) {
-	s := newServer(&fakePlanReader{}, &fakeUserPlanReader{}, &fakeQuotaManager{finalizeErr: repository.ErrConflict}, &fakeLedgerReader{}, fakePinger{})
-	if rec := do(t, s, http.MethodPost, "/v1/billing/quota/finalize", `{"reservation_id":"res-1","final_requests":1,"final_tokens":42}`); rec.Code != http.StatusOK {
+	quota := &fakeQuotaManager{}
+	s := newServer(&fakePlanReader{}, &fakeUserPlanReader{}, quota, &fakeLedgerReader{}, fakePinger{})
+	if rec := do(t, s, http.MethodPost, "/v1/billing/quota/finalize", `{"reservation_id":"res-1","final_requests":1,"final_tokens":42,"usage_known":true}`); rec.Code != http.StatusOK {
 		t.Fatalf("status = %d", rec.Code)
+	}
+}
+
+func TestFinalize_Conflict(t *testing.T) {
+	s := newServer(&fakePlanReader{}, &fakeUserPlanReader{}, &fakeQuotaManager{finalizeErr: repository.ErrConflict}, &fakeLedgerReader{}, fakePinger{})
+	if rec := do(t, s, http.MethodPost, "/v1/billing/quota/finalize", `{"reservation_id":"res-1","final_requests":1,"final_tokens":42,"usage_known":true}`); rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", rec.Code)
 	}
 }
 

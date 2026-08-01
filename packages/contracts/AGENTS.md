@@ -15,6 +15,7 @@
 - Auth 契约：`openapi/auth/v1.yaml`
 - Executor 契约：`openapi/executor/v1.yaml`
 - Edge/Panel 契约：`openapi/api/v1.yaml`（请求日志公开状态与 TTFT/protocol/stream/token/cache/thinking/timestamps 等摘要字段）
+- Billing 契约：`openapi/billing/v1.yaml`（内部 reserve/finalize/release/get-status/mark-pending/reconcile 结算状态机契约，Edge 为唯一直接消费者）
 - Go 生成配置：`go/auth-v1-models.yaml`、`go/auth-v1-server.yaml`、`go/api-v1-models.yaml`、`go/api-v1-server.yaml`、`go/executor-v1-models.yaml`、`go/executor-v1-server.yaml`
 - Go 生成脚本：`go/generate.sh`、`go/generate-executor.sh`
 - Go 新鲜度检查：`go/check-generated.sh`、`go/check-generated-executor.sh`
@@ -25,6 +26,7 @@
 |---|---|---|---|---|
 | `@tokenmp/contracts/openapi/auth/v1.yaml` | YAML 读取能力 | Auth Service v1 OpenAPI 3.0.3 契约；无副作用 | stable | `openapi/auth/v1.yaml` |
 | `@tokenmp/contracts/openapi/api/v1.yaml` | YAML 读取能力 | Edge/Panel API v1 OpenAPI 契约；请求日志摘要含 processing/TTFT/protocol/stream/token/cache/thinking/timestamps | stable | `openapi/api/v1.yaml` |
+| `@tokenmp/contracts/openapi/billing/v1.yaml` | YAML 读取能力 | Billing 内部 HTTP v1 OpenAPI 契约；reserve/finalize/release/get-status/mark-pending/reconcile 结算状态机，unknown usage 禁止猜测 | stable | `openapi/billing/v1.yaml` |
 | `@tokenmp/contracts/openapi/executor/v1.yaml` | YAML 读取能力 | Executor Service v1 OpenAPI 3.0.3 契约；无副作用 | stable | `openapi/executor/v1.yaml` |
 | `generate:auth:go` 脚本 | Go 1.26.5+，oapi-codegen v2.8.0（自动下载） | 生成 Auth `models.gen.go` 与 `server.gen.go` | stable | 两份 `go/auth-v1-*.yaml` + `openapi/auth/v1.yaml` |
 | `generate:executor:go` 脚本 | Go 1.26.5+，oapi-codegen v2.8.0（自动下载） | 生成 Executor `models.gen.go` 与 `server.gen.go`，输出到 `services/executor/internal/contract/executorv1/` | experimental | 两份 `go/executor-v1-*.yaml` + `openapi/executor/v1.yaml` |
