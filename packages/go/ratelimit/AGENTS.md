@@ -55,7 +55,9 @@ RATELIMIT_REQUIRE_REDIS_TESTS=true \
 ```
 
 集成测试在 Redis 不可达且未开启 required 模式时自动 SKIP（不 FAIL）；CI 在
-`redis:7-alpine` service container 上以 required 模式运行，并显式等待 Redis ready。
+`redis:7-alpine` service container 上以 required 模式运行。GitHub Actions 在 job
+steps 前等待 service health check；随后 required suite 自身 PING Redis，URL parse、
+ping 或 Lua 失败均 FATAL，因此不会静默 SKIP。
 
 ## 测试门禁拆分（required-mode gate）
 

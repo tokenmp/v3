@@ -12,8 +12,9 @@
 //     keeps local `go test -race ./...` green without Redis.
 //   - When RATELIMIT_REQUIRE_REDIS_TESTS=true: Redis is MANDATORY. URL parse
 //     failure, ping failure, or Lua eval failure are all FATAL (t.Fatalf), so
-//     CI can never silently skip the integration suite. CI sets this env and
-//     waits for the Redis service to be ready before running.
+//     CI can never silently skip the integration suite. GitHub Actions waits
+//     for the Redis service health check before job steps; this suite then
+//     PINGs Redis itself.
 //
 // The testable dial core lives in redis_helper_test.go (no build tag) as
 // dialRedisErr, which returns (client, error, required) and never fatals. The

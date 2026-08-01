@@ -593,21 +593,7 @@ jobs:
           RATING_TEST_REDIS_ADDR: redis://127.0.0.1:6379/0
           RATELIMIT_REQUIRE_REDIS_TESTS: "true"
         run: |
-          # Explicitly wait for the Redis service container to be ready before
-          # running the required integration suite, so a slow container startup
-          # can never cause a false skip (required mode fatals on ping failure).
-          timeout=60
-          while [ "$timeout" -gt 0 ]; do
-            if redis-cli -h 127.0.0.1 -p 6379 ping >/dev/null 2>&1; then
-              echo "redis ready"
-              break
-            fi
-            echo "waiting for redis..."
-            sleep 1
-            timeout=$((timeout-1))
-          done
-          if [ "$timeout" -le 0 ]; then
-            echo "redis did not become ready in time" >&2
-            exit 1
-          fi
+          # GitHub Actions waits for the Redis service health check before job
+          # steps. This required suite then PINGs Redis itself and fatals on any
+          # parse, ping, or Lua failure, so it cannot silently skip.
           go test -tags=integration -race ./...
