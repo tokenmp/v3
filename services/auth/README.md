@@ -340,7 +340,10 @@ at `services/auth/Dockerfile` (not at the repository root). The build context
 is still the repository root so the Auth `go.mod`/`go.sum` and service source
 resolve correctly. The builder deliberately does not copy the root `go.work`
 and sets `GOWORK=off`, so adding another workspace module does not force that
-module's source into the independently deployable Auth image:
+module's source into the independently deployable Auth image. Auth's
+module-local `httpresp` and `ratelimit` replaces are copied at their repo-root
+paths before module download and before the build; CI also verifies the Auth
+entrypoint with `GOWORK=off go build -mod=readonly ./cmd/auth`.
 
 ```bash
 docker build -f services/auth/Dockerfile -t tokenmp-v3-auth:local .

@@ -89,7 +89,9 @@ go test -race ./...
 
 - `Dockerfile` is built with the repository root as context and produces only the static
   `api` binary in a non-root Alpine runtime image. Its service-local module download runs
-  with `GOWORK=off`; the shared `packages/go/httpresp` replace target is copied explicitly.
+  with `GOWORK=off`; the shared `packages/go/httpresp` and `packages/go/ratelimit` local
+  replace targets are copied explicitly. CI verifies the entrypoint with
+  `GOWORK=off go build -mod=readonly ./cmd/api`.
 - The image health check probes `/healthz`, the HTTP liveness route.
 - Root `compose.yaml` owns the service definition only; provide required database and key
   inputs at deploy time, and do not add shared PostgreSQL/Redis/proxy resources or secrets.

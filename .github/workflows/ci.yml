@@ -231,6 +231,19 @@ jobs:
       # run, not pushed, not published to any registry, and not tagged into
       # a long-lived cache. This step requires no local Docker on developer
       # machines — the Ubuntu runner provides Docker out of the box.
+      # Build every deployable Go entrypoint outside go.work with a readonly
+      # module graph. This makes missing direct requirements, go.sum entries,
+      # or local replace targets fail before Docker's separate image builds.
+      - name: Go module autonomy gate (GOWORK=off)
+        run: |
+          set -euo pipefail
+          for service in api auth billing config executor logging notice; do
+            (
+              cd "services/${service}"
+              GOWORK=off go build -mod=readonly "./cmd/${service}"
+            )
+          done
+
       - name: Dockerfile COPY source guard
         run: bash tools/check-dockerfile-copy-sources.sh
 

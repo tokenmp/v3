@@ -8,6 +8,7 @@ WORKDIR /workspace
 
 COPY services/api/go.mod services/api/go.sum ./services/api/
 COPY packages/go/httpresp ./packages/go/httpresp
+COPY packages/go/ratelimit ./packages/go/ratelimit
 RUN cd services/api && GOWORK=off go mod download
 
 COPY services/api ./services/api
