@@ -94,14 +94,15 @@ func mutateRevision(t *testing.T, raw []byte, newRevision string) []byte {
 	return out
 }
 
+// configServiceSnapshotServer serves a RAW snapshot body (the authoritative
+// Config Service wire contract) with the revision/sha256 in X-Config-* headers.
 func configServiceSnapshotServer(t *testing.T, revision string, raw []byte) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"revision": revision, "snapshot": json.RawMessage(raw), "sha256": "test-sha",
-			"compiled_meta": nil, "created_at": "2026-07-24T00:00:00Z",
-		})
+		w.Header().Set("X-Config-Revision", revision)
+		w.Header().Set("X-Config-SHA256", "test-sha")
+		_, _ = w.Write(raw)
 	}))
 }
 

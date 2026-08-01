@@ -14,6 +14,7 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -152,15 +153,62 @@ func (s *Server) handleLatestSnapshot(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	// This endpoint serves raw ConfigSnapshot JSON consumed by the executor's
-	// config source — it must NOT be wrapped in the {code,data,message} envelope.
+	// This endpoint serves the RAW ConfigSnapshot JSON consumed by the
+	// executor's config source. Per the OpenAPI contract
+	// (getConfigSnapshotLatest) the response body IS the raw snapshot JSON —
+	// it must NOT be wrapped in the {code,data,message} envelope nor in a
+	// revision/sha256 metadata wrapper. The revision identifier and content
+	// digest are carried in the X-Config-Revision and X-Config-SHA256 headers
+	// for integrity checks (the body itself is opaque to this service).
+	//
+	// Validate the stored bytes are strict, single-value JSON before serving:
+	// a stored wrapper, an empty/null snapshot, or trailing data would be
+	// served verbatim to executors and fail their strict decoder. Treat any
+	// such row as an internal error rather than emitting a malformed body.
+	// The bytes are served verbatim (not re-encoded or trimmed) so the body
+	// matches the X-Config-SHA256 digest computed over the stored bytes.
+	body := snap.SnapshotJSON
+	if len(bytes.TrimSpace(body)) == 0 {
+		s.logger.Error("published snapshot body is empty")
+		httpresp.Error(w, httpresp.CodeInternalError, "snapshot unavailable")
+		return
+	}
+	// null is a valid single JSON value but not a usable snapshot object.
+	if bytes.Equal(bytes.TrimSpace(body), []byte("null")) {
+		s.logger.Error("published snapshot body is null")
+		httpresp.Error(w, httpresp.CodeInternalError, "snapshot unavailable")
+		return
+	}
+	if !json.Valid(body) || !singleJSONValue(body) {
+		s.logger.Error("published snapshot body is not strict single-value JSON")
+		httpresp.Error(w, httpresp.CodeInternalError, "snapshot unavailable")
+		return
+	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("X-Config-Revision", snap.Revision)
 	w.Header().Set("X-Config-SHA256", snap.SHA256)
 	w.Header().Set("Cache-Control", "no-store")
-	if err := json.NewEncoder(w).Encode(snap); err != nil {
-		s.logger.Error("snapshot encode failed", "error", err)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	if _, err := w.Write(body); err != nil {
+		s.logger.Error("snapshot write failed", "error", err)
 	}
+}
+
+// singleJSONValue reports whether body decodes to exactly one top-level JSON
+// value with no trailing non-whitespace data. This rejects a stored document
+// that concatenates two JSON values or carries trailing garbage, which the
+// executor's strict decoder would reject. json.Valid alone permits a single
+// value followed by trailing whitespace but encoding/json still treats only the
+// first value as the document, so this guard makes the “single value” contract
+// explicit without depending on decoder offset behavior.
+func singleJSONValue(body []byte) bool {
+	dec := json.NewDecoder(bytes.NewReader(body))
+	var v json.RawMessage
+	if err := dec.Decode(&v); err != nil {
+		return false
+	}
+	rest := body[dec.InputOffset():]
+	return len(bytes.TrimSpace(rest)) == 0
 }
 
 func (s *Server) logMiddleware(next http.Handler) http.Handler {
