@@ -4,7 +4,7 @@ This document describes the current test split, not a current pass count. Histor
 
 ## Local smoke gate
 
-`tests/smoke/` is the credential-free, deterministic subset used by the dedicated E2E GitHub Actions workflow. Without `BASE_URL`, Playwright starts an isolated loopback Next server with mock Auth and Notice APIs and runs this subset only through the `chromium-smoke` or `Mobile Chrome-smoke` projects.
+`tests/smoke/` is the credential-free, deterministic subset used by the dedicated E2E GitHub Actions workflow. Without `BASE_URL`, Playwright starts an isolated loopback Next server with mock Auth and Notice APIs and runs this subset only through the `chromium-smoke` or `Mobile Chrome-smoke` projects. Its server wrapper preserves and atomically restores the exact pre-run bytes (or absence) of `apps/web/next-env.d.ts` and `apps/web/tsconfig.json` on normal exit and termination.
 
 Current local smoke coverage:
 

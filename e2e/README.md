@@ -11,7 +11,7 @@ pnpm --filter tokenmp-v3-e2e exec playwright test --project=chromium-smoke
 pnpm --filter tokenmp-v3-e2e exec playwright test --project='Mobile Chrome-smoke'
 ```
 
-The server listens on `127.0.0.1:3101` by default. Set `E2E_PORT` to an unused local port when needed. Playwright owns this server and never reuses an existing process, preventing a local invocation from silently testing another application.
+The server listens on `127.0.0.1:3101` by default. Set `E2E_PORT` to an unused local port when needed. Playwright owns this server and never reuses an existing process, preventing a local invocation from silently testing another application. The `scripts/run-local-smoke-server.mjs` wrapper snapshots the exact bytes (or absence) of `apps/web/next-env.d.ts` and `apps/web/tsconfig.json` before Next starts, then atomically restores them on normal exit or termination signals. This protects existing local edits without using Git checkout.
 
 The smoke spec records browser requests and asserts they are loopback-only. It does not prove that a future application build has no server-side external dependency; keep local smoke page coverage limited to assets and APIs available in mock mode.
 
@@ -54,6 +54,7 @@ pnpm --filter tokenmp-v3-e2e exec playwright test --list
 ```bash
 pnpm install --frozen-lockfile
 pnpm --filter tokenmp-v3-e2e exec playwright install chromium
+pnpm --filter tokenmp-v3-e2e run test:wrapper  # wrapper normal-exit and TERM restoration
 ```
 
 Failure-only screenshots, videos, and reports are written to `e2e/test-results/` and `e2e/playwright-report/`; both are ignored by Git. Review artifacts before sharing because browser output can contain test-environment data.
