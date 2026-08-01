@@ -2,7 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 
 /**
  * TokenMP v3 E2E 测试 - 针对 dev 服务器
- * 运行前确保 dev 服务器可访问: http://122.51.255.26
+ * Requires an explicitly supplied, controlled BASE_URL target.
  */
 
 const TEST_USER = {

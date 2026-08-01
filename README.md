@@ -61,6 +61,8 @@ Implemented checks:
 
 The workflow requests the minimum permission `contents: read` and cancels superseded runs on the same ref. CI checks are the only implemented automation; continuous delivery and deployment are not implemented.
 
+A dedicated [E2E smoke workflow](.github/workflows/e2e.yml) runs on pull requests and manual dispatch. It installs only Chromium and runs the credential-free local mock smoke project on an isolated loopback Next server; it does not accept a target URL, credentials, or API keys and never runs the live E2E suite. The normal `verify` job continues to exclude `tokenmp-v3-e2e`. See [`e2e/README.md`](e2e/README.md) for the explicit-`BASE_URL` live-suite procedure.
+
 ## Services & Ports
 
 All Go services read their listen address and database DSN from environment variables; the defaults below come from each service's `internal/config`. Production/dev deployments override them via env (notably the dev box runs Notice on 8086 and Config on 8084 to avoid collisions).

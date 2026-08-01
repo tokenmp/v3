@@ -23,6 +23,7 @@ coverage/
 
 # Next.js build output
 **/.next/
+**/.next-e2e/
 **/.turbo/
 **/out/
 

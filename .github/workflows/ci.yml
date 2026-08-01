@@ -49,9 +49,9 @@ jobs:
         run: pnpm typecheck
 
       - name: Test
-        # tokenmp-v3-e2e is a live dev-server Playwright suite with a large
-        # browser matrix. Keep this fast PR CI job scoped to package/unit
-        # tests; run E2E from its dedicated workflow/manual command.
+        # tokenmp-v3-e2e has a dedicated local mock smoke workflow. Keep this
+        # fast PR CI job scoped to package/unit tests; the full live-target
+        # browser suite remains an explicit, separately managed command.
         run: pnpm turbo run test --filter=!tokenmp-v3-e2e
 
       - name: Build
