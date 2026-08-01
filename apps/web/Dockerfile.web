@@ -1,5 +1,4 @@
 # syntax=docker/dockerfile:1
-# syntax=docker/dockerfile:1
 # Production image built from a clean repository-root context. The server never
 # needs a host Node.js/pnpm installation or prebuilt .next output.
 FROM node:26.4.0-alpine AS builder

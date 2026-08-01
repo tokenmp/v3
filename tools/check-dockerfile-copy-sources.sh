@@ -9,6 +9,16 @@ readonly services=(api auth billing config executor logging notice)
 readonly web_dockerfile="apps/web/Dockerfile.web"
 status=0
 
+# Docker parser directives must appear only at the start of a Dockerfile.
+# A duplicate syntax directive fails BuildKit before COPY checks or any build.
+while IFS= read -r dockerfile; do
+  syntax_count="$(grep -Ec '^[[:space:]]*#[[:space:]]*syntax=docker/dockerfile:' "$dockerfile" || true)"
+  if [[ "$syntax_count" -gt 1 || "$(head -n 1 "$dockerfile")" != '# syntax=docker/dockerfile:'* ]]; then
+    printf '%s: require exactly one syntax directive on the first line\n' "$dockerfile" >&2
+    status=1
+  fi
+done < <(find apps services -name 'Dockerfile*' -type f -print | sort)
+
 for service in "${services[@]}"; do
   dockerfile="services/${service}/Dockerfile"
   module="services/${service}"
