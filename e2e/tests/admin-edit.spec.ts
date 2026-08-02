@@ -1,316 +1,71 @@
-import { e2eCredentials, skipAdminIfNoCreds } from '../utils/credentials';
 import { test, expect, type Page } from '@playwright/test';
+import { skipAdminIfNoCreds } from '../utils/credentials';
+import { TestUtils } from '../utils/test-utils';
 
-/**
- * TokenMP v3 E2E 测试 - Admin 后台编辑功能
- * 使用受保护环境变量注入的 admin 账号
- */
-
-const ADMIN_USER = e2eCredentials().admin;
-
-async function login(page: Page, email: string, password: string) {
-  await page.goto('/login');
-  await page.waitForLoadState('networkidle');
-  await page.fill('input[type="email"]', email);
-  await page.fill('input#password', password);
-  await page.click('button[type="submit"]');
-  await page.waitForURL(/\/(panel|admin)/, { timeout: 15000 });
+async function loginAndVisit(page: Page, path: string) {
+  const utils = new TestUtils(page);
+  await utils.loginAsAdmin();
+  await page.goto(path);
+  await utils.waitForPageLoad();
+  return utils;
 }
 
-test.describe('Admin 后台 - 公告编辑', () => {
+async function openAdminModal(page: Page, buttonName: string) {
+  await page.getByRole('button', { name: buttonName }).click();
+  const modal = page.locator('[role="dialog"], dialog[open], .fixed.inset-0.z-50').last();
+  await expect(modal).toBeVisible();
+  return modal;
+}
+
+test.describe('Admin 编辑入口', () => {
   skipAdminIfNoCreds(test);
-  test.beforeEach(async ({ page }) => {
-    await login(page, ADMIN_USER.email, ADMIN_USER.password);
+
+  test('公告编辑入口展示当前字段', async ({ page }) => {
+    await loginAndVisit(page, '/admin/announcements');
+    const dialog = await openAdminModal(page, '新建公告');
+    await expect(dialog.getByLabel('标题')).toBeVisible();
+    await expect(dialog.getByLabel('摘要')).toBeVisible();
+    await expect(dialog.getByLabel('内容（Markdown）')).toBeVisible();
+    await expect(dialog.getByRole('checkbox', { name: '立即发布' })).toBeVisible();
   });
 
-  test('新建公告', async ({ page }) => {
-    await page.goto('/admin/announcements');
-    await page.waitForLoadState('networkidle');
-    
-    const createBtn = page.getByRole('button', { name: /新建/ });
-    if (await createBtn.isVisible()) {
-      await createBtn.click();
-      await page.waitForTimeout(500);
-      
-      // 填写表单
-      await page.locator('input[placeholder="公告标题"]').fill('E2E测试公告');
-      // 摘要是选填的，正文用 textarea
-      await page.locator('textarea').first().fill('这是测试摘要');
-      await page.locator('textarea').last().fill('# 测试内容\n\n这是公告正文');
-      
-      // 提交 - Dialog 按钮是"保存"
-      await page.getByRole('button', { name: /保存|创建/ }).click({ force: true });
-      await page.waitForTimeout(2000);
-      
-      // 检查是否创建成功 - 使用更通用的选择器
-      const body = await page.textContent('body');
-      expect(body).toContain('E2E测试公告');
-    }
+  test('版本日志编辑入口支持 Markdown 预览', async ({ page }) => {
+    await loginAndVisit(page, '/admin/changelogs');
+    const dialog = await openAdminModal(page, '新建版本');
+    await dialog.getByLabel('内容（Markdown）').fill('# 编辑预览');
+    await expect(dialog.getByRole('heading', { name: '编辑预览' })).toBeVisible();
   });
 
-  test('编辑公告', async ({ page }) => {
-    await page.goto('/admin/announcements');
-    await page.waitForLoadState('networkidle');
-    
-    const editBtn = page.getByRole('button', { name: '编辑' }).first();
-    if (await editBtn.isVisible()) {
-      await editBtn.click();
-      await page.waitForTimeout(500);
-      
-      await page.locator('input[placeholder="公告标题"]').fill('已修改公告_' + Date.now());
-      await page.getByRole('button', { name: '保存' }).click({ force: true });
-      await page.waitForTimeout(2000);
-    }
+  test('通知编辑入口不会在未填写必填项时提交', async ({ page }) => {
+    await loginAndVisit(page, '/admin/notifications');
+    const dialog = await openAdminModal(page, '发送通知');
+    await expect(dialog.getByRole('button', { name: '发送' })).toBeDisabled();
   });
 
-  test('删除公告', async ({ page }) => {
-    await page.goto('/admin/announcements');
-    await page.waitForLoadState('networkidle');
-    
-    const deleteBtn = page.getByRole('button', { name: '删除' }).first();
-    if (await deleteBtn.isVisible()) {
-      await deleteBtn.click();
-      await page.waitForTimeout(500);
-      await page.getByRole('button', { name: /确认|删除/ }).last().click({ force: true });
-      await page.waitForTimeout(2000);
-    }
-  });
-});
-
-test.describe('Admin 后台 - 版本日志编辑', () => {
-  skipAdminIfNoCreds(test);
-  test.beforeEach(async ({ page }) => {
-    await login(page, ADMIN_USER.email, ADMIN_USER.password);
+  test('套餐编辑入口使用按钮式类型选择', async ({ page }) => {
+    await loginAndVisit(page, '/admin/plans');
+    const dialog = await openAdminModal(page, '新建套餐');
+    await expect(dialog.getByRole('button', { name: 'Token' })).toBeVisible();
+    await expect(dialog.getByLabel('Token 额度（选填，Token 类型用）')).toBeVisible();
   });
 
-  test('新建版本日志', async ({ page }) => {
-    await page.goto('/admin/changelogs');
-    await page.waitForLoadState('networkidle');
-    
-    const createBtn = page.getByRole('button', { name: /新建/ });
-    if (await createBtn.isVisible()) {
-      await createBtn.click();
-      await page.waitForTimeout(500);
-      
-      await page.locator('input[placeholder="v3.1.0"]').fill('v0.0.1-e2e');
-      await page.locator('input[placeholder="版本标题"]').fill('E2E测试版本');
-      await page.locator('textarea').first().fill('# v0.0.1-e2e\n\n- 测试功能');
-      
-      await page.getByRole('button', { name: /创建|保存/ }).click({ force: true });
-      await page.waitForTimeout(2000);
-      
-      // 检查是否创建成功 - 使用更通用的选择器
-      const body = await page.textContent('body');
-      expect(body).toContain('v0.0.1-e2e');
-    }
+  test('Provider 编辑入口使用当前 SDK Tab', async ({ page }) => {
+    await loginAndVisit(page, '/admin/providers');
+    const modal = await openAdminModal(page, '新建 Provider');
+    await expect(modal.getByRole('button', { name: 'OpenAI' })).toBeVisible();
+    await expect(modal.getByRole('button', { name: 'Anthropic' })).toBeVisible();
+    await expect(modal.getByPlaceholder('https://api.example.com')).toBeVisible();
   });
 
-  test('编辑版本日志', async ({ page }) => {
-    await page.goto('/admin/changelogs');
-    await page.waitForLoadState('networkidle');
-    
-    const editBtn = page.getByRole('button', { name: '编辑' }).first();
-    if (await editBtn.isVisible()) {
-      await editBtn.click();
-      await page.waitForTimeout(500);
-      
-      await page.locator('input[placeholder="版本标题"]').fill('已修改版本_' + Date.now());
-      await page.getByRole('button', { name: '保存' }).click({ force: true });
-      await page.waitForTimeout(2000);
-    }
-  });
-});
-
-test.describe('Admin 后台 - 通知发送', () => {
-  skipAdminIfNoCreds(test);
-  test.beforeEach(async ({ page }) => {
-    await login(page, ADMIN_USER.email, ADMIN_USER.password);
-  });
-
-  test('发送通知', async ({ page }) => {
-    await page.goto('/admin/notifications');
-    await page.waitForLoadState('networkidle');
-    
-    await page.getByRole('button', { name: '发送通知' }).click();
-    await page.waitForTimeout(500);
-    
-    await page.locator('input[placeholder*="标题"]').fill('E2E测试通知');
-    await page.locator('textarea').first().fill('这是测试通知内容');
-    
-    await page.getByRole('button', { name: '发送', exact: true }).click({ force: true });
-    await page.waitForTimeout(2000);
-    
-    // 通知发送后弹窗可能关闭，检查 toast 或页面状态
-    // 通知列表可能不立即显示新通知，检查页面没有错误即可
-    const hasError = await page.getByText('发送失败').isVisible().catch(() => false);
-    expect(hasError).toBe(false);
-  });
-});
-
-test.describe('Admin 后台 - 套餐管理', () => {
-  skipAdminIfNoCreds(test);
-  test.beforeEach(async ({ page }) => {
-    await login(page, ADMIN_USER.email, ADMIN_USER.password);
-  });
-
-  test('新建套餐', async ({ page }) => {
-    await page.goto('/admin/plans');
-    await page.waitForLoadState('networkidle');
-    
-    const createBtn = page.getByRole('button', { name: /新建/ });
-    if (await createBtn.isVisible()) {
-      await createBtn.click();
-      await page.waitForTimeout(500);
-      
-      await page.locator('input[placeholder="套餐名称"]').fill('E2E测试套餐');
-      
-      // 选择套餐类型
-      const typeSelect = page.locator('select');
-      if (await typeSelect.isVisible()) {
-        await typeSelect.selectOption('token');
-      }
-      
-      await page.locator('input[placeholder*="1000"]').first().fill('99');
-      await page.locator('input[placeholder*="500000"]').first().fill('1000000');
-      
-      // 使用 JavaScript 点击按钮
-      await page.evaluate(() => {
-        const btn = document.querySelector('button[type="button"]');
-        if (btn) btn.click();
-      });
-      await page.waitForTimeout(2000);
-      
-      // 检查是否创建成功 - 使用更通用的选择器
-      const body = await page.textContent('body');
-      expect(body).toContain('E2E测试套餐');
-    }
-  });
-
-  test('编辑套餐', async ({ page }) => {
-    await page.goto('/admin/plans');
-    await page.waitForLoadState('networkidle');
-    
-    const editBtn = page.getByRole('button', { name: '编辑' }).first();
-    if (await editBtn.isVisible()) {
-      await editBtn.click();
-      await page.waitForTimeout(500);
-      
-      await page.locator('input[placeholder="套餐名称"]').fill('已修改套餐_' + Date.now());
-      await page.getByRole('button', { name: '保存' }).click({ force: true });
-      await page.waitForTimeout(2000);
-    }
-  });
-});
-
-test.describe('Admin 后台 - Provider 管理', () => {
-  skipAdminIfNoCreds(test);
-  test.beforeEach(async ({ page }) => {
-    await login(page, ADMIN_USER.email, ADMIN_USER.password);
-  });
-
-  test('新建 Provider', async ({ page }) => {
-    await page.goto('/admin/providers');
-    await page.waitForLoadState('networkidle');
-    
-    await page.getByRole('button', { name: /新建/ }).click();
-    await page.waitForTimeout(500);
-    
-    await page.locator('input[placeholder="deepseek"]').first().fill('e2e-provider');
-    await page.locator('input[placeholder="DeepSeek"]').first().fill('E2E测试Provider');
-    await page.locator('input[placeholder*="api.example"]').first().fill('https://api.e2e.test');
-    
-    await page.getByRole('button', { name: /创建|保存/ }).click({ force: true });
-    await page.waitForTimeout(2000);
-    
-    // 关闭弹窗 - 点击背景遮罩
-    await page.locator('[class*="bg-black"]').first().click({ force: true, position: { x: 5, y: 5 } });
-    await page.waitForTimeout(500);
-    
-    // 检查列表中是否有新 Provider（用 ID 搜索）
-    await page.locator('input[placeholder*="搜索"]').fill('e2e-provider');
-    await page.waitForTimeout(1000);
-    
-    const count = await page.locator('tbody tr').count();
-    expect(count).toBeGreaterThan(0);
-  });
-});
-
-test.describe('Admin 后台 - 模型管理', () => {
-  skipAdminIfNoCreds(test);
-  test.beforeEach(async ({ page }) => {
-    await login(page, ADMIN_USER.email, ADMIN_USER.password);
-  });
-
-  test('新建模型', async ({ page }) => {
-    await page.goto('/admin/models');
-    await page.waitForLoadState('networkidle');
-    
-    const createBtn = page.getByRole('button', { name: /新建/ });
-    if (await createBtn.isVisible()) {
-      await createBtn.click();
-      await page.waitForTimeout(500);
-      
-      await page.locator('input[placeholder="gpt-4o-mini"]').fill('e2e-test-model-' + Date.now());
-      await page.locator('input[placeholder="GPT-4o mini"]').fill('E2E测试模型');
-      await page.waitForTimeout(500);
-      
-      const saveBtn = page.getByRole('button', { name: /创建|保存/ });
-      if (await saveBtn.isEnabled().catch(() => false)) {
-        await saveBtn.click({ force: true });
-        await page.waitForTimeout(2000);
-      }
-    }
-  });
-});
-
-test.describe('Admin 后台 - 用户管理', () => {
-  skipAdminIfNoCreds(test);
-  test.beforeEach(async ({ page }) => {
-    await login(page, ADMIN_USER.email, ADMIN_USER.password);
-  });
-
-  test('用户列表加载', async ({ page }) => {
-    await page.goto('/admin/users');
-    await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(2000);
-    
-    // 检查页面有内容
-    const body = await page.textContent('body');
-    expect(body).toBeTruthy();
-    expect(body.length).toBeGreaterThan(100);
-  });
-
-  test('搜索用户', async ({ page }) => {
-    await page.goto('/admin/users');
-    await page.waitForLoadState('networkidle');
-    
-    await page.locator('input[placeholder*="搜索邮箱"]').fill('demo');
-    await page.waitForTimeout(1000);
-    
-    const count = await page.locator('tbody tr').count();
-    expect(count).toBeGreaterThan(0);
-  });
-
-  test('筛选用户', async ({ page }) => {
-    await page.goto('/admin/users');
-    await page.waitForLoadState('networkidle');
-    
+  test('用户管理保留搜索、筛选和分页入口', async ({ page }) => {
+    await loginAndVisit(page, '/admin/users');
+    await expect(page.getByPlaceholder('搜索邮箱')).toBeVisible();
     await page.getByRole('button', { name: '正常', exact: true }).click();
-    await page.waitForTimeout(500);
     await page.getByRole('button', { name: '全部', exact: true }).click();
-    await page.waitForTimeout(500);
+    await expect(page.locator('[aria-label="下一页"]')).toBeVisible();
   });
 
-  test('分页功能', async ({ page }) => {
-    await page.goto('/admin/users');
-    await page.waitForLoadState('networkidle');
-    
-    await expect(page.locator('.text-xs.tabular-nums')).toBeVisible({ timeout: 5000 });
-    
-    const nextBtn = page.locator('[aria-label="下一页"]');
-    if (await nextBtn.isEnabled()) {
-      await nextBtn.click();
-      await page.waitForTimeout(500);
-    }
+  test('共享环境中的 Admin 写操作', async () => {
+    test.skip(true, 'Create, update, and delete operations mutate shared live Admin data; run them only against a dedicated disposable fixture.');
   });
 });

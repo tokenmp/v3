@@ -408,10 +408,10 @@ test.describe('移动端 Admin - 模型管理', () => {
 
   test('模型卡片列表', async ({ page }) => {
     await page.goto('/admin/models');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
     
-    // 等待加载完成
-    await page.waitForSelector('table, .md\\:hidden', { timeout: 10000 }).catch(() => null);
+    // The Config-backed page may poll, so networkidle is not deterministic.
+    await page.waitForSelector('main', { state: 'visible' });
     
     // 检查是否有内容
     const body = await page.textContent('body');
@@ -420,7 +420,7 @@ test.describe('移动端 Admin - 模型管理', () => {
 
   test('新建模型弹窗', async ({ page }) => {
     await page.goto('/admin/models');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
     
     // 点击新建按钮
     const createBtn = page.getByRole('button', { name: /新建/ });
