@@ -1,13 +1,11 @@
+import { e2eCredentials, skipAdminIfNoCreds } from '../utils/credentials';
 import { test, expect, type Page } from '@playwright/test';
 
 /**
  * TokenMP v3 E2E 测试 - Admin 后台全功能覆盖
  */
 
-const ADMIN_USER = {
-  email: 'demo@tokenmp.cn',
-  password: 'demo12345678',
-};
+const ADMIN_USER = e2eCredentials().admin;
 
 async function login(page: Page) {
   await page.goto('/login');
@@ -26,6 +24,7 @@ async function login(page: Page) {
 
 // ==================== 模型管理 ====================
 test.describe('Admin - 模型管理', () => {
+  skipAdminIfNoCreds(test);
   test.beforeEach(async ({ page }) => { await login(page); });
 
   test('模型列表加载', async ({ page }) => {
@@ -191,6 +190,7 @@ test.describe('Admin - 模型管理', () => {
 
 // ==================== 路由管理 ====================
 test.describe('Admin - 路由管理', () => {
+  skipAdminIfNoCreds(test);
   test.beforeEach(async ({ page }) => { await login(page); });
 
   test('路由列表加载', async ({ page }) => {
@@ -257,6 +257,7 @@ test.describe('Admin - 路由管理', () => {
 
 // ==================== 凭据管理 ====================
 test.describe('Admin - 凭据管理', () => {
+  skipAdminIfNoCreds(test);
   test.beforeEach(async ({ page }) => { await login(page); });
 
   test('凭据列表加载', async ({ page }) => {
@@ -313,6 +314,7 @@ test.describe('Admin - 凭据管理', () => {
 
 // ==================== 重试策略 ====================
 test.describe('Admin - 重试策略', () => {
+  skipAdminIfNoCreds(test);
   test.beforeEach(async ({ page }) => { await login(page); });
 
   test('重试策略页面加载', async ({ page }) => {
@@ -355,6 +357,7 @@ test.describe('Admin - 重试策略', () => {
 
 // ==================== API Key 管理 ====================
 test.describe('Admin - API Key 管理', () => {
+  skipAdminIfNoCreds(test);
   test.beforeEach(async ({ page }) => { await login(page); });
 
   test('API Key 列表加载', async ({ page }) => {
@@ -390,6 +393,7 @@ test.describe('Admin - API Key 管理', () => {
 
 // ==================== 用户套餐管理 ====================
 test.describe('Admin - 用户套餐管理', () => {
+  skipAdminIfNoCreds(test);
   test.beforeEach(async ({ page }) => { await login(page); });
 
   test('用户套餐列表加载', async ({ page }) => {
@@ -416,6 +420,7 @@ test.describe('Admin - 用户套餐管理', () => {
 
 // ==================== 用量统计 ====================
 test.describe('Admin - 用量统计', () => {
+  skipAdminIfNoCreds(test);
   test.beforeEach(async ({ page }) => { await login(page); });
 
   test('用量统计页面加载', async ({ page }) => {
@@ -447,6 +452,7 @@ test.describe('Admin - 用量统计', () => {
 
 // ==================== Auto 模型池 ====================
 test.describe('Admin - Auto 模型池', () => {
+  skipAdminIfNoCreds(test);
   test.beforeEach(async ({ page }) => { await login(page); });
 
   test('Auto 模型池页面加载', async ({ page }) => {
@@ -484,6 +490,7 @@ test.describe('Admin - Auto 模型池', () => {
 
 // ==================== 请求日志 ====================
 test.describe('Admin - 请求日志', () => {
+  skipAdminIfNoCreds(test);
   test.beforeEach(async ({ page }) => { await login(page); });
 
   test('请求日志列表加载', async ({ page }) => {
@@ -546,6 +553,7 @@ test.describe('Admin - 请求日志', () => {
 
 // ==================== Provider 管理 - 扩展 ====================
 test.describe('Admin - Provider 管理扩展', () => {
+  skipAdminIfNoCreds(test);
   test.beforeEach(async ({ page }) => { await login(page); });
 
   test('编辑 Provider', async ({ page }) => {
@@ -592,6 +600,7 @@ test.describe('Admin - Provider 管理扩展', () => {
 
 // ==================== 套餐管理 - 扩展 ====================
 test.describe('Admin - 套餐管理扩展', () => {
+  skipAdminIfNoCreds(test);
   test.beforeEach(async ({ page }) => { await login(page); });
 
   test('删除套餐', async ({ page }) => {
@@ -627,6 +636,7 @@ test.describe('Admin - 套餐管理扩展', () => {
 
 // ==================== 用户管理 - 扩展 ====================
 test.describe('Admin - 用户管理扩展', () => {
+  skipAdminIfNoCreds(test);
   test.beforeEach(async ({ page }) => { await login(page); });
 
   test('进入用户详情页', async ({ page }) => {
@@ -677,6 +687,7 @@ test.describe('Admin - 用户管理扩展', () => {
 
 // ==================== 公告管理 - 扩展 ====================
 test.describe('Admin - 公告管理扩展', () => {
+  skipAdminIfNoCreds(test);
   test.beforeEach(async ({ page }) => { await login(page); });
 
   test('立即发布选项', async ({ page }) => {
@@ -700,6 +711,7 @@ test.describe('Admin - 公告管理扩展', () => {
 
 // ==================== 版本日志 - 扩展 ====================
 test.describe('Admin - 版本日志扩展', () => {
+  skipAdminIfNoCreds(test);
   test.beforeEach(async ({ page }) => { await login(page); });
 
   test('Markdown 预览', async ({ page }) => {
@@ -737,6 +749,7 @@ test.describe('Admin - 版本日志扩展', () => {
 
 // ==================== 通知管理 - 扩展 ====================
 test.describe('Admin - 通知管理扩展', () => {
+  skipAdminIfNoCreds(test);
   test.beforeEach(async ({ page }) => { await login(page); });
 
   test('删除通知', async ({ page }) => {

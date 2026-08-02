@@ -16,13 +16,15 @@ This is a UI availability gate, not proof of Admin CRUD, authenticated Panel beh
 
 ## Explicit live suite
 
-The remaining Admin, Panel, mobile, and specialized specs require an explicitly supplied `BASE_URL` and a controlled test environment with provisioned test data. Some exercise authenticated and data-mutating flows, so they are manual/target-owner responsibilities and are not enabled in regular CI.
+The remaining Admin, Panel, mobile, and specialized specs require an explicitly supplied `BASE_URL` (or protected `E2E_BASE_URL`) and a controlled test environment with provisioned test data. Authenticated user specs receive `E2E_USER_EMAIL`/`E2E_USER_PASSWORD`; Admin specs receive `E2E_ADMIN_EMAIL`/`E2E_ADMIN_PASSWORD`. Optional fixture inputs are `E2E_API_KEY`, `E2E_USER_ID`, and `E2E_PLAN_ID`. Admin and user describes conditionally skip with a clear reason when their required pair is absent, so a credential-free live list/run does not attempt placeholder authentication. Values must remain protected secrets and must never be committed. Some specs exercise data-mutating flows, so they are manual/target-owner responsibilities and are not enabled in regular CI.
 
 Use the current file list and Playwright list output to establish the actual coverage before selecting a live subset:
 
 ```bash
 find e2e/tests -name '*.spec.ts' -print | sort
 BASE_URL=https://your-controlled-test-target.example \
+E2E_USER_EMAIL=… E2E_USER_PASSWORD=… \
+E2E_ADMIN_EMAIL=… E2E_ADMIN_PASSWORD=… \
   pnpm --filter tokenmp-v3-e2e exec playwright test --list
 ```
 

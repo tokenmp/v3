@@ -1,7 +1,11 @@
 import { test, expect } from '@playwright/test';
 import { TestUtils } from '../utils/test-utils';
+import { skipAdminIfNoCreds, skipUserIfNoCreds } from '../utils/credentials';
 
 test.describe('TokenMP v3 完整 E2E 测试', () => {
+  // This combined flow crosses both roles, so skip unless both protected identities exist.
+  skipAdminIfNoCreds(test);
+  skipUserIfNoCreds(test);
   let utils: TestUtils;
 
   test.beforeEach(async ({ page }) => {

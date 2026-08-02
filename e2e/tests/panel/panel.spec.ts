@@ -1,7 +1,9 @@
 import { test, expect } from '@playwright/test';
+import { skipUserIfNoCreds } from '../../utils/credentials';
 import { TestUtils } from '../../utils/test-utils';
 
 test.describe('Panel 用户概览页面', () => {
+  skipUserIfNoCreds(test);
   let utils: TestUtils;
 
   test.beforeEach(async ({ page }) => {
@@ -160,6 +162,7 @@ test.describe('Panel 用户概览页面', () => {
 });
 
 test.describe('Panel API Key 管理页面', () => {
+  skipUserIfNoCreds(test);
   let utils: TestUtils;
 
   test.beforeEach(async ({ page }) => {
@@ -322,6 +325,7 @@ test.describe('Panel API Key 管理页面', () => {
 });
 
 test.describe('Panel 请求日志页面', () => {
+  skipUserIfNoCreds(test);
   let utils: TestUtils;
 
   test.beforeEach(async ({ page }) => {

@@ -1,19 +1,14 @@
 import { test, expect, type Page, type BrowserContext } from '@playwright/test';
+import { e2eCredentials, skipAdminIfNoCreds, skipUserIfNoCreds } from '../utils/credentials';
 
 /**
  * TokenMP v3 E2E 测试 - 移动端专项
  * 覆盖移动端特有的交互和展示
  */
 
-const ADMIN_USER = {
-  email: 'demo@tokenmp.cn',
-  password: 'demo12345678',
-};
-
-const TEST_USER = {
-  email: 'e2e-test@tokenmp.dev',
-  password: 'TestPassword123!',
-};
+const credentials = e2eCredentials();
+const ADMIN_USER = credentials.admin;
+const TEST_USER = credentials.user;
 
 // 移动端视口配置
 const MOBILE_VIEWPORT = { width: 390, height: 844 };
@@ -33,6 +28,7 @@ async function login(page: Page, email: string, password: string) {
 
 // ==================== 移动端 Panel 测试 ====================
 test.describe('移动端 Panel - 布局与导航', () => {
+  skipUserIfNoCreds(test);
   test.use({ viewport: MOBILE_VIEWPORT });
 
   test.beforeEach(async ({ page }) => {
@@ -99,6 +95,7 @@ test.describe('移动端 Panel - 布局与导航', () => {
 });
 
 test.describe('移动端 Panel - 概览页面', () => {
+  skipUserIfNoCreds(test);
   test.use({ viewport: MOBILE_VIEWPORT });
 
   test.beforeEach(async ({ page }) => {
@@ -130,6 +127,7 @@ test.describe('移动端 Panel - 概览页面', () => {
 });
 
 test.describe('移动端 Panel - API Key', () => {
+  skipUserIfNoCreds(test);
   test.use({ viewport: MOBILE_VIEWPORT });
 
   test.beforeEach(async ({ page }) => {
@@ -166,6 +164,7 @@ test.describe('移动端 Panel - API Key', () => {
 });
 
 test.describe('移动端 Panel - 请求日志', () => {
+  skipUserIfNoCreds(test);
   test.use({ viewport: MOBILE_VIEWPORT });
 
   test.beforeEach(async ({ page }) => {
@@ -216,6 +215,7 @@ test.describe('移动端 Panel - 请求日志', () => {
 });
 
 test.describe('移动端 Panel - 设置页面', () => {
+  skipUserIfNoCreds(test);
   test.use({ viewport: MOBILE_VIEWPORT });
 
   test.beforeEach(async ({ page }) => {
@@ -250,6 +250,7 @@ test.describe('移动端 Panel - 设置页面', () => {
 
 // ==================== 移动端 Admin 测试 ====================
 test.describe('移动端 Admin - 布局与导航', () => {
+  skipAdminIfNoCreds(test);
   test.use({ viewport: MOBILE_VIEWPORT });
 
   test.beforeEach(async ({ page }) => {
@@ -312,6 +313,7 @@ test.describe('移动端 Admin - 布局与导航', () => {
 });
 
 test.describe('移动端 Admin - 用户管理', () => {
+  skipAdminIfNoCreds(test);
   test.use({ viewport: MOBILE_VIEWPORT });
 
   test.beforeEach(async ({ page }) => {
@@ -395,6 +397,7 @@ test.describe('移动端 Admin - 用户管理', () => {
 });
 
 test.describe('移动端 Admin - 模型管理', () => {
+  skipAdminIfNoCreds(test);
   test.use({ viewport: MOBILE_VIEWPORT });
 
   test.beforeEach(async ({ page }) => {
@@ -434,6 +437,7 @@ test.describe('移动端 Admin - 模型管理', () => {
 });
 
 test.describe('移动端 Admin - 公告管理', () => {
+  skipAdminIfNoCreds(test);
   test.use({ viewport: MOBILE_VIEWPORT });
 
   test.beforeEach(async ({ page }) => {
@@ -470,6 +474,7 @@ test.describe('移动端 Admin - 公告管理', () => {
 });
 
 test.describe('移动端 Admin - 套餐管理', () => {
+  skipAdminIfNoCreds(test);
   test.use({ viewport: MOBILE_VIEWPORT });
 
   test.beforeEach(async ({ page }) => {
@@ -507,6 +512,7 @@ test.describe('移动端 Admin - 套餐管理', () => {
 
 // ==================== 移动端响应式测试 ====================
 test.describe('移动端响应式 - 断点切换', () => {
+  skipUserIfNoCreds(test);
   test('从移动端切换到桌面端', async ({ page }) => {
     // 先以移动端登录
     await page.setViewportSize(MOBILE_VIEWPORT);
@@ -550,6 +556,7 @@ test.describe('移动端响应式 - 断点切换', () => {
 
 // ==================== 移动端触摸交互测试 ====================
 test.describe('移动端触摸 - 弹窗交互', () => {
+  skipAdminIfNoCreds(test);
   test.use({ viewport: MOBILE_VIEWPORT });
 
   test.beforeEach(async ({ page }) => {
@@ -598,6 +605,7 @@ test.describe('移动端性能 - 页面加载', () => {
   test.use({ viewport: MOBILE_VIEWPORT });
 
   test('Panel 页面加载速度', async ({ page }) => {
+    skipUserIfNoCreds(test);
     await login(page, TEST_USER.email, TEST_USER.password);
     
     const startTime = Date.now();
@@ -613,6 +621,7 @@ test.describe('移动端性能 - 页面加载', () => {
   });
 
   test('Admin 页面加载速度', async ({ page }) => {
+    skipAdminIfNoCreds(test);
     await login(page, ADMIN_USER.email, ADMIN_USER.password);
     
     const startTime = Date.now();
@@ -630,6 +639,7 @@ test.describe('移动端性能 - 页面加载', () => {
 
 // ==================== 移动端可访问性测试 ====================
 test.describe('移动端可访问性', () => {
+  skipUserIfNoCreds(test);
   test.use({ viewport: MOBILE_VIEWPORT });
 
   test('按钮有足够的点击区域', async ({ page }) => {

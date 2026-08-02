@@ -1,14 +1,12 @@
+import { e2eCredentials, skipAdminIfNoCreds } from '../utils/credentials';
 import { test, expect, type Page } from '@playwright/test';
 
 /**
  * TokenMP v3 E2E 测试 - Admin 后台编辑功能
- * 使用 demo admin 账号
+ * 使用受保护环境变量注入的 admin 账号
  */
 
-const ADMIN_USER = {
-  email: 'demo@tokenmp.cn',
-  password: 'demo12345678',
-};
+const ADMIN_USER = e2eCredentials().admin;
 
 async function login(page: Page, email: string, password: string) {
   await page.goto('/login');
@@ -20,6 +18,7 @@ async function login(page: Page, email: string, password: string) {
 }
 
 test.describe('Admin 后台 - 公告编辑', () => {
+  skipAdminIfNoCreds(test);
   test.beforeEach(async ({ page }) => {
     await login(page, ADMIN_USER.email, ADMIN_USER.password);
   });
@@ -79,6 +78,7 @@ test.describe('Admin 后台 - 公告编辑', () => {
 });
 
 test.describe('Admin 后台 - 版本日志编辑', () => {
+  skipAdminIfNoCreds(test);
   test.beforeEach(async ({ page }) => {
     await login(page, ADMIN_USER.email, ADMIN_USER.password);
   });
@@ -122,6 +122,7 @@ test.describe('Admin 后台 - 版本日志编辑', () => {
 });
 
 test.describe('Admin 后台 - 通知发送', () => {
+  skipAdminIfNoCreds(test);
   test.beforeEach(async ({ page }) => {
     await login(page, ADMIN_USER.email, ADMIN_USER.password);
   });
@@ -147,6 +148,7 @@ test.describe('Admin 后台 - 通知发送', () => {
 });
 
 test.describe('Admin 后台 - 套餐管理', () => {
+  skipAdminIfNoCreds(test);
   test.beforeEach(async ({ page }) => {
     await login(page, ADMIN_USER.email, ADMIN_USER.password);
   });
@@ -201,6 +203,7 @@ test.describe('Admin 后台 - 套餐管理', () => {
 });
 
 test.describe('Admin 后台 - Provider 管理', () => {
+  skipAdminIfNoCreds(test);
   test.beforeEach(async ({ page }) => {
     await login(page, ADMIN_USER.email, ADMIN_USER.password);
   });
@@ -233,6 +236,7 @@ test.describe('Admin 后台 - Provider 管理', () => {
 });
 
 test.describe('Admin 后台 - 模型管理', () => {
+  skipAdminIfNoCreds(test);
   test.beforeEach(async ({ page }) => {
     await login(page, ADMIN_USER.email, ADMIN_USER.password);
   });
@@ -260,6 +264,7 @@ test.describe('Admin 后台 - 模型管理', () => {
 });
 
 test.describe('Admin 后台 - 用户管理', () => {
+  skipAdminIfNoCreds(test);
   test.beforeEach(async ({ page }) => {
     await login(page, ADMIN_USER.email, ADMIN_USER.password);
   });

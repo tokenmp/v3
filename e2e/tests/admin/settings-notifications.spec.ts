@@ -1,7 +1,9 @@
 import { test, expect } from '@playwright/test';
+import { e2eCredentials, hasUserCreds, skipAdminIfNoCreds } from '../../utils/credentials';
 import { TestUtils } from '../../utils/test-utils';
 
 test.describe('Admin 系统设置页面', () => {
+  skipAdminIfNoCreds(test);
   let utils: TestUtils;
 
   test.beforeEach(async ({ page }) => {
@@ -164,6 +166,7 @@ test.describe('Admin 系统设置页面', () => {
 });
 
 test.describe('Admin 通知管理页面', () => {
+  skipAdminIfNoCreds(test);
   let utils: TestUtils;
 
   test.beforeEach(async ({ page }) => {
@@ -214,6 +217,10 @@ test.describe('Admin 通知管理页面', () => {
   });
 
   test('发送给指定用户', async ({ page }) => {
+    test.skip(
+      !hasUserCreds(),
+      'Targeted notification requires protected E2E_USER_EMAIL.',
+    );
     // 点击发送按钮
     await page.click('text=发送通知');
     
@@ -225,7 +232,7 @@ test.describe('Admin 通知管理页面', () => {
     await page.fill('textarea[placeholder*="正文"]', '这是一条指定用户通知');
     
     // 选择用户
-    await page.fill('input[placeholder*="用户"]', 'user@example.com');
+    await page.fill('input[placeholder*="用户"]', e2eCredentials().user.email);
     
     // 点击发送
     await page.click('button:has-text("发送")');

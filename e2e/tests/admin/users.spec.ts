@@ -1,7 +1,9 @@
+import { skipAdminIfNoCreds } from '../../utils/credentials';
 import { test, expect } from '@playwright/test';
 import { TestUtils } from '../../utils/test-utils';
 
 test.describe('Admin 用户管理页面', () => {
+  skipAdminIfNoCreds(test);
   let utils: TestUtils;
 
   test.beforeEach(async ({ page }) => {
@@ -316,6 +318,7 @@ test.describe('Admin 用户管理页面', () => {
 });
 
 test.describe('Admin 用户详情页面', () => {
+  skipAdminIfNoCreds(test);
   let utils: TestUtils;
 
   test.beforeEach(async ({ page }) => {

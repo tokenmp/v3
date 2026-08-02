@@ -19,14 +19,27 @@ The smoke spec records browser requests and asserts they are loopback-only. It d
 
 ## Explicit live target
 
-All existing Admin, Panel, mobile, and data-mutating specs remain live-target tests. They are **not** selected unless `BASE_URL` is explicitly supplied. In this mode Playwright never starts a server and targets exactly the supplied URL:
+All existing Admin, Panel, mobile, and data-mutating specs remain live-target tests. They are **not** selected unless `BASE_URL` (or protected `E2E_BASE_URL`) is explicitly supplied. In this mode Playwright never starts a server and targets exactly the supplied URL:
 
 ```bash
 BASE_URL=https://your-controlled-test-target.example \
+E2E_USER_EMAIL=… E2E_USER_PASSWORD=… \
+E2E_ADMIN_EMAIL=… E2E_ADMIN_PASSWORD=… \
   pnpm --filter tokenmp-v3-e2e exec playwright test --project=chromium
 ```
 
-Use a controlled, disposable environment and its provisioned test identities. Do not put a target URL containing credentials, API keys, or production data in a workflow, source file, or command history. A private target URL belongs in a protected repository variable or secret when a future manually dispatched live workflow is added; browser credentials must remain secrets and must not be passed as workflow inputs.
+Live identities and optional test data are injected only through protected environment variables:
+
+| Variable | Purpose |
+| --- | --- |
+| `E2E_BASE_URL` | Optional alternative to `BASE_URL` for the explicit target. |
+| `E2E_USER_EMAIL`, `E2E_USER_PASSWORD` | Required by authenticated Panel and user mobile specs. |
+| `E2E_ADMIN_EMAIL`, `E2E_ADMIN_PASSWORD` | Required by Admin CRUD and admin mobile specs. |
+| `E2E_API_KEY`, `E2E_USER_ID`, `E2E_PLAN_ID` | Optional provisioned fixture data for specs that need it. |
+
+Admin describes are skipped with a clear reason when the admin pair is absent; user describes do the same for the user pair. This makes `--list` and an accidental credential-free live invocation safe, but it does not validate a supplied credential: an invalid supplied value still fails the relevant login test. Mock/local fallbacks are deliberately invalid placeholders and cannot authenticate to a live service.
+
+Use a controlled, disposable environment and its provisioned test identities. Do not put a target URL containing credentials, API keys, passwords, or production data in a workflow, source file, command history, or tracked `.env` file. Keep all `E2E_*` values in protected secrets; never commit their values.
 
 The full suite is intentionally excluded from `.github/workflows/ci.yml`'s normal `verify` job. `.github/workflows/e2e.yml` is a separate PR/manual local-smoke gate only; it does not run the live suite.
 
@@ -39,6 +52,7 @@ e2e/
 │   ├── admin/       # live Admin CRUD coverage
 │   ├── panel/       # live user-panel coverage
 │   └── *.spec.ts    # live specialized coverage
+├── utils/credentials.ts  # protected E2E_* credential resolution and suite gates
 ├── utils/test-utils.ts
 ├── playwright.config.ts
 └── run-tests.sh

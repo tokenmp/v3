@@ -1,14 +1,12 @@
 import { test, expect, type Page } from '@playwright/test';
+import { e2eCredentials, skipUserIfNoCreds } from '../utils/credentials';
 
 /**
  * TokenMP v3 E2E 测试 - 针对 dev 服务器
  * Requires an explicitly supplied, controlled BASE_URL target.
  */
 
-const TEST_USER = {
-  email: 'e2e-test@tokenmp.dev',
-  password: 'TestPassword123!',
-};
+const TEST_USER = e2eCredentials().user;
 
 async function login(page: Page, email: string, password: string) {
   await page.goto('/login');
@@ -20,6 +18,7 @@ async function login(page: Page, email: string, password: string) {
 }
 
 test.describe('TokenMP v3 E2E - 公开页面', () => {
+  skipUserIfNoCreds(test);
   test('首页显示内容', async ({ page }) => {
     await page.goto('/');
     await page.waitForLoadState('networkidle');
@@ -69,6 +68,7 @@ test.describe('TokenMP v3 E2E - 公开页面', () => {
 });
 
 test.describe('TokenMP v3 E2E - Panel 用户面板', () => {
+  skipUserIfNoCreds(test);
   test.beforeEach(async ({ page }) => {
     await login(page, TEST_USER.email, TEST_USER.password);
   });
