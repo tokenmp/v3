@@ -1,13 +1,15 @@
 import { defineConfig, devices } from '@playwright/test';
 
 const localPort = Number(process.env.E2E_PORT ?? 3101);
-const hasExplicitBaseURL = Boolean(process.env.BASE_URL);
-const baseURL = process.env.BASE_URL ?? `http://127.0.0.1:${localPort}`;
+const explicitBaseURL = process.env.BASE_URL ?? process.env.E2E_BASE_URL;
+const hasExplicitBaseURL = Boolean(explicitBaseURL);
+const baseURL = explicitBaseURL ?? `http://127.0.0.1:${localPort}`;
 
 /**
  * TokenMP v3 E2E configuration.
  *
- * A supplied BASE_URL is an explicit opt-in to a separately managed target.
+ * A supplied BASE_URL (or protected E2E_BASE_URL) is an explicit opt-in to a
+ * separately managed target.
  * Without it, only the credential-free local smoke project is available and
  * Playwright starts an isolated mock web app on the loopback interface.
  */

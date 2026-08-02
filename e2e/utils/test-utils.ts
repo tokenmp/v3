@@ -1,4 +1,5 @@
 import { test, expect, Page } from '@playwright/test';
+import { e2eCredentials } from './credentials';
 
 // 测试工具函数
 export class TestUtils {
@@ -11,7 +12,10 @@ export class TestUtils {
   }
 
   // 登录为管理员
-  async loginAsAdmin(email: string = 'admin@example.com', password: string = 'password123') {
+  async loginAsAdmin(
+    email: string = e2eCredentials().admin.email,
+    password: string = e2eCredentials().admin.password,
+  ) {
     await this.page.goto('/login');
     await this.page.fill('input[type="email"]', email);
     await this.page.fill('input[type="password"]', password);
@@ -20,7 +24,10 @@ export class TestUtils {
   }
 
   // 登录为普通用户
-  async loginAsUser(email: string = 'user@example.com', password: string = 'password123') {
+  async loginAsUser(
+    email: string = e2eCredentials().user.email,
+    password: string = e2eCredentials().user.password,
+  ) {
     await this.page.goto('/login');
     await this.page.fill('input[type="email"]', email);
     await this.page.fill('input[type="password"]', password);
@@ -247,16 +254,16 @@ export class TestUtils {
 export const testFixture = {
   // 管理员用户数据
   adminUser: {
-    email: 'admin@example.com',
-    password: 'password123',
+    email: e2eCredentials().admin.email,
+    password: e2eCredentials().admin.password,
     role: 'admin',
     status: 'active',
   },
   
   // 普通用户数据
   regularUser: {
-    email: 'user@example.com',
-    password: 'password123',
+    email: e2eCredentials().user.email,
+    password: e2eCredentials().user.password,
     role: 'user',
     status: 'active',
   },
