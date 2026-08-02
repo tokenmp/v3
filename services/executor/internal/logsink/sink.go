@@ -318,7 +318,19 @@ func buildBatch(e requestlog.ExecutionEvent) (batch, bool) {
 	case requestlog.KindReserved, requestlog.KindStarted:
 		log.FinalStatus = "processing"
 	case requestlog.KindFinalized:
-		log.FinalStatus = "success"
+		// A finalized settlement records the terminal accounting, not a fresh
+		// success assertion. Only a completed outcome writes "success"; a
+		// committed-but-failed or client-cancelled stream must preserve the
+		// failure final_status already recorded by the preceding KindAttempt
+		// failure, never clobbering it with "success". The driver sets
+		// Status/FailureCategory on the finalized event to reflect the outcome.
+		if e.Status == "success" {
+			log.FinalStatus = "success"
+		} else if e.FailureCategory != "" {
+			log.FinalStatus = e.FailureCategory
+		} else {
+			log.FinalStatus = "upstream_error"
+		}
 	case requestlog.KindReleased:
 		if e.FailureCategory != "" {
 			log.FinalStatus = e.FailureCategory

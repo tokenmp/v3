@@ -46,7 +46,8 @@
 | UpstreamStatus | Log.UpstreamHTTPStatus, Attempt.UpstreamHTTPStatus |
 | UpstreamRequestID | Attempt/Event Metadata `upstream_request_id`（唯一允许的上游 metadata） |
 | Kind=attempt | 产生 1 行 Attempt |
-| Kind=finalized/released | Log.CompletedAt = Timestamp |
+| Kind=finalized | Log.CompletedAt = Timestamp；**final_status 按 outcome 映射而非恒为 success**：completed→`success`、client_cancelled→`client_cancelled`、其余 committed-but-failed→`upstream_error`，避免覆盖同 attempt 先前 logFailure 记录的失败语义 |
+| Kind=released | Log.CompletedAt = Timestamp；final_status=FailureCategory 或回退 `upstream_error` |
 | 所有 Kind | 产生 1 行 Event（Source="executor"；reserved→quota_reserved、started→upstream_started、attempt→upstream_finished、terminal/completed） |
 
 ## 验证

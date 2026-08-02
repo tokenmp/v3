@@ -45,6 +45,12 @@ func (h *Hybrid) CreateChatCompletion(w http.ResponseWriter, r *http.Request) {
 	// A committed sink is authoritative: JSON would corrupt its SSE response.
 	// Context lifecycle termination is similarly a deliberate no-write result.
 	if sink.Committed() || contextLifecycleError(r.Context(), err) != nil {
+		// OpenAI transport-level [DONE] guarantee: a committed stream that never
+		// received a terminal EventFinish (clean EOF, a combined
+		// content+finish_reason chunk, or an upstream error after commit) still
+		// terminates with exactly one [DONE]. A no-op once finished. The error
+		// is intentionally ignored: the response is already committed.
+		_ = sink.EnsureDone(r.Context())
 		return
 	}
 	if err != nil {

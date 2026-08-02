@@ -96,6 +96,10 @@ func (h *Hybrid) CreateResponse(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := h.streamExecutor.Execute(r.Context(), normalized.StreamRequest(sink))
 	if sink.Committed() || contextLifecycleError(r.Context(), err) != nil {
+		// OpenAI transport-level [DONE] guarantee (Responses shares the OpenAI
+		// Chat SSE shape). See CreateChatCompletion for rationale. No-op once
+		// finished or for a stream that never committed.
+		_ = sink.EnsureDone(r.Context())
 		return
 	}
 	if err != nil {

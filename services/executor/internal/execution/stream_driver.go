@@ -218,12 +218,15 @@ func (d *StreamDriver) Run(ctx context.Context, in StreamInput) (StreamResult, e
 		// Record the bridge start time so the terminal summary can reconstruct
 		// real TTFT (stream open latency + Bridge-relative first commit).
 		bridgeStart := d.now()
-		// Wire the optional cross-protocol EndOfStreamFinalizer so a committed
-		// clean EOF (e.g. OpenAI [DONE] that never carried finish_reason) is
-		// completed via synthesized protocol-native terminal output instead of
-		// being treated as a truncated stream. Same-protocol sinks expose no
-		// finalizer (nil) and keep the legacy contract. The closure carries no
-		// raw bytes across the streaming boundary.
+		// Wire the optional EndOfStreamFinalizer so a committed clean EOF
+		// (e.g. OpenAI [DONE] that never carried finish_reason, or a combined
+		// content+finish_reason chunk) is completed via synthesized protocol-native
+		// terminal output instead of being treated as a truncated stream. Both the
+		// cross-protocol convertingSink and a same-protocol sink that implements
+		// terminal synthesis (the transport SSEProtocolSink) expose a finalizer;
+		// a plain sink that does not exposes none and keeps the legacy
+		// committed-EOF contract. The closure carries no raw bytes across the
+		// streaming boundary.
 		if fn := sink.finalizer(); fn != nil {
 			bridge.Finalizer = fn
 		}
@@ -643,6 +646,19 @@ func (d *StreamDriver) logFinalized(ctx context.Context, in StreamInput, prepare
 			Disposition: disposition,
 			Outcome:     completionOutcome,
 		},
+	}
+	// Carry the terminal disposition so the logsink does not overwrite a prior
+	// failed attempt's final_status with "success". A committed stream that did
+	// not reach StateCompleted was already recorded as a failure by logFailure;
+	// KindFinalized must preserve that failure semantics rather than clobber it.
+	switch outcome.State {
+	case streaming.StateCompleted:
+		event.Status = "success"
+	case streaming.StateClientCancelled:
+		event.Status = "failed"
+		event.FailureCategory = "client_cancelled"
+	default:
+		event.Status = "failed"
 	}
 	if outcome.UsageKnown {
 		event.Usage = requestlog.ExecutionUsage{

@@ -140,6 +140,13 @@ go build ./...
 
 commit 前的失败渲染协议原生 JSON；SSE sink commit 后不追加 JSON fallback。sink 要求 `http.Flusher`，canonical payload 上限 256 KiB；OpenAI 使用 `data:` 帧和唯一 `[DONE]`，Anthropic 使用 native `event:` + `data:` 且无 `[DONE]`。Driver 的 pre-commit-only retry、一次 Reserve/唯一 Finalize/Release 不变；无 HTTP atomicity、wire-attempt proof、跨进程 exactly-once 或 public/provider E2E。Responses non-stream+stream 已 runtime 启用；Images legacy completion-only non-stream 已执行。CI 完整模块 `go test -race ./...` 自动覆盖这些 package；route conformance/process tests 覆盖 stream pre-commit JSON 404。
 
+### SSE 终态 `[DONE]` 保证（已实施）
+
+OpenAI Chat/Responses 的下游 SSE 必须稳定终止于恰好一个 `[DONE]`，覆盖 committed 后任何未收到 `EventFinish` 的情况（clean EOF、combined content+finish_reason chunk、commit 后上游错误）。三层保证：
+1. **transport 级 `EnsureDone`**：`CreateChatCompletion`/`CreateResponse` 在 `Execute` 后若 `sink.Committed() && !sink.Finished()`，追加 `data: [DONE]\n\n` 并 flush；幂等（已 finished 或未 commit 为 no-op）；Anthropic 不加裸 `[DONE]`（保持 native terminal events 语义）。
+2. **same-protocol `EndOfStreamFinalizer`**：`SSEProtocolSink` 实现 `execution.streamFinalizer`（`Finalize`），由 `streamPayloadSink.finalizer()` 发现并接入 `Bridge.Finalizer`，与跨协议 `convertingSink` 对称：committed clean EOF 无 finish 时合成 `finish_reason="stop"`（OpenAI，写 `[DONE]`）或 native `message_stop`（Anthropic，无 `[DONE]`），使流成为 `StateCompleted` 而非 `ReasonStreamTruncated`。新增 `SSEProtocolSink.Finished()` 访问器与 `finalized` exactly-once guard。
+3. **classifyRoot 容忍 combined chunk**：`openaiadapter.classifyRoot` 把 combined content+finish_reason chunk（如 MiniMax-M3 把末 delta 与 finish_reason 合并在同一 chunk）按 semantic 事件分类，不再拒为 `errChunkProtocol`；该 chunk 的 finish_reason 不作为 EventFinish（Sink 拒绝非 finish 事件携带 FinishReason），终态由 #2 在随后 clean EOF 合成。`validateRoot` 仍严格拒绝不支持/非法 finish_reason。logsink 的 `KindFinalized` 不再恒为 `success`：按 outcome 映射（completed→`success`、client_cancelled→`client_cancelled`、其余 committed-but-failed→`upstream_error`），不覆盖同 attempt 先前记录的失败语义。
+
 ## Phase 11 Images HTTP（已实施）
 
 `POST /v1/images/generations` 已经 `CaptureRawBody`、`NewNonStream`、transport-neutral facade、Runner、registry/composition 调用 official legacy Images SDK。`internal/imagecontract` 是 SDK 和 transport 共用的纯 Go semantic validator：request 的 nonempty/untrimmed prompt、1 MiB prompt、512-byte CTL-free user、default `url` 与 response 16 MiB/10 MiB/12 MiB/usage/extensions/revised prompt 边界一致。normalizer 返回 `NormalizedImageRequest{Request, EffectiveResponseFormat}`，renderer 仅接受全 item 一致且匹配该 format 的结果；base64 流式计数，不分配 DecodeString 结果。所有 Images 成功及失败均写 `Cache-Control: no-store`。不支持 GPT Image 特有参数或 usage quota；Responses non-stream+stream 已 runtime 启用。

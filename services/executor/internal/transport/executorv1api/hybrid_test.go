@@ -50,7 +50,7 @@ func executorv1Handler(server interface {
 	return executorv1.Handler(server)
 }
 
-func TestHybridChatStreamingWritesSSEAndDoesNotAppendJSONAfterCommit(t *testing.T) {
+func TestHybridChatStreamingWritesSSEAndAppendsDoneAfterCommit(t *testing.T) {
 	t.Parallel()
 	streamer := &hybridStreamExecutor{run: func(ctx context.Context, req StreamRequest) (StreamResult, error) {
 		if req.RequestID != "req_hybrid" || req.Protocol != adapter.ProtocolOpenAIChat {
@@ -73,7 +73,7 @@ func TestHybridChatStreamingWritesSSEAndDoesNotAppendJSONAfterCommit(t *testing.
 	if got := recorder.Header().Get("Content-Type"); got != "text/event-stream" {
 		t.Fatalf("Content-Type = %q", got)
 	}
-	if got := recorder.Body.String(); got != "data: {\"id\":\"one\"}\n\n" {
+	if got := recorder.Body.String(); got != "data: {\"id\":\"one\"}\n\ndata: [DONE]\n\n" {
 		t.Fatalf("body = %q", got)
 	}
 	if strings.Contains(recorder.Body.String(), "INTERNAL_ERROR") || streamer.calls.Load() != 1 {

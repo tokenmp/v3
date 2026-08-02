@@ -29,6 +29,12 @@ func TestParseChunkClassifiesCanonicalOwnedPayload(t *testing.T) {
 		{"tool", `{"id":"c","object":"chat.completion.chunk","created":1,"model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call","type":"function","function":{"name":"f","arguments":"{}"}}]},"finish_reason":null}]}`, streaming.EventSemantic, "", 0},
 		{"usage only", `{"id":"c","object":"chat.completion.chunk","created":1,"model":"m","choices":[],"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}}`, streaming.EventUsage, "", 3},
 		{"finish", `{"id":"c","object":"chat.completion.chunk","created":1,"model":"m","choices":[{"index":0,"delta":{},"finish_reason":"function_call"}]}`, streaming.EventFinish, "function_call", 0},
+		// A combined content+finish_reason chunk (e.g. MiniMax-M3) is tolerated as
+		// a semantic event: the content flows downstream and the finish_reason on
+		// this chunk is intentionally dropped (the transport synthesizes a
+		// terminal finish on the clean EOF). Usage, when present, is carried.
+		{"combined content+finish", `{"id":"c","object":"chat.completion.chunk","created":1,"model":"m","choices":[{"index":0,"delta":{"content":"x"},"finish_reason":"stop"}]}`, streaming.EventSemantic, "", 0},
+		{"combined reasoning+finish+usage", `{"id":"c","object":"chat.completion.chunk","created":1,"model":"m","choices":[{"index":0,"delta":{"reasoning_content":"think"},"finish_reason":"length"}],"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}}`, streaming.EventSemantic, "", 3},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -107,18 +113,18 @@ func TestParseChunkRejectsInvalidWithoutLeakingPayload(t *testing.T) {
 	secret := "raw-provider-secret"
 	cases := map[string]string{
 		"blank": "", "trailing": string(validChunk("")) + `x`, "array": `[]`,
-		"duplicate":       `{"id":"c","id":"` + secret + `","object":"chat.completion.chunk","created":1,"model":"m","choices":[]}`,
-		"prototype":       `{"id":"c","object":"chat.completion.chunk","created":1,"model":"m","choices":[],"__proto__":{}}`,
-		"bad required":    `{"id":"","object":"wrong","created":-1,"model":"","choices":[]}`,
-		"multi":           `{"id":"c","object":"chat.completion.chunk","created":1,"model":"m","choices":[{"index":0,"delta":{}},{"index":1,"delta":{}}]}`,
-		"index":           `{"id":"c","object":"chat.completion.chunk","created":1,"model":"m","choices":[{"index":1,"delta":{}}]}`,
-		"finish semantic": `{"id":"c","object":"chat.completion.chunk","created":1,"model":"m","choices":[{"index":0,"delta":{"content":"x"},"finish_reason":"stop"}]}`,
-		"negative usage":  `{"id":"c","object":"chat.completion.chunk","created":1,"model":"m","choices":[],"usage":{"total_tokens":-1}}`,
-		"bad tool":        `{"id":"c","object":"chat.completion.chunk","created":1,"model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"id":"x"}]},"finish_reason":null}]}`,
-		"bad role":        `{"id":"c","object":"chat.completion.chunk","created":1,"model":"m","choices":[{"index":0,"delta":{"role":"attacker"},"finish_reason":null}]}`,
-		"bad delta":       `{"id":"c","object":"chat.completion.chunk","created":1,"model":"m","choices":[{"index":0,"delta":[],"finish_reason":null}]}`,
-		"bad finish":      `{"id":"c","object":"chat.completion.chunk","created":1,"model":"m","choices":[{"index":0,"delta":{},"finish_reason":"unknown"}]}`,
-		"partial usage":   `{"id":"c","object":"chat.completion.chunk","created":1,"model":"m","choices":[],"usage":{"total_tokens":1}}`,
+		"duplicate":           `{"id":"c","id":"` + secret + `","object":"chat.completion.chunk","created":1,"model":"m","choices":[]}`,
+		"prototype":           `{"id":"c","object":"chat.completion.chunk","created":1,"model":"m","choices":[],"__proto__":{}}`,
+		"bad required":        `{"id":"","object":"wrong","created":-1,"model":"","choices":[]}`,
+		"multi":               `{"id":"c","object":"chat.completion.chunk","created":1,"model":"m","choices":[{"index":0,"delta":{}},{"index":1,"delta":{}}]}`,
+		"index":               `{"id":"c","object":"chat.completion.chunk","created":1,"model":"m","choices":[{"index":1,"delta":{}}]}`,
+		"negative usage":      `{"id":"c","object":"chat.completion.chunk","created":1,"model":"m","choices":[],"usage":{"total_tokens":-1}}`,
+		"bad tool":            `{"id":"c","object":"chat.completion.chunk","created":1,"model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"id":"x"}]},"finish_reason":null}]}`,
+		"bad role":            `{"id":"c","object":"chat.completion.chunk","created":1,"model":"m","choices":[{"index":0,"delta":{"role":"attacker"},"finish_reason":null}]}`,
+		"bad delta":           `{"id":"c","object":"chat.completion.chunk","created":1,"model":"m","choices":[{"index":0,"delta":[],"finish_reason":null}]}`,
+		"bad finish":          `{"id":"c","object":"chat.completion.chunk","created":1,"model":"m","choices":[{"index":0,"delta":{},"finish_reason":"unknown"}]}`,
+		"combined bad finish": `{"id":"c","object":"chat.completion.chunk","created":1,"model":"m","choices":[{"index":0,"delta":{"content":"x"},"finish_reason":"unknown"}]}`,
+		"partial usage":       `{"id":"c","object":"chat.completion.chunk","created":1,"model":"m","choices":[],"usage":{"total_tokens":1}}`,
 	}
 	for name, raw := range cases {
 		t.Run(name, func(t *testing.T) {
