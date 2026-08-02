@@ -255,3 +255,173 @@ func TestSSEProtocolSinkRejectsInvalidEventsAndCancelledCommitBeforeHeader(t *te
 		t.Fatalf("unknown Anthropic event type = %v", err)
 	}
 }
+
+func TestSSEProtocolSinkEnsureDoneAppendsDoneAfterCommitWithoutFinish(t *testing.T) {
+	t.Parallel()
+	// A committed OpenAI stream that never received a terminal EventFinish
+	// (clean EOF, a combined content+finish_reason chunk, or an upstream error
+	// after commit) must still terminate with exactly one [DONE].
+	recorder := httptest.NewRecorder()
+	sink, err := NewOpenAISSEProtocolSink(recorder)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sink.Commit(context.Background(), []sdk.StreamEvent{sseEvent(1, streaming.EventSemantic, "chat.completion.chunk", `{"id":"one"}`)}); err != nil {
+		t.Fatal(err)
+	}
+	if sink.Finished() {
+		t.Fatal("Finished = true before EnsureDone")
+	}
+	if err := sink.EnsureDone(context.Background()); err != nil {
+		t.Fatalf("EnsureDone: %v", err)
+	}
+	if !sink.Finished() {
+		t.Fatal("Finished = false after EnsureDone")
+	}
+	want := "data: {\"id\":\"one\"}\n\ndata: [DONE]\n\n"
+	if got := recorder.Body.String(); got != want {
+		t.Fatalf("body = %q, want %q", got, want)
+	}
+	// Idempotent: a second EnsureDone is a no-op (exactly one [DONE]).
+	before := recorder.Body.String()
+	if err := sink.EnsureDone(context.Background()); err != nil {
+		t.Fatalf("second EnsureDone: %v", err)
+	}
+	if recorder.Body.String() != before {
+		t.Fatalf("second EnsureDone appended again: %q", recorder.Body.String())
+	}
+}
+
+func TestSSEProtocolSinkEnsureDoneNoOpAfterFinish(t *testing.T) {
+	t.Parallel()
+	// When a terminal EventFinish already wrote [DONE], EnsureDone must not
+	// append a second [DONE].
+	recorder := httptest.NewRecorder()
+	sink, err := NewOpenAISSEProtocolSink(recorder)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sink.Commit(context.Background(), []sdk.StreamEvent{sseEvent(1, streaming.EventSemantic, "chat.completion.chunk", `{"id":"one"}`)}); err != nil {
+		t.Fatal(err)
+	}
+	finish := sseEvent(2, streaming.EventFinish, "chat.completion.chunk", `{"id":"two"}`)
+	finish.Meta.FinishReason = "stop"
+	if err := sink.WriteEvent(context.Background(), finish); err != nil {
+		t.Fatal(err)
+	}
+	if err := sink.Flush(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := sink.EnsureDone(context.Background()); err != nil {
+		t.Fatalf("EnsureDone: %v", err)
+	}
+	want := "data: {\"id\":\"one\"}\n\ndata: {\"id\":\"two\"}\n\ndata: [DONE]\n\n"
+	if got := recorder.Body.String(); got != want {
+		t.Fatalf("body = %q, want %q (no duplicate [DONE])", got, want)
+	}
+}
+
+func TestSSEProtocolSinkEnsureDoneNoOpForAnthropic(t *testing.T) {
+	t.Parallel()
+	// Anthropic streams keep native terminal-event semantics: EnsureDone must
+	// never append a bare [DONE].
+	recorder := httptest.NewRecorder()
+	sink, err := NewAnthropicSSEProtocolSink(recorder)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sink.Commit(context.Background(), []sdk.StreamEvent{sseEvent(1, streaming.EventLifecycle, "message_start", `{"type":"message_start"}`)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := sink.EnsureDone(context.Background()); err != nil {
+		t.Fatalf("EnsureDone: %v", err)
+	}
+	if strings.Contains(recorder.Body.String(), "[DONE]") {
+		t.Fatalf("Anthropic EnsureDone appended [DONE]: %q", recorder.Body.String())
+	}
+}
+
+func TestSSEProtocolSinkEnsureDoneNoOpWhenUncommitted(t *testing.T) {
+	t.Parallel()
+	// An uncommitted sink must not write [DONE] (no SSE response started).
+	recorder := httptest.NewRecorder()
+	sink, err := NewOpenAISSEProtocolSink(recorder)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sink.EnsureDone(context.Background()); err != nil {
+		t.Fatalf("EnsureDone: %v", err)
+	}
+	if recorder.Body.Len() != 0 || recorder.Code != http.StatusOK {
+		t.Fatalf("uncommitted EnsureDone wrote body=%q code=%d", recorder.Body.String(), recorder.Code)
+	}
+}
+
+func TestSSEProtocolSinkFinalizeSynthesizesOpenAIFinishAndDone(t *testing.T) {
+	t.Parallel()
+	// A committed clean EOF without an explicit finish: Finalize synthesizes a
+	// chat.completion.chunk carrying finish_reason="stop" and writes [DONE],
+	// returning sanitized terminal metadata. This is the same-protocol parity
+	// with the cross-protocol convertingSink Finalizer.
+	recorder := httptest.NewRecorder()
+	sink, err := NewOpenAISSEProtocolSink(recorder)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sink.Commit(context.Background(), []sdk.StreamEvent{sseEvent(1, streaming.EventSemantic, "chat.completion.chunk", `{"id":"one"}`)}); err != nil {
+		t.Fatal(err)
+	}
+	meta, err := sink.Finalize(context.Background())
+	if err != nil {
+		t.Fatalf("Finalize: %v", err)
+	}
+	if meta.Finish != "stop" {
+		t.Fatalf("Finish = %q, want stop", meta.Finish)
+	}
+	if !sink.Finished() {
+		t.Fatal("Finished = false after Finalize")
+	}
+	if !strings.Contains(recorder.Body.String(), "finish_reason\":\"stop\"") || !strings.Contains(recorder.Body.String(), "data: [DONE]\n\n") {
+		t.Fatalf("body missing synthesized finish/[DONE]: %q", recorder.Body.String())
+	}
+	// Idempotent: a second Finalize is a no-op.
+	before := recorder.Body.String()
+	meta2, err := sink.Finalize(context.Background())
+	if err != nil || meta2.Finish != "" {
+		t.Fatalf("second Finalize = %+v %v", meta2, err)
+	}
+	if recorder.Body.String() != before {
+		t.Fatalf("second Finalize appended again: %q", recorder.Body.String())
+	}
+}
+
+func TestSSEProtocolSinkFinalizeSynthesizesAnthropicMessageStopWithoutDone(t *testing.T) {
+	t.Parallel()
+	// A committed clean EOF for Anthropic: Finalize synthesizes a native
+	// message_stop event and never appends a bare [DONE].
+	recorder := httptest.NewRecorder()
+	sink, err := NewAnthropicSSEProtocolSink(recorder)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sink.Commit(context.Background(), []sdk.StreamEvent{sseEvent(1, streaming.EventSemantic, "content_block_delta", `{"type":"content_block_delta","delta":{"type":"text_delta","text":"hi"}}`)}); err != nil {
+		t.Fatal(err)
+	}
+	meta, err := sink.Finalize(context.Background())
+	if err != nil {
+		t.Fatalf("Finalize: %v", err)
+	}
+	if meta.Finish != "end_turn" {
+		t.Fatalf("Finish = %q, want end_turn", meta.Finish)
+	}
+	if !sink.Finished() {
+		t.Fatal("Finished = false after Finalize")
+	}
+	got := recorder.Body.String()
+	if !strings.Contains(got, "event: message_stop\n") || !strings.Contains(got, `"type":"message_stop"`) {
+		t.Fatalf("body missing synthesized message_stop: %q", got)
+	}
+	if strings.Contains(got, "[DONE]") {
+		t.Fatalf("Anthropic Finalize appended [DONE]: %q", got)
+	}
+}

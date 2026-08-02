@@ -755,6 +755,19 @@ func (r *Runner) logFinalized(ctx context.Context, in Input, prepared routing.Pr
 			Outcome:     string(outcome.Outcome),
 		},
 	}
+	// Carry the terminal disposition so the logsink does not overwrite a prior
+	// failed attempt's final_status with "success". The non-stream Runner only
+	// finalizes on success today, but encode the outcome defensively for parity
+	// with the stream driver.
+	switch outcome.Outcome {
+	case quota.OutcomeCompleted:
+		event.Status = "success"
+	case quota.OutcomeClientCancelled:
+		event.Status = "failed"
+		event.FailureCategory = "client_cancelled"
+	default:
+		event.Status = "failed"
+	}
 	if outcome.Usage != (quota.ConfirmedUsage{}) {
 		event.Usage = requestlog.ExecutionUsage{
 			InputTokens:  outcome.Usage.InputTokens,

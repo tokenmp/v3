@@ -297,10 +297,13 @@ func TestSDKPayloadSourceNativeErrorDoesNotConsumePendingPayload(t *testing.T) {
 
 // ── streamPayloadSink.finalizer delegation ──────────────────────────────────
 
-func TestStreamPayloadSinkFinalizerNilForSameProtocol(t *testing.T) {
+func TestStreamPayloadSinkFinalizerNilForSinkWithoutFinalize(t *testing.T) {
 	t.Parallel()
-	// A same-protocol sink chain (inner returned directly by newConvertingSink)
-	// exposes no finalizer: the Bridge keeps the legacy committed-EOF contract.
+	// A same-protocol sink that does NOT implement terminal synthesis exposes
+	// no finalizer: the Bridge keeps the legacy committed-EOF contract for it.
+	// (A same-protocol sink that implements the streamFinalizer capability —
+	// e.g. the transport SSEProtocolSink — exposes a non-nil finalizer; see
+	// TestStreamPayloadSinkFinalizerForFinalizingSameProtocolSink.)
 	inner := &payloadTestSink{}
 	conv := newConvertingSink(inner, adapter.ProtocolOpenAIChat, adapter.ProtocolOpenAIChat, nil)
 	if conv != inner {
@@ -311,7 +314,71 @@ func TestStreamPayloadSinkFinalizerNilForSameProtocol(t *testing.T) {
 		t.Fatal(err)
 	}
 	if fn := sink.finalizer(); fn != nil {
-		t.Fatal("same-protocol finalizer must be nil")
+		t.Fatal("non-finalizing same-protocol sink finalizer must be nil")
+	}
+}
+
+// finalizingTestSink is a same-protocol ProtocolSink that also implements the
+// streamFinalizer capability, mirroring the transport SSEProtocolSink. It
+// records the synthesized terminal write so a test can assert the Bridge's
+// committed-clean-EOF terminal synthesis reaches the downstream sink.
+type finalizingTestSink struct {
+	payloadTestSink
+	finalized bool
+}
+
+func (s *finalizingTestSink) Finalize(_ context.Context) (streaming.TerminalMeta, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.finalized {
+		return streaming.TerminalMeta{}, nil
+	}
+	s.finalized = true
+	s.writes = append(s.writes, sdk.StreamEvent{
+		Sequence: 1,
+		Meta:     streaming.Event{Sequence: 1, Kind: streaming.EventFinish, EventType: "chat.completion.chunk", FinishReason: "stop"},
+		Data:     []byte(`{"object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`),
+	})
+	return streaming.TerminalMeta{Finish: "stop"}, nil
+}
+
+func TestStreamPayloadSinkFinalizerForFinalizingSameProtocolSink(t *testing.T) {
+	t.Parallel()
+	// A same-protocol sink that implements streamFinalizer exposes a non-nil
+	// finalizer the streamPayloadSink delegates to, so a committed clean EOF is
+	// completed via synthesized terminal output instead of being treated as a
+	// truncated stream. This is the same-protocol parity with the
+	// cross-protocol convertingSink finalizer.
+	inner := &finalizingTestSink{}
+	conv := newConvertingSink(inner, adapter.ProtocolOpenAIChat, adapter.ProtocolOpenAIChat, nil)
+	if conv != inner {
+		t.Fatal("same-protocol must return inner sink directly")
+	}
+	_, sink, err := newSDKPayloadSource(&payloadTestSource{err: streaming.ErrEndOfStream}, conv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fn := sink.finalizer()
+	if fn == nil {
+		t.Fatal("finalizing same-protocol sink finalizer must be non-nil")
+	}
+	meta, err := fn(context.Background())
+	if err != nil {
+		t.Fatalf("finalizer: %v", err)
+	}
+	if meta.Finish != "stop" {
+		t.Fatalf("Finish = %q, want stop", meta.Finish)
+	}
+	var sawFinish bool
+	inner.mu.Lock()
+	for _, ev := range inner.writes {
+		if ev.Meta.Kind == streaming.EventFinish && ev.Meta.FinishReason == "stop" {
+			sawFinish = true
+		}
+	}
+	inner.mu.Unlock()
+	if !sawFinish {
+		t.Fatal("delegated finalizer did not synthesize a finish event downstream")
 	}
 }
 

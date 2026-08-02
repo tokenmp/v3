@@ -199,6 +199,47 @@ func TestStreamDriverSemanticCompleteFinalizes(t *testing.T) {
 	}
 }
 
+func TestStreamDriverSameProtocolCleanEOFSynthesizesFinish(t *testing.T) {
+	// A same-protocol sink that implements terminal synthesis (mirroring the
+	// transport SSEProtocolSink) is discovered by streamPayloadSink.finalizer,
+	// so a committed clean EOF without an explicit finish completes the stream
+	// via the synthesized terminal instead of being treated as truncated.
+	resolver, plan := runnerFixture(t)
+	client := &driverStreamClient{open: func(context.Context, sdk.StreamCall) (sdk.StreamOpen, error) {
+		// Semantic content commits the stream, usage confirms cost, then a clean
+		// EOF (no explicit finish).
+		return sdk.StreamOpen{Source: &driverSource{events: []sdk.StreamEvent{streamEvent(1, streaming.EventSemantic), streamUsage(2)}}}, nil
+	}}
+	downstream := &finalizingTestSink{}
+	driver, port := streamDriver(t, client)
+	result, err := driver.Run(context.Background(), streamDriverInput(resolver, plan, downstream))
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	if result.Outcome.State != streaming.StateCompleted {
+		t.Fatalf("State = %v, want completed (synthesized finish)", result.Outcome.State)
+	}
+	if result.Outcome.Finish != "stop" {
+		t.Fatalf("Finish = %q, want stop", result.Outcome.Finish)
+	}
+	// The finalizer wrote a synthesized finish downstream.
+	downstream.mu.Lock()
+	sawFinish := false
+	for _, ev := range downstream.writes {
+		if ev.Meta.Kind == streaming.EventFinish && ev.Meta.FinishReason == "stop" {
+			sawFinish = true
+		}
+	}
+	downstream.mu.Unlock()
+	if !sawFinish {
+		t.Fatal("finalizer did not synthesize a downstream finish")
+	}
+	calls := port.TypedCalls()
+	if len(calls) != 2 || calls[1].Method != "FinalizeReservation" {
+		t.Fatalf("quota calls = %+v", calls)
+	}
+}
+
 func TestStreamDriverPrecommitFailureReleases(t *testing.T) {
 	resolver, plan := runnerFixture(t)
 	client := &driverStreamClient{open: func(context.Context, sdk.StreamCall) (sdk.StreamOpen, error) {

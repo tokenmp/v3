@@ -445,6 +445,50 @@ func TestBuildBatchStartedCreatesTTFTTimelineUpdate(t *testing.T) {
 	}
 }
 
+func TestBuildBatchFinalizedMapsStatusByOutcome(t *testing.T) {
+	t.Parallel()
+	// KindFinalized must not clobber a prior failed attempt's final_status
+	// with "success". It maps final_status from the carried Status/FailureCategory
+	// (set by the driver from the streaming/quota outcome), preserving failure
+	// semantics for committed-but-failed or client-cancelled streams.
+	cases := []struct {
+		name            string
+		status          string
+		failureCategory string
+		wantFinalStatus string
+	}{
+		{"completed", "success", "", "success"},
+		{"client_cancelled", "failed", "client_cancelled", "client_cancelled"},
+		{"post_commit_error", "failed", "", "upstream_error"},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			b, ok := buildBatch(requestlog.ExecutionEvent{
+				RequestID:       "req_f",
+				Kind:            requestlog.KindFinalized,
+				Status:          tc.status,
+				FailureCategory: tc.failureCategory,
+				Attempt:         1,
+				Timestamp:       time.Date(2026, 8, 2, 0, 0, 0, 0, time.UTC),
+			})
+			if !ok {
+				t.Fatal("buildBatch(finalized) ok = false")
+			}
+			if b.Log.FinalStatus != tc.wantFinalStatus {
+				t.Fatalf("FinalStatus = %q, want %q", b.Log.FinalStatus, tc.wantFinalStatus)
+			}
+			if b.Log.CompletedAt == nil {
+				t.Error("CompletedAt is nil for finalized")
+			}
+			if len(b.Attempts) != 0 {
+				t.Fatalf("attempts = %d, want 0", len(b.Attempts))
+			}
+		})
+	}
+}
+
 func TestBuildBatchAllowsOnlySafeUpstreamMetadata(t *testing.T) {
 	t.Parallel()
 

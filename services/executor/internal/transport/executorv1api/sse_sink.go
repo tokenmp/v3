@@ -27,6 +27,7 @@ type SSEProtocolSink struct {
 	committed bool
 	staged    bool
 	finished  bool
+	finalized bool // exactly-once guard for Finalize (committed clean EOF terminal synthesis)
 	last      uint64
 }
 
@@ -89,6 +90,22 @@ func (s *SSEProtocolSink) Committed() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.committed
+}
+
+// Finished reports whether a terminal EventFinish has been written. A handler
+// uses it after Execute to decide whether a transport-level OpenAI [DONE]
+// guarantee must still be appended: a committed stream that never received an
+// explicit finish (clean EOF, a combined content+finish_reason chunk, or an
+// upstream error after commit) must still terminate with [DONE]. Anthropic
+// streams keep native terminal-event semantics and never append a bare
+// [DONE]; Finished only gates the OpenAI guarantee.
+func (s *SSEProtocolSink) Finished() bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.finished
 }
 
 // Commit emits and flushes the initial batch. A write or flush failure leaves
@@ -176,6 +193,134 @@ func (s *SSEProtocolSink) Flush(ctx context.Context) error {
 	s.flusher.Flush()
 	s.staged = false
 	return nil
+}
+
+// EnsureDone is the OpenAI transport-level [DONE] guarantee. After a handler
+// has run Execute, if the sink committed but never wrote a terminal
+// EventFinish (clean EOF, a combined content+finish_reason chunk, or an
+// upstream error after commit), it appends exactly one `data: [DONE]` frame
+// and flushes, then marks the stream finished. It is a no-op when a finish
+// was already written or the sink never committed, and it is a no-op for the
+// Anthropic protocol, which keeps native terminal-event semantics (no bare
+// [DONE]). Any staged-but-unflushed event is flushed first so the terminal
+// [DONE] is emitted after all content. A write or flush failure is returned
+// (the response is already committed and must not be retried).
+func (s *SSEProtocolSink) EnsureDone(ctx context.Context) error {
+	if s == nil || ctx == nil {
+		return errSSESinkMisconfigured
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.protocol != adapter.ProtocolOpenAIChat || !s.committed || s.finished {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if s.staged {
+		s.flusher.Flush()
+		s.staged = false
+	}
+	if err := writeAll(s.writer, []byte("data: [DONE]\n\n")); err != nil {
+		return errSSESinkWrite
+	}
+	// Set exactly-once before writing so a write failure does not allow a
+	// retry to synthesize a second terminal. The synthesized output may be
+	// partially written; the Bridge does not retry (downstream uncertain).
+	s.finished = true
+	s.flusher.Flush()
+	return nil
+}
+
+// Finalize is the same-protocol EndOfStreamFinalizer for the streaming Bridge.
+// Invoked exactly once on a committed clean EOF (the upstream stream ended
+// after commit without an explicit EventFinish), it synthesizes and writes the
+// protocol-native terminal event directly, flushes, then returns sanitized
+// terminal metadata the Bridge folds into its Outcome. This mirrors the
+// cross-protocol convertingSink Finalize: it is the ONLY path by which a
+// committed clean EOF becomes a completed stream instead of a
+// truncated-stream failure (ReasonStreamTruncated).
+//
+// For the OpenAI protocol it synthesizes a chat.completion.chunk carrying
+// finish_reason="stop" (which writeEvent terminates with [DONE]); for the
+// Anthropic protocol it synthesizes a native message_stop event (no bare
+// [DONE]). It carries no raw upstream bytes across the streaming boundary:
+// the returned TerminalMeta is sanitized. It is idempotent: a second call is
+// a no-op returning empty metadata. A context error is returned as-is so the
+// Bridge resolves client cancellation; any other write/flush failure is a
+// post-commit sink failure (no retry).
+func (s *SSEProtocolSink) Finalize(ctx context.Context) (streaming.TerminalMeta, error) {
+	if s == nil || ctx == nil {
+		return streaming.TerminalMeta{}, errSSESinkMisconfigured
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.committed || s.finished || s.finalized {
+		return streaming.TerminalMeta{}, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return streaming.TerminalMeta{}, err
+	}
+	finish, data, err := s.synthesizeTerminal()
+	if err != nil {
+		return streaming.TerminalMeta{}, err
+	}
+	s.finalized = true
+	event := sdk.StreamEvent{
+		Sequence: s.last + 1,
+		Meta: streaming.Event{
+			Sequence:     s.last + 1,
+			Kind:         streaming.EventFinish,
+			EventType:    s.terminalEventType(),
+			FinishReason: finish,
+		},
+		Data: data,
+	}
+	if err := s.writeEvent(event); err != nil {
+		return streaming.TerminalMeta{}, err
+	}
+	s.flusher.Flush()
+	return streaming.TerminalMeta{Finish: finish}, nil
+}
+
+// synthesizeTerminal builds the canonical (compact) protocol-native terminal
+// payload and its bounded safe finish token for a committed clean EOF. It is
+// called under the sink mutex. The OpenAI shape is a minimal
+// chat.completion.chunk carrying an empty delta and finish_reason="stop"; the
+// Anthropic shape is a native message_stop event. Neither carries upstream
+// content, credential, or URL material.
+func (s *SSEProtocolSink) synthesizeTerminal() (string, []byte, error) {
+	var payload any
+	var finish string
+	if s.protocol == adapter.ProtocolAnthropic {
+		payload = map[string]string{"type": "message_stop"}
+		finish = "end_turn"
+	} else {
+		payload = map[string]any{
+			"object":  "chat.completion.chunk",
+			"choices": []map[string]any{{"index": 0, "delta": map[string]string{}, "finish_reason": "stop"}},
+		}
+		finish = "stop"
+	}
+	data, err := json.Marshal(payload)
+	if err != nil || !json.Valid(data) {
+		return "", nil, errSSESinkProtocol
+	}
+	// canonicalSSEJSON requires compact, key-ordered-stable bytes; json.Marshal
+	// already emits compact canonical form for map literals with sorted keys.
+	if !canonicalSSEJSON(data) {
+		return "", nil, errSSESinkProtocol
+	}
+	return finish, data, nil
+}
+
+// terminalEventType returns the bounded safe EventType for the synthesized
+// terminal so validateAt accepts it.
+func (s *SSEProtocolSink) terminalEventType() string {
+	if s.protocol == adapter.ProtocolAnthropic {
+		return "message_stop"
+	}
+	return "chat.completion.chunk"
 }
 
 func (s *SSEProtocolSink) start() {

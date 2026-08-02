@@ -309,11 +309,23 @@ func classifyRoot(r map[string]any) (streaming.Event, error) {
 	if x := c["finish_reason"]; x != nil {
 		finish = x.(string)
 	}
-	if semantic && finish != "" {
-		return streaming.Event{}, errChunkProtocol
-	}
+	// Tolerate a combined content+finish_reason chunk (e.g. MiniMax-M3 emits the
+	// final delta and finish_reason in one chunk instead of a separate empty
+	// delta). Classify it as a semantic event so its content still flows
+	// downstream; the finish_reason on this chunk is intentionally not surfaced
+	// as an EventFinish (the Sink rejects FinishReason on non-finish events).
+	// The transport-level EndOfStreamFinalizer synthesizes a terminal
+	// finish_reason="stop" on the subsequent clean EOF, so the stream still
+	// completes and OpenAI framing still terminates with [DONE]. The actual
+	// upstream usage, if any, is carried on the semantic event so it is not
+	// lost. Truly illegal chunks remain rejected upstream by validateRoot (an
+	// unsupported/finish_reason value, malformed delta, etc.).
 	if semantic {
-		return streaming.Event{Kind: streaming.EventSemantic, EventType: "chat.completion.chunk"}, nil
+		ev := streaming.Event{Kind: streaming.EventSemantic, EventType: "chat.completion.chunk"}
+		if hasUsage {
+			ev.Usage = &usage
+		}
+		return ev, nil
 	}
 	if finish != "" {
 		ev := streaming.Event{Kind: streaming.EventFinish, EventType: "chat.completion.chunk", FinishReason: finish}
