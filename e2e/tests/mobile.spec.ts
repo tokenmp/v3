@@ -20,9 +20,11 @@ async function login(page: Page, email: string, password: string) {
   await page.fill('input#password', password);
   await page.click('button[type="submit"]');
   await page.waitForURL(/\/(panel|admin)/, { timeout: 15000 });
-  if (page.url().includes('/panel') && email === ADMIN_USER.email) {
+  if (email === ADMIN_USER.email) {
+    // Login consistently lands on Panel in the current UI. Admin scenarios
+    // must then request the protected admin route explicitly.
     await page.goto('/admin');
-    await page.waitForLoadState('networkidle');
+    await page.waitForURL('/admin');
   }
 }
 

@@ -20,6 +20,10 @@ export class TestUtils {
     await this.page.fill('input[type="email"]', email);
     await this.page.fill('input[type="password"]', password);
     await this.page.click('button[type="submit"]');
+    // The shared login flow always lands on the Panel; admin access is verified
+    // by explicitly navigating to the protected admin landing page afterwards.
+    await this.page.waitForURL('/panel');
+    await this.page.goto('/admin');
     await this.page.waitForURL('/admin');
   }
 
@@ -74,10 +78,18 @@ export class TestUtils {
     await this.page.selectOption(selector, value);
   }
 
-  // 检查页面标题
+  // The redesigned app deliberately keeps the document title at "TokenMP".
+  // Admin pages expose their route name as h1; panel pages expose it through
+  // the accessible breadcrumb instead of duplicating a visual page heading.
   async checkPageTitle(expectedTitle: string) {
-    const title = await this.page.title();
-    expect(title).toContain(expectedTitle);
+    const heading = this.page.getByRole('heading', { level: 1, name: expectedTitle });
+    if (await heading.count()) {
+      await expect(heading).toBeVisible();
+      return;
+    }
+    await expect(
+      this.page.locator('nav[aria-label="面包屑"]').getByText(expectedTitle, { exact: true }),
+    ).toBeVisible();
   }
 
   // 检查 URL
