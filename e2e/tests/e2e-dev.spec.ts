@@ -77,18 +77,16 @@ test.describe('TokenMP v3 E2E - Panel 用户面板', () => {
     await page.goto('/panel');
     await page.waitForLoadState('networkidle');
     
-    // 使用更精确的选择器 - 卡片标题
-    await expect(page.getByText('账户').first()).toBeVisible();
-    await expect(page.getByText('配额').first()).toBeVisible();
-    await expect(page.getByText('最近请求').first()).toBeVisible();
+    await expect(page.getByRole('heading', { level: 1, name: '概览' })).toBeVisible();
+    await expect(page.getByRole('heading', { level: 2, name: '当前套餐' })).toBeVisible();
+    await expect(page.getByText('最近请求', { exact: true })).toBeVisible();
   });
 
   test('API Key 页面加载', async ({ page }) => {
     await page.goto('/panel/keys');
     await page.waitForLoadState('networkidle');
     
-    // 页面标题
-    await expect(page.getByTitle('API 密钥')).toBeVisible();
+    await expect(page.locator('nav[aria-label="面包屑"]').getByText('API 密钥', { exact: true })).toBeVisible();
     // 创建按钮
     await expect(page.getByRole('button', { name: '创建密钥' })).toBeVisible();
   });
@@ -121,7 +119,7 @@ test.describe('TokenMP v3 E2E - Panel 用户面板', () => {
     await page.goto('/panel/requests');
     await page.waitForLoadState('networkidle');
     
-    await expect(page.getByTitle('请求日志')).toBeVisible();
+    await expect(page.locator('nav[aria-label="面包屑"]').getByText('请求日志', { exact: true })).toBeVisible();
     await expect(page.locator('input[placeholder*="搜索"]')).toBeVisible();
   });
 
@@ -149,21 +147,21 @@ test.describe('TokenMP v3 E2E - Panel 用户面板', () => {
     await page.goto('/panel/announcements');
     await page.waitForLoadState('networkidle');
     
-    await expect(page.getByTitle('公告')).toBeVisible();
+    await expect(page.locator('nav[aria-label="面包屑"]').getByText('公告', { exact: true })).toBeVisible();
   });
 
   test('版本日志页面加载', async ({ page }) => {
     await page.goto('/panel/changelogs');
     await page.waitForLoadState('networkidle');
     
-    await expect(page.getByTitle('版本日志')).toBeVisible();
+    await expect(page.locator('nav[aria-label="面包屑"]').getByText('版本日志', { exact: true })).toBeVisible();
   });
 
   test('通知页面加载', async ({ page }) => {
     await page.goto('/panel/notifications');
     await page.waitForLoadState('networkidle');
     
-    await expect(page.getByTitle('通知')).toBeVisible();
+    await expect(page.locator('nav[aria-label="面包屑"]').getByText('通知', { exact: true })).toBeVisible();
   });
 
   test('设置页面加载', async ({ page }) => {
@@ -201,7 +199,7 @@ test.describe('TokenMP v3 E2E - Panel 用户面板', () => {
     await page.goto('/panel/auto-model');
     await page.waitForLoadState('networkidle');
     
-    await expect(page.getByTitle('Auto 模型')).toBeVisible();
+    await expect(page.locator('nav[aria-label="面包屑"]').getByText('Auto 模型', { exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: /保存/ })).toBeVisible();
   });
 

@@ -39,6 +39,8 @@ Live identities and optional test data are injected only through protected envir
 
 Admin describes are skipped with a clear reason when the admin pair is absent; user describes do the same for the user pair. This makes `--list` and an accidental credential-free live invocation safe, but it does not validate a supplied credential: an invalid supplied value still fails the relevant login test. Mock/local fallbacks are deliberately invalid placeholders and cannot authenticate to a live service.
 
+Live Admin coverage intentionally separates safe UI/read-only checks from mutations. Specs assert current dialogs, controls, routes, list wiring, and responsive navigation against the supplied target. Create/update/delete, snapshot publication, and role/status mutation cases are explicitly skipped with a reason unless a dedicated disposable fixture is supplied: they must not alter shared development data.
+
 Use a controlled, disposable environment and its provisioned test identities. Do not put a target URL containing credentials, API keys, passwords, or production data in a workflow, source file, command history, or tracked `.env` file. Keep all `E2E_*` values in protected secrets; never commit their values.
 
 The full suite is intentionally excluded from `.github/workflows/ci.yml`'s normal `verify` job. `.github/workflows/e2e.yml` is a separate PR/manual local-smoke gate only; it does not run the live suite.

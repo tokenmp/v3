@@ -20,9 +20,11 @@ async function login(page: Page, email: string, password: string) {
   await page.fill('input#password', password);
   await page.click('button[type="submit"]');
   await page.waitForURL(/\/(panel|admin)/, { timeout: 15000 });
-  if (page.url().includes('/panel') && email === ADMIN_USER.email) {
+  if (email === ADMIN_USER.email) {
+    // Login consistently lands on Panel in the current UI. Admin scenarios
+    // must then request the protected admin route explicitly.
     await page.goto('/admin');
-    await page.waitForLoadState('networkidle');
+    await page.waitForURL('/admin');
   }
 }
 
@@ -406,10 +408,10 @@ test.describe('移动端 Admin - 模型管理', () => {
 
   test('模型卡片列表', async ({ page }) => {
     await page.goto('/admin/models');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
     
-    // 等待加载完成
-    await page.waitForSelector('table, .md\\:hidden', { timeout: 10000 }).catch(() => null);
+    // The Config-backed page may poll, so networkidle is not deterministic.
+    await page.waitForSelector('main', { state: 'visible' });
     
     // 检查是否有内容
     const body = await page.textContent('body');
@@ -418,7 +420,7 @@ test.describe('移动端 Admin - 模型管理', () => {
 
   test('新建模型弹窗', async ({ page }) => {
     await page.goto('/admin/models');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
     
     // 点击新建按钮
     const createBtn = page.getByRole('button', { name: /新建/ });
