@@ -7,7 +7,10 @@ export class TestUtils {
 
   // 等待页面加载完成
   async waitForPageLoad() {
-    await this.page.waitForLoadState('networkidle');
+    // Live pages poll health and request-log endpoints, so networkidle is not a
+    // deterministic readiness signal. Wait for the document, then let each
+    // test assert its page-specific, user-visible affordance.
+    await this.page.waitForLoadState('domcontentloaded');
     await this.page.waitForSelector('body', { state: 'visible' });
   }
 
@@ -149,8 +152,14 @@ export class TestUtils {
   }
 
   // 检查弹窗是否存在
+  private dialog() {
+    // The app uses both native <dialog> modals and overlay dialogs. Keep the
+    // helper aligned with either accessible implementation.
+    return this.page.locator('dialog[open], [role="dialog"], .fixed.inset-0.z-50').last();
+  }
+
   async checkDialogVisible(visible: boolean) {
-    const dialog = this.page.locator('[role="dialog"]');
+    const dialog = this.dialog();
     if (visible) {
       await expect(dialog).toBeVisible();
     } else {
@@ -160,20 +169,20 @@ export class TestUtils {
 
   // 检查确认弹窗
   async checkConfirmDialog(title: string, description: string) {
-    const dialog = this.page.locator('[role="dialog"]');
+    const dialog = this.dialog();
     await expect(dialog).toBeVisible();
-    await expect(dialog.locator('h2')).toContainText(title);
-    await expect(dialog.locator('p')).toContainText(description);
+    await expect(dialog.getByRole('heading', { name: title })).toBeVisible();
+    await expect(dialog).toContainText(description);
   }
 
   // 点击确认弹窗的确认按钮
   async clickConfirmButton() {
-    await this.page.click('[role="dialog"] button:has-text("确认")');
+    await this.dialog().getByRole('button', { name: /确认/ }).click();
   }
 
   // 点击确认弹窗的取消按钮
   async clickCancelButton() {
-    await this.page.click('[role="dialog"] button:has-text("取消")');
+    await this.dialog().getByRole('button', { name: '取消', exact: true }).click();
   }
 
   // 检查表格单元格内容
