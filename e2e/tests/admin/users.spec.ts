@@ -1,5 +1,5 @@
-import { e2eCredentials, skipAdminIfNoCreds } from '../../utils/credentials';
-import { test, expect } from '@playwright/test';
+import { skipAdminIfNoCreds } from '../../utils/credentials';
+import { expect, test } from '../../utils/fixtures';
 import { TestUtils } from '../../utils/test-utils';
 
 test.describe('Admin 用户管理页面', () => {
@@ -111,23 +111,32 @@ test.describe('Admin 用户管理页面', () => {
     }
   });
 
-  test('用户状态操作可用', async ({ page }) => {
-    // This controlled environment currently provisions the same identity for
-    // user and admin. Mutating it would lock the rest of the suite out, so
-    // retain coverage of the live action affordance without changing fixtures.
-    const statusAction = page.locator('tbody tr').filter({ hasNotText: e2eCredentials().admin.email })
-      .getByRole('button', { name: /^(禁用|启用)$/ }).first();
-    test.skip(await statusAction.count() === 0, 'Requires a second disposable user fixture.');
-    await expect(statusAction).toBeVisible();
-    await expect(statusAction).toBeEnabled();
+  test('可禁用并重新启用 disposable 用户', async ({ page, disposableUser }) => {
+    const search = page.getByPlaceholder('搜索邮箱');
+    await search.fill(disposableUser.email);
+    const row = page.locator('tbody tr').filter({ hasText: disposableUser.email });
+    await expect(row).toBeVisible();
+    await row.getByRole('button', { name: '禁用', exact: true }).click();
+    const confirm = page.getByRole('dialog').last();
+    await expect(confirm).toContainText(disposableUser.email);
+    await confirm.getByRole('button', { name: /确认/ }).click();
+    await expect(page.getByText('用户已禁用', { exact: true })).toBeVisible();
+    await expect(row.getByRole('button', { name: '启用', exact: true })).toBeVisible();
+    await row.getByRole('button', { name: '启用', exact: true }).click();
+    await page.getByRole('dialog').last().getByRole('button', { name: /确认/ }).click();
+    await expect(page.getByText('用户已启用', { exact: true })).toBeVisible();
   });
 
-  test('用户角色操作可用', async ({ page }) => {
-    const roleAction = page.locator('tbody tr').filter({ hasNotText: e2eCredentials().admin.email })
-      .getByRole('button', { name: /^(设为管理员|取消管理员)$/ }).first();
-    test.skip(await roleAction.count() === 0, 'Requires a second disposable user fixture.');
-    await expect(roleAction).toBeVisible();
-    await expect(roleAction).toBeEnabled();
+  test('可提升并降回 disposable 用户角色', async ({ page, disposableUser }) => {
+    const search = page.getByPlaceholder('搜索邮箱');
+    await search.fill(disposableUser.email);
+    const row = page.locator('tbody tr').filter({ hasText: disposableUser.email });
+    await expect(row).toBeVisible();
+    await row.getByRole('button', { name: '设为管理员', exact: true }).click();
+    await expect(page.getByText('已设为管理员', { exact: true })).toBeVisible();
+    await expect(row.getByRole('button', { name: '取消管理员', exact: true })).toBeVisible();
+    await row.getByRole('button', { name: '取消管理员', exact: true }).click();
+    await expect(page.getByText('已取消管理员', { exact: true })).toBeVisible();
   });
 
   test('用户详情页链接', async ({ page }) => {

@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { expect, test } from '../../utils/fixtures';
 import { skipUserIfNoCreds } from '../../utils/credentials';
 import { TestUtils } from '../../utils/test-utils';
 
@@ -8,9 +8,9 @@ test.describe('Panel 用户概览页面', () => {
   skipUserIfNoCreds(test);
   let utils: TestUtils;
 
-  test.beforeEach(async ({ page }) => {
+  test.beforeEach(async ({ page, disposableUser }) => {
     utils = new TestUtils(page);
-    await utils.loginAsUser();
+    await utils.loginAsUser(disposableUser.email, disposableUser.password);
     await page.goto('/panel');
     await utils.waitForPageLoad();
   });
@@ -20,14 +20,20 @@ test.describe('Panel 用户概览页面', () => {
     await expect(page.getByRole('heading', { name: '当前套餐' })).toBeVisible();
     await expect(page.getByText('最近请求', { exact: true })).toBeVisible();
     await expect(page.getByRole('link', { name: '计费设置' })).toBeVisible();
-    await expect(page.getByRole('link', { name: '查看请求记录' }).first()).toBeVisible();
+    await expect(page.getByRole('link', { name: /查看请求记录|请求日志/ }).first()).toBeVisible();
   });
 
   test('展示套餐用量和状态', async ({ page }) => {
     await expect(page.getByText(/个生效套餐/)).toBeVisible();
-    await expect(page.getByText(/编程套餐|Token 套餐/).first()).toBeVisible();
-    await expect(page.getByText('生效中').first()).toBeVisible();
-    await expect(page.locator('div.h-2.overflow-hidden.rounded-full.bg-muted').first()).toBeVisible();
+    // Newly registered disposable users intentionally have no subscription.
+    // Assert the empty-account summary rather than requiring shared-plan data.
+    const activePlan = page.getByText(/编程套餐|Token 套餐/).first();
+    if (await activePlan.isVisible().catch(() => false)) {
+      await expect(page.getByText('生效中').first()).toBeVisible();
+      await expect(page.locator('div.h-2.overflow-hidden.rounded-full.bg-muted').first()).toBeVisible();
+    } else {
+      await expect(page.getByText('暂无生效套餐', { exact: true })).toBeVisible();
+    }
   });
 
   test('最近请求适配当前视口', async ({ page }) => {
@@ -59,9 +65,9 @@ test.describe('Panel API Key 管理页面', () => {
   skipUserIfNoCreds(test);
   let utils: TestUtils;
 
-  test.beforeEach(async ({ page }) => {
+  test.beforeEach(async ({ page, disposableUser }) => {
     utils = new TestUtils(page);
-    await utils.loginAsUser();
+    await utils.loginAsUser(disposableUser.email, disposableUser.password);
     await page.goto('/panel/keys');
     await utils.waitForPageLoad();
   });
@@ -99,9 +105,9 @@ test.describe('Panel 请求日志页面', () => {
   skipUserIfNoCreds(test);
   let utils: TestUtils;
 
-  test.beforeEach(async ({ page }) => {
+  test.beforeEach(async ({ page, disposableUser }) => {
     utils = new TestUtils(page);
-    await utils.loginAsUser();
+    await utils.loginAsUser(disposableUser.email, disposableUser.password);
     await page.goto('/panel/requests');
     await utils.waitForPageLoad();
   });

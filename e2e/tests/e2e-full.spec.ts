@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { expect, test } from '../utils/fixtures';
 import { skipAdminIfNoCreds, skipUserIfNoCreds } from '../utils/credentials';
 import { TestUtils } from '../utils/test-utils';
 
@@ -42,9 +42,9 @@ test.describe('TokenMP v3 跨角色组合流程', () => {
   }
 
   for (const path of panelPaths) {
-    test(`普通用户可访问 ${path}`, async ({ page }) => {
+    test(`普通用户可访问 ${path}`, async ({ page, disposableUser }) => {
       const utils = new TestUtils(page);
-      await utils.loginAsUser();
+      await utils.loginAsUser(disposableUser.email, disposableUser.password);
       await page.goto(path);
       await expect(page).toHaveURL(path);
       await expect(page.locator('body')).toBeVisible();
@@ -69,8 +69,11 @@ test.describe('TokenMP v3 跨角色组合流程', () => {
     await expect(page.locator('aside')).toBeVisible();
   });
 
-  test('普通用户不能访问 Admin', async () => {
-    test.skip(true, 'The supplied live user identity is currently an admin; this authorization assertion requires a distinct disposable non-admin fixture.');
+  test('普通用户不能访问 Admin', async ({ page, disposableUser }) => {
+    const utils = new TestUtils(page);
+    await utils.loginAsUser(disposableUser.email, disposableUser.password);
+    await page.goto('/admin');
+    await expect(page).toHaveURL(/\/login(?:\?reason=session_expired)?$/);
   });
 
   test('跨角色写入生命周期', async () => {

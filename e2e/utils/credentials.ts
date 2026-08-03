@@ -45,7 +45,12 @@ export function hasAdminCreds(): boolean {
 }
 
 export function hasUserCreds(): boolean {
-  return Boolean(process.env.E2E_USER_EMAIL && process.env.E2E_USER_PASSWORD);
+  // E2E_BASE_URL opts into the global disposable-user pool. Retain the
+  // provisioned-pair path for read-only BASE_URL investigations.
+  return Boolean(
+    process.env.E2E_BASE_URL
+    || (process.env.E2E_USER_EMAIL && process.env.E2E_USER_PASSWORD),
+  );
 }
 
 export function skipAdminIfNoCreds(test: PlaywrightTest): void {

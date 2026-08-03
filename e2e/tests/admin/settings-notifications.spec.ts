@@ -1,5 +1,6 @@
-import { test, expect, type Page } from '@playwright/test';
-import { e2eCredentials, hasUserCreds, skipAdminIfNoCreds } from '../../utils/credentials';
+import { expect, test } from '../../utils/fixtures';
+import type { Page } from '@playwright/test';
+import { skipAdminIfNoCreds } from '../../utils/credentials';
 import { TestUtils } from '../../utils/test-utils';
 
 async function loginAndVisit(page: Page, path: string) {
@@ -80,17 +81,16 @@ test.describe('Admin 通知管理页面', () => {
     await expect(dialog.getByRole('button', { name: '发送' })).toBeEnabled();
   });
 
-  test('指定用户通知使用搜索和选择流程', async ({ page }) => {
-    test.skip(!hasUserCreds(), 'Targeted notification requires protected E2E_USER_EMAIL.');
+  test('指定 disposable 用户通知使用搜索和选择流程', async ({ page, disposableUser }) => {
     await loginAndVisit(page, '/admin/notifications');
     const dialog = await openDialog(page);
 
     await dialog.getByRole('checkbox', { name: '发送给全体用户' }).click();
     const search = dialog.getByPlaceholder('输入邮箱搜索用户');
     await expect(search).toBeVisible();
-    await search.fill(e2eCredentials().user.email);
-    await expect(dialog.getByText(e2eCredentials().user.email, { exact: true })).toBeVisible();
-    await dialog.getByText(e2eCredentials().user.email, { exact: true }).click();
+    await search.fill(disposableUser.email);
+    await expect(dialog.getByText(disposableUser.email, { exact: true })).toBeVisible();
+    await dialog.getByText(disposableUser.email, { exact: true }).click();
     await expect(dialog.getByRole('button', { name: '取消选择用户' })).toBeVisible();
   });
 
@@ -111,7 +111,29 @@ test.describe('Admin 通知管理页面', () => {
     await expect(page.getByRole('cell', { name: '暂无通知' })).toBeVisible();
   });
 
-  test('发送和删除通知', async () => {
-    test.skip(true, 'Sending or deleting notifications changes shared live recipient data; run only against a dedicated disposable Notice fixture.');
+  test('发送、验证收件并删除 disposable 用户通知', async ({ page, request, disposableUser }) => {
+    await loginAndVisit(page, '/admin/notifications');
+    const title = `E2E fixture notification ${disposableUser.id}`;
+    const dialog = await openDialog(page);
+    await dialog.getByRole('checkbox', { name: '发送给全体用户' }).click();
+    await dialog.getByPlaceholder('输入邮箱搜索用户').fill(disposableUser.email);
+    await dialog.getByText(disposableUser.email, { exact: true }).click();
+    await dialog.getByPlaceholder('标题（必填）').fill(title);
+    await dialog.getByPlaceholder('通知内容（必填）').fill('Created only for isolated E2E CRUD coverage.');
+    await dialog.getByRole('button', { name: '发送', exact: true }).click();
+    await expect(page.getByText('通知已发送', { exact: true })).toBeVisible();
+
+    const inbox = await request.get('/api/v1/notice/notifications', {
+      headers: { authorization: `Bearer ${disposableUser.accessToken}` },
+    });
+    expect(inbox.ok()).toBe(true);
+    const payload = await inbox.json() as { items?: Array<{ title?: string }> };
+    expect(payload.items?.some((item) => item.title === title)).toBe(true);
+
+    const row = page.locator('tbody tr').filter({ hasText: title });
+    await expect(row).toBeVisible();
+    await row.getByRole('button').click();
+    await page.getByRole('dialog').last().getByRole('button', { name: /确认/ }).click();
+    await expect(row).toBeHidden();
   });
 });

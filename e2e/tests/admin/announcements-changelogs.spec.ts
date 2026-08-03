@@ -1,4 +1,5 @@
-import { test, expect, type Page } from '@playwright/test';
+import { expect, test } from '../../utils/fixtures';
+import type { Page } from '@playwright/test';
 import { skipAdminIfNoCreds } from '../../utils/credentials';
 import { TestUtils } from '../../utils/test-utils';
 
@@ -41,8 +42,27 @@ test.describe('Admin 公告管理页面', () => {
     await expect(page.getByText('请填写标题', { exact: true })).toBeVisible();
   });
 
-  test('创建、编辑和删除公告', async () => {
-    test.skip(true, 'Requires an isolated Notice fixture: this live target has shared announcement data and the CRUD flow is destructive.');
+  test('创建、编辑和删除 disposable 公告', async ({ page, disposableUser }) => {
+    await loginAndVisit(page, '/admin/announcements');
+    const title = `E2E fixture announcement ${disposableUser.id}`;
+    const dialog = await openDialog(page, '新建公告');
+    await dialog.getByLabel('标题').fill(title);
+    await dialog.getByLabel('摘要').fill('Disposable E2E record');
+    await dialog.getByLabel('内容（Markdown）').fill('Created only for isolated E2E CRUD coverage.');
+    await dialog.getByRole('button', { name: '保存', exact: true }).click();
+    await expect(page.getByText('公告已创建', { exact: true })).toBeVisible();
+
+    const row = page.locator('tbody tr').filter({ hasText: title });
+    await expect(row).toBeVisible();
+    await row.getByRole('button').nth(0).click();
+    const edit = page.getByRole('dialog').last();
+    await edit.getByLabel('摘要').fill('Disposable E2E record updated');
+    await edit.getByRole('button', { name: '保存', exact: true }).click();
+    await expect(page.getByText('公告已更新', { exact: true })).toBeVisible();
+
+    await row.getByRole('button').nth(1).click();
+    await page.getByRole('dialog').last().getByRole('button', { name: '删除', exact: true }).click();
+    await expect(page.getByText('公告已删除', { exact: true })).toBeVisible();
   });
 
   test('公告列表请求使用当前 Notice admin 路径', async ({ page }) => {
@@ -88,8 +108,28 @@ test.describe('Admin 版本日志管理页面', () => {
     await expect(page.getByText('请填写版本号和标题', { exact: true })).toBeVisible();
   });
 
-  test('创建、编辑和删除版本日志', async () => {
-    test.skip(true, 'Requires an isolated Notice fixture: this live target has shared changelog data and the CRUD flow is destructive.');
+  test('创建、编辑和删除 disposable 版本日志', async ({ page, disposableUser }) => {
+    await loginAndVisit(page, '/admin/changelogs');
+    const version = `e2e-${disposableUser.id.slice(0, 8)}`;
+    const title = `E2E fixture changelog ${disposableUser.id}`;
+    const dialog = await openDialog(page, '新建版本');
+    await dialog.getByLabel('版本号').fill(version);
+    await dialog.getByLabel('标题').fill(title);
+    await dialog.getByLabel('内容（Markdown）').fill('Created only for isolated E2E CRUD coverage.');
+    await dialog.getByRole('button', { name: '创建', exact: true }).click();
+    await expect(page.getByText('版本日志已创建', { exact: true })).toBeVisible();
+
+    const row = page.locator('tbody tr').filter({ hasText: title });
+    await expect(row).toBeVisible();
+    await row.getByRole('button', { name: '编辑', exact: true }).click();
+    const edit = page.getByRole('dialog').last();
+    await edit.getByLabel('标题').fill(`${title} updated`);
+    await edit.getByRole('button', { name: '保存', exact: true }).click();
+    await expect(page.getByText('版本日志已更新', { exact: true })).toBeVisible();
+
+    await row.getByRole('button', { name: '删除', exact: true }).click();
+    await page.getByRole('dialog').last().getByRole('button', { name: /确认/ }).click();
+    await expect(page.getByText('版本日志已删除', { exact: true })).toBeVisible();
   });
 
   test('版本日志列表请求使用当前 Notice admin 路径', async ({ page }) => {
