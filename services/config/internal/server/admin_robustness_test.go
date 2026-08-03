@@ -102,11 +102,11 @@ func TestCreateProvider_SuccessMaps201(t *testing.T) {
 func TestCreateProvider_MissingFields400(t *testing.T) {
 	s := newAdminTestServer(t, &errWriter{})
 	cases := []string{
-		`{}`,                                    // missing all
-		`{"id":"p1"}`,                           // missing name, base_url
-		`{"name":"P1"}`,                         // missing id, base_url
-		`{"base_url":"http://x"}`,               // missing id, name
-		`{"id":"p1","name":"P1"}`,               // missing base_url
+		`{}`,                      // missing all
+		`{"id":"p1"}`,             // missing name, base_url
+		`{"name":"P1"}`,           // missing id, base_url
+		`{"base_url":"http://x"}`, // missing id, name
+		`{"id":"p1","name":"P1"}`, // missing base_url
 	}
 	for _, body := range cases {
 		req := httptest.NewRequest(http.MethodPost, "/v1/config/admin/providers", strings.NewReader(body))

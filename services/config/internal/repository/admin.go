@@ -354,9 +354,9 @@ func classifyReadErr(err error) error {
 //   - 23503 (foreign_key_violation)    → ErrInvalidInput (400)
 //   - 23514 (check_violation)          → ErrInvalidInput (400)
 //   - 42703 (undefined_column)         → ErrInvalidInput (400) — defensive;
-//                                         allowlist filtering should prevent
-//                                         this, but classify as client error
-//                                         if it slips through.
+//     allowlist filtering should prevent
+//     this, but classify as client error
+//     if it slips through.
 //   - everything else                  → ErrInsertFailed (500)
 func classifyWriteErr(err error) error {
 	if err == nil {
