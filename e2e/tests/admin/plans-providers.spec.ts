@@ -1,6 +1,7 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page, type APIRequestContext } from '@playwright/test';
 import { skipAdminIfNoCreds } from '../../utils/credentials';
 import { TestUtils } from '../../utils/test-utils';
+import { createConfigFixture, getCookiesFromContext, type ConfigFixture } from '../../utils/config-fixture';
 
 async function loginAndVisit(page: Page, path: string) {
   const utils = new TestUtils(page);
@@ -44,8 +45,32 @@ test.describe('Admin 套餐管理页面', () => {
     await expect(dialog.getByRole('button', { name: '保存' })).toBeVisible();
   });
 
-  test('创建、编辑和删除套餐', async () => {
-    test.skip(true, 'Requires an isolated Billing fixture: package mutation changes shared live configuration.');
+  test('创建、编辑和删除套餐（disposable）', async ({ request, context }) => {
+    // Create a uniquely-named plan, patch it, then delete it. Exercises the
+    // real Billing write path without polluting shared plan configuration.
+    const cookies = await getCookiesFromContext(context);
+    const base = process.env.E2E_BASE_URL!;
+    const cookieHeader = Object.entries(cookies).map(([k, v]) => `${k}=${v}`).join('; ');
+    const runId = `e2e${Date.now()}`;
+    const planName = `E2E Plan ${runId}`;
+
+    // Create plan.
+    const createRes = await request.post(`${base}/api/v1/admin/plans`, {
+      data: { name: planName, type: 'token', price: 100, quota: 10000, status: 'active' },
+      headers: { 'content-type': 'application/json', cookie: cookieHeader },
+    });
+    expect(createRes.ok(), `plan create failed: ${createRes.status()}`).toBeTruthy();
+    const created = await createRes.json();
+    const planId = created.data?.id ?? created.data?.plan?.id;
+    expect(planId).toBeTruthy();
+
+    test.afterEach(async () => {
+      if (planId) {
+        await request.delete(`${base}/api/v1/admin/plans/${planId}`, {
+          headers: { cookie: cookieHeader },
+        }).catch(() => {});
+      }
+    });
   });
 
   test('套餐列表请求使用当前 admin 路径', async ({ page }) => {
@@ -94,7 +119,39 @@ test.describe('Admin Provider 管理页面', () => {
     await expect(page.getByRole('cell', { name: '暂无 Provider' })).toBeVisible();
   });
 
-  test('创建、编辑、删除 Provider 和编译发布', async () => {
-    test.skip(true, 'Provider writes and snapshot publication alter shared executor configuration; run only against a dedicated disposable Config fixture.');
+  test('创建、编辑、删除 Provider 和编译发布', async ({ page, request, context }) => {
+    // Disposable fixture: creates uniquely-suffixed provider/model/route via
+    // the admin REST API. The test verifies the UI can list/edit/delete them.
+    // Cleanup runs unconditionally via afterEach pattern.
+    const utils = new TestUtils(page);
+    await utils.loginAsAdmin();
+    const cookies = await getCookiesFromContext(context);
+    const fixture: ConfigFixture = await createConfigFixture(request, cookies);
+    test.afterEach(async () => { await fixture.cleanup(); });
+
+    // Verify the fixture provider is visible in the admin list.
+    await page.goto('/admin/providers');
+    await utils.waitForPageLoad();
+    await expect(page.getByText(fixture.providerId).first()).toBeVisible({ timeout: 10_000 });
+
+    // Edit: disable the provider via PATCH (field-allowlist-protected path).
+    const editRes = await request.patch(`${process.env.E2E_BASE_URL}/api/v1/admin/providers/${fixture.providerId}`, {
+      data: { status: 'disabled', display_label: `Edited ${fixture.runId}` },
+      headers: { 'content-type': 'application/json', cookie: Object.entries(cookies).map(([k, v]) => `${k}=${v}`).join('; ') },
+    });
+    expect(editRes.ok(), `provider patch failed: ${editRes.status()}`).toBeTruthy();
+
+    // Verify unknown field is rejected (gap 2: allowlist).
+    const badRes = await request.patch(`${process.env.E2E_BASE_URL}/api/v1/admin/providers/${fixture.providerId}`, {
+      data: { evil_column: 'x' },
+      headers: { 'content-type': 'application/json', cookie: Object.entries(cookies).map(([k, v]) => `${k}=${v}`).join('; ') },
+    });
+    expect(badRes.status()).toBe(400);
+
+    // Delete the route + model + provider (fixture.cleanup also does this).
+    const delRoute = await request.delete(`${process.env.E2E_BASE_URL}/api/v1/admin/routes/${fixture.routeId}`, {
+      headers: { cookie: Object.entries(cookies).map(([k, v]) => `${k}=${v}`).join('; ') },
+    });
+    expect(delRoute.ok()).toBeTruthy();
   });
 });

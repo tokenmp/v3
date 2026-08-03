@@ -133,6 +133,11 @@ func (s *Server) handleAdminUpdateModel(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		return
 	}
+	fields, ok := filterFields(fields, modelPatchFields)
+	if !ok {
+		httpresp.Error(w, httpresp.CodeBadRequest, "unknown or immutable field in patch")
+		return
+	}
 	if err := s.adminWriter.UpdateModel(r.Context(), chi.URLParam(r, "id"), fields); err != nil {
 		writeAdminWriteErr(w, err)
 		return
@@ -198,6 +203,11 @@ func (s *Server) handleAdminUpdateProvider(w http.ResponseWriter, r *http.Reques
 	if err != nil {
 		return
 	}
+	fields, ok := filterFields(fields, providerPatchFields)
+	if !ok {
+		httpresp.Error(w, httpresp.CodeBadRequest, "unknown or immutable field in patch")
+		return
+	}
 	if err := s.adminWriter.UpdateProvider(r.Context(), chi.URLParam(r, "id"), fields); err != nil {
 		writeAdminWriteErr(w, err)
 		return
@@ -255,6 +265,11 @@ func (s *Server) handleAdminUpdateAdapter(w http.ResponseWriter, r *http.Request
 	if err != nil {
 		return
 	}
+	fields, ok := filterFields(fields, adapterPatchFields)
+	if !ok {
+		httpresp.Error(w, httpresp.CodeBadRequest, "unknown or immutable field in patch")
+		return
+	}
 	if err := s.adminWriter.UpdateAdapter(r.Context(), chi.URLParam(r, "id"), fields); err != nil {
 		writeAdminWriteErr(w, err)
 		return
@@ -306,6 +321,11 @@ func (s *Server) handleAdminUpdateEndpoint(w http.ResponseWriter, r *http.Reques
 	}
 	fields, err := decodeAdminFields(w, r)
 	if err != nil {
+		return
+	}
+	fields, ok := filterFields(fields, endpointPatchFields)
+	if !ok {
+		httpresp.Error(w, httpresp.CodeBadRequest, "unknown or immutable field in patch")
 		return
 	}
 	if err := s.adminWriter.UpdateEndpoint(r.Context(), eid, fields); err != nil {
@@ -403,9 +423,26 @@ func (s *Server) handleAdminUpdateCredential(w http.ResponseWriter, r *http.Requ
 		httpresp.Error(w, httpresp.CodeBadRequest, "plaintext api_key rejected; use a vault:// credential_ref")
 		return
 	}
+	// Allowlist filtering rejects unknown columns before they reach GORM.
+	fields, ok := filterFields(fields, credentialPatchFields)
+	if !ok {
+		httpresp.Error(w, httpresp.CodeBadRequest, "unknown or immutable field in patch")
+		return
+	}
 	if ref, ok := fields["credential_ref"].(string); ok && ref != "" && !isVaultRef(ref) {
 		httpresp.Error(w, httpresp.CodeBadRequest, "credential_ref must be a vault:// reference")
 		return
+	}
+	// key_prefix/suffix are display-only hints; sanitize them.
+	if v, ok := fields["key_prefix"]; ok {
+		if s2, ok2 := v.(string); ok2 {
+			fields["key_prefix"] = sanitizeDisplayHint(s2)
+		}
+	}
+	if v, ok := fields["key_suffix"]; ok {
+		if s2, ok2 := v.(string); ok2 {
+			fields["key_suffix"] = sanitizeDisplayHint(s2)
+		}
 	}
 	if err := s.adminWriter.UpdateCredential(r.Context(), chi.URLParam(r, "cid"), fields); err != nil {
 		writeAdminWriteErr(w, err)
@@ -462,6 +499,11 @@ func (s *Server) handleAdminGetRoute(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAdminUpdateRoute(w http.ResponseWriter, r *http.Request) {
 	fields, err := decodeAdminFields(w, r)
 	if err != nil {
+		return
+	}
+	fields, ok := filterFields(fields, routePatchFields)
+	if !ok {
+		httpresp.Error(w, httpresp.CodeBadRequest, "unknown or immutable field in patch")
 		return
 	}
 	if err := s.adminWriter.UpdateRoute(r.Context(), chi.URLParam(r, "id"), fields); err != nil {
@@ -709,6 +751,79 @@ func (s *Server) handleAdminSetGlobal(w http.ResponseWriter, r *http.Request) {
 	httpresp.OK(w, map[string]any{"key": key, "updated": true})
 }
 
+// ---- PATCH field allowlists ----
+//
+// Each PATCH handler decodes a JSON object into map[string]any and passes it
+// to GORM's Updates(). GORM uses the map keys directly as column names, so an
+// unknown key produces a "column does not exist" error (or worse, could write
+// to an unintended column). These allowlists reject any field not in the set
+// before it reaches the database. Immutable/managed columns (id, created_at,
+// updated_at) are excluded — they are never PATCH-able.
+
+// providerPatchFields are the updatable columns of the providers table.
+var providerPatchFields = map[string]bool{
+	"name": true, "display_label": true, "selector": true, "base_url": true,
+	"sdk_kind": true, "protocol": true, "default_retry": true, "default_timeout": true,
+	"context_window": true, "max_output_tokens": true, "rpm": true, "tpm": true,
+	"status": true,
+}
+
+// modelPatchFields are the updatable columns of the models table.
+var modelPatchFields = map[string]bool{
+	"display_name": true, "input_modalities": true, "output_modalities": true,
+	"capabilities": true, "context_window": true, "max_output_tokens": true,
+	"thinking_supported": true, "thinking_default_effort": true, "thinking_max_effort": true,
+	"thinking_min_budget_token": true, "thinking_max_budget_token": true,
+	"status": true,
+}
+
+// adapterPatchFields are the updatable columns of the adapters table.
+var adapterPatchFields = map[string]bool{
+	"name": true, "version": true, "provider_id": true, "sdk_kind": true,
+	"protocol": true, "capability_require": true, "capability_deny": true,
+	"thinking": true, "request_policy": true, "response_policy": true,
+	"retry_policy": true, "timeout_policy": true, "status": true,
+}
+
+// endpointPatchFields are the updatable columns of the upstream_endpoints table.
+var endpointPatchFields = map[string]bool{
+	"path": true, "protocol": true, "auth_kind": true, "auth_header": true,
+	"auth_query": true, "auth_prefix": true, "status": true,
+}
+
+// credentialPatchFields are the updatable columns of the upstream_credentials
+// table. api_key is intentionally excluded (secret boundary); it is rejected
+// separately in the handler for a more specific error message.
+var credentialPatchFields = map[string]bool{
+	"credential_ref": true, "key_prefix": true, "key_suffix": true,
+	"priority": true, "max_concurrency": true, "daily_quota": true,
+	"rpm": true, "tpm": true, "status": true,
+}
+
+// routePatchFields are the updatable columns of the route_mappings table.
+var routePatchFields = map[string]bool{
+	"model_id": true, "provider_id": true, "adapter_id": true, "upstream_model": true,
+	"protocol": true, "priority": true, "enabled": true, "is_default": true,
+	"context_window": true, "max_output_tokens": true, "rpm": true, "tpm": true,
+	"route_group": true, "retry_policy": true, "timeout_policy": true,
+	"status": true,
+}
+
+// filterFields returns the subset of fields that are in the allowlist. If any
+// key is not in the allowlist it returns false so the caller can reject with
+// 400 Bad Request. The immutable columns id/created_at/updated_at are always
+// rejected (they are never in any allowlist).
+func filterFields(fields map[string]any, allowed map[string]bool) (map[string]any, bool) {
+	filtered := make(map[string]any, len(fields))
+	for k, v := range fields {
+		if !allowed[k] {
+			return nil, false
+		}
+		filtered[k] = v
+	}
+	return filtered, true
+}
+
 // ---- shared helpers ----
 
 func parseAdminPaging(r *http.Request) (int, int) {
@@ -758,6 +873,10 @@ func writeAdminWriteErr(w http.ResponseWriter, err error) {
 	}
 	if errors.Is(err, repository.ErrConflict) {
 		httpresp.Error(w, httpresp.CodeConflict, "conflict")
+		return
+	}
+	if errors.Is(err, repository.ErrInvalidInput) {
+		httpresp.Error(w, httpresp.CodeBadRequest, "invalid input")
 		return
 	}
 	httpresp.Error(w, httpresp.CodeInternalError, "internal error")

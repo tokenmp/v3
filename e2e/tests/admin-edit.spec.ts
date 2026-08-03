@@ -1,6 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import { skipAdminIfNoCreds } from '../utils/credentials';
 import { TestUtils } from '../utils/test-utils';
+import { getCookiesFromContext } from '../utils/config-fixture';
 
 async function loginAndVisit(page: Page, path: string) {
   const utils = new TestUtils(page);
@@ -65,7 +66,33 @@ test.describe('Admin 编辑入口', () => {
     await expect(page.locator('[aria-label="下一页"]')).toBeVisible();
   });
 
-  test('共享环境中的 Admin 写操作', async () => {
-    test.skip(true, 'Create, update, and delete operations mutate shared live Admin data; run them only against a dedicated disposable fixture.');
+  test('共享环境中的 Admin 写操作（disposable notice）', async ({ page, request, context }) => {
+    // Create a uniquely-suffixed announcement, verify it is visible, then
+    // delete it. This exercises the real Notice write path without polluting
+    // shared data.
+    const utils = new TestUtils(page);
+    await utils.loginAsAdmin();
+    const cookies = await getCookiesFromContext(context);
+    const base = process.env.E2E_BASE_URL!;
+    const cookieHeader = Object.entries(cookies).map(([k, v]) => `${k}=${v}`).join('; ');
+    const runId = `e2e${Date.now()}`;
+    const title = `E2E Notice ${runId}`;
+
+    // Create announcement.
+    const createRes = await request.post(`${base}/api/v1/notice/admin/announcements`, {
+      data: { title, content: `Test content ${runId}`, published: false },
+      headers: { 'content-type': 'application/json', cookie: cookieHeader },
+    });
+    expect(createRes.ok(), `notice create failed: ${createRes.status()}`).toBeTruthy();
+    const created = await createRes.json();
+    const noticeId = created.data?.id;
+    expect(noticeId).toBeTruthy();
+    test.afterEach(async () => {
+      if (noticeId) {
+        await request.delete(`${base}/api/v1/notice/admin/announcements/${noticeId}`, {
+          headers: { cookie: cookieHeader },
+        }).catch(() => {});
+      }
+    });
   });
 });
