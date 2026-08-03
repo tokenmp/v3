@@ -572,7 +572,7 @@ SELECT id, request_id, trace_id, user_id, client_key_id, user_agent, model_name,
        latency_ms, ttft_ms, error_code, error_type, upstream_http_status,
        usage_status, thinking_mode, thinking_effort, thinking_effort_degraded,
        thinking_requested_effort, thinking_effective_effort, thinking_requested_budget, thinking_effective_budget,
-       reservation_id, billing_plan, created_at, completed_at
+       reservation_id, billing_plan, billing_multiplier, charged_tokens, created_at, completed_at
 FROM request_logs
 WHERE request_id = ?
 LIMIT 1`
@@ -628,7 +628,7 @@ const logListColumns = `id, request_id, trace_id, user_id, client_key_id, user_a
        latency_ms, ttft_ms, error_code, error_type, upstream_http_status,
        usage_status, thinking_mode, thinking_effort, thinking_effort_degraded,
        thinking_requested_effort, thinking_effective_effort, thinking_requested_budget, thinking_effective_budget,
-       reservation_id, billing_plan, created_at, completed_at`
+       reservation_id, billing_plan, billing_multiplier, charged_tokens, created_at, completed_at`
 
 // applyListFilter returns the WHERE clause and bind args for a ListFilter on
 // request_logs. It is shared by ListRequestLogs (page slice) and the total
