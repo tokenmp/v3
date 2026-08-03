@@ -29,6 +29,7 @@ required=(
   BILLING_SWEEPER_ENABLED BILLING_SWEEPER_INTERVAL BILLING_SWEEPER_PENDING_GRACE
   BILLING_SWEEPER_EXPIRY_BATCH BILLING_SWEEPER_PENDING_BATCH
   BILLING_SWEEPER_RETENTION_DEADLINE BILLING_SWEEPER_UNKNOWN_POLICY
+  AUTH_API_BASE
 )
 
 for name in "${required[@]}"; do
@@ -37,6 +38,13 @@ for name in "${required[@]}"; do
     exit 1
   fi
 done
+
+# Web server-side auth must target Auth on the Compose network; falling back to
+# NEXT_PUBLIC_API_BASE would route login calls to the Edge/BFF instead.
+if ! grep -Eq '^[[:space:]]+AUTH_API_BASE: \$\{AUTH_API_BASE:-http://auth:8080\}' "$compose"; then
+  echo "AUTH_API_BASE must default to http://auth:8080" >&2
+  exit 1
+fi
 
 # These were speculative aliases and are never accepted by the feature configs.
 for name in AUTH_REDIS_URL API_REDIS_URL AUTH_HMAC_SECRET_FILE API_HMAC_SECRET_FILE API_CONFIG_TOKEN_FILE; do

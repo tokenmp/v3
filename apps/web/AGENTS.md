@@ -76,6 +76,11 @@ Tokens 和 Web，再从 Next standalone 产物生成非 root 生产 runner。部
 不得作为 build arg 传递密钥；同源部署保持公开 base URL 为空，dev 部署默认关闭 auth 和
 notice mock（`0`）。
 
+Compose additionally sets the runtime-only server-side `AUTH_API_BASE` to
+`http://auth:8080`. It is not a public build arg and must target Auth on the Compose network;
+otherwise Next login/refresh/logout routes fall back to the BFF and return 404. The fresh-server
+TLS, secret, migration, and Config-seed procedure is `../../docs/deployment.md`.
+
 ## 模块边界
 
 - 允许访问：`packages/*` 公开入口。

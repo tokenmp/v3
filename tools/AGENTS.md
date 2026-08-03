@@ -28,6 +28,15 @@
 
 工具必须支持安全的帮助、检查或 dry-run 方式；具有副作用的命令应在执行前展示目标和影响范围。
 
+- `generate-jwt-keys.sh <output-directory>`：显式在 deployment-owned directory 生成 Ed25519
+  Auth signing pair，拒绝覆盖已有文件，将 private/public 分别设为 `0600`/`0644`，并以 `openssl`
+  解析验证后只输出路径、不输出 PEM。仅 Auth 挂载 private；API、Executor、Notice 共享 public。
+- `seed-config.sh <config-admin-base-url> [seed-json]`：需要显式
+  `CONFIG_ADMIN_TOKEN_FILE`、`curl` 与 `jq`，从无 secret 的 `seed-config.example.json` 建立一个
+  provider/model/`vault://` credential/route 并调用 admin compile 发布。它拒绝 placeholder、非 HTTPS
+  upstream URL 与非 `vault://` ref；不会接受或打印 upstream API key。仅在已确认的目标环境、已迁移的
+  空 Config DB 和受控 admin endpoint 上运行。完整步骤见 `../docs/deployment.md`。
+
 - `check-dockerfile-copy-sources.sh`：静态验证全部 Dockerfile 的首行恰有一个
   `syntax=docker/dockerfile` parser directive；并验证全部可部署 Go 服务的 Dockerfile 在仓库根
   build context 下只从其 `services/<service>` 目录及允许的共享 Go package COPY，且每个源路径
@@ -38,7 +47,8 @@
   -mod=readonly ./cmd/<service>` 验证每个服务入口的独立 module 闭包。
 - `check-compose-env-contract.sh`：静态检查根 `compose.yaml` 的跨分支环境变量 allowlist，
   拒绝过时别名并要求 token/HMAC 只通过 `/run/secrets` 文件路径传递。它不读取 secret
-  内容、不调用 Docker、无副作用；CI 在 Compose render 前执行。
+  内容、不调用 Docker、无副作用；CI 在 Compose render 前执行。它也要求 Web server-side
+  `AUTH_API_BASE` 固定默认 `http://auth:8080`，避免 login BFF 404。
 
 ## DO NOT
 

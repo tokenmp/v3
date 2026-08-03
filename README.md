@@ -76,9 +76,9 @@ All Go services read their listen address and database DSN from environment vari
 | Logging | `services/logging` | `:8083` (`LOGGING_HTTP_ADDR`) | `tokenmp_logging` (`LOGGING_DATABASE_URL`) | Ingests request logs/attempts/events from Executor; serves admin query/stats/dashboard |
 | Notice | `services/notice` | `:8081` (`NOTICE_HTTP_ADDR`) | `tokenmp_biz` (`NOTICE_DATABASE_URL`) | Project announcements/changelogs/notifications; reuses Auth Ed25519 public key for local JWT verification |
 | Billing | `services/billing` | `:8085` (`BILLING_HTTP_ADDR`) | `tokenmp_billing` (`BILLING_DATABASE_URL`) | Quota/balance; balances are computed values |
-| Web | `apps/web` | `:3100` (`next dev/start -p 3100`) | none | Next.js admin panel + user panel; all API calls are same-origin (`/v1`, `/api/v1`) |
+| Web | `apps/web` | `:3100` (`next dev/start -p 3100`) | none | Next.js admin panel + user panel; browser calls are same-origin (`/v1`, `/api/v1`), while server-side auth uses Compose `AUTH_API_BASE=http://auth:8080` |
 
-> **Port collision warning**: the `Executor` default (`127.0.0.1:8081`) and the `Notice` default (`:8081`) both bind 8081. The Edge BFF (`services/api`) expects Executor on 8081, so on hosts that also run Notice you must override `NOTICE_HTTP_ADDR` (dev uses 8086). Similarly, `Config` defaults to 8082 which the public openresty also used historically; dev overrides `CONFIG_HTTP_ADDR` to 8084.
+> **Port collision warning**: the `Executor` default (`127.0.0.1:8081`) and the `Notice` default (`:8081`) both bind 8081 only when they share a host network. In Compose they are isolated service networks; Notice is published loopback-only as `TOKENMP_V3_NOTICE_HOST_PORT` (default 8081), while Executor is not host-published. Config is likewise loopback-only as `TOKENMP_V3_CONFIG_HOST_PORT` (default 8082). For non-Compose host deployments, choose distinct listener ports deliberately.
 
 ### Edge routing
 
@@ -221,13 +221,18 @@ Read `AGENTS.md`, then read each nested `AGENTS.md` from the repository root to 
 ### Container Compose
 
 The repository-root [`compose.yaml`](compose.yaml) builds and orchestrates the seven Go
-services and Web app under the fixed `tokenmp-v3` Compose project. It deliberately does
+services and Web app under the fixed `tokenmp-v3` Compose project. For a clean-server procedure
+covering external PostgreSQL/Redis, JWT/internal secret files, migrations, the required published
+Config seed, Executor credential mapping, HTTPS reverse proxying, verification, and rollback
+boundaries, follow [Fresh-server deployment](docs/deployment.md). It deliberately does
 **not** create or manage PostgreSQL, Redis, OpenResty, or any other shared infrastructure.
 Database DSNs, credential mappings, and JWT key-file paths are required deployment inputs;
 key files are injected read-only and no `.env` file is committed. Containers use the
-internal `tokenmp-v3-backend` network; only Edge/BFF (`3002`, configurable with
+internal `tokenmp-v3-backend` network. Edge/BFF (`3002`, configurable with
 `TOKENMP_V3_API_HOST_PORT`) and Web (`3100`, configurable with
-`TOKENMP_V3_WEB_HOST_PORT`) are published by default.
+`TOKENMP_V3_WEB_HOST_PORT`) are publicly publishable; Auth, Config, and Notice expose only
+loopback proxy/administration entrypoints by default (`TOKENMP_V3_AUTH_HOST_PORT`,
+`TOKENMP_V3_CONFIG_HOST_PORT`, `TOKENMP_V3_NOTICE_HOST_PORT`).
 
 Use a temporary, environment-owned env file to render the configuration before an
 operator starts it:
@@ -271,6 +276,8 @@ Never pass a file path as a token value, use a secret-reading entrypoint wrapper
 interpolate a token into Compose environment/rendered configuration.
 
 Deployment source files are mounted read-only under `/run/secrets`; neither their contents nor
-external Redis/PostgreSQL resources are committed or created. CI checks this contract with
+external Redis/PostgreSQL resources are committed or created. The Web container also sets the
+server-side `AUTH_API_BASE` to `http://auth:8080` by default, so Next login/refresh/logout routes
+reach Auth over the Compose network rather than incorrectly using the browser-facing BFF base. CI checks this contract with
 `tools/check-compose-env-contract.sh`, renders using temporary sentinel secret files, and fails
 if the sentinel appears in rendered Compose output.

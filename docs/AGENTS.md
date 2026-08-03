@@ -33,6 +33,7 @@
 
 ## 当前索引
 
+- Fresh-server deployment：`deployment.md`（external PostgreSQL/Redis prerequisites, deployment-owned JWT/internal secret inputs, migrations, Config seed/publish, Executor credential mapping, required HTTPS proxy, verification and rollback boundaries）
 - Monorepo 工具选型：`adr/0001-monorepo-tooling.md`
 - UI Design Tokens 决策：`adr/0002-ui-design-tokens.md`
 - CI 基线决策：`adr/0003-ci-baseline.md`

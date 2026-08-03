@@ -81,12 +81,17 @@ OpenResty/其他反向代理均为外部共享基础设施，不得加入此 Com
   该输入仅用于镜像构建，不会进入运行时服务环境。
 - Next `NEXT_PUBLIC_*` 是 build-time public inputs，必须在 Compose `build.args` 传入，且只可
   包含公开 flags/base URL；它们会固化到 bundle，运行时 environment 无法覆盖。默认同源 base URL
-  为空，dev 部署 mock flags 为 `0`。
+  为空，dev 部署 mock flags 为 `0`。Web server-side `AUTH_API_BASE` 则是 runtime-only internal
+  base，默认 `http://auth:8080`，不得回退到浏览器 BFF base。
 - 数据库 DSN、私钥、JWT 公钥路径和 Executor credential mapping 都由必填环境变量提供。
-  JWT 文件以只读 bind mount 注入，绝不复制进镜像或提交 `.env`。Compose 未声明业务数据卷。
-- 所有 Go 服务都在内部网络监听；仅 Edge `3002` 与 Web `3100` 默认发布到宿主，且可通过
-  `TOKENMP_V3_API_HOST_PORT`、`TOKENMP_V3_WEB_HOST_PORT` 覆盖。共享反向代理应仅连接这些
-  明确发布的入口，不属于此项目管理范围。
+  JWT 文件以只读 bind mount 注入，绝不复制进镜像或提交 `.env`。`EXECUTOR_CREDENTIAL_*`
+  真值由必填的、部署自有 `TOKENMP_V3_EXECUTOR_CREDENTIAL_ENV_FILE` 仅注入 Executor；map JSON
+  只将 `vault://` ref 映射到该变量名。Compose 未声明业务数据卷。
+- 所有 Go 服务都在内部网络监听；Edge `3002` 与 Web `3100` 默认发布到宿主，Auth `8080`、
+  Config `8082`、Notice `8081` 默认只发布到 `127.0.0.1`，分别可通过
+  `TOKENMP_V3_API_HOST_PORT`、`TOKENMP_V3_WEB_HOST_PORT`、`TOKENMP_V3_AUTH_HOST_PORT`、
+  `TOKENMP_V3_CONFIG_HOST_PORT`、`TOKENMP_V3_NOTICE_HOST_PORT` 覆盖。共享 TLS 反向代理可连接
+  这些明确发布的入口，不属于此项目管理范围；Config admin 入口不可公开暴露。
 - Compose 不猜测宿主网关：外部 DB/基础设施端点必须由 DSN/URL 环境变量明确提供。跨 macOS
   Docker Desktop 与 Linux 的可移植方式是使用两端都可解析且可路由的基础设施 DNS 名称；若必须
   使用宿主服务，则环境专属的受控 override 文件可明确设置 Linux `host-gateway` 或 Docker Desktop
@@ -123,7 +128,9 @@ Compose secrets, never interpolated as environment values.
   `billing-settlement` merges; its sweeper settings are explicit in Compose.
 
 `tools/check-compose-env-contract.sh` is the repository-local allowlist check for this
-cross-branch contract. It is self-contained so CI does not depend on sibling worktrees.
+cross-branch contract. It is self-contained so CI does not depend on sibling worktrees. The
+fresh-server procedure, external-infrastructure prerequisites, TLS requirement, seed, and
+credential-map contract are in [`docs/deployment.md`](../docs/deployment.md).
 
 CI additionally performs build-only clean-context image gates; Go image builds explicitly pass
 `GOPROXY=https://proxy.golang.org,direct`, and the Web gate uses `apps/web/Dockerfile.web` without
