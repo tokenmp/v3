@@ -1,0 +1,35 @@
+{
+  "model": {
+    "id": "replace-with-public-model-id",
+    "display_name": "Replace with provider model display name",
+    "input_modalities": ["text"],
+    "output_modalities": ["text"],
+    "capabilities": ["text"],
+    "status": "active"
+  },
+  "provider": {
+    "id": "replace-with-provider-id",
+    "name": "Replace with provider name",
+    "display_label": "Replace with provider label",
+    "selector": "replace-with-provider-id",
+    "base_url": "https://replace-with-provider.example",
+    "sdk_kind": "openai",
+    "protocol": "openai_chat",
+    "status": "active"
+  },
+  "credential": {
+    "id": "default",
+    "credential_ref": "vault://replace-with-provider-id/credential/default",
+    "priority": 100,
+    "status": "active"
+  },
+  "route": {
+    "id": "replace-with-route-id",
+    "upstream_model": "replace-with-provider-model-id",
+    "protocol": "openai_chat",
+    "priority": 100,
+    "enabled": true,
+    "is_default": true,
+    "status": "active"
+  }
+}

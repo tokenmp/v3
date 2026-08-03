@@ -69,6 +69,9 @@ services:
         gid: "10001"
         mode: 0400
     expose: ["8080"]
+    # Loopback-only: the external TLS proxy forwards public auth paths here.
+    ports:
+      - "127.0.0.1:${TOKENMP_V3_AUTH_HOST_PORT:-8080}:8080"
 
   config:
     <<: *service-defaults
@@ -89,6 +92,9 @@ services:
         gid: "10001"
         mode: 0400
     expose: ["8082"]
+    # Loopback-only for initial seed and controlled Config admin operations.
+    ports:
+      - "127.0.0.1:${TOKENMP_V3_CONFIG_HOST_PORT:-8082}:8082"
 
   logging:
     <<: *service-defaults
@@ -153,6 +159,9 @@ services:
         target: /run/tokenmp/notice-jwt-public.pem
         read_only: true
     expose: ["8081"]
+    # Loopback-only: the external TLS proxy forwards public notice paths here.
+    ports:
+      - "127.0.0.1:${TOKENMP_V3_NOTICE_HOST_PORT:-8081}:8081"
 
   executor:
     <<: *service-defaults
@@ -168,6 +177,10 @@ services:
       EXECUTOR_CREDENTIAL_REF_MAP_JSON: ${EXECUTOR_CREDENTIAL_REF_MAP_JSON:?required}
       EXECUTOR_JWT_PUBLIC_KEY_FILE: /run/tokenmp/executor-jwt-public.pem
       EXECUTOR_LOGGING_SERVICE_URL: http://logging:8083
+    # Deployment-owned env file supplies the EXECUTOR_CREDENTIAL_* variables
+    # named by EXECUTOR_CREDENTIAL_REF_MAP_JSON. It must never be committed.
+    env_file:
+      - ${TOKENMP_V3_EXECUTOR_CREDENTIAL_ENV_FILE:?required}
     volumes:
       - type: bind
         source: ${EXECUTOR_JWT_PUBLIC_KEY_FILE:?required}
@@ -191,7 +204,10 @@ services:
     environment:
       API_HTTP_ADDR: 0.0.0.0:3002
       API_EXECUTOR_URL: http://executor:8081
-      API_EXECUTOR_TOKEN: ${API_EXECUTOR_TOKEN:?required}
+      # Empty is the JWT-passthrough default: API preserves the client JWT for
+      # Executor, which verifies the shared Auth public key. A non-empty value
+      # enables the separately configured delegated Edge service-token mode.
+      API_EXECUTOR_TOKEN: ${API_EXECUTOR_TOKEN:-}
       API_BILLING_URL: http://billing:8085
       API_LOGGING_URL: http://logging:8083
       API_AUTH_URL: http://auth:8080
@@ -257,6 +273,8 @@ services:
     environment:
       PORT: "3100"
       HOSTNAME: 0.0.0.0
+      # Server-side auth routes cannot use the browser's same-origin BFF base.
+      AUTH_API_BASE: ${AUTH_API_BASE:-http://auth:8080}
     ports:
       - "${TOKENMP_V3_WEB_HOST_PORT:-3100}:3100"
     healthcheck:

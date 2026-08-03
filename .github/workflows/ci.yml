@@ -272,6 +272,9 @@ jobs:
           for file in auth-private.pem auth-public.pem notice-public.pem executor-public.pem api-public.pem; do
             : > "$inputs/$file"
           done
+          # Empty map means no named Executor credential values are needed,
+          # but Compose still validates the deployment-owned env_file path.
+          : > "$inputs/executor-credentials.env"
           secret='compose-render-secret-must-not-appear'
           for file in auth-rate-limit-hmac api-rate-limit-hmac config-admin-token api-config-service-token billing-logging-service-token; do
             printf '%s' "$secret" > "$inputs/$file"
@@ -287,6 +290,7 @@ jobs:
           TOKENMP_V3_CONFIG_ADMIN_TOKEN_FILE="$inputs/config-admin-token" \
           TOKENMP_V3_API_CONFIG_SERVICE_TOKEN_FILE="$inputs/api-config-service-token" \
           TOKENMP_V3_BILLING_LOGGING_SERVICE_TOKEN_FILE="$inputs/billing-logging-service-token" \
+          TOKENMP_V3_EXECUTOR_CREDENTIAL_ENV_FILE="$inputs/executor-credentials.env" \
           docker compose -p tokenmp-v3 config > "$rendered"
           ! grep -F -- "$secret" "$rendered"
 
