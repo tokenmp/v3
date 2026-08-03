@@ -2,6 +2,7 @@ import { expect, test } from '../../utils/fixtures';
 import type { Page } from '@playwright/test';
 import { skipAdminIfNoCreds } from '../../utils/credentials';
 import { TestUtils } from '../../utils/test-utils';
+import { createConfigFixture, getCookiesFromContext } from '../../utils/config-fixture';
 
 async function loginAndVisit(page: Page, path: string) {
   const utils = new TestUtils(page);
@@ -68,8 +69,28 @@ test.describe('Admin 系统设置页面', () => {
     await expect(page.getByRole('checkbox', { name: /维护模式/ })).toBeVisible();
   });
 
-  test('编译并发布 snapshot', async () => {
-    test.skip(true, 'Publishing affects the shared executor configuration; run only against a dedicated disposable Config fixture.');
+  test('编译并发布 snapshot（disposable fixture）', async ({ request, context }) => {
+    // Create a disposable fixture so the compile has test data to work with.
+    // The fixture route is enabled:false + priority:999 so it never serves
+    // real traffic even if the snapshot goes live momentarily.
+    const cookies = await getCookiesFromContext(context);
+    const fixture = await createConfigFixture(request, cookies);
+    test.afterEach(async () => { await fixture.cleanup(); });
+
+    const base = process.env.E2E_BASE_URL!;
+    const cookieHeader = Object.entries(cookies).map(([k, v]) => `${k}=${v}`).join('; ');
+
+    // Compile + publish via the admin API.
+    const compileRes = await request.post(`${base}/api/v1/admin/compile`, {
+      headers: { 'content-type': 'application/json', cookie: cookieHeader },
+    });
+    expect(compileRes.ok(), `compile failed: ${compileRes.status()}`).toBeTruthy();
+    const body = await compileRes.json();
+    expect(body.data?.published).toBe(true);
+
+    // After cleanup (afterEach deletes the fixture), a subsequent compile
+    // will produce a snapshot without the test data — the executor returns to
+    // its prior configuration.
   });
 });
 

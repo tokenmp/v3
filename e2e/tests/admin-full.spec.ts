@@ -1,6 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import { skipAdminIfNoCreds } from '../utils/credentials';
 import { TestUtils } from '../utils/test-utils';
+import { createConfigFixture, getCookiesFromContext } from '../utils/config-fixture';
 
 async function loginAndVisit(page: Page, path: string) {
   const utils = new TestUtils(page);
@@ -49,7 +50,19 @@ test.describe('Admin 完整只读路由覆盖', () => {
     test.skip(true, 'The standalone /admin/user-plans route was removed; plan assignment now belongs to the user detail page.');
   });
 
-  test('共享环境中的执行配置写操作', async () => {
-    test.skip(true, 'Model, route, credential, retry, auto-model, Provider, and publish actions mutate shared executor configuration; run them only against a dedicated disposable Config fixture.');
+  test('共享环境中的执行配置写操作', async ({ page, request, context }) => {
+    // Disposable fixture: creates uniquely-suffixed provider/model/route, then
+    // verifies the admin UI lists them and the allowlist-protected PATCH works.
+    const cookies = await getCookiesFromContext(context);
+    const fixture = await createConfigFixture(request, cookies);
+    test.afterEach(async () => { await fixture.cleanup(); });
+
+    await loginAndVisit(page, '/admin/providers');
+    await expect(page.getByText(fixture.providerId).first()).toBeVisible({ timeout: 10_000 });
+
+    // Verify model appears on the models page.
+    await page.goto('/admin/models');
+    await page.waitForLoadState('networkidle');
+    await expect(page.getByText(fixture.modelId).first()).toBeVisible({ timeout: 10_000 });
   });
 });

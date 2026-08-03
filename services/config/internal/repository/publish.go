@@ -88,6 +88,10 @@ var (
 	ErrInsertFailed  = errors.New("repository: insert failed")
 	ErrCASMismatch   = errors.New("repository: version mismatch")
 	ErrEmptySnapshot = errors.New("repository: empty snapshot")
+	// ErrInvalidInput is returned when a write violates a database constraint
+	// that indicates a client-side error (NOT NULL, foreign key, or check
+	// constraint). Maps to HTTP 400.
+	ErrInvalidInput = errors.New("repository: invalid input")
 	// ErrSecretRejected is returned when a write attempts to store a plaintext
 	// secret or a non-vault:// credential ref. It is safe to log.
 	ErrSecretRejected = errors.New("repository: plaintext secret rejected")

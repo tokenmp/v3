@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"gorm.io/gorm"
 )
@@ -343,6 +344,31 @@ func classifyReadErr(err error) error {
 	return ErrQueryFailed
 }
 
+// classifyWriteErr maps a Postgres driver error to a stable sentinel by
+// string-matching the SQLSTATE code (the same approach as isUniqueViolation).
+// We do not import the pgx/pgconn type to avoid a new dependency; the
+// SQLSTATE is stable and surfaces in the error string.
+//
+//   - 23505 (unique_violation)         → ErrConflict (409)
+//   - 23502 (not_null_violation)       → ErrInvalidInput (400)
+//   - 23503 (foreign_key_violation)    → ErrInvalidInput (400)
+//   - 23514 (check_violation)          → ErrInvalidInput (400)
+//   - 42703 (undefined_column)         → ErrInvalidInput (400) — defensive;
+//     allowlist filtering should prevent
+//     this, but classify as client error
+//     if it slips through.
+//   - everything else                  → ErrInsertFailed (500)
 func classifyWriteErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	s := err.Error()
+	lower := strings.ToLower(s)
+	if strings.Contains(s, "23505") || strings.Contains(lower, "unique constraint") {
+		return ErrConflict
+	}
+	if strings.Contains(s, "23502") || strings.Contains(s, "23503") || strings.Contains(s, "23514") || strings.Contains(s, "42703") {
+		return ErrInvalidInput
+	}
 	return ErrInsertFailed
 }
