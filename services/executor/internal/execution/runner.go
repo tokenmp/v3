@@ -734,11 +734,12 @@ func (r *Runner) logFinalized(ctx context.Context, in Input, prepared routing.Pr
 		return
 	}
 	event := requestlog.ExecutionEvent{
-		RequestID:     in.RequestID,
-		ReservationID: in.ReservationID,
-		Revision:      prepared.Revision,
-		Generation:    prepared.Generation,
-		Attempt:       attemptNo,
+		RequestID:         in.RequestID,
+		ReservationID:     in.ReservationID,
+		Revision:          prepared.Revision,
+		Generation:        prepared.Generation,
+		Attempt:           attemptNo,
+		BillingMultiplier: prepared.BillingMultiplier,
 		Candidate: requestlog.ExecutionCandidate{
 			ModelID:      prepared.Candidate.ModelID,
 			ProviderID:   prepared.Candidate.ProviderID,
@@ -787,11 +788,12 @@ func (r *Runner) logReleased(ctx context.Context, in Input, prepared routing.Pre
 		return
 	}
 	event := requestlog.ExecutionEvent{
-		RequestID:     in.RequestID,
-		ReservationID: in.ReservationID,
-		Revision:      prepared.Revision,
-		Generation:    prepared.Generation,
-		Attempt:       attemptNo,
+		RequestID:         in.RequestID,
+		ReservationID:     in.ReservationID,
+		Revision:          prepared.Revision,
+		Generation:        prepared.Generation,
+		Attempt:           attemptNo,
+		BillingMultiplier: prepared.BillingMultiplier,
 		Candidate: requestlog.ExecutionCandidate{
 			ModelID:      prepared.Candidate.ModelID,
 			ProviderID:   prepared.Candidate.ProviderID,
@@ -818,11 +820,12 @@ func (r *Runner) logTerminalizationUnknown(ctx context.Context, in Input, prepar
 		return
 	}
 	event := requestlog.ExecutionEvent{
-		RequestID:     in.RequestID,
-		ReservationID: in.ReservationID,
-		Revision:      prepared.Revision,
-		Generation:    prepared.Generation,
-		Attempt:       attemptNo,
+		RequestID:         in.RequestID,
+		ReservationID:     in.ReservationID,
+		Revision:          prepared.Revision,
+		Generation:        prepared.Generation,
+		Attempt:           attemptNo,
+		BillingMultiplier: prepared.BillingMultiplier,
 		Candidate: requestlog.ExecutionCandidate{
 			ModelID:      prepared.Candidate.ModelID,
 			ProviderID:   prepared.Candidate.ProviderID,

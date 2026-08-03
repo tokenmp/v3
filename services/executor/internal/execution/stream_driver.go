@@ -581,11 +581,12 @@ func (d *StreamDriver) logCommitted(ctx context.Context, in StreamInput, prepare
 		return
 	}
 	event := requestlog.ExecutionEvent{
-		RequestID:     in.RequestID,
-		ReservationID: in.ReservationID,
-		Revision:      prepared.Revision,
-		Generation:    prepared.Generation,
-		Attempt:       attemptNo,
+		RequestID:         in.RequestID,
+		ReservationID:     in.ReservationID,
+		Revision:          prepared.Revision,
+		Generation:        prepared.Generation,
+		Attempt:           attemptNo,
+		BillingMultiplier: prepared.BillingMultiplier,
 		Candidate: requestlog.ExecutionCandidate{
 			ModelID:      prepared.Candidate.ModelID,
 			ProviderID:   prepared.Candidate.ProviderID,
@@ -626,11 +627,12 @@ func (d *StreamDriver) logFinalized(ctx context.Context, in StreamInput, prepare
 		completionOutcome = string(quota.OutcomeClientCancelled)
 	}
 	event := requestlog.ExecutionEvent{
-		RequestID:     in.RequestID,
-		ReservationID: in.ReservationID,
-		Revision:      prepared.Revision,
-		Generation:    prepared.Generation,
-		Attempt:       attemptNo,
+		RequestID:         in.RequestID,
+		ReservationID:     in.ReservationID,
+		Revision:          prepared.Revision,
+		Generation:        prepared.Generation,
+		Attempt:           attemptNo,
+		BillingMultiplier: prepared.BillingMultiplier,
 		Candidate: requestlog.ExecutionCandidate{
 			ModelID:      prepared.Candidate.ModelID,
 			ProviderID:   prepared.Candidate.ProviderID,
@@ -679,11 +681,12 @@ func (d *StreamDriver) logReleased(ctx context.Context, in StreamInput, prepared
 		return
 	}
 	event := requestlog.ExecutionEvent{
-		RequestID:     in.RequestID,
-		ReservationID: in.ReservationID,
-		Revision:      prepared.Revision,
-		Generation:    prepared.Generation,
-		Attempt:       attemptNo,
+		RequestID:         in.RequestID,
+		ReservationID:     in.ReservationID,
+		Revision:          prepared.Revision,
+		Generation:        prepared.Generation,
+		Attempt:           attemptNo,
+		BillingMultiplier: prepared.BillingMultiplier,
 		Candidate: requestlog.ExecutionCandidate{
 			ModelID:      prepared.Candidate.ModelID,
 			ProviderID:   prepared.Candidate.ProviderID,
@@ -710,11 +713,12 @@ func (d *StreamDriver) logTerminalizationUnknown(ctx context.Context, in StreamI
 		return
 	}
 	event := requestlog.ExecutionEvent{
-		RequestID:     in.RequestID,
-		ReservationID: in.ReservationID,
-		Revision:      prepared.Revision,
-		Generation:    prepared.Generation,
-		Attempt:       attemptNo,
+		RequestID:         in.RequestID,
+		ReservationID:     in.ReservationID,
+		Revision:          prepared.Revision,
+		Generation:        prepared.Generation,
+		Attempt:           attemptNo,
+		BillingMultiplier: prepared.BillingMultiplier,
 		Candidate: requestlog.ExecutionCandidate{
 			ModelID:      prepared.Candidate.ModelID,
 			ProviderID:   prepared.Candidate.ProviderID,
