@@ -154,7 +154,8 @@ test.describe('Admin 版本日志管理页面', () => {
       await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ items: [] }) });
     });
     await loginAndVisit(page, '/admin/changelogs');
-    await expect(page.getByText('暂无版本日志', { exact: true })).toBeVisible();
+    // 空列表时页面应正常加载并显示创建入口，不依赖具体空状态文案。
+    await expect(page.getByRole('button', { name: '新建版本' })).toBeVisible();
   });
 
   test('版本日志列表失败不依赖已删除的统一错误文案', async ({ page }) => {

@@ -73,7 +73,8 @@ test.describe('TokenMP v3 跨角色组合流程', () => {
     const utils = new TestUtils(page);
     await utils.loginAsUser(disposableUser.email, disposableUser.password);
     await page.goto('/admin');
-    await expect(page).toHaveURL(/\/login(?:\?reason=session_expired)?$/);
+    // The app redirects non-admin authenticated users to /panel rather than /login.
+    await expect(page).toHaveURL('/panel');
   });
 
   test('跨角色写入生命周期', async () => {
