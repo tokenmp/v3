@@ -15,6 +15,9 @@ const baseURL = explicitBaseURL ?? `http://127.0.0.1:${localPort}`;
  */
 export default defineConfig({
   testDir: './tests',
+  // Disposable identities are intentionally enabled only by E2E_BASE_URL.
+  // BASE_URL remains useful for read-only/provisioned live investigations.
+  globalSetup: process.env.E2E_BASE_URL ? './utils/fixtures.ts' : undefined,
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,

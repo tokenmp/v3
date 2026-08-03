@@ -1,12 +1,11 @@
-import { test, expect, type Page } from '@playwright/test';
-import { e2eCredentials, skipUserIfNoCreds } from '../utils/credentials';
+import { expect, test } from '../utils/fixtures';
+import type { Page } from '@playwright/test';
+import { skipUserIfNoCreds } from '../utils/credentials';
 
 /**
  * TokenMP v3 E2E 测试 - 针对 dev 服务器
  * Requires an explicitly supplied, controlled BASE_URL target.
  */
-
-const TEST_USER = e2eCredentials().user;
 
 async function login(page: Page, email: string, password: string) {
   await page.goto('/login');
@@ -27,7 +26,7 @@ test.describe('TokenMP v3 E2E - 公开页面', () => {
     expect(body).toBeTruthy();
   });
 
-  test('登录页面元素完整', async ({ page }) => {
+  test('登录页面元素完整', async ({ page, disposableUser }) => {
     await page.goto('/login');
     await page.waitForLoadState('networkidle');
     
@@ -49,11 +48,11 @@ test.describe('TokenMP v3 E2E - 公开页面', () => {
     await expect(page.locator('button[type="submit"]')).toBeVisible();
   });
 
-  test('登录失败 - 错误密码', async ({ page }) => {
+  test('登录失败 - 错误密码', async ({ page, disposableUser }) => {
     await page.goto('/login');
     await page.waitForLoadState('networkidle');
     
-    await page.fill('input[type="email"]', TEST_USER.email);
+    await page.fill('input[type="email"]', disposableUser.email);
     await page.fill('input#password', 'wrongpassword');
     await page.click('button[type="submit"]');
     
@@ -61,16 +60,16 @@ test.describe('TokenMP v3 E2E - 公开页面', () => {
     await expect(page.locator('[data-sonner-toast]')).toBeVisible({ timeout: 10000 });
   });
 
-  test('登录成功 - 跳转到 panel', async ({ page }) => {
-    await login(page, TEST_USER.email, TEST_USER.password);
+  test('登录成功 - 跳转到 panel', async ({ page, disposableUser }) => {
+    await login(page, disposableUser.email, disposableUser.password);
     await expect(page).toHaveURL(/\/panel/);
   });
 });
 
 test.describe('TokenMP v3 E2E - Panel 用户面板', () => {
   skipUserIfNoCreds(test);
-  test.beforeEach(async ({ page }) => {
-    await login(page, TEST_USER.email, TEST_USER.password);
+  test.beforeEach(async ({ page, disposableUser }) => {
+    await login(page, disposableUser.email, disposableUser.password);
   });
 
   test('概览页面加载', async ({ page }) => {
@@ -139,7 +138,7 @@ test.describe('TokenMP v3 E2E - Panel 用户面板', () => {
     const hasCards = await page.locator('.md\\:hidden').isVisible().catch(() => false);
     const hasEmpty = await page.getByText('暂无可用模型').isVisible().catch(() => false);
     const body = await page.textContent('body');
-    const hasContent = body.length > 100;
+    const hasContent = (body?.length ?? 0) > 100;
     expect(hasTitle || hasTable || hasCards || hasEmpty || hasContent).toBe(true);
   });
 

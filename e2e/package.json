@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "test": "playwright test",
+    "typecheck": "tsc --noEmit",
     "pretest:smoke": "pnpm --filter @tokenmp/ui-tokens run build",
     "test:smoke": "playwright test --project=chromium-smoke",
     "pretest:smoke:mobile": "pnpm --filter @tokenmp/ui-tokens run build",
@@ -16,6 +17,7 @@
     "install:browsers": "playwright install"
   },
   "devDependencies": {
-    "@playwright/test": "^1.52.0"
+    "@playwright/test": "^1.52.0",
+    "@types/node": "26.1.1"
   }
 }

@@ -33,13 +33,16 @@ Live identities and optional test data are injected only through protected envir
 | Variable | Purpose |
 | --- | --- |
 | `E2E_BASE_URL` | Optional alternative to `BASE_URL` for the explicit target. |
-| `E2E_USER_EMAIL`, `E2E_USER_PASSWORD` | Required by authenticated Panel and user mobile specs. |
-| `E2E_ADMIN_EMAIL`, `E2E_ADMIN_PASSWORD` | Required by Admin CRUD and admin mobile specs. |
+| `E2E_USER_EMAIL`, `E2E_USER_PASSWORD` | Optional provisioned fallback for authenticated Panel/user mobile specs. When `E2E_BASE_URL` is set, the disposable pool supplies these specs instead. |
+| `E2E_ADMIN_EMAIL`, `E2E_ADMIN_PASSWORD` | Required by Admin CRUD and admin mobile specs; the pool never registers an admin. |
+| `E2E_DISPOSABLE_USER_COUNT` | Optional live pool size (default 24, range 2–64). Increase only when the chosen worker/browser matrix needs more isolated users. |
 | `E2E_API_KEY`, `E2E_USER_ID`, `E2E_PLAN_ID` | Optional provisioned fixture data for specs that need it. |
 
 Admin describes are skipped with a clear reason when the admin pair is absent; user describes do the same for the user pair. This makes `--list` and an accidental credential-free live invocation safe, but it does not validate a supplied credential: an invalid supplied value still fails the relevant login test. Mock/local fallbacks are deliberately invalid placeholders and cannot authenticate to a live service.
 
-Live Admin coverage intentionally separates safe UI/read-only checks from mutations. Specs assert current dialogs, controls, routes, list wiring, and responsive navigation against the supplied target. Create/update/delete, snapshot publication, and role/status mutation cases are explicitly skipped with a reason unless a dedicated disposable fixture is supplied: they must not alter shared development data.
+When `E2E_BASE_URL` is set, Playwright global setup registers a run-scoped pool of ordinary disposable users through the Auth contract, then logs each user in separately because registration does not issue a session. The ignored `e2e/test-results/.disposable-fixtures.json` holds the temporary IDs, passwords, and tokens with owner-only permissions and is removed at teardown. The test fixture assigns a stable pool user per browser-project/worker, preventing concurrent browser logins from rotating a shared user session. Auth has no admin delete endpoint, so created records remain as clearly identifiable disposable test accounts; no secrets are committed or printed.
+
+The pool enables isolated user login coverage plus safe Admin mutations whose target is a disposable user: role/status round trips, targeted notification delivery, and Notice announcement/changelog CRUD with in-test deletion. The existing protected Admin credential remains the actor. Config/Provider/snapshot and Billing plan mutations remain skipped because they change shared control-plane or billing configuration and cannot be isolated by a user fixture.
 
 Use a controlled, disposable environment and its provisioned test identities. Do not put a target URL containing credentials, API keys, passwords, or production data in a workflow, source file, command history, or tracked `.env` file. Keep all `E2E_*` values in protected secrets; never commit their values.
 
@@ -55,6 +58,7 @@ e2e/
 │   ├── panel/       # live user-panel coverage
 │   └── *.spec.ts    # live specialized coverage
 ├── utils/credentials.ts  # protected E2E_* credential resolution and suite gates
+├── utils/fixtures.ts     # live global setup + worker-isolated disposable users
 ├── utils/test-utils.ts
 ├── playwright.config.ts
 └── run-tests.sh
@@ -74,6 +78,7 @@ pnpm install --frozen-lockfile
 pnpm --filter tokenmp-v3-e2e exec playwright install chromium
 pnpm --filter tokenmp-v3-e2e run test:smoke    # builds UI tokens, then runs Chromium smoke
 pnpm --filter tokenmp-v3-e2e run test:wrapper  # wrapper normal-exit and TERM restoration
+pnpm --filter tokenmp-v3-e2e run typecheck     # E2E config, fixtures, and specs
 ```
 
 Failure-only screenshots, videos, and reports are written to `e2e/test-results/` and `e2e/playwright-report/`; both are ignored by Git. Review artifacts before sharing because browser output can contain test-environment data.
