@@ -11,11 +11,30 @@ async function loginAndVisit(page: Page, path: string) {
   return utils;
 }
 
+function activeDialog(page: Page) {
+  // The current Dialog overlay has no role="dialog"; target its visible
+  // container so controls remain scoped even before its accessibility markup
+  // is improved by the frontend owner.
+  return page.locator('dialog[open], [role="dialog"], .fixed.inset-0.z-50').last();
+}
+
 async function openDialog(page: Page) {
   await page.getByRole('button', { name: '发送通知' }).click();
-  const dialog = page.locator('[role="dialog"], dialog[open], .fixed.inset-0.z-50').last();
+  const dialog = activeDialog(page);
   await expect(dialog).toBeVisible();
   return dialog;
+}
+
+function notificationItems(payload: unknown): Array<{ title?: string }> {
+  // Direct service responses use the project HTTP envelope while browser API
+  // clients unwrap it in core.request. APIRequestContext returns raw JSON.
+  if (payload && typeof payload === 'object' && 'data' in payload) {
+    return notificationItems((payload as { data: unknown }).data);
+  }
+  if (payload && typeof payload === 'object' && Array.isArray((payload as { items?: unknown }).items)) {
+    return (payload as { items: Array<{ title?: string }> }).items;
+  }
+  return [];
 }
 
 test.describe('Admin 系统设置页面', () => {
@@ -127,13 +146,16 @@ test.describe('Admin 通知管理页面', () => {
       headers: { authorization: `Bearer ${disposableUser.accessToken}` },
     });
     expect(inbox.ok()).toBe(true);
-    const payload = await inbox.json() as { items?: Array<{ title?: string }> };
-    expect(payload.items?.some((item) => item.title === title)).toBe(true);
+    expect(notificationItems(await inbox.json()).some((item) => item.title === title)).toBe(true);
 
     const row = page.locator('tbody tr').filter({ hasText: title });
     await expect(row).toBeVisible();
+    // The desktop delete action is icon-only; this uniquely-created row has a
+    // single action button in the current UI.
     await row.getByRole('button').click();
-    await page.getByRole('dialog').last().getByRole('button', { name: /确认/ }).click();
+    const confirm = activeDialog(page);
+    await expect(confirm).toBeVisible();
+    await confirm.getByRole('button', { name: /确认/ }).click();
     await expect(row).toBeHidden();
   });
 });

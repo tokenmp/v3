@@ -3,9 +3,16 @@ import type { Page } from '@playwright/test';
 import { skipAdminIfNoCreds } from '../../utils/credentials';
 import { TestUtils } from '../../utils/test-utils';
 
+function activeDialog(page: Page) {
+  // The app's Dialog currently renders an overlay without role="dialog".
+  // Keep all dialog interactions scoped to the visible overlay rather than
+  // relying on an absent ARIA role.
+  return page.locator('dialog[open], [role="dialog"], .fixed.inset-0.z-50').last();
+}
+
 async function openDialog(page: Page, name: string) {
   await page.getByRole('button', { name }).click();
-  const dialog = page.locator('[role="dialog"], dialog[open], .fixed.inset-0.z-50').last();
+  const dialog = activeDialog(page);
   await expect(dialog).toBeVisible();
   return dialog;
 }
@@ -54,14 +61,19 @@ test.describe('Admin 公告管理页面', () => {
 
     const row = page.locator('tbody tr').filter({ hasText: title });
     await expect(row).toBeVisible();
-    await row.getByRole('button').nth(0).click();
-    const edit = page.getByRole('dialog').last();
+    // Desktop action controls are icon-only, with edit before delete in the
+    // current table. Scope the structural fallback to this uniquely-created row.
+    await row.getByRole('button').first().click();
+    const edit = activeDialog(page);
+    await expect(edit).toBeVisible();
     await edit.getByLabel('摘要').fill('Disposable E2E record updated');
     await edit.getByRole('button', { name: '保存', exact: true }).click();
     await expect(page.getByText('公告已更新', { exact: true })).toBeVisible();
 
     await row.getByRole('button').nth(1).click();
-    await page.getByRole('dialog').last().getByRole('button', { name: '删除', exact: true }).click();
+    const confirm = activeDialog(page);
+    await expect(confirm).toBeVisible();
+    await confirm.getByRole('button', { name: '删除', exact: true }).click();
     await expect(page.getByText('公告已删除', { exact: true })).toBeVisible();
   });
 
@@ -121,14 +133,19 @@ test.describe('Admin 版本日志管理页面', () => {
 
     const row = page.locator('tbody tr').filter({ hasText: title });
     await expect(row).toBeVisible();
-    await row.getByRole('button', { name: '编辑', exact: true }).click();
-    const edit = page.getByRole('dialog').last();
+    // Desktop edit/delete controls are icon-only. The order is fixed by the
+    // current UI, and the row is unique to this disposable test record.
+    await row.getByRole('button').first().click();
+    const edit = activeDialog(page);
+    await expect(edit).toBeVisible();
     await edit.getByLabel('标题').fill(`${title} updated`);
     await edit.getByRole('button', { name: '保存', exact: true }).click();
     await expect(page.getByText('版本日志已更新', { exact: true })).toBeVisible();
 
-    await row.getByRole('button', { name: '删除', exact: true }).click();
-    await page.getByRole('dialog').last().getByRole('button', { name: /确认/ }).click();
+    await row.getByRole('button').nth(1).click();
+    const confirm = activeDialog(page);
+    await expect(confirm).toBeVisible();
+    await confirm.getByRole('button', { name: /确认/ }).click();
     await expect(page.getByText('版本日志已删除', { exact: true })).toBeVisible();
   });
 

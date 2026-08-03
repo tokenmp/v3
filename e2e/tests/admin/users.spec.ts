@@ -117,13 +117,21 @@ test.describe('Admin 用户管理页面', () => {
     const row = page.locator('tbody tr').filter({ hasText: disposableUser.email });
     await expect(row).toBeVisible();
     await row.getByRole('button', { name: '禁用', exact: true }).click();
-    const confirm = page.getByRole('dialog').last();
+    // ConfirmDialog currently uses the app's fixed overlay without an ARIA
+    // dialog role. Assert its accessible heading and description in that
+    // visible overlay, then perform the same confirmation as the role flow.
+    const confirm = page.locator('dialog[open], [role="dialog"], .fixed.inset-0.z-50').last();
+    await expect(confirm).toBeVisible();
+    await expect(confirm.getByRole('heading', { name: '禁用用户' })).toBeVisible();
     await expect(confirm).toContainText(disposableUser.email);
     await confirm.getByRole('button', { name: /确认/ }).click();
     await expect(page.getByText('用户已禁用', { exact: true })).toBeVisible();
     await expect(row.getByRole('button', { name: '启用', exact: true })).toBeVisible();
     await row.getByRole('button', { name: '启用', exact: true }).click();
-    await page.getByRole('dialog').last().getByRole('button', { name: /确认/ }).click();
+    const enableConfirm = page.locator('dialog[open], [role="dialog"], .fixed.inset-0.z-50').last();
+    await expect(enableConfirm).toBeVisible();
+    await expect(enableConfirm.getByRole('heading', { name: '启用用户' })).toBeVisible();
+    await enableConfirm.getByRole('button', { name: /确认/ }).click();
     await expect(page.getByText('用户已启用', { exact: true })).toBeVisible();
   });
 
