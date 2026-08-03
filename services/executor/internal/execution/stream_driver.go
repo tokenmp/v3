@@ -464,11 +464,12 @@ func (d *StreamDriver) now() time.Time {
 
 func (d *StreamDriver) baseEvent(in StreamInput, prepared routing.PreparedAttempt, attemptNo int) requestlog.ExecutionEvent {
 	return requestlog.ExecutionEvent{
-		RequestID:     in.RequestID,
-		ReservationID: in.ReservationID,
-		Revision:      prepared.Revision,
-		Generation:    prepared.Generation,
-		Attempt:       attemptNo,
+		RequestID:         in.RequestID,
+		ReservationID:     in.ReservationID,
+		Revision:          prepared.Revision,
+		Generation:        prepared.Generation,
+		Attempt:           attemptNo,
+		BillingMultiplier: prepared.BillingMultiplier,
 		Candidate: requestlog.ExecutionCandidate{
 			ModelID:      prepared.Candidate.ModelID,
 			ProviderID:   prepared.Candidate.ProviderID,

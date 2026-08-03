@@ -414,6 +414,13 @@ func confirmedTokenUsage(ctx context.Context, logClient *logging.Client, logger 
 	if detail.Log.UsageStatus != "final" {
 		return 0, false
 	}
+	// Prefer charged_tokens (already multiplied by the executor's billing
+	// multiplier) over raw total_tokens. Falls back to total/input+output
+	// for backward compat with logs that predate the multiplier feature.
+	charged := int64(detail.Log.ChargedTokens)
+	if charged > 0 {
+		return charged, true
+	}
 	total := int64(detail.Log.TotalTokens)
 	if total <= 0 {
 		total = int64(detail.Log.InputTokens + detail.Log.OutputTokens)

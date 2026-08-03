@@ -615,11 +615,12 @@ func (r *Runner) now() time.Time {
 
 func (r *Runner) baseEvent(in Input, prepared routing.PreparedAttempt, attemptNo int) requestlog.ExecutionEvent {
 	return requestlog.ExecutionEvent{
-		RequestID:     in.RequestID,
-		ReservationID: in.ReservationID,
-		Revision:      prepared.Revision,
-		Generation:    prepared.Generation,
-		Attempt:       attemptNo,
+		RequestID:         in.RequestID,
+		ReservationID:     in.ReservationID,
+		Revision:          prepared.Revision,
+		Generation:        prepared.Generation,
+		Attempt:           attemptNo,
+		BillingMultiplier: prepared.BillingMultiplier,
 		Candidate: requestlog.ExecutionCandidate{
 			ModelID:      prepared.Candidate.ModelID,
 			ProviderID:   prepared.Candidate.ProviderID,

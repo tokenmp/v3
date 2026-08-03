@@ -115,6 +115,9 @@ func (s *Server) handleAdminCreateModel(w http.ResponseWriter, r *http.Request) 
 	if m.Status == "" {
 		m.Status = "active"
 	}
+	if m.BillingMultiplier <= 0 {
+		m.BillingMultiplier = 1.0
+	}
 	if err := s.adminWriter.CreateModel(r.Context(), &m); err != nil {
 		writeAdminWriteErr(w, err)
 		return
@@ -792,7 +795,8 @@ var modelPatchFields = map[string]bool{
 	"capabilities": true, "context_window": true, "max_output_tokens": true,
 	"thinking_supported": true, "thinking_default_effort": true, "thinking_max_effort": true,
 	"thinking_min_budget_token": true, "thinking_max_budget_token": true,
-	"status": true,
+	"billing_multiplier": true,
+	"status":             true,
 }
 
 // adapterPatchFields are the updatable columns of the adapters table.

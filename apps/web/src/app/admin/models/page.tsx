@@ -386,6 +386,11 @@ function ModelFormModal({
     item?.maxOutputTokens != null ? String(item.maxOutputTokens) : '',
   );
 
+  // Billing
+  const [billingMultiplier, setBillingMultiplier] = useState(
+    item?.billingMultiplier != null ? String(item.billingMultiplier) : '1',
+  );
+
   const createMutation = useMutation({
     mutationFn: (input: {
       id: string;
@@ -436,6 +441,10 @@ function ModelFormModal({
       thinkingMaxEffort: thinkingSupported ? maxEffort : null,
       contextWindow: parseNullableInt(contextWindow),
       maxOutputTokens: parseNullableInt(maxOutputTokens),
+      billingMultiplier: (() => {
+        const m = parseFloat(billingMultiplier);
+        return Number.isNaN(m) || m <= 0 ? 1 : m;
+      })(),
     };
     if (isEdit) {
       updateMutation.mutate(payload);
@@ -618,6 +627,17 @@ function ModelFormModal({
               onChange={(e) => setMaxOutputTokens(e.target.value)}
               placeholder="留空使用默认"
               min={1}
+              className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+            />
+          </Field>
+          <Field label="计费倍率" hint="实际扣费 = token 用量 × 倍率（向上取整）。支持小数，如 0.5、1.5、3.0">
+            <input
+              type="number"
+              value={billingMultiplier}
+              onChange={(e) => setBillingMultiplier(e.target.value)}
+              placeholder="1"
+              min={0.01}
+              step={0.01}
               className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
             />
           </Field>

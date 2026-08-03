@@ -213,6 +213,8 @@ function mapRequestLog(r: Record<string, unknown>): AdminRequestLog {
     outputTokens: r.output_tokens != null ? Number(r.output_tokens) : null,
     totalTokens: r.total_tokens != null ? Number(r.total_tokens) : null,
     cacheTokens: r.cache_tokens != null ? Number(r.cache_tokens) : null,
+    chargedTokens: r.charged_tokens != null ? Number(r.charged_tokens) : null,
+    billingMultiplier: r.billing_multiplier != null ? Number(r.billing_multiplier) : null,
     cost: null,
     durationMs: r.latency_ms != null ? Number(r.latency_ms) : (r.durationMs != null ? Number(r.durationMs) : null),
     ttftMs: r.ttft_ms != null ? Number(r.ttft_ms) : (r.ttftMs != null ? Number(r.ttftMs) : null),
@@ -679,6 +681,7 @@ function mapModelConfig(m: Record<string, unknown>): AdminModelConfig {
     thinkingMaxEffort: m.thinking_max_effort != null ? String(m.thinking_max_effort) : (m.thinkingMaxEffort != null ? String(m.thinkingMaxEffort) : null),
     thinkingMinBudgetToken: m.thinking_min_budget_token != null ? Number(m.thinking_min_budget_token) : (m.thinkingMinBudgetToken != null ? Number(m.thinkingMinBudgetToken) : null),
     thinkingMaxBudgetToken: m.thinking_max_budget_token != null ? Number(m.thinking_max_budget_token) : (m.thinkingMaxBudgetToken != null ? Number(m.thinkingMaxBudgetToken) : null),
+    billingMultiplier: m.billing_multiplier != null ? Number(m.billing_multiplier) : (m.billingMultiplier != null ? Number(m.billingMultiplier) : 1),
     contextWindow: m.context_window != null ? Number(m.context_window) : (m.contextWindow != null ? Number(m.contextWindow) : null),
     maxOutputTokens: m.max_output_tokens != null ? Number(m.max_output_tokens) : (m.maxOutputTokens != null ? Number(m.maxOutputTokens) : null),
     routeCount: Number(m.route_count ?? m.routeCount ?? 0),
@@ -887,7 +890,7 @@ export const adminConfigApi = {
     const items = Array.isArray(res) ? res : (res.items ?? []);
     return items.map((m) => mapModelConfig(m as unknown as Record<string, unknown>));
   },
-  createModel: async (input: { id: string; displayName: string; capabilities?: string[]; thinkingSupported?: boolean; thinkingDefaultEffort?: string | null; thinkingMaxEffort?: string | null; contextWindow?: number | null; maxOutputTokens?: number | null }): Promise<AdminModelConfig> => {
+  createModel: async (input: { id: string; displayName: string; capabilities?: string[]; thinkingSupported?: boolean; thinkingDefaultEffort?: string | null; thinkingMaxEffort?: string | null; contextWindow?: number | null; maxOutputTokens?: number | null; billingMultiplier?: number }): Promise<AdminModelConfig> => {
     return request<AdminModelConfig>('/api/v1/admin/models', {
       method: 'POST',
       body: {
@@ -899,6 +902,7 @@ export const adminConfigApi = {
         thinking_max_effort: input.thinkingMaxEffort ?? null,
         context_window: input.contextWindow ?? null,
         max_output_tokens: input.maxOutputTokens ?? null,
+        billing_multiplier: input.billingMultiplier ?? 1,
         status: 'active',
       },
       baseUrl: ADMIN_BASE,
@@ -913,6 +917,7 @@ export const adminConfigApi = {
     if (input.capabilities !== undefined) fields.capabilities = input.capabilities;
     if (input.contextWindow !== undefined) fields.context_window = input.contextWindow;
     if (input.maxOutputTokens !== undefined) fields.max_output_tokens = input.maxOutputTokens;
+    if (input.billingMultiplier !== undefined) fields.billing_multiplier = input.billingMultiplier;
     await request<{ id: string }>(`/api/v1/admin/models/${id}`, {
       method: 'PATCH',
       body: fields,

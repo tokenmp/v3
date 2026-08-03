@@ -234,6 +234,8 @@ type requestLog struct {
 	ThinkingEffectiveBudget int        `json:"thinking_effective_budget,omitempty"`
 	ReservationID           string     `json:"reservation_id,omitempty"`
 	BillingPlan             string     `json:"billing_plan,omitempty"`
+	BillingMultiplier       float64    `json:"billing_multiplier,omitempty"`
+	ChargedTokens           int        `json:"charged_tokens,omitempty"`
 	CreatedAt               time.Time  `json:"created_at"`
 	CompletedAt             *time.Time `json:"completed_at,omitempty"`
 }
@@ -353,6 +355,14 @@ func buildBatch(e requestlog.ExecutionEvent) (batch, bool) {
 		log.OutputTokens = int(e.Usage.OutputTokens)
 		log.TotalTokens = int(e.Usage.TotalTokens)
 		log.UsageStatus = "final"
+		// Billing multiplier: compute charged tokens = ceil(total * multiplier).
+		// A multiplier of 0 means unset (treat as 1.0 for backward compat).
+		multiplier := e.BillingMultiplier
+		if multiplier <= 0 {
+			multiplier = 1.0
+		}
+		log.BillingMultiplier = multiplier
+		log.ChargedTokens = chargedTokens(log.TotalTokens, multiplier)
 	}
 
 	// Latency and HTTP status from attempt events.
@@ -570,4 +580,19 @@ func mapEventStatus(status, kind string) string {
 		return "failed"
 	}
 	return "info"
+}
+
+// chargedTokens computes the quota-charged token count as
+// ceil(totalTokens * multiplier), rounding up so fractional multipliers
+// always charge at least the ceiling. A zero/negative total yields 0.
+func chargedTokens(totalTokens int, multiplier float64) int {
+	if totalTokens <= 0 || multiplier <= 0 {
+		return 0
+	}
+	charged := float64(totalTokens) * multiplier
+	result := int(charged)
+	if charged > float64(result) {
+		result++ // ceil
+	}
+	return result
 }
