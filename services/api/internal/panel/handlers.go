@@ -362,6 +362,8 @@ type requestLogDetailResponse struct {
 	InputTokens             *int         `json:"inputTokens,omitempty"`
 	OutputTokens            *int         `json:"outputTokens,omitempty"`
 	TotalTokens             *int         `json:"totalTokens,omitempty"`
+	ChargedTokens           *int         `json:"chargedTokens,omitempty"`
+	BillingMultiplier       float64      `json:"billingMultiplier,omitempty"`
 	CacheTokens             *int         `json:"cacheTokens,omitempty"`
 	Cost                    string       `json:"cost,omitempty"`
 	DurationMs              *int         `json:"durationMs,omitempty"`
@@ -556,6 +558,8 @@ func mapRequestLog(l logging.RequestLog) apiv1.RequestLog {
 		InputTokens:             intPtrOrNil(l.InputTokens),
 		OutputTokens:            intPtrOrNil(l.OutputTokens),
 		TotalTokens:             intPtrOrNil(l.TotalTokens),
+		ChargedTokens:           intPtrOrNil(l.ChargedTokens),
+		BillingMultiplier:       float64PtrOrNil(l.BillingMultiplier),
 		CacheTokens:             intPtrOrNil(l.CacheTokens),
 		Cost:                    strPtrOrNil("0"),
 		DurationMs:              intPtrOrNil(l.LatencyMS),
@@ -595,6 +599,8 @@ func mapRequestLogDetail(d logging.LogDetail) requestLogDetailResponse {
 		InputTokens:             intPtrOrNil(d.Log.InputTokens),
 		OutputTokens:            intPtrOrNil(d.Log.OutputTokens),
 		TotalTokens:             intPtrOrNil(d.Log.TotalTokens),
+		ChargedTokens:           intPtrOrNil(d.Log.ChargedTokens),
+		BillingMultiplier:       d.Log.BillingMultiplier,
 		CacheTokens:             intPtrOrNil(d.Log.CacheTokens),
 		Cost:                    "0",
 		DurationMs:              intPtrOrNil(d.Log.LatencyMS),
@@ -633,6 +639,13 @@ func intPtrOrNil(n int) *int {
 		return nil
 	}
 	return &n
+}
+
+func float64PtrOrNil(f float64) *float64 {
+	if f == 0 {
+		return nil
+	}
+	return &f
 }
 
 func strPtrOrNil(s string) *string {

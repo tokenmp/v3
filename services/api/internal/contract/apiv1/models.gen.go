@@ -331,8 +331,10 @@ type PlanStatus string
 
 // RequestLog defines model for RequestLog.
 type RequestLog struct {
-	CacheTokens *int       `json:"cacheTokens,omitempty"`
-	CompletedAt *time.Time `json:"completedAt,omitempty"`
+	BillingMultiplier *float64   `json:"billingMultiplier,omitempty"`
+	CacheTokens       *int       `json:"cacheTokens,omitempty"`
+	ChargedTokens     *int       `json:"chargedTokens,omitempty"`
+	CompletedAt       *time.Time `json:"completedAt,omitempty"`
 
 	// Cost Cost as string (bigint, in smallest unit)
 	Cost                    *string          `json:"cost,omitempty"`
