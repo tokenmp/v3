@@ -66,10 +66,11 @@ type GlobalInput struct {
 	AutoModelIDs []string
 }
 type ModelInput struct {
-	ID               string
-	Capabilities     []Capability
-	Thinking         ThinkingInput
-	FallbackModelIDs []string
+	ID                string
+	Capabilities      []Capability
+	Thinking          ThinkingInput
+	BillingMultiplier float64
+	FallbackModelIDs  []string
 }
 type ThinkingInput struct {
 	Supported                      bool
@@ -116,10 +117,11 @@ type CompiledConfig struct {
 	Routes       []CompiledRoute
 }
 type CompiledModel struct {
-	ID               string
-	Capabilities     []Capability
-	Thinking         ThinkingInput
-	FallbackModelIDs []string
+	ID                string
+	Capabilities      []Capability
+	Thinking          ThinkingInput
+	BillingMultiplier float64
+	FallbackModelIDs  []string
 }
 type CompiledProvider struct {
 	ID, Name, BaseURL, Selector string
@@ -200,7 +202,7 @@ func Compile(in ConfigInput) (CompiledConfig, error) {
 		if err := thinkingInput(m.Thinking); err != nil {
 			return CompiledConfig{}, fmt.Errorf("model %q: %w", key, err)
 		}
-		out.Models[key] = CompiledModel{ID: m.ID, Capabilities: append([]Capability(nil), m.Capabilities...), Thinking: m.Thinking, FallbackModelIDs: append([]string(nil), m.FallbackModelIDs...)}
+		out.Models[key] = CompiledModel{ID: m.ID, Capabilities: append([]Capability(nil), m.Capabilities...), Thinking: m.Thinking, BillingMultiplier: m.BillingMultiplier, FallbackModelIDs: append([]string(nil), m.FallbackModelIDs...)}
 	}
 	if err := validateModelReferences(out.Models, in.Global.AutoModelIDs); err != nil {
 		return CompiledConfig{}, err

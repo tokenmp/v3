@@ -53,6 +53,8 @@ export interface AdminRequestLog extends RequestLog {
   errorMessage?: string | null;
   totalTokens?: number | null;
   cacheTokens?: number | null;
+  chargedTokens?: number | null;
+  billingMultiplier?: number | null;
   ttftMs?: number | null;
   completedAt?: string | null;
   usageStatus?: string | null;
@@ -284,6 +286,7 @@ export interface AdminModelConfig {
   thinkingMaxEffort?: string | null;
   thinkingMinBudgetToken?: number | null;
   thinkingMaxBudgetToken?: number | null;
+  billingMultiplier?: number;
   contextWindow: number | null;
   maxOutputTokens: number | null;
   routeCount: number;

@@ -58,11 +58,12 @@ type wireTimeoutPolicy struct {
 }
 
 type wireModel struct {
-	ID               string            `json:"ID"`
-	DisplayName      string            `json:"DisplayName"`
-	Capabilities     []string          `json:"Capabilities"`
-	Thinking         wireModelThinking `json:"Thinking"`
-	FallbackModelIDs []string          `json:"FallbackModelIDs,omitempty"`
+	ID                string            `json:"ID"`
+	DisplayName       string            `json:"DisplayName"`
+	Capabilities      []string          `json:"Capabilities"`
+	Thinking          wireModelThinking `json:"Thinking"`
+	BillingMultiplier float64           `json:"BillingMultiplier,omitempty"`
+	FallbackModelIDs  []string          `json:"FallbackModelIDs,omitempty"`
 }
 
 type wireModelThinking struct {
@@ -441,10 +442,11 @@ func compileSnapshotWithEndpoints(
 			}
 		}
 		wireModels[m.ID] = wireModel{
-			ID:           m.ID,
-			DisplayName:  m.DisplayName,
-			Capabilities: caps,
-			Thinking:     thinking,
+			ID:                m.ID,
+			DisplayName:       m.DisplayName,
+			Capabilities:      caps,
+			Thinking:          thinking,
+			BillingMultiplier: m.BillingMultiplier,
 		}
 	}
 

@@ -29,14 +29,15 @@ type CredentialResolver interface {
 // selected candidate. It contains neither a credential reference nor a secret.
 // Each call to Prepare constructs independent copies of mutable fields.
 type PreparedAttempt struct {
-	Target        sdk.Target
-	Candidate     sdk.CandidateIdentity
-	Adapter       adapter.CompiledAdapter
-	ModelThinking adapter.ThinkingInput
-	Retry         adapter.CompiledRetry
-	Timeout       adapter.CompiledTimeout
-	Revision      string
-	Generation    uint64
+	Target            sdk.Target
+	Candidate         sdk.CandidateIdentity
+	Adapter           adapter.CompiledAdapter
+	ModelThinking     adapter.ThinkingInput
+	BillingMultiplier float64
+	Retry             adapter.CompiledRetry
+	Timeout           adapter.CompiledTimeout
+	Revision          string
+	Generation        uint64
 }
 
 // Prepare verifies candidate against this Resolver's private frozen config and
@@ -69,12 +70,13 @@ func (r *Resolver) Prepare(candidate Candidate) (PreparedAttempt, error) {
 			CredentialID: credential.ID,
 			AdapterID:    compiledAdapter.ID,
 		},
-		Adapter:       clonePreparedAdapter(compiledAdapter),
-		ModelThinking: model.Thinking,
-		Retry:         clonePreparedRetry(route.Retry),
-		Timeout:       route.Timeout,
-		Revision:      r.revision,
-		Generation:    r.generation,
+		Adapter:           clonePreparedAdapter(compiledAdapter),
+		ModelThinking:     model.Thinking,
+		BillingMultiplier: model.BillingMultiplier,
+		Retry:             clonePreparedRetry(route.Retry),
+		Timeout:           route.Timeout,
+		Revision:          r.revision,
+		Generation:        r.generation,
 	}, nil
 }
 

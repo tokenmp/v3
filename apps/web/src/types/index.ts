@@ -158,6 +158,8 @@ export interface RequestLog {
   outputTokens: number | null;
   totalTokens?: number | null;
   cacheTokens?: number | null;
+  chargedTokens?: number | null;
+  billingMultiplier?: number | null;
   /** Decimal cost as a string. */
   cost: string | null;
   durationMs: number | null;

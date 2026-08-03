@@ -60,6 +60,8 @@ type RequestLog struct {
 	ThinkingEffectiveBudget int        `json:"thinking_effective_budget,omitempty"`
 	ReservationID           string     `json:"reservation_id,omitempty"`
 	BillingPlan             string     `json:"billing_plan,omitempty"`
+	BillingMultiplier       float64    `json:"billing_multiplier,omitempty"`
+	ChargedTokens           int        `json:"charged_tokens,omitempty"`
 	CreatedAt               time.Time  `json:"created_at"`
 	CompletedAt             *time.Time `json:"completed_at,omitempty"`
 }

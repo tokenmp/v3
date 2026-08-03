@@ -441,6 +441,24 @@ export default function RequestLogDetailPage() {
             hint={log.cacheTokens != null && log.cacheTokens > 0 ? `缓存 ${formatTokens(log.cacheTokens)} · 总计 ${formatTokens(totalTokens)}` : `总计 ${formatTokens(totalTokens)}`}
             tone="green"
           />
+          {log.billingMultiplier != null && log.billingMultiplier > 0 && log.billingMultiplier !== 1 && (
+            <StatTile
+              icon={Activity}
+              label="计费倍率"
+              value={`×${log.billingMultiplier}`}
+              hint={log.chargedTokens != null && log.chargedTokens > 0 ? `实际扣费 ${formatTokens(log.chargedTokens)} token` : undefined}
+              tone="orange"
+            />
+          )}
+          {log.billingMultiplier === 1 && log.chargedTokens != null && log.chargedTokens > 0 && (
+            <StatTile
+              icon={Activity}
+              label="实际扣费"
+              value={formatTokens(log.chargedTokens)}
+              hint="倍率 ×1"
+              tone="orange"
+            />
+          )}
           {tokensPerSec != null && (
             <StatTile icon={Gauge} label="生成速度" value={formatTokensPerSecond(tokensPerSec)} tone="orange" />
           )}

@@ -104,6 +104,10 @@ type ExecutionEvent struct {
 	// UsageKnown reports whether Usage was explicitly confirmed by the
 	// provider response.
 	UsageKnown bool
+	// BillingMultiplier is the model's billing multiplier from the compiled
+	// snapshot. When > 0 and UsageKnown, the sink computes charged tokens as
+	// ceil(total * multiplier). 0 means 1.0 (no multiplier) for backward compat.
+	BillingMultiplier float64
 	// Committed reports whether the stream bridge committed before the event
 	// was recorded. Relevant only for streaming events.
 	Committed bool

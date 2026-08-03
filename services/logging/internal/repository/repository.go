@@ -61,6 +61,8 @@ type RequestLog struct {
 	ThinkingEffectiveBudget int        `json:"thinking_effective_budget,omitempty" gorm:"column:thinking_effective_budget"`
 	ReservationID           string     `json:"reservation_id,omitempty" gorm:"column:reservation_id"`
 	BillingPlan             string     `json:"billing_plan,omitempty" gorm:"column:billing_plan"`
+	BillingMultiplier       float64    `json:"billing_multiplier,omitempty" gorm:"column:billing_multiplier"`
+	ChargedTokens           int        `json:"charged_tokens,omitempty" gorm:"column:charged_tokens"`
 	CreatedAt               time.Time  `json:"created_at" gorm:"column:created_at"`
 	CompletedAt             *time.Time `json:"completed_at,omitempty" gorm:"column:completed_at"`
 }
@@ -220,7 +222,8 @@ const insertRequestLogSQL = `INSERT INTO request_logs (
   latency_ms, ttft_ms, error_code, error_type, upstream_http_status,
   usage_status, thinking_mode, thinking_effort, thinking_effort_degraded,
   thinking_requested_effort, thinking_effective_effort, thinking_requested_budget, thinking_effective_budget,
-  reservation_id, billing_plan, created_at, completed_at, user_agent
+  reservation_id, billing_plan, created_at, completed_at, user_agent,
+  billing_multiplier, charged_tokens
 ) VALUES (
   ?, ?, ?, ?, ?, ?,
   ?, ?, ?, ?, ?, ?,
@@ -228,7 +231,8 @@ const insertRequestLogSQL = `INSERT INTO request_logs (
   ?, ?, ?, ?, ?,
   NULLIF(?, '')::text, ?, ?, ?,
   ?, ?, ?, ?,
-  ?, ?, ?, ?, ?
+  ?, ?, ?, ?, ?,
+  ?, ?
 )
 RETURNING id`
 
@@ -298,7 +302,12 @@ const upsertRequestLogSQL = `UPDATE request_logs SET
     ELSE COALESCE($32, completed_at)
   END,
   stream = ($33 OR stream),
-  user_agent = COALESCE(NULLIF($34, ''), user_agent)
+  user_agent = COALESCE(NULLIF($34, ''), user_agent),
+  billing_multiplier = CASE
+    WHEN $36 > 0 THEN $36
+    ELSE billing_multiplier
+  END,
+  charged_tokens = COALESCE(NULLIF($35, 0), charged_tokens)
 WHERE request_id = $1
 RETURNING id`
 
@@ -337,6 +346,7 @@ func (r *GormRepository) upsertRequestLog(ctx TxContext, log RequestLog) (int64,
 		log.UsageStatus, log.ThinkingMode, log.ThinkingEffort, log.ThinkingEffortDegraded,
 		log.ThinkingRequestedEffort, log.ThinkingEffectiveEffort, log.ThinkingRequestedBudget, log.ThinkingEffectiveBudget,
 		log.ReservationID, log.BillingPlan, log.CompletedAt, log.Stream, log.UserAgent,
+		log.ChargedTokens, log.BillingMultiplier,
 	).Scan(&id).Error
 	if err != nil {
 		return 0, ErrInsertFailed
@@ -353,6 +363,7 @@ func (r *GormRepository) upsertRequestLog(ctx TxContext, log RequestLog) (int64,
 		log.UsageStatus, log.ThinkingMode, log.ThinkingEffort, log.ThinkingEffortDegraded,
 		log.ThinkingRequestedEffort, log.ThinkingEffectiveEffort, log.ThinkingRequestedBudget, log.ThinkingEffectiveBudget,
 		log.ReservationID, log.BillingPlan, log.CreatedAt, log.CompletedAt, log.UserAgent,
+		log.BillingMultiplier, log.ChargedTokens,
 	).Scan(&id).Error; err != nil {
 		return 0, ErrInsertFailed
 	}
@@ -382,6 +393,7 @@ func (r *GormRepository) InsertRequestLog(ctx context.Context, log RequestLog) (
 		log.UsageStatus, log.ThinkingMode, log.ThinkingEffort, log.ThinkingEffortDegraded,
 		log.ThinkingRequestedEffort, log.ThinkingEffectiveEffort, log.ThinkingRequestedBudget, log.ThinkingEffectiveBudget,
 		log.ReservationID, log.BillingPlan, log.CreatedAt, log.CompletedAt, log.UserAgent,
+		log.BillingMultiplier, log.ChargedTokens,
 	).Scan(&id).Error; err != nil {
 		return 0, ErrInsertFailed
 	}

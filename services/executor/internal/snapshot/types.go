@@ -30,11 +30,12 @@ type GlobalPolicy struct {
 
 // ModelConfig declares the public model identity and its normalized features.
 type ModelConfig struct {
-	ID               string
-	DisplayName      string
-	Capabilities     []adapter.Capability
-	Thinking         ModelThinkingConfig
-	FallbackModelIDs []string
+	ID                string
+	DisplayName       string
+	Capabilities      []adapter.Capability
+	Thinking          ModelThinkingConfig
+	BillingMultiplier float64
+	FallbackModelIDs  []string
 }
 
 // ModelThinkingConfig describes model-level thinking limits before an adapter

@@ -41,6 +41,7 @@ type Model struct {
 	ThinkingMaxEffort      *string     `gorm:"column:thinking_max_effort" json:"thinking_max_effort,omitempty"`
 	ThinkingMinBudgetToken *int        `gorm:"column:thinking_min_budget_token" json:"thinking_min_budget_token,omitempty"`
 	ThinkingMaxBudgetToken *int        `gorm:"column:thinking_max_budget_token" json:"thinking_max_budget_token,omitempty"`
+	BillingMultiplier      float64     `gorm:"column:billing_multiplier" json:"billing_multiplier"`
 	Status                 string      `gorm:"column:status" json:"status"`
 	CreatedAt              time.Time   `gorm:"column:created_at" json:"created_at"`
 	UpdatedAt              time.Time   `gorm:"column:updated_at" json:"updated_at"`

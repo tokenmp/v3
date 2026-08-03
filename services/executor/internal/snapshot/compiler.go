@@ -11,7 +11,7 @@ type CompiledConfig = adapter.CompiledConfig
 func Compile(raw ConfigSnapshot) (CompiledConfig, error) {
 	models := make(map[string]adapter.ModelInput, len(raw.Models))
 	for k, v := range raw.Models {
-		models[k] = adapter.ModelInput{ID: v.ID, Capabilities: v.Capabilities, Thinking: adapter.ThinkingInput{Supported: v.Thinking.Supported, DefaultEffort: v.Thinking.DefaultEffort, MaxEffort: v.Thinking.MaxEffort, MinBudgetToken: v.Thinking.MinBudgetToken, MaxBudgetToken: v.Thinking.MaxBudgetToken}, FallbackModelIDs: v.FallbackModelIDs}
+		models[k] = adapter.ModelInput{ID: v.ID, Capabilities: v.Capabilities, Thinking: adapter.ThinkingInput{Supported: v.Thinking.Supported, DefaultEffort: v.Thinking.DefaultEffort, MaxEffort: v.Thinking.MaxEffort, MinBudgetToken: v.Thinking.MinBudgetToken, MaxBudgetToken: v.Thinking.MaxBudgetToken}, BillingMultiplier: v.BillingMultiplier, FallbackModelIDs: v.FallbackModelIDs}
 	}
 	providers := make(map[string]adapter.ProviderInput, len(raw.Providers))
 	for k, v := range raw.Providers {
