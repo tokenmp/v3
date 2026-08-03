@@ -95,6 +95,24 @@ func TestCreateProvider_SuccessMaps201(t *testing.T) {
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want 201; body=%s", rec.Code, rec.Body.String())
 	}
+	// Verify status defaults to "active" when omitted.
+	var resp struct {
+		Data struct {
+			Status   string `json:"status"`
+			SDKKind  string `json:"sdk_kind"`
+			Protocol string `json:"protocol"`
+		} `json:"data"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
+	if resp.Data.Status != "active" {
+		t.Fatalf("default status = %q, want "+"`active`", resp.Data.Status)
+	}
+	if resp.Data.SDKKind != "openai" {
+		t.Fatalf("default sdk_kind = %q, want `openai`", resp.Data.SDKKind)
+	}
+	if resp.Data.Protocol != "openai_chat" {
+		t.Fatalf("default protocol = %q, want `openai_chat`", resp.Data.Protocol)
+	}
 }
 
 // ---- Gap 1: missing required fields → 400 ----
