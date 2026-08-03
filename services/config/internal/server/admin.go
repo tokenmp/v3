@@ -112,6 +112,9 @@ func (s *Server) handleAdminCreateModel(w http.ResponseWriter, r *http.Request) 
 		httpresp.Error(w, httpresp.CodeBadRequest, "id and display name required")
 		return
 	}
+	if m.Status == "" {
+		m.Status = "active"
+	}
 	if err := s.adminWriter.CreateModel(r.Context(), &m); err != nil {
 		writeAdminWriteErr(w, err)
 		return
@@ -182,6 +185,9 @@ func (s *Server) handleAdminCreateProvider(w http.ResponseWriter, r *http.Reques
 	if p.Protocol == "" {
 		p.Protocol = "openai_chat"
 	}
+	if p.Status == "" {
+		p.Status = "active"
+	}
 	if err := s.adminWriter.CreateProvider(r.Context(), &p); err != nil {
 		writeAdminWriteErr(w, err)
 		return
@@ -244,6 +250,9 @@ func (s *Server) handleAdminCreateAdapter(w http.ResponseWriter, r *http.Request
 		httpresp.Error(w, httpresp.CodeBadRequest, "missing required fields")
 		return
 	}
+	if a.Status == "" {
+		a.Status = "active"
+	}
 	if err := s.adminWriter.CreateAdapter(r.Context(), &a); err != nil {
 		writeAdminWriteErr(w, err)
 		return
@@ -305,6 +314,9 @@ func (s *Server) handleAdminCreateEndpoint(w http.ResponseWriter, r *http.Reques
 	if e.Path == "" || e.Protocol == "" || e.AuthKind == "" {
 		httpresp.Error(w, httpresp.CodeBadRequest, "missing required fields")
 		return
+	}
+	if e.Status == "" {
+		e.Status = "active"
 	}
 	if err := s.adminWriter.CreateEndpoint(r.Context(), &e); err != nil {
 		writeAdminWriteErr(w, err)
@@ -396,6 +408,9 @@ func (s *Server) handleAdminCreateCredential(w http.ResponseWriter, r *http.Requ
 		httpresp.Error(w, httpresp.CodeBadRequest, "credential_ref must be a vault:// reference")
 		return
 	}
+	if c.Status == "" {
+		c.Status = "active"
+	}
 	// key_prefix/suffix are display-only hints; do not derive from any secret.
 	if c.KeyPrefix != nil {
 		*c.KeyPrefix = sanitizeDisplayHint(*c.KeyPrefix)
@@ -479,6 +494,9 @@ func (s *Server) handleAdminCreateRoute(w http.ResponseWriter, r *http.Request) 
 	if rm.ID == "" || rm.ModelID == "" || rm.ProviderID == "" || rm.UpstreamModel == "" || rm.Protocol == "" {
 		httpresp.Error(w, httpresp.CodeBadRequest, "missing required fields")
 		return
+	}
+	if rm.Status == "" {
+		rm.Status = "active"
 	}
 	if err := s.adminWriter.CreateRoute(r.Context(), &rm); err != nil {
 		writeAdminWriteErr(w, err)
