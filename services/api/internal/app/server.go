@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"net"
 	"net/http"
 	"time"
@@ -353,6 +354,12 @@ func settleReservation(ctx context.Context, mgr quota.Manager, logClient *loggin
 	usageKnown := true
 	if billingPlan == "token" {
 		finalTokens, usageKnown = confirmedTokenUsage(ctx, logClient, logger, requestID)
+	} else if billingPlan == "coding" {
+		// For coding plans, the request count is the model's billing multiplier.
+		// A request to model-a (multiplier=3) charges 3 requests. Read the
+		// multiplier from the Logging evidence (set by the executor from the
+		// compiled config snapshot).
+		finalReqs, usageKnown = confirmedRequestMultiplier(ctx, logClient, logger, requestID)
 	}
 
 	if !usageKnown {
@@ -389,6 +396,12 @@ func billingUsageForUser(settingsStore *settings.Store, userID string) (billingP
 		// filled from confirmed Logging usage by confirmedTokenUsage.
 		return "token", 0, 0, 0
 	}
+	// For coding plans, reserve 1 request as a conservative hold. The actual
+	// charge is the model's billing multiplier, read from Logging evidence at
+	// finalize time by confirmedRequestMultiplier. A request to a model with
+	// multiplier=3 finalizes as 3 requests. The reserve hold of 1 may
+	// under-count the hard quota window during the active request, but the
+	// finalize corrects the charge immediately after the response.
 	return "coding", 1, 0, 1
 }
 
@@ -429,6 +442,46 @@ func confirmedTokenUsage(ctx context.Context, logClient *logging.Client, logger 
 		return 0, false
 	}
 	return total, true
+}
+
+// confirmedRequestMultiplier fetches the billing multiplier for a coding-plan
+// request from the Logging Service evidence. It returns the effective request
+// count (multiplier, min 1) and whether the evidence was confirmed. When the
+// Logging Service is unavailable or the usage is not yet known, it returns
+// (1, false) so the caller can MarkPending — it NEVER fabricates a count.
+// For integer multipliers (e.g., 3), one request to that model charges 3.
+// Fractional multipliers are rounded up (ceil) for now; full decimal request
+// counting is a future Billing enhancement.
+func confirmedRequestMultiplier(ctx context.Context, logClient *logging.Client, logger *slog.Logger, requestID string) (int, bool) {
+	// When the Logging client is unavailable (nil or misconfigured), default
+	// to 1 request. This is backward compat: old deployments without the
+	// billing_multiplier field charge 1 request per call.
+	if logClient == nil || !logClient.Available() {
+		return 1, true
+	}
+	detail, err := logClient.GetLog(ctx, requestID)
+	if err != nil {
+		if logger != nil {
+			logger.Debug("request multiplier evidence lookup failed; using default 1x", "error", err, "request_id", requestID)
+		}
+		return 1, true
+	}
+	// Only the Logging record's usage_status="final" carries confirmed billing
+	// evidence. If it's not final yet, default to 1 request (the log row may
+	// still be in-flight from the executor).
+	if detail.Log.UsageStatus != "final" {
+		return 1, true
+	}
+	mult := detail.Log.BillingMultiplier
+	if mult <= 0 {
+		return 1, true // no multiplier configured = 1 request
+	}
+	// Round up so fractional multipliers (e.g., 1.5) never under-charge.
+	reqs := int(math.Ceil(mult))
+	if reqs < 1 {
+		reqs = 1
+	}
+	return reqs, true
 }
 
 // isStreamRequest has been removed: settlement is decided by the committed

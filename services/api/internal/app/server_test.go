@@ -184,11 +184,13 @@ func TestEdgeLogsClientCancelledTerminal(t *testing.T) {
 	}
 	ingested := make(chan ingestWire, 4)
 	logBackend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var body ingestWire
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			t.Errorf("decode ingest: %v", err)
+		if r.Method == http.MethodPost {
+			var body ingestWire
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode ingest: %v", err)
+			}
+			ingested <- body
 		}
-		ingested <- body
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer logBackend.Close()
@@ -378,11 +380,13 @@ func TestEdgeIngestsBoundedUserAgentOnReceipt(t *testing.T) {
 	}
 	ingested := make(chan ingestWire, 1)
 	logBackend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var body ingestWire
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			t.Errorf("decode ingest: %v", err)
+		if r.Method == http.MethodPost {
+			var body ingestWire
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode ingest: %v", err)
+			}
+			ingested <- body
 		}
-		ingested <- body
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer logBackend.Close()
